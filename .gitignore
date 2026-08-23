@@ -1,0 +1,64 @@
+# ─── Secretos ─────────────────────────────────────────────────
+# NUNCA subir estos archivos. Si uno se sube por error, hay que
+# rotar TODAS las credenciales que contenía: el historial de git
+# las conserva aunque después borres el archivo.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+token.json
+service-account*.json
+
+# ─── Python / Django ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+db.sqlite3
+db.sqlite3-journal
+/backend/media/
+/backend/staticfiles/
+celerybeat-schedule*
+
+# ─── Node / React ─────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.eslintcache
+
+# ─── Editores ─────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# ─── Sistema operativo ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Temporales y respaldos ───────────────────────────────────
+*.log
+*.bak
+*.tmp
+~$*
+
+# ─── Documentación e investigación ────────────────────────────
+# Excluida del repositorio PÚBLICO: la planilla de la encuesta contiene
+# los correos de 16 personas que se ofrecieron a probar la aplicación.
+# Publicar datos personales de terceros no corresponde.
+#
+# Para versionar el informe: usar un repositorio privado, o eliminar
+# antes la columna de correos (P25) de la planilla.
+docs/

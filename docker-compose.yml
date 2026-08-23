@@ -1,0 +1,140 @@
+# ══════════════════════════════════════════════════════════════════
+# Levanta el sistema completo con un solo comando:
+#     docker compose up --build
+#
+# Para trabajar en un servicio puntual, levanta solo sus dependencias:
+#     docker compose up postgres rabbitmq auth
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ─── Infraestructura ────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: suscripciones
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports: ["5432:5432"]
+    volumes:
+      - datos_postgres:/var/lib/postgresql/data
+      # Crea un esquema por servicio en el primer arranque
+      - ./infra/migraciones/01-esquemas.sql:/docker-entrypoint-initdb.d/01-esquemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"      # protocolo
+      - "15672:15672"    # panel web
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  # ─── Gateway ────────────────────────────────────────────────────
+
+  gateway:
+    build: ./gateway
+    ports: ["8000:8000"]
+    env_file: .env
+    environment:
+      URL_AUTH: http://auth:8001
+      URL_SUBSCRIPTIONS: http://subscriptions:8002
+      URL_CONNECTORS: http://connectors:8003
+      URL_ANALYTICS: http://analytics:8004
+      URL_NOTIFICATIONS: http://notifications:8005
+    depends_on: [auth, subscriptions, connectors, analytics, notifications]
+    volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
+
+  # ─── Servicios de dominio ───────────────────────────────────────
+  # Todos comparten la misma forma: build, env, depends_on, volumes.
+
+  auth:
+    build: ./services/auth
+    ports: ["8001:8001"]
+    env_file: .env
+    environment:
+      ESQUEMA_BD: auth
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
+
+  subscriptions:
+    build: ./services/subscriptions
+    ports: ["8002:8002"]
+    env_file: .env
+    environment:
+      ESQUEMA_BD: subscriptions
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
+
+  connectors:
+    build: ./services/connectors
+    ports: ["8003:8003"]
+    env_file: .env
+    environment:
+      ESQUEMA_BD: connectors
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
+
+  # Trabajador que ejecuta las sincronizaciones periódicas.
+  # Mismo código que connectors, distinto punto de entrada.
+  connectors-worker:
+    build: ./services/connectors
+    command: celery -A config worker --beat --loglevel=info
+    env_file: .env
+    environment:
+      ESQUEMA_BD: connectors
+    depends_on: [connectors, redis]
+    volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
+
+  analytics:
+    build: ./services/analytics
+    ports: ["8004:8004"]
+    env_file: .env
+    environment:
+      ESQUEMA_BD: analytics
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
+
+  notifications:
+    build: ./services/notifications
+    ports: ["8005:8005"]
+    env_file: .env
+    environment:
+      ESQUEMA_BD: notifications
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/notifications:/app", "./shared:/app/shared:ro"]
+
+  # ─── Frontend ───────────────────────────────────────────────────
+
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    depends_on: [gateway]
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  datos_postgres:

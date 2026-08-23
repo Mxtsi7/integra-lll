@@ -1,0 +1,68 @@
+# ══════════════════════════════════════════════════════════════════
+# CONFIGURACIÓN Y SECRETOS
+#
+# ConfigMap = configuración no sensible, se sube al repositorio.
+# Secret    = credenciales. Este archivo es una PLANTILLA con valores
+#             falsos. El Secret real se crea con kubectl y NUNCA se
+#             sube al repositorio.
+# ══════════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-suscripciones
+data:
+  DEBUG: "False"
+  ALLOWED_HOSTS: "gateway,suscripciones.CAMBIAR.cl"
+  CORS_ALLOWED_ORIGINS: "https://suscripciones.CAMBIAR.cl"
+
+  # Descubrimiento por nombre de Service dentro del clúster
+  RABBITMQ_HOST: "rabbitmq"
+  EXCHANGE_EVENTOS: "suscripciones"
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+
+  JWT_ALGORITMO: "HS256"
+  JWT_MINUTOS_ACCESO: "30"
+  JWT_DIAS_REFRESCO: "7"
+
+  EMAIL_HOST: "smtp.gmail.com"
+  EMAIL_PORT: "587"
+  DEFAULT_FROM_EMAIL: "no-responder@ejemplo.cl"
+
+---
+# ⚠️ PLANTILLA. Valores falsos a propósito.
+#
+# El Secret real se crea así, y el comando NO queda en el repositorio:
+#
+#   kubectl create secret generic secretos-suscripciones \
+#     --namespace suscripciones \
+#     --from-literal=SECRET_KEY='...' \
+#     --from-literal=JWT_SECRET='...' \
+#     --from-literal=DATABASE_URL='postgres://...' \
+#     --from-literal=RABBITMQ_URL='amqp://...' \
+#     --from-literal=SPOTIFY_CLIENT_SECRET='...' \
+#     --from-literal=GOOGLE_CLIENT_SECRET='...' \
+#     --from-literal=ANTHROPIC_API_KEY='...' \
+#     --from-literal=EMAIL_HOST_PASSWORD='...'
+#
+# Los Secret de Kubernetes están codificados en base64, NO cifrados.
+# Cualquiera con permiso de lectura sobre el namespace puede leerlos.
+# Para el proyecto es suficiente; en producción real se usa un gestor
+# externo (Sealed Secrets, Vault, o el del proveedor de nube).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secretos-suscripciones
+type: Opaque
+stringData:
+  SECRET_KEY: "PLANTILLA-no-usar"
+  JWT_SECRET: "PLANTILLA-no-usar"
+  DATABASE_URL: "postgres://usuario:clave@host:5432/suscripciones"
+  RABBITMQ_URL: "amqp://usuario:clave@rabbitmq:5672/"
+  SPOTIFY_CLIENT_ID: ""
+  SPOTIFY_CLIENT_SECRET: ""
+  GOOGLE_CLIENT_ID: ""
+  GOOGLE_CLIENT_SECRET: ""
+  ANTHROPIC_API_KEY: ""
+  EMAIL_HOST_USER: ""
+  EMAIL_HOST_PASSWORD: ""

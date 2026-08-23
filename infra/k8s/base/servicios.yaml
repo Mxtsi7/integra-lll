@@ -1,0 +1,272 @@
+# ══════════════════════════════════════════════════════════════════
+# SERVICIOS DE DOMINIO
+#
+# Los cinco son idénticos salvo el nombre, el puerto y el esquema de
+# base de datos. Si entiendes uno, entiendes los cinco.
+#
+# Reemplazar REGISTRO por el registro de imágenes que indique el curso
+# (por ejemplo ghcr.io/tu-organizacion) y TAG por la versión.
+# ══════════════════════════════════════════════════════════════════
+
+# ─── auth ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  labels: { app: auth, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: auth }
+  template:
+    metadata:
+      labels: { app: auth }
+    spec:
+      containers:
+        - name: auth
+          image: REGISTRO/auth:TAG
+          ports: [{ containerPort: 8001 }]
+          env:
+            - name: ESQUEMA_BD
+              value: auth
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          # Liveness: si falla, Kubernetes reinicia el contenedor.
+          livenessProbe:
+            httpGet: { path: /health/, port: 8001 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          # Readiness: si falla, deja de recibir tráfico pero NO se reinicia.
+          # Es lo que evita que lleguen peticiones antes de estar listo.
+          readinessProbe:
+            httpGet: { path: /health/, port: 8001 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+spec:
+  # ClusterIP: visible solo dentro del clúster.
+  # Los servicios de dominio NUNCA se exponen al exterior (ADR-004).
+  type: ClusterIP
+  selector: { app: auth }
+  ports: [{ port: 8001, targetPort: 8001 }]
+
+---
+# ─── subscriptions ────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriptions
+  labels: { app: subscriptions, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: subscriptions }
+  template:
+    metadata:
+      labels: { app: subscriptions }
+    spec:
+      containers:
+        - name: subscriptions
+          image: REGISTRO/subscriptions:TAG
+          ports: [{ containerPort: 8002 }]
+          env:
+            - name: ESQUEMA_BD
+              value: subscriptions
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          livenessProbe:
+            httpGet: { path: /health/, port: 8002 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/, port: 8002 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: subscriptions
+spec:
+  type: ClusterIP
+  selector: { app: subscriptions }
+  ports: [{ port: 8002, targetPort: 8002 }]
+
+---
+# ─── connectors ───────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectors
+  labels: { app: connectors, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: connectors }
+  template:
+    metadata:
+      labels: { app: connectors }
+    spec:
+      containers:
+        - name: connectors
+          image: REGISTRO/connectors:TAG
+          ports: [{ containerPort: 8003 }]
+          env:
+            - name: ESQUEMA_BD
+              value: connectors
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          livenessProbe:
+            httpGet: { path: /health/, port: 8003 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/, port: 8003 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: connectors
+spec:
+  type: ClusterIP
+  selector: { app: connectors }
+  ports: [{ port: 8003, targetPort: 8003 }]
+---
+# Trabajador de sincronización. Misma imagen, distinto comando y sin Service:
+# no atiende peticiones, solo consume la cola.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectors-worker
+  labels: { app: connectors-worker, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: connectors-worker }
+  template:
+    metadata:
+      labels: { app: connectors-worker }
+    spec:
+      containers:
+        - name: worker
+          image: REGISTRO/connectors:TAG
+          command: ["celery", "-A", "config", "worker", "--beat", "--loglevel=info"]
+          env:
+            - name: ESQUEMA_BD
+              value: connectors
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+
+---
+# ─── analytics ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  labels: { app: analytics, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: analytics }
+  template:
+    metadata:
+      labels: { app: analytics }
+    spec:
+      containers:
+        - name: analytics
+          image: REGISTRO/analytics:TAG
+          ports: [{ containerPort: 8004 }]
+          env:
+            - name: ESQUEMA_BD
+              value: analytics
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          livenessProbe:
+            httpGet: { path: /health/, port: 8004 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/, port: 8004 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics
+spec:
+  type: ClusterIP
+  selector: { app: analytics }
+  ports: [{ port: 8004, targetPort: 8004 }]
+
+---
+# ─── notifications ────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifications
+  labels: { app: notifications, parte-de: suscripciones }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: notifications }
+  template:
+    metadata:
+      labels: { app: notifications }
+    spec:
+      containers:
+        - name: notifications
+          image: REGISTRO/notifications:TAG
+          ports: [{ containerPort: 8005 }]
+          env:
+            - name: ESQUEMA_BD
+              value: notifications
+          envFrom:
+            - configMapRef: { name: config-suscripciones }
+            - secretRef: { name: secretos-suscripciones }
+          livenessProbe:
+            httpGet: { path: /health/, port: 8005 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet: { path: /health/, port: 8005 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notifications
+spec:
+  type: ClusterIP
+  selector: { app: notifications }
+  ports: [{ port: 8005, targetPort: 8005 }]
