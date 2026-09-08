@@ -1,0 +1,61 @@
+@startuml cu-3-datos
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Verdana
+skinparam defaultFontSize 12
+skinparam ArrowColor #6B7684
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EDF3FB
+  BorderColor #4C77AC
+  FontColor #16283F
+}
+skinparam rectangle {
+  BackgroundColor #FAFBFD
+  BorderColor #CBD4E0
+  FontColor #56626F
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #2F3B4A
+  FontColor #1B2432
+}
+left to right direction
+
+title Casos de uso - Datos, panel y alertas
+
+actor "Usuario\nautenticado" as auth
+actor "Proveedor\nde correo" as correo
+
+rectangle "Ingesta de datos" {
+  usecase "CU-12\nVincular cuenta\nde correo\nRF-14" as CU12
+  usecase "CU-10\nImportar desde\nCSV o PDF\nRF-11" as CU10
+  usecase "CU-13\nConfirmar cobros\ncandidatos\nRF-14" as CU13
+}
+
+rectangle "Visualizacion" {
+  usecase "CU-08\nVisualizar panel\nRF-09" as CU08
+  usecase "CU-09\nVisualizar calendario\nde pagos\nRF-10" as CU09
+  usecase "CU-21\nExportar historial\nRF-22" as CU21
+}
+
+rectangle "Configuracion" {
+  usecase "CU-18\nConfigurar alertas\nRF-18" as CU18
+  usecase "CU-25\nDefinir presupuesto\nideal\nRF-19" as CU25
+}
+
+auth --> CU12
+auth --> CU10
+auth --> CU13
+auth --> CU08
+auth --> CU09
+auth --> CU21
+auth --> CU18
+auth --> CU25
+CU12 --> correo
+CU13 .> CU10 : <<extend>>
+CU13 .> CU12 : <<extend>>
+
+@enduml

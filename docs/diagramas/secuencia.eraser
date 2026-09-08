@@ -1,0 +1,148 @@
+title Deteccion y registro de suscripciones - Ojo al Gasto
+autoNumber on
+
+// ══════════════════════════════════════════════════════════
+// Coherente con:
+//   ADR-004  el gateway es el unico punto de entrada y valida el JWT
+//   ADR-005  el banco quedo fuera: correo y archivo
+//   RF-05    la deteccion queda PENDIENTE hasta que el usuario confirme
+//   RN-13    normalizacion de glosas
+//   RN-23    sanitizacion de datos personales antes de llamar a la IA
+//   RN-24    timeout de 3,5 s con respuesta predeterminada
+//   RNF-20   contador de llamadas a la API de IA
+//
+// Las alertas programadas (RN-01, RN-02, RN-04) van en su propio
+// diagrama, con el actor Temporizador. No ocurren en este flujo.
+// ══════════════════════════════════════════════════════════
+
+Usuario [icon: user, color: gray]
+App [icon: monitor, color: blue]
+Gateway [icon: shield, color: blue]
+Conectores [icon: link, color: green]
+Suscripciones [icon: repeat, color: green]
+Analitica [icon: bar-chart-2, color: green]
+Datos [icon: database, color: gray]
+Correo [icon: mail, color: orange]
+IA [icon: cpu, color: purple]
+
+// ══════════════════════════════════════════════════════════
+// 1. AUTENTICACION
+// ══════════════════════════════════════════════════════════
+
+Usuario > App: Inicia sesion
+App > Gateway: Credenciales o Google
+activate Gateway
+Gateway > Datos: Valida contra el esquema auth
+Datos --> Gateway: Perfil del usuario
+Gateway --> App: Token JWT
+deactivate Gateway
+App --> Usuario: Entra al panel
+
+// ══════════════════════════════════════════════════════════
+// 2. AUTORIZACION DEL CONECTOR DE CORREO
+// ══════════════════════════════════════════════════════════
+
+Usuario > App: Autoriza la lectura de su correo
+App > Gateway: Solicitud con el token
+Gateway > Conectores: Registrar el conector
+activate Conectores
+Conectores > Datos: Guarda el consentimiento con fecha, hora y version
+Conectores --> Gateway: Conector activo
+deactivate Conectores
+Gateway --> App: Conector activo
+
+// ══════════════════════════════════════════════════════════
+// 3. DETECCION DE CANDIDATOS
+// ══════════════════════════════════════════════════════════
+
+Usuario > App: Solicita sincronizar sus cobros
+App > Gateway: Solicitud con el token
+Gateway > Conectores: Inicia la deteccion
+activate Conectores
+
+alt hay un conector de correo autorizado {
+  Conectores > Correo: Lee los mensajes autorizados por OAuth
+  Correo --> Conectores: Facturas y renovaciones
+}
+
+alt el usuario sube una cartola {
+  Usuario > App: Sube un CSV o un PDF
+  App > Gateway: Archivo
+  Gateway > Conectores: Contenido del archivo
+}
+
+Conectores > Conectores: Normaliza las glosas
+Conectores > Conectores: Elimina los datos personales
+Conectores > Datos: Guarda los CANDIDATOS en estado pendiente
+Conectores --> Gateway: Lista de candidatos
+deactivate Conectores
+Gateway --> App: Candidatos por confirmar
+App --> Usuario: Muestra los candidatos detectados
+
+// ══════════════════════════════════════════════════════════
+// 4. CONFIRMACION DEL USUARIO - RF-05
+// El sistema NO crea la suscripcion sin este paso
+// ══════════════════════════════════════════════════════════
+
+Usuario > App: Confirma o descarta cada candidato
+App > Gateway: Decision del usuario
+Gateway > Suscripciones: Aplica la decision
+activate Suscripciones
+
+alt el usuario lo confirma {
+  Suscripciones > Datos: Crea la suscripcion con su origen
+}
+
+alt el usuario lo descarta {
+  Suscripciones > Datos: Guarda solo el hash, sin contenido
+}
+
+Suscripciones --> Gateway: Resultado
+deactivate Suscripciones
+Gateway --> App: Panel actualizado
+App --> Usuario: Muestra el panel con el gasto del periodo
+
+// ══════════════════════════════════════════════════════════
+// 5. ASISTENTE FINANCIERO - solo con plan Premium
+// ══════════════════════════════════════════════════════════
+
+opt el usuario tiene plan Premium {
+  Usuario > App: Pregunta al asistente financiero
+  App > Gateway: Consulta del chat
+  Gateway > Analitica: Consulta con el contexto del usuario
+  activate Analitica
+  Analitica > Datos: Cobros, historial de uso y suscripciones
+  Datos --> Analitica: Contexto
+  Analitica > Analitica: Elimina RUT, tarjetas, nombres y saldos
+
+  alt la IA responde en menos de 3,5 segundos {
+    Analitica > IA: Consulta sin datos identificables
+    IA --> Analitica: Recomendacion y explicacion
+    Analitica > Datos: Suma 1 al contador de llamadas del mes
+  }
+
+  alt la IA no responde en 3,5 segundos {
+    Analitica > Datos: Toma la respuesta predeterminada
+    Datos --> Analitica: Respuesta ya calculada, sin llamar a la API
+  }
+
+  Analitica --> Gateway: Respuesta
+  deactivate Analitica
+  Gateway --> App: Respuesta del asistente
+  App --> Usuario: Muestra la recomendacion con sus montos reales
+}
+
+// ══════════════════════════════════════════════════════════
+// 6. CANCELACION
+// ══════════════════════════════════════════════════════════
+
+Usuario > App: Quiere cancelar una suscripcion
+App > Gateway: Solicitud de cancelacion
+Gateway > Suscripciones: Marca como cancelada
+activate Suscripciones
+Suscripciones > Datos: Cambia el estado y registra la transicion
+Suscripciones > Datos: Elimina de la cola las alertas pendientes
+Suscripciones --> Gateway: Pasos de cancelacion del proveedor
+deactivate Suscripciones
+Gateway --> App: Guia de cancelacion
+App --> Usuario: Muestra los pasos y el enlace del proveedor

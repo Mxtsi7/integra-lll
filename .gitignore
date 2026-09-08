@@ -55,10 +55,18 @@ desktop.ini
 ~$*
 
 # ─── Documentación e investigación ────────────────────────────
-# Excluida del repositorio PÚBLICO: la planilla de la encuesta contiene
-# los correos de 16 personas que se ofrecieron a probar la aplicación.
-# Publicar datos personales de terceros no corresponde.
+# La carpeta docs/ SÍ se versiona. La planilla de la encuesta fue
+# anonimizada el 8 de septiembre de 2026: se retiraron los correos
+# de las 16 personas que se ofrecieron a probar la aplicación.
 #
-# Para versionar el informe: usar un repositorio privado, o eliminar
-# antes la columna de correos (P25) de la planilla.
-docs/
+# El archivo con los correos originales vive FUERA del repositorio.
+# No volver a traerlo: este repositorio es PÚBLICO.
+*NO SUBIR*
+*con correos*
+
+# El .rar de investigacion contiene una copia ANTERIOR de la planilla,
+# de antes de la anonimizacion, con los 16 correos dentro. Ademas duplica
+# archivos que ya estan sueltos en docs/. No se versiona.
+*.rar
+*.zip
+*.7z

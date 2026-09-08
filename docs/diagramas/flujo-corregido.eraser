@@ -1,0 +1,178 @@
+title Diagrama de flujo — Ojo al Gasto
+
+direction right
+
+// ══════════════════════════════════════════════════════════
+// ENTRADA DE DATOS — RF-02, RF-05, RF-19
+// ══════════════════════════════════════════════════════════
+
+Inicio [shape: oval, color: gray]
+Origen del registro [shape: diamond, color: gray]
+Sanitizar PII en la ingesta [icon: shield, color: orange]
+Candidato detectado pendiente [icon: help-circle, color: yellow]
+El usuario lo confirma [shape: diamond, color: gray]
+Descartar y guardar solo el hash [icon: trash-2, color: yellow]
+
+Inicio > Origen del registro
+Origen del registro > Suscripción creada: Manual · RF-02
+Origen del registro > Candidato detectado pendiente: CSV o PDF · RF-19
+Origen del registro > Sanitizar PII en la ingesta: Correo · RF-05
+Sanitizar PII en la ingesta > Candidato detectado pendiente
+Candidato detectado pendiente > El usuario lo confirma
+El usuario lo confirma > Suscripción creada: Sí
+El usuario lo confirma > Descartar y guardar solo el hash: No
+
+// ══════════════════════════════════════════════════════════
+// CICLO DE VIDA — los seis estados
+// ══════════════════════════════════════════════════════════
+
+Ciclo de vida de la suscripción [color: blue] {
+  Suscripción creada [icon: plus-circle, color: blue]
+  Es prueba gratuita [shape: diamond, color: gray]
+  En prueba gratuita [icon: gift, color: blue]
+  Vence sin que el usuario cancele [shape: diamond, color: gray]
+  Activa [icon: check-circle, color: green]
+  Cuarenta y cinco días sin uso [shape: diamond, color: gray]
+  Fantasma [icon: eye-off, color: purple]
+  Pausada [icon: pause-circle, color: yellow]
+  Sesenta días sin cobro [shape: diamond, color: gray]
+  Por confirmar [icon: alert-circle, color: orange]
+  Treinta días más sin cobro [shape: diamond, color: gray]
+  Cancelada [icon: x-circle, color: red]
+}
+
+Suscripción creada > Es prueba gratuita
+Es prueba gratuita > En prueba gratuita: Sí
+Es prueba gratuita > Activa: No
+En prueba gratuita > Vence sin que el usuario cancele
+Vence sin que el usuario cancele > Activa: Sí · RN-17
+Vence sin que el usuario cancele > Cancelada: No, cancela
+
+Activa > Cuarenta y cinco días sin uso
+Cuarenta y cinco días sin uso > Fantasma: Sí · RN-15
+Cuarenta y cinco días sin uso > Activa: No
+Fantasma > Activa: REGLA POR DEFINIR
+
+Activa > Sesenta días sin cobro
+Sesenta días sin cobro > Por confirmar: Sí · RN-19
+Sesenta días sin cobro > Activa: No
+Por confirmar > Treinta días más sin cobro
+Treinta días más sin cobro > Cancelada: Sí, 90 días · RN-20
+Treinta días más sin cobro > Activa: No, cobro nuevo · RN-21
+Por confirmar > Activa: responde que sigue vigente · REGLA POR DEFINIR
+
+Activa > Pausada: el usuario pausa · REGLA POR DEFINIR
+Pausada > Activa: fecha de reactivación · REGLA POR DEFINIR
+
+Activa > Cancelada: confirma la baja · RN-18
+
+Registrar ahorro [icon: trending-down, color: gray]
+Cementerio de suscripciones [icon: archive, color: gray]
+Cancelada > Registrar ahorro
+Registrar ahorro > Cementerio de suscripciones: RF-14
+
+// ══════════════════════════════════════════════════════════
+// MOTOR DE REGLAS
+// ══════════════════════════════════════════════════════════
+
+Cobro nuevo detectado [icon: credit-card, color: gray]
+Tarea programada diaria [icon: clock, color: gray]
+Motor de reglas [shape: hexagon, icon: cpu, color: blue]
+
+Cobro nuevo detectado > Motor de reglas
+Tarea programada diaria > Motor de reglas
+
+Alza de tarifa mayor a cinco por ciento [icon: trending-up, color: orange]
+Doble cobro en menos de cinco días [icon: copy, color: orange]
+Próximo cobro tres días y siete días [icon: calendar, color: orange]
+Fin de prueba gratuita cuarenta y ocho y veinticuatro horas [icon: bell, color: orange]
+Solapamiento de servicios misma categoría [icon: layers, color: orange]
+Costo por hora de uso [icon: activity, color: green]
+Score de cancelación [icon: bar-chart-2, color: green]
+Clasificar gasto recurrente variable [icon: shuffle, color: orange]
+
+Motor de reglas > Alza de tarifa mayor a cinco por ciento: RN-06
+Motor de reglas > Doble cobro en menos de cinco días: RN-07
+Motor de reglas > Próximo cobro tres días y siete días: RN-01 · RN-02
+Motor de reglas > Fin de prueba gratuita cuarenta y ocho y veinticuatro horas: RN-04
+Motor de reglas > Solapamiento de servicios misma categoría: RN-16
+Motor de reglas > Costo por hora de uso
+Motor de reglas > Score de cancelación
+Motor de reglas > Clasificar gasto recurrente variable: RN-12
+
+// ══════════════════════════════════════════════════════════
+// DESPACHO DE ALERTAS
+// ══════════════════════════════════════════════════════════
+
+Anomalía registrada visible en el panel [icon: alert-triangle, color: orange]
+Alza de tarifa mayor a cinco por ciento > Anomalía registrada visible en el panel
+Doble cobro en menos de cinco días > Anomalía registrada visible en el panel
+
+La alerta está activa [shape: diamond, color: gray]
+Ya van dos push hoy [shape: diamond, color: gray]
+Entre las veintidós y las ocho [shape: diamond, color: gray]
+Encolar y despachar a las nueve [icon: pause, color: orange]
+Enviar por el canal según criticidad [icon: send, color: orange]
+Panel y alertas [icon: monitor, color: blue]
+
+Anomalía registrada visible en el panel > La alerta está activa: RF-09
+Próximo cobro tres días y siete días > La alerta está activa
+Fin de prueba gratuita cuarenta y ocho y veinticuatro horas > La alerta está activa
+La alerta está activa > Panel y alertas: No, solo panel
+La alerta está activa > Ya van dos push hoy: Sí
+Ya van dos push hoy > Panel y alertas: Sí · RN-08
+Ya van dos push hoy > Entre las veintidós y las ocho: No
+Entre las veintidós y las ocho > Encolar y despachar a las nueve: Sí · RN-09
+Entre las veintidós y las ocho > Enviar por el canal según criticidad: No
+Encolar y despachar a las nueve > Enviar por el canal según criticidad
+Enviar por el canal según criticidad > Panel y alertas: RN-10
+
+Solapamiento de servicios misma categoría > Panel y alertas
+Costo por hora de uso > Panel y alertas
+Clasificar gasto recurrente variable > Panel y alertas
+
+// ══════════════════════════════════════════════════════════
+// RECOMENDACIÓN
+// ══════════════════════════════════════════════════════════
+
+Recomendación [shape: diamond, color: gray]
+Instrucciones para cancelar [icon: file-text, color: green]
+Definir fecha de reactivación [icon: calendar, color: yellow]
+
+Score de cancelación > Recomendación
+Recomendación > Instrucciones para cancelar: Cancelar · RF-16
+Recomendación > Definir fecha de reactivación: Pausar
+Recomendación > Panel y alertas: Mantener
+Instrucciones para cancelar > Cancelada
+Definir fecha de reactivación > Pausada
+
+// ══════════════════════════════════════════════════════════
+// PRESUPUESTO
+// ══════════════════════════════════════════════════════════
+
+Control de presupuesto mensual [icon: target, color: blue]
+Supera el techo [shape: diamond, color: gray]
+Alerta de presupuesto [icon: alert-octagon, color: red]
+
+Panel y alertas > Control de presupuesto mensual: RF-13
+Control de presupuesto mensual > Supera el techo
+Supera el techo > Alerta de presupuesto: Sí
+Supera el techo > Panel y alertas: No
+Alerta de presupuesto > La alerta está activa
+
+// ══════════════════════════════════════════════════════════
+// ASISTENTE CON IA — solo plan Premium
+// ══════════════════════════════════════════════════════════
+
+Usuario Premium abre el chat [shape: oval, color: purple]
+Sanitizar PII en el chat [icon: shield, color: purple]
+Asistente con IA [icon: message-circle, color: purple]
+Responde en tres coma cinco segundos [shape: diamond, color: gray]
+Respuesta del asistente [icon: message-square, color: purple]
+Respuesta predeterminada desde la base de datos [icon: database, color: purple]
+
+Usuario Premium abre el chat > Sanitizar PII en el chat: RN-23
+Sanitizar PII en el chat > Asistente con IA
+Asistente con IA > Responde en tres coma cinco segundos
+Responde en tres coma cinco segundos > Respuesta del asistente: Sí
+Responde en tres coma cinco segundos > Respuesta predeterminada desde la base de datos: No · RN-24

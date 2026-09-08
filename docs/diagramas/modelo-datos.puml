@@ -1,0 +1,292 @@
+' ═══════════════════════════════════════════════════════════════
+' MODELO ENTIDAD-RELACIÓN
+' Plataforma de control de suscripciones
+'
+' Particionado por servicio, conforme al ADR-002: cada servicio
+' posee su propio esquema de PostgreSQL y NO existen claves
+' foráneas entre esquemas.
+'
+' Alineado con:
+'   ADR-002  un esquema por servicio
+'   ADR-004  organizacion_id en toda tabla con datos de clientes
+'   ADR-005  minimización de datos (Ley 21.719)
+'   ADR-006  dos canales de notificación: correo y push
+'
+' RENDERIZAR:  python render.py   (en esta carpeta)
+' ═══════════════════════════════════════════════════════════════
+
+@startuml modelo-datos
+
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+skinparam nodesep 30
+skinparam ranksep 55
+skinparam class {
+  BackgroundColor #FEFEFE
+  BorderColor #555555
+  ArrowColor #444444
+}
+skinparam package {
+  BackgroundColor #F7F9FC
+  BorderColor #99AABB
+  FontStyle bold
+}
+
+title Modelo entidad-relación — particionado por esquema de servicio
+
+' ══════════════════════════════════════════════════════════════
+package "esquema  auth" as P_AUTH {
+
+  entity "organizacion" as org {
+    **id** : uuid <<PK>>
+    --
+    nombre : varchar(120)
+    plan : varchar(20)
+    creado_en : timestamptz
+    actualizado_en : timestamptz
+    --
+    //En B2C representa un hogar//
+    //o grupo familiar (glosario)//
+  }
+
+  entity "usuario" as usr {
+    **id** : uuid <<PK>>
+    --
+    organizacion_id : uuid <<FK>>
+    nombre : varchar(120)
+    email : varchar(255) <<UQ>>
+    rol : varchar(20)
+    creado_en : timestamptz
+    actualizado_en : timestamptz
+    --
+    //rol: titular | integrante//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "esquema  subscriptions" as P_SUBS {
+
+  entity "categoria" as cat {
+    **id** : uuid <<PK>>
+    --
+    nombre : varchar(60) <<UQ>>
+    --
+    //Catálogo global: sin organizacion_id//
+  }
+
+  entity "proveedor" as prov {
+    **id** : uuid <<PK>>
+    --
+    categoria_id : uuid <<FK>>
+    nombre : varchar(120) <<UQ>>
+    url_cancelacion : text
+    --
+    //Catálogo global: Netflix es//
+    //Netflix para todas las//
+    //organizaciones (glosario)//
+  }
+
+  entity "suscripcion" as sub {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    proveedor_id : uuid <<FK>>
+    nombre_libre : varchar(120)
+    monto : integer
+    moneda : char(3)
+    ciclo : varchar(10)
+    fecha_inicio : date
+    **proximo_cobro** : date
+    estado : varchar(15)
+    es_prueba : boolean
+    fin_prueba : date
+    medio_pago_alias : varchar(40)
+    creado_en : timestamptz
+    actualizado_en : timestamptz
+  }
+
+  entity "usuario_suscripcion" as us {
+    **usuario_id** : uuid <<PK>>
+    **suscripcion_id** : uuid <<PK,FK>>
+    --
+    **organizacion_id** : uuid
+    es_pagador : boolean
+    creado_en : timestamptz
+    --
+    //PK COMPUESTA: un usuario puede//
+    //tener muchas suscripciones//
+  }
+
+  entity "cobro" as cob {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    suscripcion_id : uuid <<FK>>
+    conector_id : uuid
+    monto : integer
+    moneda : char(3)
+    fecha : date
+    origen : varchar(15)
+    creado_en : timestamptz
+    --
+    //origen: manual | correo | conector//
+  }
+
+  entity "cancelacion" as can {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    suscripcion_id : uuid <<FK,UQ>>
+    fecha_cancelacion : date
+    ahorro_estimado : integer
+    motivo : text
+    creado_en : timestamptz
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "esquema  connectors" as P_CONN {
+
+  entity "conector" as con {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    usuario_id : uuid
+    tipo : varchar(20)
+    estado : varchar(20)
+    token_cifrado : bytea
+    refresco_cifrado : bytea
+    expira_en : timestamptz
+    ultima_sincronizacion : timestamptz
+    ultimo_error : text
+    creado_en : timestamptz
+    actualizado_en : timestamptz
+    --
+    //tipo: spotify | correo | csv//
+    //Los tokens NUNCA se exponen//
+    //en la interfaz ni en los logs//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "esquema  analytics" as P_ANA {
+
+  entity "uso" as uso {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    suscripcion_id : uuid
+    fecha : date
+    minutos : integer
+    veces : integer
+    fuente : varchar(20)
+    creado_en : timestamptz
+    --
+    //★ Tabla central del producto.//
+    //Sin uso no hay recomendación//
+    //fuente: api | dispositivo | manual//
+  }
+
+  entity "recomendacion" as rec {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    suscripcion_id : uuid
+    tipo : varchar(25)
+    puntaje : smallint
+    motivo : text
+    ahorro_estimado : integer
+    estado : varchar(15)
+    generada_en : timestamptz
+    --
+    //tipo: cancelar | solapamiento//
+    //estado: pendiente | aceptada |//
+    //        descartada//
+  }
+
+  entity "presupuesto" as pre {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    anio : smallint
+    mes : smallint
+    monto_tope : integer
+    moneda : char(3)
+    creado_en : timestamptz
+    --
+    //UQ (organizacion_id, anio, mes)//
+    //Es del hogar, no de una persona//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "esquema  notifications" as P_NOTI {
+
+  entity "dispositivo" as dis {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    usuario_id : uuid
+    token_push : varchar(255)
+    plataforma : varchar(15)
+    ultima_actividad : timestamptz
+    creado_en : timestamptz
+    --
+    //Necesario para el canal push//
+    //de la app móvil (ADR-006)//
+  }
+
+  entity "alerta" as ale {
+    **id** : uuid <<PK>>
+    --
+    **organizacion_id** : uuid
+    usuario_id : uuid
+    suscripcion_id : uuid
+    tipo : varchar(25)
+    canal : varchar(10)
+    mensaje : text
+    fecha_programada : timestamptz
+    fecha_envio : timestamptz
+    estado : varchar(15)
+    leida : boolean
+    --
+    //canal: correo | push//
+    //tipo: proximo_cobro | fin_prueba |//
+    //      alza_precio | presupuesto//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+' RELACIONES DENTRO DE UN MISMO ESQUEMA  (clave foránea real)
+' ══════════════════════════════════════════════════════════════
+org  ||--o{ usr  : "tiene"
+cat  ||--o{ prov : "clasifica"
+prov ||--o{ sub  : "es provisto por"
+sub  ||--o{ us   : "participa en"
+sub  ||--o{ cob  : "genera"
+sub  ||--o| can  : "puede tener"
+usr  ||--o{ dis  : ""
+usr  ||--o{ ale  : "destinatario"
+
+' ══════════════════════════════════════════════════════════════
+' RELACIONES QUE CRUZAN ESQUEMAS  (UUID suelto, SIN clave foránea)
+' La integridad se sostiene con eventos (ADR-002, ADR-003)
+' ══════════════════════════════════════════════════════════════
+usr .. us   : "usuario_id"
+usr .. con  : "usuario_id"
+org .. pre  : "organizacion_id"
+sub .. uso  : "suscripcion_id"
+sub .. rec  : "suscripcion_id"
+sub .. ale  : "suscripcion_id"
+con .. cob  : "conector_id"
+
+legend bottom
+  |= Notación |= Significado |
+  | Línea continua | Clave foránea real: ambas tablas viven en el mismo esquema |
+  | Línea punteada | UUID sin clave foránea: cruza frontera de servicio (ADR-002). La integridad se mantiene con eventos, no con el motor |
+  | Campo en **negrita** | Clave primaria, o el organizacion_id que hace efectivo el aislamiento multi-tenant |
+  |= Regla transversal | Toda tabla con datos de clientes lleva organizacion_id y toda consulta filtra por él |
+endlegend
+
+@enduml

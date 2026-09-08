@@ -1,0 +1,52 @@
+@startuml cu-2-suscripciones
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Verdana
+skinparam defaultFontSize 12
+skinparam ArrowColor #6B7684
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EDF3FB
+  BorderColor #4C77AC
+  FontColor #16283F
+}
+skinparam rectangle {
+  BackgroundColor #FAFBFD
+  BorderColor #CBD4E0
+  FontColor #56626F
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #2F3B4A
+  FontColor #1B2432
+}
+left to right direction
+
+title Casos de uso - Suscripciones y uso
+
+actor "Usuario\nautenticado" as auth
+
+rectangle "Gestion de suscripciones" {
+  usecase "CU-05\nRegistrar suscripcion\nmanualmente\nRF-06" as CU05
+  usecase "CU-06\nEditar suscripcion\nRF-07" as CU06
+  usecase "CU-07\nCancelar o eliminar\nsuscripcion\nRF-08" as CU07
+  usecase "CU-19\nConsultar guia\nde cancelacion\nRF-20" as CU19
+  usecase "CU-20\nVer historial\nde ahorro\nRF-21" as CU20
+}
+
+rectangle "Registro de uso" {
+  usecase "CU-23\nRegistrar uso manual\nRF-16" as CU23
+  usecase "CU-14\nVincular conector\nde tiempo de uso\nRF-15" as CU14
+}
+
+auth --> CU05
+auth --> CU06
+auth --> CU07
+auth --> CU23
+auth --> CU14
+CU19 .> CU07 : <<extend>>
+CU20 .> CU07 : <<extend>>
+
+@enduml

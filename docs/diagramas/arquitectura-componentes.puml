@@ -1,0 +1,202 @@
+' ═══════════════════════════════════════════════════════════════
+' DIAGRAMA DE COMPONENTES
+' Plataforma de control de suscripciones — arquitectura de microservicios
+'
+' Alineado con:
+'   ADR-001  microservicios (5 servicios de dominio + gateway)
+'   ADR-002  un esquema de PostgreSQL por servicio
+'   ADR-003  HTTP para consultas, eventos para efectos
+'   ADR-004  el gateway valida el JWT una sola vez
+'   ADR-005  entrada manual como piso obligatorio
+'   ADR-006  dos clientes en TypeScript: móvil (Expo) y web (Vite)
+'
+' RENDERIZAR
+'   https://www.plantuml.com/plantuml  ·  extensión PlantUML de VS Code
+'   Exportar a PNG o SVG. Guardar SIEMPRE este .puml junto a la imagen.
+' ═══════════════════════════════════════════════════════════════
+
+@startuml arquitectura-componentes
+
+skinparam componentStyle rectangle
+skinparam nodesep 28
+skinparam ranksep 46
+skinparam wrapWidth 210
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam ArrowColor #444444
+skinparam component {
+  BackgroundColor #FEFEFE
+  BorderColor #555555
+}
+skinparam package {
+  BackgroundColor #F7F9FC
+  BorderColor #99AABB
+  FontStyle bold
+}
+skinparam database {
+  BackgroundColor #FFF8E7
+  BorderColor #BF9000
+}
+skinparam queue {
+  BackgroundColor #EAF3EA
+  BorderColor #4E7C4E
+}
+skinparam cloud {
+  BackgroundColor #F2F2F2
+  BorderColor #888888
+}
+
+title Diagrama de componentes — arquitectura de microservicios
+
+' ─── CLIENTE ───────────────────────────────────────────────────
+actor "Usuario" as USR
+
+package "Clientes" {
+  [Aplicación móvil\nReact Native + Expo\nAndroid (APK)] as APP
+  [Aplicación web\nReact + Vite] as SPA
+  [shared\ncliente de API generado\ntipos y validaciones] as SH
+}
+
+' ─── ENTRADA ───────────────────────────────────────────────────
+package "Punto de entrada" {
+  [API Gateway\nDjango + DRF] as GW
+  note right of GW
+    ADR-004
+    · valida la firma del JWT una sola vez
+    · **descarta** las cabeceras de identidad
+      que vengan desde el exterior
+    · propaga X-Usuario-Id, X-Organizacion-Id,
+      X-Rol y X-Correlation-ID
+    · único componente expuesto a internet
+  end note
+}
+
+' ─── SERVICIOS DE DOMINIO ──────────────────────────────────────
+package "Servicios de dominio" {
+  [auth\n:8001\norganizaciones · usuarios\nroles · tokens] as AUTH
+  [subscriptions\n:8002\nsuscripciones · proveedores\ncobros] as SUBS
+  [connectors\n:8003\nSpotify · correo · CSV] as CONN
+  [analytics\n:8004\nuso · puntajes\nrecomendaciones] as ANA
+  [notifications\n:8005\nalertas · plantillas\nenvío] as NOTI
+
+  [connectors-worker\nCelery worker + beat\nsincronización periódica] as WORKER
+}
+
+' ─── INFRAESTRUCTURA ───────────────────────────────────────────
+package "Infraestructura de datos" {
+  database "PostgreSQL\n—\nun esquema por servicio\n(ADR-002)" as PG
+  queue "RabbitMQ\nexchange: suscripciones\n(ADR-003)" as MQ
+  queue "Redis\nbroker de Celery" as REDIS
+}
+
+' ─── EXTERNOS ──────────────────────────────────────────────────
+package "Servicios externos" {
+  cloud "API de Spotify\nhistorial de reproducción" as SPOT
+  cloud "API de Gmail\ncorreos de cobro" as GMAIL
+  cloud "API de Claude\nexplicaciones en\nlenguaje natural" as IA
+  cloud "SMTP\nenvío de correo" as SMTP
+  cloud "Expo Push\nnotificaciones al dispositivo" as PUSH
+}
+
+' ═══ FLUJOS ════════════════════════════════════════════════════
+
+USR --> APP
+USR --> SPA
+APP ..> SH : importa
+SPA ..> SH : importa
+APP --> GW : HTTPS / REST
+SPA --> GW : HTTPS / REST
+
+' El gateway rutea a cada servicio por HTTP interno
+GW --> AUTH : HTTP
+GW --> SUBS : HTTP
+GW --> CONN : HTTP
+GW --> ANA  : HTTP
+GW --> NOTI : HTTP
+
+' Persistencia: cada servicio SOLO su esquema
+AUTH --> PG
+SUBS --> PG
+CONN --> PG
+ANA  --> PG
+NOTI --> PG
+
+' Eventos asíncronos
+SUBS --> MQ
+CONN --> MQ
+AUTH --> MQ
+MQ --> ANA
+MQ --> NOTI
+MQ --> SUBS
+
+' Sincronización periódica
+WORKER --> REDIS
+WORKER --> SPOT : OAuth / HTTPS
+WORKER --> GMAIL : OAuth / HTTPS
+WORKER --> MQ
+WORKER --> PG
+
+' Integraciones de salida
+ANA  --> IA : HTTPS
+NOTI --> SMTP : SMTP
+NOTI --> PUSH : HTTPS
+PUSH --> APP : push
+
+' ═══ NOTAS ═════════════════════════════════════════════════════
+
+note bottom of PG
+  Cada servicio accede **únicamente**
+  a su propio esquema. No existen
+  claves foráneas entre esquemas
+  ni consultas cruzadas (ADR-002).
+end note
+
+note bottom of SUBS
+  **Piso obligatorio (ADR-005)**
+  El registro manual y la importación CSV
+  llegan por el gateway sin pasar por
+  ningún conector. El sistema es funcional
+  aunque **todas** las fuentes externas fallen.
+end note
+
+note bottom of NOTI
+  Dos canales de salida: correo y
+  **notificación push**. Responde a lo
+  más pedido en la encuesta: aviso antes
+  de cada cobro (76,3%) y de fin de
+  prueba gratuita (60,5%). El push solo
+  llega a la app móvil (ADR-006).
+end note
+
+note right of APP
+  **Reparto por contexto de uso (ADR-006)**
+  Móvil: panel, alertas push, registro rápido.
+  Web: conexión de cuentas por OAuth,
+  importación CSV, gestión del hogar.
+  No se duplica la misma funcionalidad.
+end note
+
+note right of CONN
+  Aísla la volatilidad de las APIs
+  externas: límites de peticiones,
+  reintentos y formatos por proveedor
+  quedan contenidos acá (ADR-001)
+end note
+
+note right of ANA
+  El puntaje es **determinista**:
+  costo por hora de uso, días desde
+  el último uso y tendencia.
+  La IA solo genera la explicación;
+  si no responde, se usa plantilla
+  y el valor se entrega igual (CU-19)
+end note
+
+legend bottom
+  |= Comunicación |= Cuándo se usa |
+  | HTTP / REST | Se necesita un dato **ahora** para responder al usuario |
+  | Eventos (AMQP) | **Ocurrió** algo y otros servicios deben reaccionar |
+  |= Regla transversal | organizacion_id viaja en toda petición y en todo evento |
+endlegend
+
+@enduml

@@ -1,0 +1,346 @@
+title Modelo entidad-relación corregido — Ojo al Gasto
+
+// ══════════════════════════════════════════════════════════
+// SUPUESTO DECLARADO — C-03
+// Asume PRODUCTO INDIVIDUAL: el titular de todo dato es USUARIO.
+// Si C-03 se resuelve como HOGAR, ver la sección 6 de mer-corregido.md:
+// no se redibuja, se reemplaza el campo de titular.
+// ══════════════════════════════════════════════════════════
+
+// ── Cuenta, identidad y seguridad ─────────────────────────
+
+USUARIO [icon: user, color: blue] {
+  id_usuario uuid pk
+  nombre varchar
+  email varchar unique
+  password_hash varchar nullable
+  plan varchar
+  zona_horaria varchar
+  ultima_actividad timestamptz
+  fecha_registro timestamptz
+}
+
+IDENTIDAD_EXTERNA [icon: key, color: blue] {
+  id_identidad uuid pk
+  id_usuario uuid
+  proveedor varchar
+  sub_externo varchar
+  creado_en timestamptz
+}
+
+TOKEN_VERIFICACION [icon: mail, color: blue] {
+  id_token uuid pk
+  id_usuario uuid
+  tipo varchar
+  hash_token varchar unique
+  dato_pendiente varchar nullable
+  expira_en timestamptz
+  usado_en timestamptz nullable
+}
+
+CONSENTIMIENTO [icon: shield, color: red] {
+  id_consentimiento uuid pk
+  seudonimo_titular uuid
+  alcance varchar
+  version_texto varchar
+  otorgado_en timestamptz
+  revocado_en timestamptz nullable
+  purga_en date
+}
+
+INTENTO_ACCESO_CRUZADO [icon: alert-triangle, color: red] {
+  id_intento uuid pk
+  marca_tiempo timestamptz
+  id_cuenta_autenticada uuid
+  tipo_recurso varchar
+  id_recurso uuid
+  resultado varchar
+}
+
+CONSUMO_IA [icon: cpu, color: blue] {
+  id_consumo uuid pk
+  id_usuario uuid
+  anio smallint
+  mes smallint
+  llamadas integer
+}
+
+DISPOSITIVO [icon: smartphone, color: blue] {
+  id_dispositivo uuid pk
+  id_usuario uuid
+  token_push varchar unique
+  plataforma varchar
+  fecha_registro timestamptz
+}
+
+// ── Catálogo global: sin campo de titular ─────────────────
+
+CATEGORIA [icon: tag, color: gray] {
+  id_categoria uuid pk
+  nombre varchar unique
+  descripcion text
+}
+
+PROVEEDOR [icon: briefcase, color: gray] {
+  id_proveedor uuid pk
+  id_categoria uuid
+  nombre varchar unique
+  alias_glosa text
+  creado_en timestamptz
+}
+
+GUIA_CANCELACION [icon: book-open, color: gray] {
+  id_guia uuid pk
+  id_proveedor uuid nullable
+  es_generica boolean
+  actualizada_en timestamptz
+}
+
+PASO_CANCELACION [icon: list, color: gray] {
+  id_paso uuid pk
+  id_guia uuid
+  orden smallint
+  texto text
+  url text
+}
+
+// ── Suscripciones ─────────────────────────────────────────
+
+SUSCRIPCION [icon: repeat, color: green] {
+  id_suscripcion uuid pk
+  id_usuario uuid
+  id_proveedor uuid nullable
+  id_categoria uuid
+  nombre_servicio varchar
+  monto decimal
+  moneda char
+  ciclo_facturacion varchar
+  fecha_inicio date
+  fecha_proximo_cobro date
+  estado varchar
+  es_prueba_gratuita boolean
+  fecha_fin_prueba date nullable
+  origen_deteccion varchar
+  es_recurrente_variable boolean
+  fecha_ultimo_uso date nullable
+  notas text
+  fecha_cancelacion date nullable
+  ahorro_estimado decimal nullable
+  fecha_eliminacion timestamptz nullable
+  creado_en timestamptz
+}
+
+USO [icon: activity, color: green] {
+  id_uso uuid pk
+  id_usuario uuid
+  id_suscripcion uuid
+  id_conector uuid nullable
+  fecha date
+  cantidad decimal
+  unidad varchar
+  origen varchar
+  creado_en timestamptz
+}
+
+MOVIMIENTO [icon: credit-card, color: green] {
+  id_movimiento uuid pk
+  id_usuario uuid
+  id_suscripcion uuid nullable
+  id_conector uuid nullable
+  monto decimal
+  moneda char
+  fecha_movimiento date
+  glosa_original text
+  glosa_normalizada text
+  origen varchar
+  estado varchar
+  hash_deteccion varchar
+  creado_en timestamptz
+}
+
+HISTORIAL_ESTADO [icon: clock, color: green] {
+  id_historial uuid pk
+  id_usuario uuid nullable
+  id_suscripcion uuid nullable
+  estado_anterior varchar
+  estado_nuevo varchar
+  motivo varchar
+  fecha_cambio timestamptz
+  seudonimo uuid nullable
+  fecha_eliminacion_cuenta date nullable
+}
+
+// ── Fuentes externas ──────────────────────────────────────
+
+CONECTOR [icon: link, color: orange] {
+  id_conector uuid pk
+  id_usuario uuid
+  tipo varchar
+  proveedor varchar
+  estado varchar
+  token_cifrado bytea
+  refresco_cifrado bytea
+  expira_en timestamptz
+  ultima_sincronizacion timestamptz
+  ultimo_error text
+  fecha_conexion timestamptz
+}
+
+INGESTA_DOCUMENTO [icon: file-text, color: orange] {
+  id_ingesta uuid pk
+  id_usuario uuid
+  hash_archivo varchar
+  fecha date
+  intentos smallint
+}
+
+// ── Alertas y notificaciones ──────────────────────────────
+
+CONFIGURACION_ALERTA [icon: settings, color: purple] {
+  id_configuracion uuid pk
+  id_usuario uuid
+  tipo varchar
+  activa boolean
+  canal varchar
+}
+
+ANTICIPACION_ALERTA [icon: clock, color: purple] {
+  id_anticipacion uuid pk
+  id_configuracion uuid
+  horas_antes integer
+}
+
+ANOMALIA [icon: alert-circle, color: purple] {
+  id_anomalia uuid pk
+  id_usuario uuid
+  id_suscripcion uuid
+  id_movimiento uuid
+  tipo varchar
+  detectada_en timestamptz
+  revisada_en timestamptz nullable
+}
+
+NOTIFICACION [icon: bell, color: purple] {
+  id_notificacion uuid pk
+  id_usuario uuid
+  id_suscripcion uuid nullable
+  id_anomalia uuid nullable
+  tipo varchar
+  canal varchar
+  estado varchar
+  fecha_programada timestamptz
+  fecha_envio timestamptz nullable
+  leida_en timestamptz nullable
+}
+
+// ── Asistente, plan y presupuesto ─────────────────────────
+
+PRESUPUESTO [icon: target, color: teal] {
+  id_presupuesto uuid pk
+  id_usuario uuid
+  anio smallint
+  mes smallint
+  monto_tope decimal
+  moneda char
+}
+
+PLAN_CONTRATADO [icon: dollar-sign, color: teal] {
+  id_plan uuid pk
+  seudonimo_titular uuid
+  id_usuario uuid nullable
+  plan varchar
+  inicio_periodo date
+  fin_periodo date
+  estado_pago varchar
+  referencia_pasarela varchar
+  monto decimal
+  moneda char
+  fecha_eliminacion_cuenta date nullable
+  purga_en date nullable
+}
+
+RECOMENDACION [icon: star, color: teal] {
+  id_recomendacion uuid pk
+  id_usuario uuid
+  tipo varchar
+  descripcion text
+  ahorro_estimado decimal
+  moneda char
+  fecha_generada timestamptz
+  estado varchar
+}
+
+RECOMENDACION_SUSCRIPCION [icon: git-merge, color: teal] {
+  id_recomendacion uuid pk
+  id_suscripcion uuid pk
+  id_usuario uuid
+}
+
+CONVERSACION [icon: message-circle, color: teal] {
+  id_conversacion uuid pk
+  id_usuario uuid
+  fecha_inicio timestamptz
+}
+
+MENSAJE [icon: message-square, color: teal] {
+  id_mensaje uuid pk
+  id_conversacion uuid
+  emisor varchar
+  contenido text
+  es_degradada boolean
+  fecha_envio timestamptz
+}
+
+// ══════════════════════════════════════════════════════════
+// RELACIONES
+// ══════════════════════════════════════════════════════════
+
+// Todo dato de la cuenta cuelga del titular (RF-20, RNF-19)
+IDENTIDAD_EXTERNA.id_usuario > USUARIO.id_usuario
+TOKEN_VERIFICACION.id_usuario > USUARIO.id_usuario
+CONSUMO_IA.id_usuario > USUARIO.id_usuario
+DISPOSITIVO.id_usuario > USUARIO.id_usuario
+SUSCRIPCION.id_usuario > USUARIO.id_usuario
+CONECTOR.id_usuario > USUARIO.id_usuario
+INGESTA_DOCUMENTO.id_usuario > USUARIO.id_usuario
+CONFIGURACION_ALERTA.id_usuario > USUARIO.id_usuario
+NOTIFICACION.id_usuario > USUARIO.id_usuario
+PRESUPUESTO.id_usuario > USUARIO.id_usuario
+RECOMENDACION.id_usuario > USUARIO.id_usuario
+CONVERSACION.id_usuario > USUARIO.id_usuario
+PLAN_CONTRATADO.id_usuario > USUARIO.id_usuario
+
+// Catálogo
+PROVEEDOR.id_categoria > CATEGORIA.id_categoria
+SUSCRIPCION.id_categoria > CATEGORIA.id_categoria
+SUSCRIPCION.id_proveedor > PROVEEDOR.id_proveedor
+GUIA_CANCELACION.id_proveedor > PROVEEDOR.id_proveedor
+PASO_CANCELACION.id_guia > GUIA_CANCELACION.id_guia
+
+// Suscripciones
+USO.id_suscripcion > SUSCRIPCION.id_suscripcion
+USO.id_conector > CONECTOR.id_conector
+MOVIMIENTO.id_suscripcion > SUSCRIPCION.id_suscripcion
+MOVIMIENTO.id_conector > CONECTOR.id_conector
+HISTORIAL_ESTADO.id_suscripcion > SUSCRIPCION.id_suscripcion
+ANOMALIA.id_suscripcion > SUSCRIPCION.id_suscripcion
+
+// Alertas
+ANTICIPACION_ALERTA.id_configuracion > CONFIGURACION_ALERTA.id_configuracion
+NOTIFICACION.id_suscripcion > SUSCRIPCION.id_suscripcion
+NOTIFICACION.id_anomalia > ANOMALIA.id_anomalia
+
+// Recomendaciones y chat
+RECOMENDACION_SUSCRIPCION.id_recomendacion > RECOMENDACION.id_recomendacion
+RECOMENDACION_SUSCRIPCION.id_suscripcion > SUSCRIPCION.id_suscripcion
+MENSAJE.id_conversacion > CONVERSACION.id_conversacion
+
+// ══════════════════════════════════════════════════════════
+// SIN RELACIÓN A PROPÓSITO
+//
+// CONSENTIMIENTO, INTENTO_ACCESO_CRUZADO y el seudonimo_titular
+// de PLAN_CONTRATADO NO llevan clave foránea a USUARIO: tienen que
+// sobrevivir disociados a la eliminación de la cuenta (RF-01.7).
+// Con cascada se destruiría la evidencia; con clave foránea viva
+// no se podría eliminar la cuenta.
+// ══════════════════════════════════════════════════════════

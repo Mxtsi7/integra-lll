@@ -1,0 +1,106 @@
+title Arquitectura de software — Ojo al Gasto
+
+// ══════════════════════════════════════════════════════════
+// Coherente con:
+//   ADR-001  microservicios, no arquitectura en capas
+//   ADR-002  un esquema por servicio, sin FK entre esquemas
+//   ADR-003  comunicación síncrona (REST) y asíncrona (eventos)
+//   ADR-004  el gateway es el único punto de entrada y valida el JWT
+//   ADR-005  conectores de correo y archivo; el banco quedó fuera
+//   ADR-006  dos clientes: web React+Vite y móvil React Native+Expo
+// ══════════════════════════════════════════════════════════
+
+Clientes [icon: users, color: gray] {
+  App web React y Vite [icon: monitor]
+  App móvil React Native y Expo [icon: smartphone]
+}
+
+API Gateway Django DRF [icon: shield, color: blue]
+
+Servicios de dominio [icon: server, color: green] {
+  auth [icon: key]
+  subscriptions [icon: repeat]
+  connectors [icon: link]
+  analytics [icon: bar-chart-2]
+  notifications [icon: bell]
+}
+
+Procesamiento asíncrono [icon: clock, color: orange] {
+  Celery beat [icon: calendar]
+  Celery worker [icon: cpu]
+}
+
+Mensajería y caché [icon: shuffle, color: orange] {
+  RabbitMQ [icon: rabbitmq]
+  Redis [icon: redis]
+}
+
+PostgreSQL [icon: postgresql, color: purple] {
+  esquema auth [icon: database]
+  esquema subscriptions [icon: database]
+  esquema connectors [icon: database]
+  esquema analytics [icon: database]
+  esquema notifications [icon: database]
+}
+
+Servicios externos [icon: cloud, color: red] {
+  API de IA [icon: cpu]
+  Expo Push [icon: bell]
+  Proveedor de correo [icon: mail]
+}
+
+// ══════════════════════════════════════════════════════════
+// ENTRADA — el gateway es el único punto alcanzable (ADR-004)
+// ══════════════════════════════════════════════════════════
+
+Clientes > API Gateway Django DRF: HTTPS · REST · JWT
+
+API Gateway Django DRF > auth: valida credenciales y emite el token
+API Gateway Django DRF > subscriptions: REST interno
+API Gateway Django DRF > connectors: REST interno
+API Gateway Django DRF > analytics: REST interno
+API Gateway Django DRF > notifications: REST interno
+
+// ══════════════════════════════════════════════════════════
+// DATOS — cada servicio posee su esquema (ADR-002)
+// ══════════════════════════════════════════════════════════
+
+auth > esquema auth
+subscriptions > esquema subscriptions
+connectors > esquema connectors
+analytics > esquema analytics
+notifications > esquema notifications
+
+// ══════════════════════════════════════════════════════════
+// EVENTOS — comunicación asíncrona (ADR-003)
+// ══════════════════════════════════════════════════════════
+
+Servicios de dominio > RabbitMQ: publica eventos
+RabbitMQ > Servicios de dominio: consume eventos
+
+Celery beat > Redis: encola las tareas programadas
+Redis > Celery worker: entrega la tarea
+Celery worker > Servicios de dominio: ejecuta los jobs diarios
+
+// ══════════════════════════════════════════════════════════
+// SALIDA HACIA TERCEROS
+// ══════════════════════════════════════════════════════════
+
+analytics > API de IA: consulta con los datos personales saneados · RN-23
+notifications > Expo Push: notificación al móvil
+connectors > Proveedor de correo: lectura autorizada por OAuth · RF-05
+
+// ══════════════════════════════════════════════════════════
+// NOTAS PARA LA DEFENSA
+//
+// 1. No es una arquitectura en capas: cada servicio se despliega
+//    por separado y es dueño de sus datos.
+// 2. Los cinco servicios NO son alcanzables desde internet.
+//    Solo el gateway y la app web lo son (ADR-004).
+// 3. RabbitMQ y Redis hacen cosas distintas: RabbitMQ lleva los
+//    eventos entre servicios, Redis es caché y cola de Celery.
+// 4. Las referencias que cruzan esquemas son UUID sueltos, sin
+//    clave foránea. La consistencia se mantiene con eventos.
+// 5. Toda tabla con datos de una cuenta lleva el campo de titular
+//    y toda consulta filtra por él (ADR-004, RF-20).
+// ══════════════════════════════════════════════════════════

@@ -1,0 +1,57 @@
+@startuml cu-5-sistema
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Verdana
+skinparam defaultFontSize 12
+skinparam ArrowColor #6B7684
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EDF3FB
+  BorderColor #4C77AC
+  FontColor #16283F
+}
+skinparam rectangle {
+  BackgroundColor #FAFBFD
+  BorderColor #CBD4E0
+  FontColor #56626F
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #2F3B4A
+  FontColor #1B2432
+}
+left to right direction
+
+title Casos de uso - Procesos automaticos
+
+actor "Temporizador" as temp
+
+rectangle "Ciclo de vida de la suscripcion - RF-13" {
+  usecase "CU-24\nTransitar estado\nde la suscripcion" as CU24
+  usecase "CU-31\nTransitar post-trial\na estado activo" as CU31
+  usecase "CU-26\nMarcar suscripcion\npor confirmar" as CU26
+  usecase "CU-27\nDetectar suscripcion\nfantasma" as CU27
+  usecase "CU-28\nCancelar por\ninactividad extendida" as CU28
+  usecase "CU-29\nReactivar suscripcion\nautomaticamente" as CU29
+}
+
+rectangle "Deteccion" {
+  usecase "CU-30\nDetectar anomalias\nde cobro\nRF-17" as CU30
+}
+
+temp --> CU24
+temp --> CU31
+temp --> CU26
+temp --> CU27
+temp --> CU28
+temp --> CU29
+temp --> CU30
+CU31 .> CU24 : <<extend>>
+CU26 .> CU24 : <<extend>>
+CU27 .> CU24 : <<extend>>
+CU28 .> CU27 : <<extend>>
+CU29 .> CU24 : <<extend>>
+
+@enduml

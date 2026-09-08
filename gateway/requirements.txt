@@ -1,5 +1,12 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-httpx==0.28.1
-pyjwt[crypto]==2.10.1
-python-multipart==0.0.20
+Django==5.1.5
+djangorestframework==3.15.2
+django-environ==0.11.2
+djangorestframework-simplejwt==5.3.1
+drf-spectacular==0.28.0
+requests==2.32.3
+pytest==8.3.4
+pytest-django==4.9.0
+
+# Sin psycopg a proposito: el gateway NO tiene base de datos.
+# Valida la firma del JWT y reenvia la peticion al servicio que corresponde.
+# En config/settings.py va DATABASES = {} (Django 5 lo admite).

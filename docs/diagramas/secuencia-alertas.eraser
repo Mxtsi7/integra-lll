@@ -1,0 +1,156 @@
+title Generacion y despacho de alertas - Ojo al Gasto
+autoNumber on
+
+// ══════════════════════════════════════════════════════════
+// Segundo diagrama de secuencia. Complementa a secuencia.eraser,
+// que cubre la deteccion y el registro de suscripciones.
+//
+// Aqui NO hay accion del usuario que dispare el flujo: lo mueve
+// el Temporizador. Es donde viven las dos funciones mas pedidas
+// del estudio: aviso de proximo cobro (76,3%) y fin de prueba (60,5%).
+//
+// Reglas que aplica:
+//   RN-01  cobro mensual: 3 dias antes
+//   RN-02  cobro anual: 7 dias antes y 24 horas antes
+//   RN-03  solo suscripciones activas; al cancelar se purga la cola
+//   RN-04  prueba gratuita: 48 horas antes y 24 horas antes
+//   RN-05  el push lleva enlace directo a la guia de cancelacion
+//   RN-06  alza de tarifa sobre 5% del promedio de 3 meses
+//   RN-07  doble cobro: 2 cargos en menos de 5 dias
+//   RN-08  tope de 2 push al dia, con orden de prioridad
+//   RN-09  silencio entre 22:00 y 08:00, despacho a las 09:00
+//   RN-10  criticas por push y correo; consejos solo dentro de la app
+//   RN-15  fantasma tras 45 dias sin uso
+//   RN-17  post-trial pasa a activa
+//   RF-09  el usuario activa o desactiva cada tipo de alerta
+// ══════════════════════════════════════════════════════════
+
+Temporizador [icon: clock, color: gray]
+Suscripciones [icon: repeat, color: green]
+Analitica [icon: bar-chart-2, color: green]
+Notificaciones [icon: bell, color: green]
+Datos [icon: database, color: gray]
+ExpoPush [icon: smartphone, color: orange]
+Correo [icon: mail, color: orange]
+Usuario [icon: user, color: purple]
+
+// ══════════════════════════════════════════════════════════
+// 1. PROXIMO COBRO - CU-27
+// ══════════════════════════════════════════════════════════
+
+Temporizador > Suscripciones: Barrido diario de proximos cobros
+activate Suscripciones
+Suscripciones > Datos: Suscripciones activas con cobro proximo
+Datos --> Suscripciones: Lista de suscripciones
+
+loop por cada suscripcion encontrada {
+  Suscripciones > Datos: Lee la configuracion de alerta del usuario
+
+  alt el usuario tiene activa la alerta de proximo cobro {
+    alt el ciclo es mensual {
+      Suscripciones > Notificaciones: Programa 1 aviso a 3 dias
+    }
+    alt el ciclo es anual {
+      Suscripciones > Notificaciones: Programa 2 avisos, a 7 dias y a 24 horas
+    }
+  }
+
+  alt el usuario la tiene desactivada {
+    Suscripciones > Suscripciones: No programa nada
+  }
+}
+deactivate Suscripciones
+
+// ══════════════════════════════════════════════════════════
+// 2. FIN DE PRUEBA GRATUITA - CU-28 y CU-29
+// ══════════════════════════════════════════════════════════
+
+Temporizador > Suscripciones: Barrido diario de pruebas gratuitas
+activate Suscripciones
+Suscripciones > Datos: Pruebas que vencen dentro de 48 horas
+Datos --> Suscripciones: Lista de pruebas
+Suscripciones > Notificaciones: Programa aviso a 48 horas y alerta critica a 24 horas
+
+Suscripciones > Datos: Pruebas ya vencidas sin cancelacion del usuario
+Datos --> Suscripciones: Lista de pruebas vencidas
+Suscripciones > Datos: Pasa a ACTIVA con el valor del plan estandar
+Suscripciones > Datos: Registra la transicion en el historial
+deactivate Suscripciones
+
+// ══════════════════════════════════════════════════════════
+// 3. SUSCRIPCION FANTASMA - CU-31
+// ══════════════════════════════════════════════════════════
+
+Temporizador > Analitica: Barrido diario de uso
+activate Analitica
+Analitica > Datos: Activas sin uso registrado hace mas de 45 dias
+Datos --> Analitica: Lista de suscripciones
+Analitica > Datos: Pasa a FANTASMA y registra la transicion
+Analitica > Notificaciones: Programa una recomendacion de cancelacion
+deactivate Analitica
+
+// ══════════════════════════════════════════════════════════
+// 4. ANOMALIA DE COBRO - CU-30
+// No la dispara el Temporizador sino la llegada de un cobro
+// ══════════════════════════════════════════════════════════
+
+Suscripciones > Analitica: Llego un cobro nuevo
+activate Analitica
+Analitica > Datos: Promedio de los ultimos 3 meses del mismo servicio
+
+alt el monto supera en un 5 por ciento o mas al promedio {
+  Analitica > Datos: Registra ANOMALIA de alza de tarifa
+  Analitica > Notificaciones: Programa la alerta
+}
+
+alt hay 2 cargos del mismo comercio en menos de 5 dias {
+  Analitica > Datos: Registra ANOMALIA de posible doble cobro
+  Analitica > Notificaciones: Programa la alerta
+}
+deactivate Analitica
+
+// ══════════════════════════════════════════════════════════
+// 5. DESPACHO DE LA COLA
+// Aqui se aplican el tope diario, el silencio y el canal
+// ══════════════════════════════════════════════════════════
+
+Temporizador > Notificaciones: Despacha la cola pendiente
+activate Notificaciones
+Notificaciones > Datos: Notificaciones programadas para ahora
+Datos --> Notificaciones: Cola del dia
+
+loop por cada notificacion de la cola {
+
+  alt la suscripcion ya no esta activa {
+    Notificaciones > Datos: La elimina de la cola sin enviar
+  }
+
+  alt es de noche en la zona horaria del usuario, entre las 22 y las 8 {
+    Notificaciones > Datos: La reprograma para las 9 de la manana
+  }
+
+  alt el usuario ya recibio 2 push hoy {
+    Notificaciones > Datos: La deja solo dentro de la app
+    Notificaciones > Notificaciones: Prioriza fin de prueba, luego proximo cobro, luego consejos
+  }
+
+  alt es critica - prueba por vencer o alza de tarifa {
+    Notificaciones > ExpoPush: Envia el push con enlace a la guia de cancelacion
+    Notificaciones > Correo: Envia el correo
+    Notificaciones > Datos: Marca enviada con su fecha
+  }
+
+  alt es un consejo de optimizacion {
+    Notificaciones > Datos: Solo la deja en el centro de notificaciones
+  }
+}
+deactivate Notificaciones
+
+// ══════════════════════════════════════════════════════════
+// 6. LLEGADA AL USUARIO
+// ══════════════════════════════════════════════════════════
+
+ExpoPush --> Usuario: Notificacion en el telefono
+Usuario > Notificaciones: Abre la notificacion
+Notificaciones > Datos: Marca como leida
+Notificaciones --> Usuario: Muestra los pasos de cancelacion del proveedor

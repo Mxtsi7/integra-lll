@@ -1,0 +1,162 @@
+' ═══════════════════════════════════════════════════════════════
+' DIAGRAMA DE DESPLIEGUE
+' Plataforma de control de suscripciones — despliegue en Kubernetes
+'
+' Complementa al diagrama de componentes: el de componentes muestra
+' QUÉ hay y cómo se comunica; este muestra DÓNDE se ejecuta.
+' Suelen pedirse los dos.
+'
+' Ver infra/k8s/ para los manifiestos correspondientes.
+' ═══════════════════════════════════════════════════════════════
+
+@startuml arquitectura-despliegue
+
+skinparam shadowing false
+skinparam ArrowColor #444444
+skinparam node {
+  BackgroundColor #F7F9FC
+  BorderColor #99AABB
+}
+skinparam artifact {
+  BackgroundColor #FEFEFE
+  BorderColor #555555
+}
+skinparam database {
+  BackgroundColor #FFF8E7
+  BorderColor #BF9000
+}
+skinparam cloud {
+  BackgroundColor #F2F2F2
+  BorderColor #888888
+}
+
+title Diagrama de despliegue — clúster de Kubernetes
+
+actor "Usuario" as USR
+
+node "Navegador" as NAV {
+  artifact "Aplicación web\nReact" as SPA
+}
+
+node "Dispositivo Android" as AND {
+  artifact "Aplicación móvil\nAPK · React Native + Expo" as APP
+}
+
+cloud "Internet" as NET
+
+node "Clúster de Kubernetes\nnamespace: suscripciones" as K8S {
+
+  node "Ingress Controller" as ING {
+    artifact "Ingress\n/api → gateway\n/    → frontend" as INGR
+  }
+
+  node "Deployment: gateway\n2 réplicas" as NGW {
+    artifact "gateway\nService ClusterIP :8000" as GW
+  }
+
+  node "Deployment: frontend\n1 réplica" as NFE {
+    artifact "frontend\nService ClusterIP :80" as FE
+  }
+
+  node "Deployments de dominio\nService ClusterIP · sin ruta de entrada" as NSVC {
+    artifact "auth :8001" as AUTH
+    artifact "subscriptions :8002" as SUBS
+    artifact "connectors :8003" as CONN
+    artifact "analytics :8004" as ANA
+    artifact "notifications :8005" as NOTI
+  }
+
+  node "Deployment: connectors-worker\nsin Service: solo consume la cola" as NWK {
+    artifact "celery worker + beat" as WORKER
+  }
+
+  node "Configuración" as NCFG {
+    artifact "ConfigMap\nconfig-suscripciones" as CM
+    artifact "Secret\nsecretos-suscripciones" as SEC
+  }
+
+  artifact "NetworkPolicy\nsolo el gateway puede\nalcanzar los servicios\nde dominio" as NP
+}
+
+node "Servicios gestionados" as MAN {
+  database "PostgreSQL\n5 esquemas" as PG
+  artifact "RabbitMQ" as MQ
+  artifact "Redis" as REDIS
+}
+
+cloud "APIs externas\nSpotify · Gmail · Claude · SMTP" as EXT
+cloud "Expo Push\nnotificaciones" as PUSH
+
+' ─── flujos ───
+USR --> NAV
+USR --> AND
+NAV --> NET : HTTPS
+AND --> NET : HTTPS
+NET --> INGR : HTTPS
+
+INGR --> FE : /
+INGR --> GW : /api
+
+GW --> AUTH
+GW --> SUBS
+GW --> CONN
+GW --> ANA
+GW --> NOTI
+
+AUTH --> PG
+SUBS --> PG
+CONN --> PG
+ANA  --> PG
+NOTI --> PG
+WORKER --> PG
+
+SUBS --> MQ
+CONN --> MQ
+ANA  --> MQ
+NOTI --> MQ
+WORKER --> REDIS
+
+WORKER --> EXT : OAuth / HTTPS
+ANA  --> EXT : HTTPS
+NOTI --> EXT : SMTP
+NOTI --> PUSH : HTTPS
+PUSH --> APP : push
+
+CM ..> NSVC : envFrom
+SEC ..> NSVC : envFrom
+NP ..> NSVC : restringe
+
+note right of INGR
+  **Única puerta de entrada al clúster.**
+  Los cinco servicios de dominio son
+  ClusterIP y no tienen ruta de Ingress:
+  no son alcanzables desde internet.
+  Es lo que hace seguro el esquema
+  de cabeceras del ADR-004.
+end note
+
+note bottom of MAN
+  Se prefieren servicios gestionados fuera
+  del clúster antes que desplegar bases de
+  datos dentro de él: los volúmenes
+  persistentes son la principal fuente de
+  problemas en despliegues de este tamaño.
+  Ver infra/k8s/README.md
+end note
+
+note bottom of AND
+  Distribución como APK (ADR-006).
+  El APK se compila en la nube con EAS:
+  nadie necesita el entorno nativo.
+  iOS queda fuera: exige cuenta de
+  Apple Developer de pago.
+end note
+
+note bottom of NWK
+  Un proceso por contenedor: el worker
+  comparte imagen con `connectors` pero
+  se despliega aparte, con otro comando
+  y sin Service asociado.
+end note
+
+@enduml

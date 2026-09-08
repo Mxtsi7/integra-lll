@@ -1,0 +1,49 @@
+@startuml cu-4-premium
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Verdana
+skinparam defaultFontSize 12
+skinparam ArrowColor #6B7684
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EDF3FB
+  BorderColor #4C77AC
+  FontColor #16283F
+}
+skinparam rectangle {
+  BackgroundColor #FAFBFD
+  BorderColor #CBD4E0
+  FontColor #56626F
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #2F3B4A
+  FontColor #1B2432
+}
+left to right direction
+
+title Casos de uso - Plan Premium y asistente
+
+actor "Usuario\nautenticado" as auth
+actor "Usuario\nPremium" as prem
+actor "Servicio\nde IA" as ia
+
+rectangle "Plan y asistente" {
+  usecase "CU-22\nContratar y gestionar\nel plan Premium\nRF-23" as CU22
+  usecase "CU-15\nChatear con el\nasistente financiero\nRF-24" as CU15
+  usecase "CU-16\nSolicitar recomendacion\nRF-24, RF-25" as CU16
+  usecase "CU-17\nExplicar una\nrecomendacion\nRF-25" as CU17
+}
+
+auth <|-- prem
+auth --> CU22
+prem --> CU15
+CU16 .> CU15 : <<extend>>
+CU17 .> CU16 : <<extend>>
+CU15 --> ia
+CU16 --> ia
+CU17 --> ia
+
+@enduml

@@ -1,0 +1,154 @@
+flowchart TB
+
+
+
+subgraph CV["Ciclo de vida de la suscripcion"]
+  direction TB
+  creada["Suscripcion creada"]
+  prueba["En prueba gratuita"]
+  activa["Activa"]
+  fantasma["Fantasma"]
+  pausada["Pausada"]
+  porconf["Por confirmar"]
+  cancelada["Cancelada"]
+
+  esprueba{"Es prueba<br/>gratuita?"}
+  vence{"Vence sin que<br/>el usuario cancele?"}
+  uso45{"45 dias<br/>sin uso?"}
+  cob60{"60 dias<br/>sin cobro?"}
+  cob90{"30 dias mas<br/>sin cobro?"}
+
+  creada --> esprueba
+  esprueba -->|"Si"| prueba
+  esprueba -->|"No"| activa
+  prueba --> vence
+  vence -->|"Si · RN-17"| activa
+  vence -->|"No, cancela"| cancelada
+
+  activa --> uso45
+  uso45 -->|"Si · RN-15"| fantasma
+  uso45 -->|"No"| activa
+  fantasma -.->|"regla por definir"| activa
+
+  activa --> cob60
+  cob60 -->|"Si · RN-19"| porconf
+  cob60 -->|"No"| activa
+  porconf --> cob90
+  cob90 -->|"Si, 90 dias · RN-20"| cancelada
+  cob90 -->|"No, cobro nuevo · RN-21"| activa
+  porconf -.->|"responde que sigue vigente<br/>regla por definir"| activa
+
+  activa -.->|"el usuario pausa<br/>regla por definir"| pausada
+  pausada -.->|"fecha de reactivacion<br/>regla por definir"| activa
+
+  activa -->|"confirma la baja · RN-18"| cancelada
+end
+
+inicio(["Inicio"])
+origen{"Origen del<br/>registro"}
+piiIngesta["Sanitizar datos personales<br/>PII · RN-23"]
+candidato["Candidato detectado<br/>pendiente de confirmar"]
+confirma{"El usuario<br/>lo confirma?"}
+descartar["Descartar<br/>solo se guarda el hash<br/>RF-05"]
+
+inicio --> origen
+origen -->|"Manual · RF-02"| creada
+origen -->|"CSV o PDF · RF-19"| candidato
+origen -->|"Correo · RF-05"| piiIngesta
+piiIngesta --> candidato
+candidato --> confirma
+confirma -->|"Si"| creada
+confirma -->|"No"| descartar
+
+ahorro["Registrar ahorro"]
+cementerio["Cementerio de suscripciones<br/>RF-14"]
+cancelada --> ahorro --> cementerio
+
+cobro["Cobro nuevo detectado"]
+tarea["Tarea programada diaria"]
+motor{{"Motor de reglas"}}
+cobro --> motor
+tarea --> motor
+
+alza["Alza de tarifa<br/>mayor a 5% · RN-06"]
+doble["Doble cobro en<br/>menos de 5 dias · RN-07"]
+proximo["Proximo cobro<br/>3 dias mensual · 7 dias y 24 h anual<br/>RN-01 · RN-02"]
+finPrueba["Fin de prueba gratuita<br/>48 h y 24 h · RN-04"]
+solape["Solapamiento de servicios<br/>misma categoria · RN-16"]
+costoHora["Costo por hora de uso"]
+score["Score de cancelacion"]
+variable["Clasificar gasto recurrente<br/>variable, sobre 30% · RN-12"]
+
+motor --> alza
+motor --> doble
+motor --> proximo
+motor --> finPrueba
+motor --> solape
+motor --> costoHora
+motor --> score
+motor --> variable
+
+anomalia["Anomalia registrada<br/>visible en el panel"]
+alza --> anomalia
+doble --> anomalia
+
+panel["Panel y alertas"]
+solape --> panel
+costoHora --> panel
+variable --> panel
+
+activaAlerta{"La alerta esta<br/>activa? RF-09"}
+tope{"Ya van 2 push<br/>hoy? RN-08"}
+silencio{"Entre 22:00<br/>y 08:00? RN-09"}
+cola["Encolar<br/>despachar a las 09:00"]
+enviar["Enviar por el canal<br/>segun criticidad · RN-10"]
+
+anomalia --> activaAlerta
+proximo --> activaAlerta
+finPrueba --> activaAlerta
+activaAlerta -->|"No, solo panel"| panel
+activaAlerta -->|"Si"| tope
+tope -->|"Si"| panel
+tope -->|"No"| silencio
+silencio -->|"Si"| cola
+silencio -->|"No"| enviar
+cola --> enviar
+enviar --> panel
+
+reco{"Recomendacion"}
+instrucciones["Instrucciones<br/>para cancelar · RF-16"]
+fechaReact["Definir fecha<br/>de reactivacion"]
+score --> reco
+reco -->|"Cancelar"| instrucciones
+reco -->|"Pausar"| fechaReact
+reco -->|"Mantener"| panel
+instrucciones --> cancelada
+fechaReact --> pausada
+
+presupuesto["Control de<br/>presupuesto mensual · RF-13"]
+techo{"Supera<br/>el techo?"}
+alertaPresu["Alerta de presupuesto"]
+panel --> presupuesto
+presupuesto --> techo
+techo -->|"Si"| alertaPresu
+techo -->|"No"| panel
+alertaPresu --> activaAlerta
+
+premium(["Usuario Premium<br/>abre el chat"])
+piiChat["Sanitizar datos personales<br/>PII · RN-23"]
+ia["Asistente con IA"]
+responde{"Responde en<br/>3,5 segundos? RN-24"}
+respIA["Respuesta del asistente"]
+respBD["Respuesta predeterminada<br/>desde la base de datos"]
+premium --> piiChat --> ia --> responde
+responde -->|"Si"| respIA
+responde -->|"No"| respBD
+
+classDef estado fill:#E3EDF9,stroke:#3F6EA8,color:#132B47
+classDef regla fill:#FBE6D8,stroke:#B96A38,color:#3A2113
+classDef pendiente fill:#FFF6D6,stroke:#B0891F,color:#3A2C05,stroke-dasharray:5 3
+classDef decision fill:#F2F2F2,stroke:#777777,color:#222222
+
+class creada,prueba,activa,fantasma,pausada,porconf,cancelada estado
+class alza,doble,proximo,finPrueba,solape,variable,piiIngesta,piiChat,respBD,cola,enviar,instrucciones regla
+class descartar,candidato pendiente

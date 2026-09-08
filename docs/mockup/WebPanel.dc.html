@@ -1,0 +1,257 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Archivo', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #C4633F; text-decoration: none; }
+    a:hover { color: #A24E2F; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; background: #FBF9F5; color: #37322C; display: flex; overflow: hidden;">
+
+  <!-- barra lateral -->
+  <div style="width: 236px; flex-shrink: 0; background: #F5F1E9; border-right: 1px solid #E9E3D9; display: flex; flex-direction: column; padding: 24px 16px;">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 0 8px 26px 8px;">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#C4633F" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span style="font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em;">Ojo al Gasto</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 3px;">
+      <div style="display: flex; align-items: center; gap: 11px; padding: 10px 10px; border-radius: 9px; background: #FFFFFF; border: 1px solid #E9E3D9;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#37322C" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        <span style="font-size: 14px; font-weight: 600;">Panel</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px; padding: 10px 10px; border-radius: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7A736A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h18M7 3v3M17 3v3"/><rect x="3" y="6" width="18" height="15" rx="2"/></svg>
+        <span style="font-size: 14px; color: #7A736A;">Calendario de pagos</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px; padding: 10px 10px; border-radius: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7A736A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 6.2L21 11l-5 4.3 1.4 6.7-5.4-3.5L6.6 22 8 15.3 3 11l6.6-1.8Z"/></svg>
+        <span style="font-size: 14px; color: #7A736A;">Recomendaciones</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px; padding: 10px 10px; border-radius: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7A736A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H6a4 4 0 0 1 0-8h3M15 7h3a4 4 0 0 1 0 8h-3M8 13h8"/></svg>
+        <span style="font-size: 14px; color: #7A736A;">Cuentas conectadas</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 11px; padding: 10px 10px; border-radius: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7A736A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17l6-6 4 4 6-7"/></svg>
+        <span style="font-size: 14px; color: #7A736A;">Informes</span>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1;"></div>
+
+    <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 11px; padding: 14px;">
+      <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px;">Plan gratuito</div>
+      <div style="font-size: 12px; color: #7A736A; line-height: 1.45;">Las alertas de cobro y de prueba gratuita están incluidas.</div>
+      <div style="margin-top: 11px; min-height: 36px; display: flex; align-items: center; justify-content: center; background: #F5F1E9; border: 1px solid #E9E3D9; border-radius: 8px; font-size: 12.5px; font-weight: 600; color: #37322C;">Ver plan Premium</div>
+    </div>
+  </div>
+
+  <!-- contenido -->
+  <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 22px 32px; border-bottom: 1px solid #E9E3D9;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 28px; line-height: 1.1;">Panel de suscripciones</span>
+        <span style="font-size: 13px; color: #7A736A;">Septiembre de 2026</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: #37322C; color: #FBF9F5; border-radius: 9px; font-size: 13.5px; font-weight: 600;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FBF9F5" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Agregar suscripción
+        </div>
+        <div style="width: 36px; height: 36px; border-radius: 50%; background: #EFE9DE; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #7A736A;">FO</div>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; gap: 24px; padding: 24px 32px; overflow: hidden;">
+
+      <!-- columna principal -->
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 18px; min-width: 0;">
+
+        <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px;">
+          <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; padding: 16px;">
+            <div style="font-size: 11.5px; font-weight: 500; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Gasto del mes</div>
+            <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 34px; line-height: 1.1; margin-top: 7px;">$45.300</div>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; padding: 16px;">
+            <div style="font-size: 11.5px; font-weight: 500; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Proyección anual</div>
+            <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 34px; line-height: 1.1; margin-top: 7px;">$543.600</div>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #F0D9CD; border-radius: 12px; padding: 16px;">
+            <div style="font-size: 11.5px; font-weight: 500; color: #A5745D; letter-spacing: 0.04em; text-transform: uppercase;">Sin uso hace +30 días</div>
+            <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 34px; line-height: 1.1; margin-top: 7px; color: #C4633F;">2</div>
+          </div>
+          <div style="background: #FFFFFF; border: 1px solid #D6E6DB; border-radius: 12px; padding: 16px;">
+            <div style="font-size: 11.5px; font-weight: 500; color: #3E6F4C; letter-spacing: 0.04em; text-transform: uppercase;">Ahorro potencial</div>
+            <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 34px; line-height: 1.1; margin-top: 7px; color: #4A8B5C;">$465.600</div>
+          </div>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 13px 18px; border-bottom: 1px solid #F0EBE2; background: #FCFAF6;">
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Servicio</span>
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Monto</span>
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Ciclo</span>
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Próximo cobro</span>
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Uso del mes</span>
+            <span style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Costo / hora</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #F5F1E9; align-items: center; background: #FDF8F5;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #2A2622; color: #FBF9F5; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">H</div>
+              <div style="display: flex; flex-direction: column; gap: 1px; min-width: 0;">
+                <span style="font-size: 14px; font-weight: 600;">HBO Max</span>
+                <span style="font-size: 11.5px; color: #C4633F; font-weight: 500;">En prueba · termina en 2 días</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$8.900</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #C4633F; font-weight: 600;">5 sep</span>
+            <span style="font-size: 13.5px; color: #7A736A;">0 h</span>
+            <span style="font-size: 13.5px; color: #ABA396;">—</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #F5F1E9; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #EFE9DE; color: #57504A; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">G</div>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 14px; font-weight: 600;">Gimnasio</span>
+                <span style="font-size: 11.5px; color: #7A736A;">Presencial</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$29.900</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #7A736A;">12 sep</span>
+            <span style="font-size: 13.5px; color: #7A736A;">4 h</span>
+            <span style="font-size: 13.5px; font-weight: 600; color: #C4633F;">$7.475</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #F5F1E9; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #EFE9DE; color: #57504A; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">N</div>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 14px; font-weight: 600;">Netflix</span>
+                <span style="font-size: 11.5px; color: #7A736A;">Video</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$9.900</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #7A736A;">18 sep</span>
+            <span style="font-size: 13.5px; color: #7A736A;">9 h</span>
+            <span style="font-size: 13.5px; font-weight: 600;">$1.100</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #F5F1E9; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #EFE9DE; color: #57504A; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">C</div>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 14px; font-weight: 600;">ChatGPT Plus</span>
+                <span style="font-size: 11.5px; color: #7A736A;">Herramientas</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$19.500</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #7A736A;">22 sep</span>
+            <span style="font-size: 13.5px; color: #7A736A;">31 h</span>
+            <span style="font-size: 13.5px; font-weight: 600;">$629</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #F5F1E9; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #EDF5EF; color: #3E6F4C; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">S</div>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 14px; font-weight: 600;">Spotify</span>
+                <span style="font-size: 11.5px; color: #7A736A;">Música</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$5.900</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #7A736A;">3 sep</span>
+            <span style="font-size: 13.5px; color: #7A736A;">62 h</span>
+            <span style="font-size: 13.5px; font-weight: 600; color: #4A8B5C;">$95</span>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2.1fr 1fr 1fr 1.1fr 1.1fr 1.1fr; gap: 12px; padding: 14px 18px; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 11px; min-width: 0;">
+              <div style="width: 32px; height: 32px; border-radius: 8px; background: #EFE9DE; color: #57504A; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex-shrink: 0;">i</div>
+              <div style="display: flex; flex-direction: column; gap: 1px;">
+                <span style="font-size: 14px; font-weight: 600;">iCloud 200 GB</span>
+                <span style="font-size: 11.5px; color: #7A736A;">Almacenamiento</span>
+              </div>
+            </div>
+            <span style="font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums;">$2.700</span>
+            <span style="font-size: 13.5px; color: #7A736A;">Mensual</span>
+            <span style="font-size: 13.5px; color: #7A736A;">28 sep</span>
+            <span style="font-size: 13.5px; color: #ABA396;">Continuo</span>
+            <span style="font-size: 13.5px; color: #ABA396;">—</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- panel de recomendaciones -->
+      <div style="width: 316px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px;">
+
+        <div style="background: #FBF0EA; border: 1px solid #F0D9CD; border-radius: 12px; padding: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 9px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C4633F" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+            <span style="font-size: 11.5px; font-weight: 600; color: #8F462A; letter-spacing: 0.05em; text-transform: uppercase;">Urgente</span>
+          </div>
+          <div style="font-size: 14.5px; font-weight: 600; color: #8F462A; line-height: 1.4;">HBO Max se cobra en 2 días</div>
+          <div style="font-size: 12.5px; color: #A5745D; line-height: 1.5; margin-top: 6px;">No lo has usado desde que empezó la prueba. Cancelarlo evita $106.800 al año.</div>
+          <div style="margin-top: 12px; min-height: 40px; display: flex; align-items: center; justify-content: center; background: #C4633F; color: #FFFFFF; border-radius: 9px; font-size: 13.5px; font-weight: 600;">Ver cómo cancelar</div>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; padding: 16px;">
+          <div style="font-size: 11.5px; font-weight: 600; color: #7A736A; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 12px;">Recomendaciones</div>
+
+          <div style="display: flex; flex-direction: column; gap: 13px;">
+            <div style="display: flex; gap: 11px;">
+              <div style="width: 4px; border-radius: 2px; background: #C4633F; flex-shrink: 0;"></div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 13.5px; font-weight: 600;">Cancelar Gimnasio</span>
+                <span style="font-size: 12.5px; color: #7A736A; line-height: 1.45;">4 horas en 30 días. Sale a $7.475 la hora.</span>
+                <span style="font-size: 12.5px; color: #4A8B5C; font-weight: 600;">Ahorro: $358.800 al año</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 11px;">
+              <div style="width: 4px; border-radius: 2px; background: #E4DDD1; flex-shrink: 0;"></div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 13.5px; font-weight: 600;">Netflix subió $1.000</span>
+                <span style="font-size: 12.5px; color: #7A736A; line-height: 1.45;">Alza detectada en el cobro del 18 de agosto.</span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 11px;">
+              <div style="width: 4px; border-radius: 2px; background: #E4DDD1; flex-shrink: 0;"></div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                <span style="font-size: 13.5px; font-weight: 600;">Pasar Spotify a plan anual</span>
+                <span style="font-size: 12.5px; color: #7A736A; line-height: 1.45;">Lo usas 62 h al mes; el plan anual sale más barato.</span>
+                <span style="font-size: 12.5px; color: #4A8B5C; font-weight: 600;">Ahorro: $11.800 al año</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

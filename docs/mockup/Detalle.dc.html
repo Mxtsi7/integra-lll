@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Archivo', 'Segoe UI', system-ui, sans-serif; }
+    a { color: #C4633F; text-decoration: none; }
+    a:hover { color: #A24E2F; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<div style="width: 390px; height: 844px; background: #FBF9F5; color: #37322C; display: flex; flex-direction: column; overflow: hidden;">
+
+  <div style="display: flex; align-items: center; gap: 12px; padding: 18px 20px 12px 20px;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#37322C" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    <span style="font-size: 15px; font-weight: 600;">Detalle</span>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 14px; padding: 0 20px; overflow: hidden;">
+
+    <!-- cabecera del servicio -->
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <div style="width: 54px; height: 54px; border-radius: 14px; background: #2A2622; color: #FBF9F5; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; flex-shrink: 0;">H</div>
+      <div style="display: flex; flex-direction: column; gap: 3px;">
+        <div style="font-size: 21px; font-weight: 600; letter-spacing: -0.01em;">HBO Max</div>
+        <div style="font-size: 13px; color: #7A736A;">Video · Mensual · En prueba gratuita</div>
+      </div>
+    </div>
+
+    <!-- cifras -->
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;">
+      <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; padding: 13px;">
+        <div style="font-size: 11.5px; font-weight: 500; color: #7A736A; letter-spacing: 0.03em; text-transform: uppercase;">Monto</div>
+        <div style="font-size: 22px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums;">$8.900</div>
+        <div style="font-size: 12px; color: #ABA396; margin-top: 1px;">al mes</div>
+      </div>
+      <div style="background: #FBF0EA; border: 1px solid #F0D9CD; border-radius: 12px; padding: 13px;">
+        <div style="font-size: 11.5px; font-weight: 500; color: #A5745D; letter-spacing: 0.03em; text-transform: uppercase;">Primer cobro</div>
+        <div style="font-size: 22px; font-weight: 600; margin-top: 3px; color: #8F462A;">5 sep</div>
+        <div style="font-size: 12px; color: #A5745D; margin-top: 1px;">en 2 días</div>
+      </div>
+    </div>
+
+    <!-- uso -->
+    <div style="background: #FFFFFF; border: 1px solid #E9E3D9; border-radius: 12px; padding: 15px 14px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px;">
+        <span style="font-size: 12px; font-weight: 600; color: #7A736A; letter-spacing: 0.04em; text-transform: uppercase;">Uso</span>
+        <span style="font-size: 12px; color: #ABA396;">últimas 8 semanas</span>
+      </div>
+      <div style="display: flex; align-items: flex-end; gap: 7px; height: 62px;">
+        <div style="flex-grow: 1; height: 44px; background: #E4DDD1; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 30px; background: #E4DDD1; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 16px; background: #E4DDD1; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 7px; background: #E4DDD1; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 3px; background: #EFE9DE; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 3px; background: #EFE9DE; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 3px; background: #EFE9DE; border-radius: 3px;"></div>
+        <div style="flex-grow: 1; height: 3px; background: #EFE9DE; border-radius: 3px;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; margin-top: 9px;">
+        <span style="font-size: 11px; color: #ABA396;">hace 8 sem</span>
+        <span style="font-size: 11px; color: #ABA396;">esta semana</span>
+      </div>
+      <div style="border-top: 1px solid #F0EBE2; margin-top: 13px; padding-top: 13px; display: flex; align-items: baseline; justify-content: space-between;">
+        <span style="font-size: 13.5px; color: #7A736A;">Sin usar hace</span>
+        <span style="font-size: 15px; font-weight: 600; color: #C4633F;">47 días</span>
+      </div>
+    </div>
+
+    <!-- recomendacion -->
+    <div style="background: #FFFFFF; border: 1px solid #F0D9CD; border-radius: 12px; padding: 15px 14px;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 9px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#C4633F" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 6.2L21 11l-5 4.3 1.4 6.7-5.4-3.5L6.6 22 8 15.3 3 11l6.6-1.8Z"/></svg>
+        <span style="font-size: 12px; font-weight: 600; color: #8F462A; letter-spacing: 0.04em; text-transform: uppercase;">Recomendación</span>
+      </div>
+      <div style="font-size: 14.5px; font-weight: 600; line-height: 1.4;">Conviene cancelar antes del 5 de septiembre</div>
+      <div style="font-size: 13px; color: #7A736A; line-height: 1.5; margin-top: 7px;">No has abierto HBO Max en 47 días y la prueba termina en 2. Si dejas que se cobre, gastarás <strong style="color: #37322C;">$106.800 al año</strong> en un servicio que no estás usando.</div>
+    </div>
+
+    <!-- acciones -->
+    <div style="display: flex; flex-direction: column; gap: 9px; margin-top: 2px;">
+      <div style="min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; background: #C4633F; color: #FFFFFF; border-radius: 10px; font-size: 14.5px; font-weight: 600;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5h9M10 12h9M10 19h9"/><path d="M4 5h.01M4 12h.01M4 19h.01"/></svg>
+        Cómo cancelar HBO Max
+      </div>
+      <div style="min-height: 48px; display: flex; align-items: center; justify-content: center; background: #FFFFFF; border: 1px solid #E9E3D9; color: #37322C; border-radius: 10px; font-size: 14.5px; font-weight: 600;">Marcar como cancelada</div>
+    </div>
+
+  </div>
+
+  <div style="height: 26px;"></div>
+
+</div>
+</x-dc>
+</body>
+</html>

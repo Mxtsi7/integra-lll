@@ -1,0 +1,544 @@
+' ═══════════════════════════════════════════════════════════════
+' MODELO ENTIDAD-RELACIÓN CORREGIDO — Ojo al Gasto
+'
+' Aplica los 56 hallazgos de docs/REVISION-MER.md (M-01 a M-56).
+'
+' ⚠ SUPUESTO DECLARADO — C-03
+'   Este modelo asume PRODUCTO INDIVIDUAL: el titular de todo dato
+'   es el USUARIO. Si el equipo resuelve C-03 como HOGAR, hay que
+'   aplicar el delta de la sección 6 de mer-corregido.md: NO se
+'   redibuja el modelo, se reemplaza el campo de titular.
+'
+' RENDERIZAR:  python render.py   (en esta carpeta)
+' ═══════════════════════════════════════════════════════════════
+
+@startuml mer-corregido
+
+hide circle
+' El servidor de PlantUML corta el PNG en 4096 px de ancho. Con 27 entidades el
+' diagrama mide 4925 px, asi que a 96 dpi se perdian 829 px del lado derecho.
+skinparam dpi 72
+skinparam linetype ortho
+skinparam shadowing false
+skinparam nodesep 25
+skinparam ranksep 50
+skinparam class {
+  BackgroundColor #FEFEFE
+  BorderColor #555555
+  ArrowColor #444444
+}
+skinparam package {
+  BackgroundColor #F7F9FC
+  BorderColor #99AABB
+  FontStyle bold
+}
+
+title Modelo entidad-relación corregido — Ojo al Gasto\n<size:11>Supuesto: producto individual (C-03). El campo de titular es id_usuario.</size>
+
+' ══════════════════════════════════════════════════════════════
+package "Cuenta, identidad y seguridad" as P_CUENTA {
+
+  entity "USUARIO" as usr {
+    **id_usuario** : uuid <<PK>>
+    --
+    nombre : varchar(120)
+    email : varchar(255) <<UQ>>
+    password_hash : varchar(255)
+    plan : varchar(20)
+    zona_horaria : varchar(40)
+    ultima_actividad : timestamptz
+    fecha_registro : timestamptz
+    --
+    //password_hash admite nulo: la//
+    //cuenta puede ser solo de Google//
+    //ultima_actividad: RNF-20//
+    //zona_horaria: RN-09//
+  }
+
+  entity "IDENTIDAD_EXTERNA" as idext {
+    **id_identidad** : uuid <<PK>>
+    --
+    id_usuario : uuid <<FK>>
+    proveedor : varchar(20)
+    sub_externo : varchar(255)
+    creado_en : timestamptz
+    --
+    //UQ (proveedor, sub_externo)//
+    //RF-01.3 · inicio con Google//
+  }
+
+  entity "TOKEN_VERIFICACION" as tok {
+    **id_token** : uuid <<PK>>
+    --
+    id_usuario : uuid <<FK>>
+    tipo : varchar(25)
+    hash_token : varchar(255) <<UQ>>
+    dato_pendiente : varchar(255)
+    expira_en : timestamptz
+    usado_en : timestamptz
+    --
+    //tipo: restablecimiento |//
+    //      verificacion_correo//
+    //usado_en nulo = sin consumir//
+    //RF-01.4, RF-01.5//
+  }
+
+  entity "CONSENTIMIENTO" as cons {
+    **id_consentimiento** : uuid <<PK>>
+    --
+    seudonimo_titular : uuid
+    alcance : varchar(30)
+    version_texto : varchar(20)
+    otorgado_en : timestamptz
+    revocado_en : timestamptz
+    purga_en : date
+    --
+    //SIN clave foránea a USUARIO://
+    //sobrevive disociado 6 años a//
+    //la eliminación de la cuenta//
+    //RF-01.1, RF-01.7, RF-05//
+  }
+
+  entity "INTENTO_ACCESO_CRUZADO" as iac {
+    **id_intento** : uuid <<PK>>
+    --
+    marca_tiempo : timestamptz
+    id_cuenta_autenticada : uuid
+    tipo_recurso : varchar(30)
+    id_recurso : uuid
+    resultado : varchar(15)
+    --
+    //Referencia débil, sin cascada//
+    //resultado: denegado | no_existe//
+    //RNF-19 punto 3 · PNF-19//
+  }
+
+  entity "CONSUMO_IA" as cia {
+    **id_consumo** : uuid <<PK>>
+    --
+    id_usuario : uuid <<FK>>
+    anio : smallint
+    mes : smallint
+    llamadas : integer
+    --
+    //UQ (id_usuario, anio, mes)//
+    //Solo llamadas REALES a la API//
+    //RNF-20 · PNF-20//
+  }
+
+  entity "DISPOSITIVO" as dis {
+    **id_dispositivo** : uuid <<PK>>
+    --
+    id_usuario : uuid <<FK>>
+    token_push : varchar(255) <<UQ>>
+    plataforma : varchar(15)
+    fecha_registro : timestamptz
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "Catálogo global" as P_CAT {
+
+  entity "CATEGORIA" as cat {
+    **id_categoria** : uuid <<PK>>
+    --
+    nombre : varchar(60) <<UQ>>
+    descripcion : text
+    --
+    //Catálogo fijo de RF-06.//
+    //Sin campo de titular//
+  }
+
+  entity "PROVEEDOR" as prov {
+    **id_proveedor** : uuid <<PK>>
+    --
+    id_categoria : uuid <<FK>>
+    nombre : varchar(120) <<UQ>>
+    alias_glosa : text
+    creado_en : timestamptz
+    --
+    //Permite reconocer «el mismo//
+    //comercio» (RN-11) y anclar//
+    //la guía de cancelación//
+  }
+
+  entity "GUIA_CANCELACION" as gui {
+    **id_guia** : uuid <<PK>>
+    --
+    id_proveedor : uuid <<FK,NULL>>
+    es_generica : boolean
+    actualizada_en : timestamptz
+    --
+    //id_proveedor nulo = la guía//
+    //genérica de respaldo (RF-16)//
+  }
+
+  entity "PASO_CANCELACION" as paso {
+    **id_paso** : uuid <<PK>>
+    --
+    id_guia : uuid <<FK>>
+    orden : smallint
+    texto : text
+    url : text
+    --
+    //RF-16 exige pasos ORDENADOS,//
+    //no una sola dirección web//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "Suscripciones" as P_SUB {
+
+  entity "SUSCRIPCION" as sub {
+    **id_suscripcion** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    id_proveedor : uuid <<FK,NULL>>
+    id_categoria : uuid <<FK>>
+    nombre_servicio : varchar(120)
+    monto : decimal(12,2)
+    moneda : char(3)
+    ciclo_facturacion : varchar(10)
+    fecha_inicio : date
+    fecha_proximo_cobro : date
+    estado : varchar(15)
+    es_prueba_gratuita : boolean
+    fecha_fin_prueba : date
+    origen_deteccion : varchar(15)
+    es_recurrente_variable : boolean
+    fecha_ultimo_uso : date
+    notas : text
+    fecha_cancelacion : date
+    ahorro_estimado : decimal(12,2)
+    fecha_eliminacion : timestamptz
+    creado_en : timestamptz
+    --
+    //fecha_cancelacion y ahorro son//
+    //del cementerio (RF-14): derivar//
+    //ambos del historial es frágil//
+    //cuando hay ciclos de baja y//
+    //reactivación (RN-21)//
+    //id_categoria SE MANTIENE aunque//
+    //exista PROVEEDOR: RF-06 exige//
+    //que el usuario pueda cambiarla//
+    //fecha_fin_prueba obligatoria si//
+    //es_prueba_gratuita (RF-02)//
+    //fecha_eliminacion = borrado//
+    //lógico, distinto de estado//
+    //DERIVADOS: fecha_proximo_cobro,//
+    //es_recurrente_variable,//
+    //fecha_ultimo_uso//
+  }
+
+  entity "USO" as uso {
+    **id_uso** : uuid <<PK>>
+    --
+    **id_usuario** : uuid
+    id_suscripcion : uuid <<FK>>
+    id_conector : uuid <<NULL>>
+    fecha : date
+    cantidad : decimal(10,2)
+    unidad : varchar(10)
+    origen : varchar(10)
+    creado_en : timestamptz
+    --
+    //★ Sin esta entidad no existe el//
+    //costo por hora de uso (RF-04)//
+    //unidad: minutos | veces | si_no//
+    //id_conector permite el borrado//
+    //selectivo al desconectar//
+  }
+
+  entity "MOVIMIENTO" as mov {
+    **id_movimiento** : uuid <<PK>>
+    --
+    **id_usuario** : uuid
+    id_suscripcion : uuid <<FK,NULL>>
+    id_conector : uuid <<NULL>>
+    monto : decimal(12,2)
+    moneda : char(3)
+    fecha_movimiento : date
+    glosa_original : text
+    glosa_normalizada : text
+    origen : varchar(15)
+    estado : varchar(12)
+    hash_deteccion : varchar(64)
+    creado_en : timestamptz
+    --
+    //id_suscripcion ADMITE NULO: el//
+    //candidato aún no confirmado//
+    //id_conector ADMITE NULO: la//
+    //carga manual y CSV/PDF (ADR-005)//
+    //estado: candidato | confirmado//
+    //        | descartado//
+    //hash_deteccion evita regenerar//
+    //el candidato ya rechazado//
+  }
+
+  entity "HISTORIAL_ESTADO" as his {
+    **id_historial** : uuid <<PK>>
+    --
+    **id_usuario** : uuid
+    id_suscripcion : uuid <<FK,NULL>>
+    estado_anterior : varchar(15)
+    estado_nuevo : varchar(15)
+    motivo : varchar(30)
+    fecha_cambio : timestamptz
+    seudonimo : uuid
+    fecha_eliminacion_cuenta : date
+    --
+    //id_suscripcion ADMITE NULO: la//
+    //anonimización lo pone en nulo//
+    //motivo TIPADO, no texto libre//
+    //seudonimo y fecha_eliminacion//
+    //se llenan al borrar la cuenta//
+    //RF-01.7, RNF-13//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "Fuentes externas" as P_CONN {
+
+  entity "CONECTOR" as con {
+    **id_conector** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    tipo : varchar(20)
+    proveedor : varchar(40)
+    estado : varchar(20)
+    token_cifrado : bytea
+    refresco_cifrado : bytea
+    expira_en : timestamptz
+    ultima_sincronizacion : timestamptz
+    ultimo_error : text
+    fecha_conexion : timestamptz
+    --
+    //tipo: DOMINIO CERRADO por//
+    //ADR-005 (correo | archivo)//
+    //Credenciales desglosadas, no//
+    //en un único campo de texto//
+  }
+
+  entity "INGESTA_DOCUMENTO" as ing {
+    **id_ingesta** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    hash_archivo : varchar(64)
+    fecha : date
+    intentos : smallint
+    --
+    //UQ (id_usuario, hash_archivo,//
+    //     fecha) · tope 3 (RN-25)//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "Alertas y notificaciones" as P_ALE {
+
+  entity "CONFIGURACION_ALERTA" as cfg {
+    **id_configuracion** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    tipo : varchar(25)
+    activa : boolean
+    canal : varchar(15)
+    --
+    //UQ (id_usuario, tipo)//
+    //tipo: proximo_cobro | fin_prueba//
+    //      | anomalia | presupuesto//
+    //RF-09//
+  }
+
+  entity "ANTICIPACION_ALERTA" as ant {
+    **id_anticipacion** : uuid <<PK>>
+    --
+    id_configuracion : uuid <<FK>>
+    horas_antes : integer
+    --
+    //Una fila por recordatorio.//
+    //Resuelve el doble aviso anual//
+    //de RN-02 (168 h y 24 h) y la//
+    //regla 48/24 de RN-04, que una//
+    //sola columna no puede expresar//
+  }
+
+  entity "ANOMALIA" as ano {
+    **id_anomalia** : uuid <<PK>>
+    --
+    **id_usuario** : uuid
+    id_suscripcion : uuid <<FK>>
+    id_movimiento : uuid
+    tipo : varchar(20)
+    detectada_en : timestamptz
+    revisada_en : timestamptz
+    --
+    //tipo: alza_tarifa | doble_cobro//
+    //Separada de la notificación://
+    //la anomalía existe aunque la//
+    //alerta esté desactivada (RF-07)//
+  }
+
+  entity "NOTIFICACION" as not {
+    **id_notificacion** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    id_suscripcion : uuid <<FK,NULL>>
+    id_anomalia : uuid <<FK,NULL>>
+    tipo : varchar(25)
+    canal : varchar(15)
+    estado : varchar(15)
+    fecha_programada : timestamptz
+    fecha_envio : timestamptz
+    leida_en : timestamptz
+    --
+    //Cuelga de USUARIO: sin esto no//
+    //se sabe a qué teléfono enviar//
+    //id_suscripcion ADMITE NULO: la//
+    //alerta de presupuesto (RF-13)//
+    //no es de ninguna suscripción//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+package "Asistente, plan y presupuesto" as P_IA {
+
+  entity "PRESUPUESTO" as pre {
+    **id_presupuesto** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    anio : smallint
+    mes : smallint
+    monto_tope : decimal(12,2)
+    moneda : char(3)
+    --
+    //UQ (id_usuario, anio, mes)//
+    //La moneda es obligatoria: sin//
+    //ella la comparación con un//
+    //gasto multi-moneda (RF-11) es//
+    //matemáticamente indefinida//
+  }
+
+  entity "PLAN_CONTRATADO" as pln {
+    **id_plan** : uuid <<PK>>
+    --
+    seudonimo_titular : uuid
+    id_usuario : uuid <<NULL>>
+    plan : varchar(20)
+    inicio_periodo : date
+    fin_periodo : date
+    estado_pago : varchar(15)
+    referencia_pasarela : varchar(120)
+    monto : decimal(12,2)
+    moneda : char(3)
+    fecha_eliminacion_cuenta : date
+    purga_en : date
+    --
+    //id_usuario se pone en NULO al//
+    //eliminar la cuenta: sin FK dura,//
+    //igual que CONSENTIMIENTO//
+    //NUNCA datos de tarjeta: solo//
+    //la referencia de la pasarela//
+    //Los comprobantes sobreviven//
+    //disociados 6 años (RF-01.7)//
+    //RF-17//
+  }
+
+  entity "RECOMENDACION" as rec {
+    **id_recomendacion** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    tipo : varchar(25)
+    descripcion : text
+    ahorro_estimado : decimal(12,2)
+    moneda : char(3)
+    fecha_generada : timestamptz
+    estado : varchar(15)
+  }
+
+  entity "RECOMENDACION_SUSCRIPCION" as rs {
+    **id_recomendacion** : uuid <<PK,FK>>
+    **id_suscripcion** : uuid <<PK,FK>>
+    --
+    **id_usuario** : uuid
+    --
+    //PK COMPUESTA: sin ella admite//
+    //filas duplicadas//
+  }
+
+  entity "CONVERSACION" as conv {
+    **id_conversacion** : uuid <<PK>>
+    --
+    **id_usuario** : uuid <<FK>>
+    fecha_inicio : timestamptz
+  }
+
+  entity "MENSAJE" as msj {
+    **id_mensaje** : uuid <<PK>>
+    --
+    id_conversacion : uuid <<FK>>
+    emisor : varchar(15)
+    contenido : text
+    es_degradada : boolean
+    fecha_envio : timestamptz
+    --
+    //emisor, NO «rol»: colisionaba//
+    //con el rol de USUARIO//
+    //es_degradada marca la respuesta//
+    //predeterminada de RN-24, que no//
+    //consumió la API//
+  }
+}
+
+' ══════════════════════════════════════════════════════════════
+' RELACIONES
+' ══════════════════════════════════════════════════════════════
+usr ||--o{ idext : "se autentica con"
+usr ||--o{ tok   : "solicita"
+usr ||--o{ cia   : "consume"
+usr ||--o{ dis   : "registra"
+usr ||--o{ sub   : "posee"
+usr ||--o{ con   : "conecta"
+usr ||--o{ ing   : "sube"
+usr ||--o{ cfg   : "configura"
+usr ||--o{ not   : "recibe"
+usr ||--o{ pre   : "define"
+usr ||--o{ rec   : "recibe"
+usr ||--o{ conv  : "inicia"
+
+cat  ||--o{ prov : "clasifica"
+cat  ||--o{ sub  : "clasifica"
+prov |o--o{ sub  : "provee"
+prov |o--o| gui  : "tiene"
+gui  ||--o{ paso : "contiene"
+
+sub  ||--o{ uso  : "registra"
+sub  |o--o{ mov  : "genera"
+sub  |o--o{ his  : "audita"
+sub  ||--o{ ano  : "presenta"
+sub  ||--o{ rs   : "es incluida en"
+
+con  |o--o{ mov  : "detecta"
+con  |o--o{ uso  : "sincroniza"
+
+cfg  ||--o{ ant  : "programa"
+ano  |o--o{ not  : "origina"
+sub  |o--o{ not  : "motiva"
+
+rec  ||--o{ rs   : "incluye"
+conv ||--o{ msj  : "contiene"
+
+' Sin clave foránea: sobreviven a la eliminación de la cuenta
+usr .. cons : "seudónimo, sin FK"
+usr .. iac  : "referencia débil"
+usr .. pln  : "seudónimo, sin FK"
+
+legend bottom
+  |= Notación |= Significado |
+  | Línea continua | Clave foránea real |
+  | Línea punteada | Referencia sin clave foránea: la fila sobrevive a la eliminación de la cuenta |
+  | **id_usuario** en negrita | Campo de titular. Toda consulta filtra por él (RF-20, RNF-19). Cruza servicio: referencia lógica, sin clave foránea del motor (ADR-002) |
+  | <<NULL>> | El campo admite nulo. En la relación, el lado padre se dibuja |o |
+  |= Supuesto C-03 | Modelo de producto **individual**. Si se resuelve como hogar, se reemplaza el campo de titular según la sección 6 de mer-corregido.md |
+endlegend
+
+@enduml

@@ -1,0 +1,147 @@
+' ═══════════════════════════════════════════════════════════════
+' DIAGRAMA DE CASOS DE USO
+' Plataforma de control de suscripciones
+'
+' CÓMO RENDERIZARLO
+'   Opción 1 — online: pegar este archivo en https://www.plantuml.com/plantuml
+'   Opción 2 — VS Code: extensión "PlantUML" (Alt+D para previsualizar)
+'   Opción 3 — draw.io: Arrange → Insert → Advanced → PlantUML
+'
+'   Exportar a PNG o SVG para el informe. Guardar SIEMPRE este .puml
+'   junto a la imagen: un PNG no se puede corregir.
+' ═══════════════════════════════════════════════════════════════
+
+@startuml casos-de-uso
+
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+skinparam usecase {
+  BackgroundColor #FEFEFE
+  BorderColor #444444
+}
+skinparam package {
+  BackgroundColor #F7F9FC
+  BorderColor #99AABB
+}
+
+title Casos de uso — Plataforma de control de suscripciones
+
+' ─── ACTORES ───────────────────────────────────────────────────
+actor "Usuario" as USR
+actor "Administrador\nde organización" as ADM
+actor "Tiempo" as TIME <<sistema>>
+actor "API de Spotify" as SPOT <<sistema externo>>
+actor "API de Gmail" as GMAIL <<sistema externo>>
+actor "API de Claude" as IA <<sistema externo>>
+actor "Servicio de correo" as MAIL <<sistema externo>>
+
+ADM --|> USR
+
+rectangle "Plataforma de control de suscripciones" {
+
+  ' ─── GESTIÓN DE CUENTA ───────────────────────────────────────
+  package "Gestión de cuenta" {
+    usecase "CU-01\nRegistrarse" as CU01
+    usecase "CU-02\nIniciar sesión" as CU02
+    usecase "CU-03\nGestionar perfil" as CU03
+    usecase "CU-04\nInvitar miembro" as CU04
+    usecase "CU-05\nAsignar roles" as CU05
+  }
+
+  ' ─── SUSCRIPCIONES ───────────────────────────────────────────
+  package "Gestión de suscripciones" {
+    usecase "CU-06\nRegistrar suscripción" as CU06
+    usecase "CU-07\nImportar desde CSV" as CU07
+    usecase "CU-08\nEditar suscripción" as CU08
+    usecase "CU-09\nMarcar como cancelada" as CU09
+    usecase "CU-10\nCompartir suscripción" as CU10
+    usecase "CU-11\nRegistrar uso manual" as CU11
+  }
+
+  ' ─── CONECTORES ──────────────────────────────────────────────
+  package "Conectores externos" {
+    usecase "CU-12\nConectar cuenta\nde Spotify" as CU12
+    usecase "CU-13\nConectar cuenta\nde correo" as CU13
+    usecase "CU-14\nSincronizar\ndatos de uso" as CU14
+    usecase "CU-15\nDetectar cobros\nen el correo" as CU15
+    usecase "CU-16\nDesconectar cuenta" as CU16
+  }
+
+  ' ─── ANÁLISIS ────────────────────────────────────────────────
+  package "Análisis y recomendación" {
+    usecase "CU-17\nVisualizar panel\nde gastos" as CU17
+    usecase "CU-18\nConsultar costo\npor hora de uso" as CU18
+    usecase "CU-19\nGenerar recomendaciones\nde cancelación" as CU19
+    usecase "CU-20\nExplicar una\nrecomendación" as CU20
+    usecase "CU-21\nDetectar servicios\nsolapados" as CU21
+  }
+
+  ' ─── ALERTAS ─────────────────────────────────────────────────
+  package "Alertas" {
+    usecase "CU-22\nConfigurar alertas" as CU22
+    usecase "CU-23\nNotificar\npróximo cobro" as CU23
+    usecase "CU-24\nNotificar fin de\nprueba gratis" as CU24
+    usecase "CU-25\nNotificar alza\nde precio" as CU25
+  }
+}
+
+' ─── RELACIONES: USUARIO ───────────────────────────────────────
+USR --> CU01
+USR --> CU02
+USR --> CU03
+USR --> CU06
+USR --> CU07
+USR --> CU08
+USR --> CU09
+USR --> CU10
+USR --> CU11
+USR --> CU12
+USR --> CU13
+USR --> CU16
+USR --> CU17
+USR --> CU18
+USR --> CU19
+USR --> CU20
+USR --> CU21
+USR --> CU22
+
+' ─── RELACIONES: ADMINISTRADOR ─────────────────────────────────
+ADM --> CU04
+ADM --> CU05
+
+' ─── RELACIONES: TIEMPO (tareas programadas) ───────────────────
+TIME --> CU14
+TIME --> CU15
+TIME --> CU19
+TIME --> CU23
+TIME --> CU24
+TIME --> CU25
+
+' ─── RELACIONES: SISTEMAS EXTERNOS ─────────────────────────────
+CU12 --> SPOT
+CU14 --> SPOT
+CU13 --> GMAIL
+CU15 --> GMAIL
+CU20 --> IA
+CU23 --> MAIL
+CU24 --> MAIL
+CU25 --> MAIL
+
+' ─── INCLUDE / EXTEND ──────────────────────────────────────────
+' Usados con moderación a propósito: el diagrama de casos de uso
+' muestra objetivos de los actores, no descompone funciones.
+CU12 ..> CU14 : <<include>>
+CU13 ..> CU15 : <<include>>
+CU19 ..> CU20 : <<include>>
+CU06 ..> CU10 : <<extend>>
+
+legend right
+  |= Actor |= Descripción |
+  | Usuario | Persona que administra sus suscripciones |
+  | Administrador | Usuario con permisos sobre la organización |
+  | Tiempo | Dispara las tareas programadas (Celery Beat) |
+endlegend
+
+@enduml

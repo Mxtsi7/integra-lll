@@ -1,0 +1,46 @@
+@startuml cu-1-cuenta
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName Verdana
+skinparam defaultFontSize 12
+skinparam ArrowColor #6B7684
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #EDF3FB
+  BorderColor #4C77AC
+  FontColor #16283F
+}
+skinparam rectangle {
+  BackgroundColor #FAFBFD
+  BorderColor #CBD4E0
+  FontColor #56626F
+  FontStyle bold
+}
+skinparam actor {
+  BackgroundColor #FFFFFF
+  BorderColor #2F3B4A
+  FontColor #1B2432
+}
+left to right direction
+
+title Casos de uso - Cuenta y seguridad
+
+actor "Usuario\nnuevo" as nuevo
+actor "Usuario\nregistrado" as registrado
+actor "Usuario\nautenticado" as auth
+
+rectangle "Cuenta y sesion" {
+  usecase "CU-01\nRegistrar cuenta\nRF-01" as CU01
+  usecase "CU-02\nIniciar sesion\nRF-02" as CU02
+  usecase "CU-03\nGestionar credenciales\nRF-03, RF-04" as CU03
+  usecase "CU-04\nEliminar cuenta y datos\nRF-05" as CU04
+}
+
+registrado <|-- auth
+nuevo --> CU01
+registrado --> CU02
+registrado --> CU03
+auth --> CU04
+
+@enduml

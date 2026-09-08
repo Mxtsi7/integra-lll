@@ -34,7 +34,7 @@ sino en **evitar el cobro que no se quería y detectar lo que no se usa**.
 
 ```
                         ┌──────────────┐
-                        │   Frontend   │  React SPA
+                        │   Clientes   │  React Native (móvil) + React (web)
                         └──────┬───────┘
                                │ HTTPS
                         ┌──────▼───────┐
@@ -72,6 +72,24 @@ sino en **evitar el cobro que no se quería y detectar lo que no se usa**.
 | **analytics** | Registro de uso, cálculo de puntajes, recomendaciones, integración con IA | 8004 |
 | **notifications** | Alertas, plantillas y envío de correo | 8005 |
 
+### Los clientes
+
+| Cliente | Stack | Alcance |
+|---|---|---|
+| **Móvil** | React Native + Expo · Android (APK) | Panel, **notificaciones push**, registro rápido, marcar uso |
+| **Web** | React + Vite | Conexión de cuentas por OAuth, importación CSV, gestión del hogar, informes |
+| **shared** | TypeScript | Cliente de API generado desde OpenAPI, tipos, validaciones y formateo. Lo importan ambos clientes |
+
+Las funcionalidades se reparten **por contexto de uso**: no se construye la misma
+aplicación dos veces. El push vive solo en móvil porque es lo que una app nativa
+aporta; el OAuth vive solo en web porque en móvil exige *deep linking*. Ver
+ADR-006.
+
+Ambos clientes son TypeScript, así que **comparten código real** —cliente de API,
+tipos, validaciones— en `frontend/shared/`, no solo un contrato.
+
+⚠️ **Solo Android.** iOS queda fuera: exige cuenta de Apple Developer de pago.
+
 ### Por qué esta división
 
 Cada servicio corresponde a un **contexto delimitado** del dominio, no a una capa
@@ -105,7 +123,10 @@ proyecto-suscripciones/
 │  ├─ contracts/           OpenAPI de cada servicio
 │  ├─ events/              catálogo y esquemas de eventos
 │  └─ tenant/              base multi-tenant compartida
-├─ frontend/               React + Vite
+├─ frontend/
+│  ├─ shared/             cliente de API, tipos y validaciones
+│  ├─ web/                React + Vite
+│  └─ movil/              React Native + Expo
 ├─ infra/                  docker · migraciones · observabilidad
 └─ docs/                   arquitectura · diagramas · investigación · informe
 ```
@@ -145,7 +166,8 @@ services/subscriptions/
 | Integraciones | `services/connectors/` | Los tres conectores |
 | Motor + IA | `services/analytics/` | Puntajes y recomendaciones |
 | Backend dominio | `services/subscriptions/` + `services/auth/` | El núcleo |
-| Frontend | `frontend/` | Todas las pantallas |
+| Frontend web | `frontend/web/` | React. Configuración, CSV, vistas de detalle |
+| Frontend móvil | `frontend/movil/` | Expo. Panel, alertas push, registro rápido |
 | QA y documentación | `docs/` + `services/notifications/` | Pruebas de integración |
 
 `shared/` se toca de a poco y con aviso: un cambio ahí afecta a los seis.
@@ -161,7 +183,8 @@ docker compose up --build
 
 | Qué | Dónde |
 |---|---|
-| Frontend | http://localhost:5173 |
+| Cliente web | http://localhost:5173 |
+| Cliente móvil | `npx expo start` en `frontend/movil/`, escanear el QR con Expo Go |
 | Gateway | http://localhost:8000 |
 | Documentación de la API | http://localhost:8000/api/docs/ |
 | Panel de RabbitMQ | http://localhost:15672 |
