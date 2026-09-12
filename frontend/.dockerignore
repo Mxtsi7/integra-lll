@@ -1,0 +1,7 @@
+# Lo que nunca debe entrar a la imagen: se instala adentro con npm ci.
+# Un node_modules copiado desde Windows trae enlaces con rutas C:/ que
+# no resuelven en Linux.
+node_modules
+**/node_modules
+**/dist
+**/.vite
