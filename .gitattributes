@@ -1,0 +1,7 @@
+# Los scripts se ejecutan dentro de contenedores Linux: siempre LF,
+# aunque el repositorio se clone en Windows con autocrlf activado.
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+*.sql         text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
