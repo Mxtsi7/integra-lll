@@ -131,9 +131,10 @@ proyecto-suscripciones/
 └─ docs/                   arquitectura · diagramas · investigación · informe
 ```
 
-> La carpeta `docs/` no está publicada en este repositorio: la planilla de la
-> encuesta contiene correos de personas que se ofrecieron a probar la
-> aplicación, y este repositorio es público. Se comparte aparte entre el equipo.
+> La planilla de la encuesta en `docs/investigacion/` está **anonimizada**: se
+> retiraron los correos de quienes se ofrecieron a probar la aplicación, porque
+> este repositorio es público. El original con los correos se guarda fuera del
+> repositorio y no debe subirse nunca (`.gitignore` bloquea `*con correos*`).
 
 ### Anatomía de un servicio
 
@@ -174,31 +175,101 @@ services/subscriptions/
 
 ---
 
+## Preparar tu máquina
+
+Solo hacen falta dos cosas:
+
+- **Docker Desktop**, abierto. Todo corre adentro de contenedores; no hay que
+  instalar Python, Postgres ni ninguna dependencia en tu computador.
+- **Git**.
+
+Python solo se necesita si vas a trabajar en un servicio *fuera* de Docker, y
+entonces tiene que ser **3.12** (ver más abajo).
+
 ## Levantar el sistema
 
 ```bash
-cp .env.example .env      # completar los valores
-docker compose up --build
+git clone https://github.com/Mxtsi7/integra-lll.git
+cd integra-lll
+cp .env.example .env                        # con los valores de ejemplo alcanza
+docker compose up -d postgres auth subscriptions
 ```
 
-| Qué | Dónde |
-|---|---|
-| Cliente web | http://localhost:5173 |
-| Cliente móvil | `npx expo start` en `frontend/movil/`, escanear el QR con Expo Go |
-| Gateway | http://localhost:8000 |
-| Documentación de la API | http://localhost:8000/api/docs/ |
-| Panel de RabbitMQ | http://localhost:15672 |
+La primera vez descarga las imágenes y tarda unos minutos. Después, segundos.
 
-Un solo comando levanta los 6 servicios, PostgreSQL, RabbitMQ y el frontend.
-**Esto es innegociable**: si levantar el sistema toma más de un comando, con 6
-personas el proyecto se vuelve inmanejable.
+Para comprobar que quedó bien, abre en el navegador:
+
+| Qué | Dónde | Tiene que responder |
+|---|---|---|
+| Servicio `auth` | http://localhost:8001/health/ | `{"servicio": "auth", "esquema": "auth", "estado": "ok"}` |
+| Servicio `subscriptions` | http://localhost:8002/health/ | lo mismo, con `subscriptions` |
+| Panel de RabbitMQ | http://localhost:15672 | usuario y clave `guest` |
+
+Si `/health/` responde, el servicio leyó el `.env`, se conectó a PostgreSQL y
+está parado en su propio esquema. Es la prueba completa.
+
+> **Estado actual.** Hoy solo `auth` y `subscriptions` tienen proyecto Django y
+> arrancan. `connectors`, `analytics`, `notifications`, el gateway y el frontend
+> todavía son cascarones: `docker compose up --build` sin más los intenta
+> levantar y fallan. A medida que cada uno reciba su `manage.py`, se agrega al
+> comando de arriba hasta llegar al objetivo:
+>
+> ```bash
+> docker compose up --build       # todo el sistema, un solo comando
+> ```
+>
+> **Eso es innegociable**: si levantar el sistema toma más de un comando, con 6
+> personas el proyecto se vuelve inmanejable.
+
+Comandos del día a día:
+
+```bash
+docker compose ps                 # qué está corriendo y si está sano
+docker compose logs -f auth       # ver el log de un servicio (Ctrl+C para salir)
+docker compose down               # apagar todo; los datos quedan
+docker compose down -v            # apagar y borrar la base (empezar de cero)
+```
 
 ### Trabajar en un solo servicio
 
+Los servicios se levantan con tu código montado adentro: editas un archivo en
+`services/auth/` y el contenedor lo recarga solo. **No hace falta instalar
+nada en tu máquina para desarrollar.**
+
+Lo que sí conviene es un entorno virtual local para que el editor autocomplete
+y marque errores. Tiene que ser **Python 3.12**, la misma versión del
+contenedor: con otra, las dependencias fijadas en `requirements.txt` no tienen
+paquete compilado y `pip` falla.
+
 ```bash
-docker compose up postgres rabbitmq auth      # las dependencias
-cd services/subscriptions && python manage.py runserver 8002
+# Windows
+winget install Python.Python.3.12
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+
+# macOS / Linux
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+# ambos
+pip install -r services/auth/requirements.txt
 ```
+
+`.venv/` ya está en `.gitignore`. Cada servicio tiene su propio
+`requirements.txt`; instala el del servicio en el que trabajas.
+
+Para correr un servicio fuera de Docker (por ejemplo, para usar el depurador
+del editor), levanta solo sus dependencias y arráncalo a mano:
+
+```bash
+docker compose up -d postgres rabbitmq
+cd services/subscriptions
+python manage.py runserver 8002
+```
+
+En ese caso el servicio lee el `.env` de la raíz, pero `DATABASE_URL` apunta al
+host `postgres`, que solo existe dentro de la red de Docker. Cámbialo en tu
+`.env` local a `localhost` mientras trabajes así, y no lo subas.
 
 ---
 
