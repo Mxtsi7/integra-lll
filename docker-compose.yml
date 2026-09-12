@@ -127,14 +127,21 @@ services:
   # ─── Frontend ───────────────────────────────────────────────────
 
   frontend:
-    build: ./frontend
+    # El contexto es frontend/ entero porque web/ importa shared/.
+    # No depende del gateway al arrancar: la web lo llama desde el navegador,
+    # no desde el contenedor.
+    build:
+      context: ./frontend
+      dockerfile: web/Dockerfile
     ports: ["5173:5173"]
     environment:
       VITE_API_URL: http://localhost:8000/api
-    depends_on: [gateway]
     volumes:
       - ./frontend:/app
+      # Los node_modules quedan dentro del contenedor, no se pisan con los del host
       - /app/node_modules
+      - /app/shared/node_modules
+      - /app/web/node_modules
 
 volumes:
   datos_postgres:
