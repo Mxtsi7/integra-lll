@@ -157,6 +157,37 @@ services/subscriptions/
 └─ tests/
 ```
 
+### Modelo `Subscription` (implementado)
+
+El modelo ya está migrado y operativo en el esquema `subscriptions` de
+PostgreSQL. Define una suscripción recurrente asociada a un usuario del
+sistema.
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `nombre` | `CharField(100)` | Obligatorio |
+| `monto` | `DecimalField(10,2)` | Obligatorio · `CHECK monto > 0` · Validador `MinValueValidator(0.01)` |
+| `moneda` | `CharField(3)` | Choices: `CLP` · Default: `CLP` |
+| `ciclo` | `CharField(20)` | Choices: `MENSUAL`, `ANUAL` |
+| `fecha_cobro` | `DateField` | Obligatorio |
+| `estado` | `CharField(20)` | Choices: `ACTIVO`, `INACTIVO` |
+| `user` | `ForeignKey` → `auth_user` | `ON DELETE CASCADE` · `related_name="subscriptions"` |
+
+**Tabla física:** `subscription` (esquema `subscriptions`).
+
+**Constraint a nivel de BD:**
+
+```sql
+CHECK (monto > 0)   -- subscription_monto_positivo
+```
+
+**Ordenamiento por defecto:** `-fecha_cobro` (más reciente primero).
+
+> El campo `user` apunta a `settings.AUTH_USER_MODEL`. En el esquema
+> `subscriptions` la tabla `auth_user` existe porque Django la crea con
+> `migrate`; el servicio `auth` gestiona los datos reales de usuario en
+> su propio esquema.
+
 ---
 
 ## Quién es dueño de qué
@@ -229,6 +260,26 @@ docker compose logs -f auth       # ver el log de un servicio (Ctrl+C para salir
 docker compose down               # apagar todo; los datos quedan
 docker compose down -v            # apagar y borrar la base (empezar de cero)
 ```
+
+### Desarrollo con Docker Compose
+
+> **Regla general:** ejecuta `manage.py` y las herramientas de cada servicio
+> **dentro del contenedor** con `docker compose run --rm`. Así usas la misma
+> versión de Python, las mismas dependencias y la misma red que en producción,
+> sin instalar nada en tu máquina.
+
+| Tarea | Comando |
+|---|---|
+| **Crear migraciones** | `docker compose run --rm subscriptions python manage.py makemigrations app` |
+| **Aplicar migraciones** | `docker compose run --rm subscriptions python manage.py migrate` |
+| **Correr pruebas** | `docker compose run --rm subscriptions pytest` |
+| **Consola Django** | `docker compose run --rm subscriptions python manage.py shell` |
+| **Conectarse a PostgreSQL** | `docker compose exec postgres psql -U postgres -d suscripciones` |
+| **Inspeccionar esquema** | `docker compose exec postgres psql -U postgres -d suscripciones -c '\dt subscriptions.*'` |
+
+> Cambia `subscriptions` por el nombre del servicio que necesites
+> (`auth`, `connectors`, etc.). El `--rm` elimina el contenedor temporal
+> cuando termina.
 
 ### Trabajar en un solo servicio
 
