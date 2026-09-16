@@ -4,6 +4,9 @@ from django.http import JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from django.http import HttpResponse
+from django.contrib import admin
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+
 
 
 def salud(request):
@@ -24,4 +27,5 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("", lambda request: HttpResponse("Servicio auth corriendo en el puerto 8001 ✅")),
+    path("admin/", admin.site.urls),
 ]

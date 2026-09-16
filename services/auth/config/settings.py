@@ -36,17 +36,25 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[]) + [NOMBRE_SERVICIO]
 
 # ── aplicaciones ────────────────────────────────────────────────────
 INSTALLED_APPS = [
+    "django.contrib.admin",
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
     "app",
-    "core"
 ]
-
+AUTH_USER_MODEL = "app.User"
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
     # el gateway (ADR-004). Es la misma pieza en los cinco servicios.
     "shared.tenant.base.ContextoTenantMiddleware",
@@ -83,3 +91,22 @@ LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
 USE_TZ = True
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+#URL
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
