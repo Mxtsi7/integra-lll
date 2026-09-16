@@ -71,7 +71,15 @@ WSGI_APPLICATION = "config.wsgi.application"
 ESQUEMA_BD = env("ESQUEMA_BD", default=NOMBRE_SERVICIO)
 
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+
+if env.bool("TESTING", default=False):
+    DATABASES["default"]["OPTIONS"] = {
+        "options": "-c search_path=public"
+    }
+else:
+    DATABASES["default"]["OPTIONS"] = {
+        "options": f"-c search_path={ESQUEMA_BD},public"
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
