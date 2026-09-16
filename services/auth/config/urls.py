@@ -1,11 +1,22 @@
 from django.contrib import admin
+from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 
 def salud(request):
-    return JsonResponse({"servicio": "auth", "estado": "ok"})
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT current_schema()")
+        esquema = cursor.fetchone()[0]
+
+    return JsonResponse(
+        {
+            "servicio": "auth",
+            "estado": "ok",
+            "esquema": esquema,
+        }
+    )
 
 
 def inicio(request):
