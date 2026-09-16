@@ -36,7 +36,7 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[]) + [NOMBRE_SERVICIO]
 
 # ── aplicaciones ────────────────────────────────────────────────────
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    "django.contrib.admin", #datos de prueba
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "django.contrib.sessions",
@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "app",
 ]
+
 AUTH_USER_MODEL = "app.User"
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
