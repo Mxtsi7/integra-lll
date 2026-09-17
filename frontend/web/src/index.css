@@ -1,0 +1,12 @@
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow: hidden; /* evita el scroll del documento; el scroll queda solo dentro de Homepage */
+}
