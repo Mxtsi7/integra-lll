@@ -1,5 +1,5 @@
 import React from "react";
- 
+
 const styles: { [key: string]: React.CSSProperties } = {
   footer: {
     backgroundColor: "#1e2a4a",
@@ -10,6 +10,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     flexDirection: "column",
     justifyContent: "space-between",
     minHeight: "150px",
+    width: "100%",
+    boxSizing: "border-box",
+    flexShrink: 0,
   },
   topRow: {
     display: "flex",
@@ -59,16 +62,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     marginTop: "24px",
   },
 };
- 
+
 const NAV_LINKS: string[] = ["Panel", "Calendario", "Cuentas", "Informes", "Configuración"];
- 
+
 interface FooterProps {
   brandName?: string;
   year?: number;
   companyName?: string;
   links?: string[];
 }
- 
+
 export default function Footer({
   brandName = "Ojo al Gasto",
   year = new Date().getFullYear(),
@@ -83,7 +86,7 @@ export default function Footer({
           <div style={styles.iconPlaceholder}>ico</div>
           <span style={styles.brandText}>{brandName}</span>
         </div>
- 
+
         <nav style={styles.nav}>
           {links.map((link) => (
             <a key={link} href="#" style={styles.navLink}>
@@ -92,7 +95,7 @@ export default function Footer({
           ))}
         </nav>
       </div>
- 
+
       <div style={styles.copyright}>
         © {year} {companyName}
       </div>
