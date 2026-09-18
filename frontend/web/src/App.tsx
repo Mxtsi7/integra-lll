@@ -1,57 +1,27 @@
-/**
- * Pantalla de arranque. Existe para demostrar que la web importa desde
- * @ojoalgasto/shared y que el workspace funciona; el Home real la reemplaza
- * (ver docs/mockup/capturas/web-panel.png).
- */
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 
-import {
-  costoPorHora,
-  formatearFecha,
-  formatearMonto,
-  gastoProyectado,
-  getSuscripciones,
-  type Suscripcion,
-} from '@ojoalgasto/shared';
-import { useEffect, useState } from 'react';
+// Placeholder hasta que exista la página real del panel. Sin esto,
+// navigate("/panel") en Login.tsx cae en el catch-all de abajo y
+// rebota de vuelta a /login, que confunde al probar el login real.
+function PanelStub() {
+  return <p style={{ padding: 24 }}>Panel — pendiente de implementar.</p>;
+}
 
-export function App() {
-  const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
-
-  useEffect(() => {
-    getSuscripciones().then(setSuscripciones);
-  }, []);
-
+// TODO: agregar el resto de las rutas reales a medida que existan, y una
+// verificación de sesión (token en localStorage / AuthContext) que
+// proteja /panel en vez de dejarlo público como está ahora.
+export default function App() {
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '1.5rem', maxWidth: 720 }}>
-      <h1>Ojo al Gasto</h1>
-      <p>
-        Gasto mensual proyectado: <strong>{formatearMonto(gastoProyectado(suscripciones))}</strong>
-      </p>
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-        <thead>
-          <tr>
-            <th align="left">Suscripción</th>
-            <th align="right">Monto</th>
-            <th align="left">Próximo cobro</th>
-            <th align="left">Estado</th>
-            <th align="right">Costo por hora</th>
-          </tr>
-        </thead>
-        <tbody>
-          {suscripciones.map((s) => {
-            const porHora = costoPorHora(s.monto, s.horas_uso_mes ?? 0);
-            return (
-              <tr key={s.id}>
-                <td>{s.nombre}</td>
-                <td align="right">{formatearMonto(s.monto, s.moneda)}</td>
-                <td>{formatearFecha(s.fecha_proximo_cobro)}</td>
-                <td>{s.estado}</td>
-                <td align="right">{porHora === null ? 'sin uso' : formatearMonto(porHora, s.moneda)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/registro" element={<Register />} />
+        <Route path="/panel" element={<PanelStub />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
