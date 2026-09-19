@@ -1,0 +1,89 @@
+.sidebar {
+  background: var(--oag-navy);
+  color: var(--oag-navy-text);
+  width: 260px;
+  flex-shrink: 0;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-height: 100vh;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-family: var(--oag-font-mono);
+  font-size: 16px;
+  padding: 0 8px;
+  text-decoration: none;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: var(--oag-radius-sm);
+  font-size: 14px;
+  color: var(--oag-navy-text);
+  position: relative;
+  text-decoration: none;
+}
+
+.navItemActivo {
+  background: var(--oag-navy-soft);
+  color: #ffffff;
+}
+
+.navItemActivo::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: #ffffff;
+}
+
+.navIcono {
+  width: 18px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.usuario {
+  margin-top: auto;
+  background: var(--oag-navy-soft);
+  border-radius: var(--oag-radius-md);
+  padding: 14px 16px;
+  text-decoration: none;
+  display: block;
+  border: 1px solid transparent;
+}
+
+.usuarioActivo {
+  border-color: #ffffff;
+}
+
+.usuarioNombre {
+  margin: 0 0 2px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.usuarioPlan {
+  margin: 0;
+  color: var(--oag-navy-text-soft);
+  font-size: 12px;
+}
