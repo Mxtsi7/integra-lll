@@ -48,3 +48,12 @@ export interface Suscripcion {
   /** Horas de uso registradas en el mes. Es lo que hace posible el costo por hora. */
   horas_uso_mes?: number;
 }
+/** Información del usuario autenticado en la plataforma. */
+export interface Usuario {
+  id: string;
+  nombre: string;
+  correo: string;
+  rol: string;
+  organizacion_id: string;
+  plan: string;
+}
