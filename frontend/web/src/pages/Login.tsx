@@ -1,8 +1,7 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Mail, Lock, ShieldCheck } from "lucide-react";
-import { colors } from "@ojoalgasto/shared/theme/tokens";
-import { login, AuthError } from "@ojoalgasto/shared/api/auth";
+import { login, AuthError } from "@ojoalgasto/shared";
 import "../styles/Login.css";
 
 export default function Login() {
@@ -18,18 +17,21 @@ export default function Login() {
     setLoading(true);
     try {
       const { access_token, refresh_token } = await login({ correo, password });
-      // TODO: mover esto a un AuthContext (ya existe la carpeta context/ en
-      // el proyecto) en vez de tocar localStorage directo desde la página.
+      // TODO: mover esto a un AuthContext en vez de tocar localStorage
+      // directo desde la página.
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
       navigate("/panel");
     } catch (err) {
-      // El backend responde con un mensaje genérico para no revelar cuál dato falló
-      setError(
-        err instanceof AuthError && err.status === 401
-          ? "Usuario o contraseña inválidos"
-          : "No se pudo iniciar sesión. Intenta de nuevo."
-      );
+      // `err` llega como `unknown` con TS estricto — hay que angostarlo
+      // antes de leer .message.
+      if (err instanceof AuthError && err.status === 401) {
+        setError("Usuario o contraseña inválidos");
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("No se pudo iniciar sesión. Intenta de nuevo.");
+      }
     } finally {
       setLoading(false);
     }
@@ -39,7 +41,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-wrap">
         <div className="login-logo">
-          <Eye size={20} color={colors.navy} />
+          <Eye size={20} />
           <span>Ojo al Gasto</span>
         </div>
 
@@ -52,7 +54,7 @@ export default function Login() {
           <div className="login-field">
             <label htmlFor="correo">CORREO ELECTRÓNICO</label>
             <div className="login-field-input">
-              <Mail size={16} color={colors.muted} />
+              <Mail size={16} />
               <input
                 id="correo"
                 type="email"
@@ -68,7 +70,7 @@ export default function Login() {
           <div className="login-field">
             <label htmlFor="password">CONTRASEÑA</label>
             <div className="login-field-input">
-              <Lock size={16} color={colors.muted} />
+              <Lock size={16} />
               <input
                 id="password"
                 type="password"
@@ -103,7 +105,7 @@ export default function Login() {
         </form>
 
         <div className="login-footnote">
-          <ShieldCheck size={12} color={colors.muted} />
+          <ShieldCheck size={12} />
           <span>Conexión cifrada de extremo a extremo</span>
         </div>
       </div>
