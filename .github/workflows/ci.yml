@@ -1,0 +1,96 @@
+# Se ejecuta en cada pull request y en cada push a main.
+# Si algo falla acá, el PR queda en rojo antes de que nadie lo revise.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Backend: un trabajo por servicio, contra un Postgres real ──────
+  backend:
+    name: backend · ${{ matrix.servicio }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [auth, subscriptions]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: suscripciones
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Lo mismo que .env.example, con la base apuntando al servicio de arriba.
+      DEBUG: "True"
+      SECRET_KEY: clave-solo-para-ci
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/suscripciones
+      ESQUEMA_BD: ${{ matrix.servicio }}
+      # PYTHONPATH apunta a la raíz para que resuelva shared/, como en Docker.
+      PYTHONPATH: ${{ github.workspace }}
+
+    defaults:
+      run:
+        working-directory: services/${{ matrix.servicio }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/${{ matrix.servicio }}/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Comprobar la configuración de Django
+        run: python manage.py check
+
+      - name: Pruebas
+        run: pytest -v
+
+  # ── Frontend: el workspace completo ────────────────────────────────
+  frontend:
+    name: frontend · typecheck, pruebas y build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # npm ci falla si package.json y package-lock.json no coinciden:
+      # es a propósito, es lo mismo que hace el Dockerfile.
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: TypeScript
+        run: npm run typecheck
+
+      - name: Pruebas
+        run: npm test
+
+      - name: Build
+        run: npm run build
