@@ -34,11 +34,17 @@
   align-items: center;
   padding: 12px 0;
   border-top: 1px solid var(--oag-line);
+  text-decoration: none;
+  color: inherit;
 }
 
-.fila:first-child {
+li:first-child > .fila {
   border-top: none;
   padding-top: 0;
+}
+
+.fila:hover .nombre {
+  text-decoration: underline;
 }
 
 .nombre {
@@ -59,6 +65,7 @@
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+  color: var(--oag-ink);
 }
 
 .vacio {
