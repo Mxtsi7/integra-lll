@@ -52,7 +52,9 @@ services:
       URL_CONNECTORS: http://connectors:8003
       URL_ANALYTICS: http://analytics:8004
       URL_NOTIFICATIONS: http://notifications:8005
-    depends_on: [auth, subscriptions, connectors, analytics, notifications]
+    # Solo los servicios que hoy arrancan. Los otros tres se agregan
+    # cuando tengan su manage.py; mientras, el gateway responde 502 por ellos.
+    depends_on: [auth, subscriptions]
     volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
 
   # ─── Servicios de dominio ───────────────────────────────────────
