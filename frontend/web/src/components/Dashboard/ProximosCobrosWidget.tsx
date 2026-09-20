@@ -1,4 +1,5 @@
 import { formatearFecha, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { Link } from 'react-router-dom';
 import { diasHasta } from '../../utils/fechas';
 import styles from './ProximosCobrosWidget.module.css';
 
@@ -25,15 +26,17 @@ export function ProximosCobrosWidget({ suscripciones }: ProximosCobrosWidgetProp
           {proximos.map((s) => {
             const dias = diasHasta(s.fecha_proximo_cobro);
             return (
-              <li key={s.id} className={styles.fila}>
-                <div>
-                  <p className={styles.nombre}>{s.nombre}</p>
-                  <p className={styles.fecha}>
-                    {dias === 0 ? 'Hoy' : dias === 1 ? 'Mañana' : `En ${dias} días`} ·{' '}
-                    {formatearFecha(s.fecha_proximo_cobro)}
-                  </p>
-                </div>
-                <span className={styles.monto}>{formatearMonto(s.monto, s.moneda)}</span>
+              <li key={s.id}>
+                <Link to={`/suscripciones/${s.id}`} className={styles.fila}>
+                  <div>
+                    <p className={styles.nombre}>{s.nombre}</p>
+                    <p className={styles.fecha}>
+                      {dias === 0 ? 'Hoy' : dias === 1 ? 'Mañana' : `En ${dias} días`} ·{' '}
+                      {formatearFecha(s.fecha_proximo_cobro)}
+                    </p>
+                  </div>
+                  <span className={styles.monto}>{formatearMonto(s.monto, s.moneda)}</span>
+                </Link>
               </li>
             );
           })}
