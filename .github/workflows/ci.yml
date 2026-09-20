@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        servicio: [auth, subscriptions]
+        servicio: [auth, subscriptions, gateway]
 
     services:
       postgres:
@@ -43,7 +43,8 @@ jobs:
 
     defaults:
       run:
-        working-directory: services/${{ matrix.servicio }}
+        # gateway vive en la raiz, los demas en services/
+        working-directory: ${{ matrix.servicio == 'gateway' && 'gateway' || format('services/{0}', matrix.servicio) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: services/${{ matrix.servicio }}/requirements.txt
+          cache-dependency-path: '**/requirements.txt'
 
       - name: Instalar dependencias
         run: pip install -r requirements.txt
