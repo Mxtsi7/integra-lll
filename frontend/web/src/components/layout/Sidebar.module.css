@@ -87,3 +87,24 @@
   color: var(--oag-navy-text-soft);
   font-size: 12px;
 }
+
+@media (max-width: 900px) {
+  .sidebar {
+    min-height: auto;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+  }
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .usuario {
+    margin-top: 0;
+    margin-left: auto;
+  }
+}
