@@ -28,19 +28,27 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   });
 
   if (!res.ok) {
-    // DRF suele devolver {"detail": "..."} o {"campo": ["error"]}.
-    // Si el serializer real devuelve otra forma, ajustar esto.
     let message = "Ocurrió un error inesperado";
     try {
-      const data = await res.json();
-      message = data.detail ?? Object.values(data)?.[0]?.[0] ?? message;
+      const data = (await res.json()) as Record<string, unknown>;
+      if (typeof data.detail === "string") {
+        message = data.detail;
+      } else {
+        const valores = Object.values(data);
+        const primero = valores.length > 0 ? valores[0] : undefined;
+        if (Array.isArray(primero) && typeof primero[0] === "string") {
+          message = primero[0];
+        } else if (typeof primero === "string") {
+          message = primero;
+        }
+      }
     } catch {
-      // el cuerpo no era JSON, nos quedamos con el mensaje genérico
+      // el cuerpo no era JSON
     }
     throw new AuthError(message, res.status);
   }
 
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 export type LoginPayload = { correo: string; password: string };
