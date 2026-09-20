@@ -38,6 +38,9 @@ jobs:
       ALLOWED_HOSTS: localhost,127.0.0.1,testserver
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/suscripciones
       ESQUEMA_BD: ${{ matrix.servicio }}
+      # El gateway valida tokens con esto; auth firmara con lo mismo.
+      JWT_SECRET: secreto-solo-para-ci
+      JWT_ALGORITMO: HS256
       # PYTHONPATH apunta a la raíz para que resuelva shared/, como en Docker.
       PYTHONPATH: ${{ github.workspace }}
 
