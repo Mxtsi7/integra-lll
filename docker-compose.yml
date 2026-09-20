@@ -80,6 +80,44 @@ services:
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
+  # El actor Temporizador (RF-13): beat programa las tareas periódicas,
+  # worker las ejecuta. Mismo código e imagen que subscriptions, distinto
+  # punto de entrada; no corren migrate (lo hace subscriptions) y arrancan
+  # cuando ese ya está sano, así la base está migrada.
+  subscriptions-worker:
+    build: ./services/subscriptions
+    entrypoint: ["celery", "-A", "config"]
+    command: ["worker", "--loglevel=info"]
+    # El healthcheck del Dockerfile es HTTP; un worker no sirve HTTP.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "config", "inspect", "ping", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    env_file: .env
+    environment:
+      ESQUEMA_BD: subscriptions
+    depends_on:
+      subscriptions: { condition: service_healthy }
+      redis: { condition: service_started }
+    volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
+
+  subscriptions-beat:
+    build: ./services/subscriptions
+    entrypoint: ["celery", "-A", "config"]
+    # El archivo de estado de beat va fuera de /app para no aparecer en el repo
+    command: ["beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      ESQUEMA_BD: subscriptions
+    depends_on:
+      subscriptions: { condition: service_healthy }
+      redis: { condition: service_started }
+    volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
+
   connectors:
     build: ./services/connectors
     ports: ["8003:8003"]
