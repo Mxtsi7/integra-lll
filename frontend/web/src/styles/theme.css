@@ -1,0 +1,15 @@
+ 
+export const colors = {
+  navy: "#1B2A4A",
+  navySoft: "#26365C",
+  blue: "#386BEB",
+  bg: "#EEF1F7",
+  fieldBg: "#F7F9FC",
+  border: "#E1E7F0",
+  muted: "#8A93AB",
+  textMuted2: "#6B7690",
+  error: "#C4453B",
+  white: "#FFFFFF",
+} as const;
+ 
+export type Colors = typeof colors;
