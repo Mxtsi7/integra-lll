@@ -2,6 +2,7 @@ import { useState, FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Eye, User, Mail, Lock, Check } from "lucide-react";
 import { register, AuthError } from "@ojoalgasto/shared";
+import RegisterSuccess from "./registersuccess";
 import "../styles/Register.css";
 
 export default function Register() {
