@@ -1,0 +1,50 @@
+.register-success-card {
+  border-radius: 16px;
+  border: 1px solid var(--oag-border, #e1e7f0);
+  background: white;
+  padding: 40px 32px;
+  text-align: center;
+}
+
+.register-success-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background-color: var(--oag-navy, #1b2a4a);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.register-success-card h1 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--oag-navy, #1b2a4a);
+  margin: 0 0 8px;
+}
+
+.register-success-card p {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--oag-text-muted-2, #6b7690);
+  margin: 0 0 24px;
+}
+
+.register-success-button {
+  display: inline-block;
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 8px;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background-color: var(--oag-navy, #1b2a4a);
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.register-success-button:hover {
+  background-color: var(--oag-navy-soft, #26365c);
+}

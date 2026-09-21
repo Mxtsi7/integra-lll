@@ -61,8 +61,10 @@ WSGI_APPLICATION = "config.wsgi.application"
 ESQUEMA_BD = env("ESQUEMA_BD", default=NOMBRE_SERVICIO)
 
 DATABASES = {"default": env.db("DATABASE_URL")}
-if "sqlite" not in DATABASES["default"]["ENGINE"]:
-    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+# Cada servicio usa su propia base de test, para que las pruebas de dos
+# servicios puedan correr a la vez (en CI, por ejemplo) sin pisarse.
+DATABASES["default"]["TEST"] = {"NAME": f"test_{NOMBRE_SERVICIO}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -76,6 +78,24 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     "TITLE": f"Ojo al Gasto · {NOMBRE_SERVICIO}",
     "VERSION": "0.1.0",
+}
+
+# ── Celery: el actor Temporizador ───────────────────────────────────
+# Las transiciones del ciclo de vida (RF-13) no las dispara nadie: las
+# ejecuta una tarea periódica. beat las programa, worker las corre.
+# Broker: Redis (ver .env.example). Los eventos entre servicios siguen
+# yendo por RabbitMQ (ADR-003); Redis es solo la cola interna de tareas.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_TIMEZONE = "America/Santiago"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_BEAT_SCHEDULE = {
+    # Tarea de prueba: cada minuto deja constancia de que el Temporizador
+    # vive. Las tareas reales del ciclo de vida se agregan aquí.
+    "latido-del-temporizador": {
+        "task": "config.celery.latido",
+        "schedule": 60.0,
+    },
 }
 
 # ── regional ────────────────────────────────────────────────────────
