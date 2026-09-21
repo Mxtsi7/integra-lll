@@ -8,7 +8,7 @@ def test_user_serializer_creates_user_and_hides_password():
     serializer = UserSerializer(
         data={
             "email": "usuario@example.com",
-            "nombre": "Usuario de Prueba",   # ← agregado
+            "nombre": "Usuario de Prueba",
             "password": "ClaveSegura123",
         }
     )
