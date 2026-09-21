@@ -10,7 +10,7 @@ class UserManager(BaseUserManager):
 
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
-        user.set_password(password)          # ← hashea siempre
+        user.set_password(password)          
         user.save(using=self._db)
         return user
 
@@ -32,7 +32,7 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
-    nombre = models.CharField(max_length=150, default="")   # ← agrega default=""
+    nombre = models.CharField(max_length=50) 
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
