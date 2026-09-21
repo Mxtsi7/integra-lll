@@ -21,7 +21,7 @@ export default function Login() {
       // directo desde la página.
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
-      navigate("/panel");
+      navigate("/dashboard");
     } catch (err) {
       // `err` llega como `unknown` con TS estricto — hay que angostarlo
       // antes de leer .message.

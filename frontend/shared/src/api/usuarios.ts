@@ -1,8 +1,3 @@
-
-// PROPUESTA: nuevo archivo shared/src/api/usuarios.ts
-
-
-
 import type { Usuario } from '../tipos';
 import { pedir } from './cliente';
 
