@@ -6,7 +6,7 @@ from django.db import models
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
-            raise ValueError("El correo electrónico es obligatorio")
+            raise ValueError("El usuario debe tener un correo electrónico")
 
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
@@ -31,10 +31,12 @@ class UserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
+    nombre = models.CharField(max_length=150)
+    consentimiento_en = models.DateTimeField(null=True, blank=True)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
     objects = UserManager()
 
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS = ["nombre"]
