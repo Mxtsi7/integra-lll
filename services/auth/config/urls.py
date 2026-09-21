@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.db import connection
 from django.http import JsonResponse
@@ -10,7 +11,12 @@ from app.views import RegisterView
 def salud(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT 1")
-    return JsonResponse({"status": "ok"})
+    return JsonResponse(
+        {
+            "estado": "ok",
+            "esquema": settings.ESQUEMA_BD,
+        }
+    )
 
 
 def inicio(request):
