@@ -6,10 +6,10 @@ export class AuthError extends Error {
   }
 }
 
-let apiUrl = "http://localhost:8000";
+let apiUrl = "http://localhost:8000/api";
 let endpoints = {
-  login: "/api/auth/login/",
-  register: "/api/auth/register/",
+  login: "/auth/login/",
+  register: "/auth/register/",
 };
 
 export function configureAuthApi(config: {

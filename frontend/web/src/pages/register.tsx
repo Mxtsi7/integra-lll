@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Eye, User, Mail, Lock, Check } from "lucide-react";
 import { register, AuthError } from "@ojoalgasto/shared";
 import RegisterSuccess from "./registersuccess";
-import "../styles/Register.css";
+import "../styles/register.css";
 
 export default function Register() {
   const [nombre, setNombre] = useState("");
