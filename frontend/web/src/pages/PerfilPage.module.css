@@ -1,0 +1,113 @@
+.tarjetaPlan {
+  background: var(--oag-navy);
+  color: #ffffff;
+  border-radius: var(--oag-radius-lg);
+  padding: 20px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.planTitulo {
+  margin: 0 0 4px;
+  font-family: var(--oag-font-mono);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.planDescripcion {
+  margin: 0;
+  font-size: 13px;
+  color: var(--oag-navy-text);
+}
+
+.botonMejorar {
+  background: #ffffff;
+  color: var(--oag-navy);
+  border: none;
+  border-radius: var(--oag-radius-sm);
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.seccion {
+  background: var(--oag-surface);
+  border: 1px solid var(--oag-line);
+  border-radius: var(--oag-radius-lg);
+  padding: 20px 22px;
+}
+
+.seccionTitulo {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  color: var(--oag-ink);
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--oag-line);
+}
+
+.fila:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.filaEtiqueta {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--oag-ink);
+}
+
+.filaValor {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--oag-ink-soft);
+}
+
+.accion {
+  background: none;
+  border: none;
+  color: var(--oag-navy);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.accionPeligro {
+  composes: accion;
+  color: #b91c1c;
+}
+
+.mensaje {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--oag-ink-soft);
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
