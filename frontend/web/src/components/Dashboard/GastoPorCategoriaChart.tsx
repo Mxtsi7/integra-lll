@@ -65,7 +65,7 @@ export function GastoPorCategoriaChart({ suscripciones }: GastoPorCategoriaChart
                 width={70}
               />
               <Tooltip
-                formatter={(valor: number) => formatearMonto(valor)}
+                formatter={(valor: any) => formatearMonto(typeof valor === 'number' ? valor : 0)}
                 contentStyle={{
                   fontSize: 12,
                   borderRadius: 8,
