@@ -1,0 +1,94 @@
+.volver {
+  display: inline-block;
+  color: var(--oag-navy);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  margin-bottom: 16px;
+}
+
+.mensaje {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--oag-ink-soft);
+  font-size: 14px;
+}
+
+.tarjeta {
+  background: var(--oag-surface);
+  border: 1px solid var(--oag-line);
+  border-radius: var(--oag-radius-lg);
+  padding: 24px;
+  max-width: 640px;
+}
+
+.encabezado {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.icono {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--oag-radius-md);
+  background: var(--oag-navy);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--oag-font-mono);
+  flex-shrink: 0;
+}
+
+.nombre {
+  margin: 0 0 6px;
+  font-family: var(--oag-font-mono);
+  font-size: 20px;
+  color: var(--oag-ink);
+}
+
+.badgeEstado {
+  background: var(--oag-muted-bg);
+  color: var(--oag-muted-text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dato {
+  border-top: 1px solid var(--oag-line);
+  padding-top: 12px;
+}
+
+.datoEtiqueta {
+  margin: 0 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--oag-ink-soft);
+  font-family: var(--oag-font-mono);
+}
+
+.datoValor {
+  margin: 0;
+  font-size: 14px;
+  color: var(--oag-ink);
+  text-transform: capitalize;
+}
+
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
