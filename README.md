@@ -223,7 +223,7 @@ entonces tiene que ser **3.12** (ver más abajo).
 git clone https://github.com/Mxtsi7/integra-lll.git
 cd integra-lll
 cp .env.example .env                        # con los valores de ejemplo alcanza
-docker compose up -d postgres auth subscriptions
+docker compose up -d --build
 ```
 
 La primera vez descarga las imágenes y tarda unos minutos. Después, segundos.
@@ -234,23 +234,38 @@ Para comprobar que quedó bien, abre en el navegador:
 |---|---|---|
 | Servicio `auth` | http://localhost:8001/health/ | `{"servicio": "auth", "esquema": "auth", "estado": "ok"}` |
 | Servicio `subscriptions` | http://localhost:8002/health/ | lo mismo, con `subscriptions` |
+| Gateway | http://localhost:8000/health/ | `{"servicio": "gateway", "estado": "ok"}` |
+| Web | http://localhost:5173 | la pantalla de login |
 | Panel de RabbitMQ | http://localhost:15672 | usuario y clave `guest` |
 
 Si `/health/` responde, el servicio leyó el `.env`, se conectó a PostgreSQL y
 está parado en su propio esquema. Es la prueba completa.
 
-> **Estado actual.** Hoy solo `auth` y `subscriptions` tienen proyecto Django y
-> arrancan. `connectors`, `analytics`, `notifications`, el gateway y el frontend
-> todavía son cascarones: `docker compose up --build` sin más los intenta
-> levantar y fallan. A medida que cada uno reciba su `manage.py`, se agrega al
-> comando de arriba hasta llegar al objetivo:
->
-> ```bash
-> docker compose up --build       # todo el sistema, un solo comando
-> ```
->
-> **Eso es innegociable**: si levantar el sistema toma más de un comando, con 6
-> personas el proyecto se vuelve inmanejable.
+> **Estado actual.** Con ese comando arrancan `postgres`, `rabbitmq`, `redis`,
+> `auth`, `subscriptions` (con su worker y su beat de Celery), el gateway y la
+> web. `connectors`, `analytics` y `notifications` todavía son cascarones sin
+> `manage.py`: aparecen como `Exited (2)` en `docker compose ps` y se ignoran
+> hasta que tengan código. Que todo el sistema se levante con un solo comando
+> **es innegociable**: con 6 personas, cualquier paso extra se olvida.
+
+### Usuario de demostración
+
+Al arrancar, `auth` deja creado un usuario de prueba para no tener que
+registrarse cada vez que se borra la base:
+
+| Correo | Clave |
+|---|---|
+| `demo@ojoalgasto.cl` | `Demo-2026-ojo` |
+
+Lo hace el comando `python manage.py seed`, que corre desde `entrypoint.sh`
+solo cuando `SEED_DEMO=1` (lo pone `docker-compose.yml`; en producción no
+existe). Es idempotente: la segunda vez no toca nada. Las credenciales se
+cambian con `SEED_CORREO`, `SEED_CLAVE` y `SEED_NOMBRE` en el `.env`, y la
+clave se guarda hasheada, como cualquier usuario real. Para correrlo a mano:
+
+```bash
+docker compose run --rm auth python manage.py seed
+```
 
 Comandos del día a día:
 
