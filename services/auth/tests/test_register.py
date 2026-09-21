@@ -10,7 +10,7 @@ from app.models import User
 class TestRegisterEndpoint:
     def setup_method(self):
         self.client = APIClient()
-        self.url = reverse("register")
+        self.url = "/api/auth/register/"
         self.valid_payload = {
             "email": "ana@test.com",
             "password": "ClaveSegura123",
@@ -37,17 +37,18 @@ class TestRegisterEndpoint:
 
         response2 = self.client.post(self.url, self.valid_payload, format="json")
         assert response2.status_code == status.HTTP_400_BAD_REQUEST
-        assert "detail" in response2.data
+        assert "email" in response2.data
+
 
     def test_register_sin_email_devuelve_400(self):
         payload = {
             "password": "ClaveSegura123",
             "nombre": "Ana",
+            "acepta_datos": True,
         }
         response = self.client.post(self.url, payload, format="json")
-
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "detail" in response.data
+        assert "email" in response.data
 
     def test_register_sin_password_devuelve_400(self):
         payload = {
