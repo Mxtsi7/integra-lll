@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.db import connection
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
@@ -21,7 +21,7 @@ def salud(request):
 
 
 def inicio(request):
-    return JsonResponse({"mensaje": "Servicio Auth activo"})
+    return HttpResponse("Servicio Auth activo")
 
 
 urlpatterns = [
