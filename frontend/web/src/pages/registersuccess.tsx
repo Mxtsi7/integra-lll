@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
-import "../styles/RegisterSuccess.css";
+import "../styles/registersuccess.css";
 
 export default function RegisterSuccess({ nombre }: { nombre: string }) {
   return (
