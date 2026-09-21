@@ -1,24 +1,22 @@
 from rest_framework import serializers
-
 from .models import User
 
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("id", "email", "password")
+        fields = ("id", "email", "nombre", "password")
         extra_kwargs = {
-            "password": {"write_only": True},
+            "password": {"write_only": True, "min_length": 8},
+            "id": {"read_only": True},
         }
 
     def create(self, validated_data):
+        # create_user ya llama a set_password → hash
         return User.objects.create_user(**validated_data)
 
-    def update(self, instance, validated_data):
-        password = validated_data.pop("password", None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        if password:
-            instance.set_password(password)
-        instance.save()
-        return instance
+    def to_representation(self, instance):
+        # Garantiza que la respuesta NUNCA lleve password ni hash
+        data = super().to_representation(instance)
+        data.pop("password", None)
+        return data
