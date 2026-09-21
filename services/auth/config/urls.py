@@ -1,28 +1,20 @@
 from django.contrib import admin
 from django.db import connection
-from django.http import HttpResponse, JsonResponse
+from django.http import JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from app.views import RegisterView       
+from app.views import RegisterView
 
 
 def salud(request):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT current_schema()")
-        esquema = cursor.fetchone()[0]
-
-    return JsonResponse(
-        {
-            "servicio": "auth",
-            "estado": "ok",
-            "esquema": esquema,
-        }
-    )
+        cursor.execute("SELECT 1")
+    return JsonResponse({"status": "ok"})
 
 
 def inicio(request):
-    return HttpResponse("Servicio auth corriendo en el puerto 8001 ✅")
+    return JsonResponse({"mensaje": "Servicio Auth activo"})
 
 
 urlpatterns = [
