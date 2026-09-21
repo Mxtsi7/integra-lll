@@ -1,6 +1,5 @@
-"""Configuración raíz de pytest para el servicio de suscripciones."""
-
 import os
+import socket
 
 import django
 import pytest
@@ -15,18 +14,53 @@ def pytest_configure() -> None:
 
 
 @pytest.fixture(scope="session")
-def django_db_modify_db_settings() -> None:
-    """Redirige el search_path a 'public' para la BD de test.
-
-    En producción cada servicio usa su propio schema PostgreSQL
-    (ej: ``search_path=subscriptions``), pero la BD de test se crea
-    vacía y solo trae el schema ``public``.  Sin este override
-    Django no puede crear ``django_migrations`` y los tests fallan con
-    ``MigrationSchemaMissing``.
+def django_db_setup(django_db_blocker):
+    """Configura la BD de tests: search_path=public para PostgreSQL en Docker,
+    o SQLite en memoria si el host postgres no está disponible (tests locales).
     """
     from django.conf import settings
+    from django.test.utils import setup_databases, teardown_databases
 
-    settings.DATABASES["default"].setdefault("OPTIONS", {})
-    settings.DATABASES["default"]["OPTIONS"] = {
-        "options": "-c search_path=public"
-    }
+    engine = settings.DATABASES["default"].get("ENGINE", "")
+    host = settings.DATABASES["default"].get("HOST", "")
+
+    if "sqlite" in engine:
+        settings.DATABASES["default"]["OPTIONS"] = {}
+    elif host == "postgres":
+        try:
+            socket.gethostbyname(host)
+            settings.DATABASES["default"].setdefault("OPTIONS", {})
+            settings.DATABASES["default"]["OPTIONS"] = {
+                "options": "-c search_path=public"
+            }
+        except OSError:
+            from django.db import connections
+
+            settings.DATABASES["default"] = {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": ":memory:",
+                "OPTIONS": {},
+                "ATOMIC_REQUESTS": False,
+                "AUTOCOMMIT": True,
+                "CONN_MAX_AGE": 0,
+                "CONN_HEALTH_CHECKS": False,
+                "TIME_ZONE": None,
+                "TEST": {
+                    "CHARSET": None,
+                    "COLLATION": None,
+                    "MIGRATE": True,
+                    "MIRROR": None,
+                    "NAME": ":memory:",
+                },
+            }
+            connections.close_all()
+            try:
+                delattr(connections._connections, "default")
+            except AttributeError:
+                pass
+
+    with django_db_blocker.unblock():
+        db_cfg = setup_databases(verbosity=0, interactive=False)
+    yield
+    with django_db_blocker.unblock():
+        teardown_databases(db_cfg, verbosity=0)
