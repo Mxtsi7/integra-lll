@@ -1,27 +1,43 @@
 """Modelos del servicio de suscripciones – Sprint 1."""
 
-from django.conf import settings
+from decimal import Decimal
 from django.core.validators import MinValueValidator
 from django.db import models
 
-from decimal import Decimal
+from shared.tenant.base import ModeloTenant
 
 
-class Subscription(models.Model):
-    """Suscripción recurrente asociada a un usuario."""
+class Subscription(ModeloTenant):
+    """Suscripción recurrente perteneciente a una organización (ADR-002 / RF-06 / RF-13)."""
 
     # ── choices ──────────────────────────────────────────────────────
 
-    class Ciclo(models.TextChoices):
-        MENSUAL = "MENSUAL", "Mensual"
-        ANUAL = "ANUAL", "Anual"
+    class Frecuencia(models.TextChoices):
+        MENSUAL = "mensual", "Mensual"
+        ANUAL = "anual", "Anual"
 
     class Estado(models.TextChoices):
-        ACTIVO = "ACTIVO", "Activo"
-        INACTIVO = "INACTIVO", "Inactivo"
+        PRUEBA = "prueba", "Prueba"
+        ACTIVO = "activo", "Activo"
+        POR_CONFIRMAR = "por_confirmar", "Por confirmar"
+        CANCELADO = "cancelado", "Cancelado"
+        FANTASMA = "fantasma", "Fantasma"
 
     class Moneda(models.TextChoices):
         CLP = "CLP", "Peso chileno"
+        USD = "USD", "Dólar estadounidense"
+
+    class Categoria(models.TextChoices):
+        STREAMING = "streaming", "Streaming"
+        MUSICA = "musica", "Música"
+        PRODUCTIVIDAD = "productividad", "Productividad"
+        NUBE = "nube", "Nube"
+        JUEGOS = "juegos", "Juegos"
+        EDUCACION = "educacion", "Educación"
+        SALUD = "salud", "Salud"
+        NOTICIAS = "noticias", "Noticias"
+        IA = "ia", "Inteligencia Artificial"
+        OTRO = "otro", "Otro"
 
     # ── campos ───────────────────────────────────────────────────────
 
@@ -44,42 +60,58 @@ class Subscription(models.Model):
         verbose_name="Moneda",
     )
 
-    ciclo = models.CharField(
+    frecuencia = models.CharField(
         max_length=20,
-        choices=Ciclo.choices,
-        verbose_name="Ciclo de cobro",
+        choices=Frecuencia.choices,
+        verbose_name="Frecuencia de cobro",
     )
 
-    fecha_cobro = models.DateField(
-        verbose_name="Fecha de cobro",
+    fecha_proximo_cobro = models.DateField(
+        verbose_name="Fecha del próximo cobro",
+    )
+
+    categoria = models.CharField(
+        max_length=20,
+        choices=Categoria.choices,
+        default=Categoria.OTRO,
+        verbose_name="Categoría",
     )
 
     estado = models.CharField(
         max_length=20,
         choices=Estado.choices,
+        default=Estado.ACTIVO,
         verbose_name="Estado",
     )
 
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="subscriptions",
-        verbose_name="Usuario",
+    fin_prueba = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Fin de período de prueba",
+    )
+
+    horas_uso_mes = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="Horas de uso en el mes",
     )
 
     # ── meta ─────────────────────────────────────────────────────────
 
-    class Meta:
+    class Meta(ModeloTenant.Meta):
         db_table = "subscription"
         constraints = [
             models.CheckConstraint(
-                check=models.Q(monto__gt=Decimal("0")),
+                condition=models.Q(monto__gt=Decimal("0")),
                 name="subscription_monto_positivo",
             ),
         ]
-        ordering = ["-fecha_cobro"]
+        ordering = ["-fecha_proximo_cobro"]
         verbose_name = "Suscripción"
         verbose_name_plural = "Suscripciones"
 
     def __str__(self) -> str:
-        return f"{self.nombre} ({self.get_ciclo_display()}) – {self.monto} {self.moneda}"
+        return f"{self.nombre} ({self.get_frecuencia_display()}) – {self.monto} {self.moneda}"

@@ -281,6 +281,24 @@ docker compose down -v            # apagar y borrar la base (empezar de cero)
 > (`auth`, `connectors`, etc.). El `--rm` elimina el contenedor temporal
 > cuando termina.
 
+#### Pruebas del servicio `subscriptions` (Endpoints Update y Delete)
+
+Para probar los endpoints `PUT`, `PATCH`, `DELETE` y el aislamiento multi-tenant del servicio `subscriptions`:
+
+```bash
+# Dentro de Docker:
+docker compose run --rm subscriptions pytest tests/test_views.py -v
+
+# O fuera de Docker (Windows PowerShell en services/subscriptions):
+cd services/subscriptions
+.\venv\Scripts\pytest.exe tests\test_views.py -v
+
+# Demostración interactiva en vivo:
+.\venv\Scripts\python.exe verificar_todo.py
+```
+
+Ver documentación completa en [services/subscriptions/README.md](services/subscriptions/README.md).
+
 ### Trabajar en un solo servicio
 
 Los servicios se levantan con tu código montado adentro: editas un archivo en
