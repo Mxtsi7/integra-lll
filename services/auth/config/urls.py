@@ -4,12 +4,13 @@ from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
+from app.views import RegisterView
+
 
 def salud(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT current_schema()")
         esquema = cursor.fetchone()[0]
-
     return JsonResponse(
         {
             "servicio": "auth",
@@ -20,13 +21,14 @@ def salud(request):
 
 
 def inicio(request):
-    return HttpResponse("Servicio auth corriendo en el puerto 8001 ✅")
+    return HttpResponse("Servicio Auth activo")
 
 
 urlpatterns = [
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
+    path("api/auth/register/", RegisterView.as_view(), name="register"),
     path("", inicio),
     path("admin/", admin.site.urls),
 ]
