@@ -17,8 +17,11 @@ def salud(request):
     un servicio que no llega a su esquema no está sano, aunque responda.
     """
     with connection.cursor() as cursor:
-        cursor.execute("SELECT current_schema()")
-        esquema = cursor.fetchone()[0]
+        if connection.vendor == "sqlite":
+            esquema = settings.ESQUEMA_BD
+        else:
+            cursor.execute("SELECT current_schema()")
+            esquema = cursor.fetchone()[0]
     return JsonResponse(
         {"servicio": settings.NOMBRE_SERVICIO, "esquema": esquema, "estado": "ok"}
     )
