@@ -16,14 +16,28 @@ class SubscriptionSerializer(serializers.ModelSerializer):
 
     # ── normalización pre-validación ────────────────────────────────
 
+    # Mapeo de nombres legacy (tarjeta Trello) → nombres oficiales (tipos.ts)
+    _ALIAS_MAP: dict[str, str] = {
+        "ciclo": "frecuencia",
+        "fecha_cobro": "fecha_proximo_cobro",
+        "activa": "activo",
+    }
+
     def to_internal_value(self, data: dict) -> dict:
         """Normaliza campos antes de que los ChoiceField validen.
 
+        - Alias legacy: ``ciclo`` → ``frecuencia``, ``fecha_cobro`` →
+          ``fecha_proximo_cobro``, ``activa`` → ``activo``.
         - ``moneda`` se convierte a mayúsculas (ej: 'clp' -> 'CLP').
         - ``frecuencia``, ``estado`` y ``categoria`` se convierten a minúsculas.
         """
         if isinstance(data, dict):
             data = data.copy()
+            # ── alias legacy ────────────────────────────────────────
+            for legacy, oficial in self._ALIAS_MAP.items():
+                if legacy in data and oficial not in data:
+                    data[oficial] = data.pop(legacy)
+            # ── normalización de case ───────────────────────────────
             if "moneda" in data and isinstance(data["moneda"], str):
                 data["moneda"] = data["moneda"].upper()
             for campo in ("frecuencia", "estado", "categoria"):
