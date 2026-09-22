@@ -1,4 +1,4 @@
-﻿# Servicio de Suscripciones (`subscriptions`)
+# Servicio de Suscripciones (`subscriptions`)
 
 Microservicio núcleo del dominio de **Ojo al Gasto** (puerto `8002`).
 
@@ -29,39 +29,101 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 
 ---
 
-## Cómo ejecutar las pruebas (Demostración de Endpoints Update y Delete)
+---
 
-### Opción 1: Tests Automatizados con Pytest
+## Testing y Verificación de Tareas (Trello)
 
-Desde la carpeta `services/subscriptions`:
+A continuación se detalla cómo comprobar y demostrar que cada una de las tareas del Sprint 1 funciona al 100%.
+
+---
+
+### 1. Tarea: "Enviar peticiones simuladas (por ejemplo, vía Postman) para asegurar que devuelven los códigos HTTP correctos"
+
+Esta tarea exige armar una colección en Postman con peticiones simuladas (`POST` para crear y `GET` para listar) comprobando que `POST` responde `201 Created` con el objeto creado y `GET` responde `200 OK` con un arreglo que incluye dicho objeto, además de verificar códigos `403 Forbidden`, `204 No Content` y `404 Not Found`.
+
+#### Forma A: Desde la interfaz gráfica de Postman (Importar Colección)
+1. Abrir **Postman** y pulsar el botón **Import** (arriba a la izquierda).
+2. Seleccionar el archivo oficial de la colección:
+   [`services/subscriptions/subscriptions.postman_collection.json`](subscriptions.postman_collection.json)
+3. La colección ya viene preconfigurada con variables dinámicas (`base_url`, `org_id`, `org_id_b`, `subscription_id`) y scripts de prueba JavaScript (`pm.test`):
+   - **`POST /subscriptions/`**: Envía el payload de creación con la cabecera `X-Organizacion-Id`. Valida código **`201 Created`**, que el cuerpo contenga `id`, `nombre` y `moneda`, y guarda dinámicamente el `subscription_id`.
+   - **`GET /subscriptions/`**: Valida código **`200 OK`** y confirma que la lista contiene el objeto creado anteriormente.
+   - **`GET /subscriptions/:id/`**: Valida código **`200 OK`** al consultar el recurso propio.
+   - **`PATCH /subscriptions/:id/`**: Valida código **`200 OK`** al actualizar el estado a `"cancelado"`.
+   - **`GET /subscriptions/ (Org B)`**: Valida código **`200 OK`** pero 0 resultados de la Organización A (aislamiento multi-tenant).
+   - **`GET /subscriptions/ (Sin cabecera)`**: Valida código **`403 Forbidden`** (seguridad).
+   - **`DELETE /subscriptions/:id/`**: Valida código **`204 No Content`** y luego **`404 Not Found`**.
+4. Haz clic derecho en la colección y selecciona **Run Collection** para ejecutar todas las pruebas de una vez.
+
+#### Forma B: Desde la terminal con el simulador CLI (sin abrir Postman)
+Ejecuta el script que reproduce exactamente las peticiones de Postman y evalúa en consola las 12 aserciones `pm.test`:
 
 ```powershell
-# Solo los tests de endpoints (PUT, PATCH, DELETE y Aislamiento Tenant)
-.\venv\Scripts\pytest.exe tests\test_views.py -v
-
-# Toda la suite (23 tests: serializadores, validaciones y vistas)
-.\venv\Scripts\pytest.exe -v
+cd services/subscriptions
+.\venv\Scripts\python.exe simular_postman.py
 ```
 
-O dentro de Docker:
-```bash
-docker compose run --rm subscriptions pytest -v
-```
+**Resultado esperado:**
+- `7 REQUESTS` ejecutados (`POST`, `GET`, `PATCH`, `DELETE`).
+- `12/12` pruebas `pm.test` en estado **`[PASS]`**.
+- Códigos HTTP verificados: `201 Created`, `200 OK`, `403 Forbidden`, `204 No Content`, `404 Not Found`.
 
-### Opción 2: Script Interactivo de Demostración en Vivo
+---
 
-Ejecuta el script de verificación paso a paso que simula todas las operaciones contra la base de datos:
+### 2. Tarea: "Endpoints create y list"
 
-```powershell
-.\venv\Scripts\python.exe verificar_todo.py
-```
+Esta tarea exige habilitar las rutas `POST /subscriptions/` (crear suscripción propia) y `GET /subscriptions/` (listar exclusivamente las suscripciones de la cuenta autenticada), asegurando que el cliente no elija el propietario sino que el backend lo asigne desde `X-Organizacion-Id`, e incluyendo `moneda` en entrada y salida.
 
-Este script comprueba en vivo:
-1. Creación de suscripción inicial para la Organización A.
-2. `PATCH /subscriptions/<id>/` actualizando a `"cancelado"` (`200 OK`).
-3. `PUT /subscriptions/<id>/` con payload completo (`200 OK`).
-4. Intento de acceso/modificación por parte de Organización B (`404 Not Found`).
-5. Intento de llamada sin cabecera de organización (`403 Forbidden`).
-6. Intento de reasignar `organizacion_id` en el body (inmutable).
-7. `DELETE /subscriptions/<id>/` (`204 No Content`) y confirmación de borrado.
-8. Versión de `psycopg[binary]==3.2.3` alineada en los 5 servicios.
+#### Cómo comprobarlo:
+1. **Tests unitarios específicos con pytest:**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionCreateListViews" -v
+   ```
+   Comprueba:
+   - `test_create_subscription_success`: `POST` responde `201 Created` y guarda `organizacion_id` del contexto.
+   - `test_create_subscription_with_legacy_card_aliases`: Soporta alias del ejemplo de Trello (`ciclo`, `fecha_cobro`).
+   - `test_create_subscription_ignores_payload_organization`: El backend ignora cualquier intento de adjudicarse otra organización en el body.
+   - `test_create_subscription_missing_header_returns_403`: Bloquea creaciones anónimas con `403 Forbidden`.
+   - `test_create_subscription_invalid_monto_returns_400`: Bloquea montos $\le 0$ con `400 Bad Request`.
+   - `test_list_subscriptions_only_returns_own_tenant`: Org A solo ve las suyas y Org B solo ve las suyas.
+   - `test_list_subscriptions_missing_header_returns_403`: Bloquea listados sin cabecera con `403 Forbidden`.
+
+2. **Verificación interactiva en vivo:**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\python.exe verificar_todo.py
+   ```
+   (Los pasos 1 y 2 ejecutan `POST` y `GET` demostrando el aislamiento y la respuesta `201`/`200`).
+
+---
+
+### 3. Tarea: "Endpoints update y delete"
+
+Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualización parcial de campos como `estado`) y `DELETE` (eliminación física o lógica), asegurando que una organización no pueda modificar ni borrar recursos de otra cuenta (aislamiento multi-tenant estricto con `404 Not Found`).
+
+#### Cómo comprobarlo:
+1. **Tests unitarios específicos con pytest:**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionUpdateDeleteViews" -v
+   ```
+   Comprueba:
+   - `test_patch_subscription_success`: `PATCH` actualiza a `"cancelado"` y responde `200 OK`.
+   - `test_patch_subscription_supports_cancelada_normalization`: Normaliza `"cancelada"` a `"cancelado"`.
+   - `test_put_subscription_success`: `PUT` actualiza todos los campos y responde `200 OK`.
+   - `test_delete_subscription_success`: `DELETE` elimina el recurso y responde `204 No Content`.
+   - `test_tenant_isolation_patch_from_other_account_returns_404`: Otra cuenta recibe `404 Not Found`.
+   - `test_tenant_isolation_delete_from_other_account_returns_404`: Otra cuenta recibe `404 Not Found`.
+   - `test_cannot_reassign_organization_via_payload`: `organizacion_id` es inmutable.
+
+2. **Toda la suite completa (35 tests):**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\pytest.exe -v
+   ```
+   O en Docker:
+   ```bash
+   docker compose run --rm subscriptions pytest -v
+   ```
+
