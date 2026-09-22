@@ -1,10 +1,11 @@
+from django.contrib.auth import authenticate
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import RegisterSerializer, UserSerializer
 from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
-from .models import User
+
 
 class RegisterView(APIView):
     authentication_classes = []
@@ -12,14 +13,10 @@ class RegisterView(APIView):
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        return Response(
-            UserSerializer(user).data,
-            status=status.HTTP_201_CREATED,
-        )
+        return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+
 
 class LoginView(APIView):
     authentication_classes = []
@@ -29,30 +26,22 @@ class LoginView(APIView):
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"detail": self.MENSAJE_GENERICO},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+        serializer.is_valid(raise_exception=True)
 
-        email = serializer.validated_data["email"]
-        password = serializer.validated_data["password"]
+        user = authenticate(
+            request,
+            username=serializer.validated_data["email"],
+            password=serializer.validated_data["password"],
+        )
+        if user is None:
+            return Response({"detail": self.MENSAJE_GENERICO}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response(
-                {"detail": self.MENSAJE_GENERICO},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        if not user.is_active or not user.check_password(password):
-            return Response(
-                {"detail": self.MENSAJE_GENERICO},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
+        refresh = RefreshToken.for_user(user)
         return Response(
-            {"id": user.id, "email": user.email, "nombre": user.nombre},
+            {
+                "access_token": str(refresh.access_token),
+                "refresh_token": str(refresh),
+                "usuario": {"id": user.id, "nombre": user.nombre, "correo": user.email},
+            },
             status=status.HTTP_200_OK,
         )
