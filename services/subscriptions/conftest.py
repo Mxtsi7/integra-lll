@@ -15,8 +15,8 @@ def pytest_configure() -> None:
 
 @pytest.fixture(scope="session")
 def django_db_setup(django_db_blocker):
-    """Configura la BD de tests: search_path=public para PostgreSQL en Docker,
-    o SQLite en memoria si el host postgres no está disponible (tests locales).
+    """Configura la BD de tests: search_path=public para PostgreSQL,
+    o SQLite en memoria si el host de postgres no está disponible (tests locales).
     """
     from django.conf import settings
     from django.test.utils import setup_databases, teardown_databases
@@ -26,7 +26,11 @@ def django_db_setup(django_db_blocker):
 
     if "sqlite" in engine:
         settings.DATABASES["default"]["OPTIONS"] = {}
-    elif host == "postgres":
+    elif "postgresql" in engine or "psycopg" in engine:
+        # Forzar search_path=public para que las migraciones y tablas de
+        # test se creen en el esquema público, independientemente de lo que
+        # diga ESQUEMA_BD. Funciona tanto con host='postgres' (Docker)
+        # como con host='localhost' (CI / GitHub Actions).
         try:
             socket.gethostbyname(host)
             settings.DATABASES["default"].setdefault("OPTIONS", {})
