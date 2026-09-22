@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 
 import environ
-
+from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAIZ_REPO = BASE_DIR.parent.parent
@@ -91,3 +91,10 @@ TEMPLATES = [
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+SIMPLE_JWT = {
+    "SIGNING_KEY": env("JWT_SECRET"),
+    "ALGORITHM": env("JWT_ALGORITMO", default="HS256"),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_MINUTOS_ACCESO", default=30)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_DIAS_REFRESCO", default=7)),
+}
