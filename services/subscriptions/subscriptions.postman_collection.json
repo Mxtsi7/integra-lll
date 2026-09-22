@@ -1,0 +1,358 @@
+{
+	"info": {
+		"_postman_id": "8d3e91b2-c07a-4df5-911e-7b7194f42e47",
+		"name": "Ojo al Gasto - Subscriptions API",
+		"description": "Colección de pruebas para el microservicio de Suscripciones (Endpoints Create, List, Update, Delete y Aislamiento Multi-Tenant).\n\nCumple con la tarjeta de Trello: 'Enviar peticiones simuladas (por ejemplo, vía Postman) para asegurar que devuelven los códigos HTTP correctos'.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. POST /subscriptions/ (Crear Suscripción)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 201 Created\", function () {",
+							"    pm.response.to.have.status(201);",
+							"});",
+							"",
+							"pm.test(\"Responde con el objeto creado conteniendo id, nombre y moneda\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property(\"id\");",
+							"    pm.expect(jsonData.nombre).to.eql(\"Netflix\");",
+							"    pm.expect(jsonData.moneda).to.eql(\"CLP\");",
+							"    pm.expect(jsonData.frecuencia).to.eql(\"mensual\");",
+							"    pm.expect(jsonData.fecha_proximo_cobro).to.eql(\"2026-10-01\");",
+							"    ",
+							"    // Guardar el ID creado para los siguientes requests",
+							"    pm.collectionVariables.set(\"subscription_id\", jsonData.id);",
+							"});",
+							"",
+							"pm.test(\"El backend asignó la organización autenticada\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    var expectedOrg = pm.collectionVariables.get(\"org_id\");",
+							"    pm.expect(jsonData.organizacion_id).to.eql(expectedOrg);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}",
+						"description": "Contexto de organización autenticada inyectado por el gateway"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"nombre\": \"Netflix\",\n    \"monto\": 9990,\n    \"moneda\": \"CLP\",\n    \"ciclo\": \"mensual\",\n    \"fecha_cobro\": \"2026-10-01\",\n    \"estado\": \"activo\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/subscriptions/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						""
+					]
+				},
+				"description": "Crea una suscripción propia asignando automáticamente la organización autenticada (201 Created). Acepta alias legacy como 'ciclo' y 'fecha_cobro'."
+			},
+			"response": []
+		},
+		{
+			"name": "2. GET /subscriptions/ (Listar Suscripciones Propias)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 200 OK\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Devuelve un arreglo que incluye el objeto recién creado\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    var items = jsonData.results ? jsonData.results : jsonData;",
+							"    pm.expect(items).to.be.an(\"array\");",
+							"    ",
+							"    var createdId = pm.collectionVariables.get(\"subscription_id\");",
+							"    var encontrado = items.find(function(sub) {",
+							"        return sub.id === createdId || sub.nombre === \"Netflix\";",
+							"    });",
+							"    pm.expect(encontrado).to.not.be.undefined;",
+							"    pm.expect(encontrado.nombre).to.eql(\"Netflix\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/subscriptions/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						""
+					]
+				},
+				"description": "Lista exclusivamente las suscripciones de la organización autenticada."
+			},
+			"response": []
+		},
+		{
+			"name": "3. GET /subscriptions/:id/ (Detalle de Suscripción)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 200 OK\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"El recurso coincide con el ID solicitado\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.id).to.eql(pm.collectionVariables.get(\"subscription_id\"));",
+							"    pm.expect(jsonData.nombre).to.eql(\"Netflix\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/subscriptions/{{subscription_id}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						"{{subscription_id}}",
+						""
+					]
+				},
+				"description": "Consulta el detalle de una suscripción propia."
+			},
+			"response": []
+		},
+		{
+			"name": "4. PATCH /subscriptions/:id/ (Actualizar Parcialmente)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 200 OK\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"El estado fue actualizado a 'cancelado'\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData.estado).to.eql(\"cancelado\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"estado\": \"cancelado\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/subscriptions/{{subscription_id}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						"{{subscription_id}}",
+						""
+					]
+				},
+				"description": "Actualiza parcialmente una suscripción propia (ej. estado a cancelado)."
+			},
+			"response": []
+		},
+		{
+			"name": "5. GET /subscriptions/ (Aislamiento: Organización B no ve las de A)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 200 OK\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Organización B no puede ver la suscripción creada por Org A\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    var items = jsonData.results ? jsonData.results : jsonData;",
+							"    var createdId = pm.collectionVariables.get(\"subscription_id\");",
+							"    var encontrado = items.some(function(sub) {",
+							"        return sub.id === createdId;",
+							"    });",
+							"    pm.expect(encontrado).to.be.false;",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id_b}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/subscriptions/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						""
+					]
+				},
+				"description": "Demuestra aislamiento multi-tenant: otra organización no recibe los registros de Org A."
+			},
+			"response": []
+		},
+		{
+			"name": "6. GET /subscriptions/ (Seguridad: Sin Cabecera)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 403 Forbidden\", function () {",
+							"    pm.response.to.have.status(403);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/subscriptions/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						""
+					]
+				},
+				"description": "Petición sin cabecera X-Organizacion-Id es rechazada con 403 Forbidden."
+			},
+			"response": []
+		},
+		{
+			"name": "7. DELETE /subscriptions/:id/ (Eliminar Suscripción Propia)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 204 No Content\", function () {",
+							"    pm.response.to.have.status(204);",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/subscriptions/{{subscription_id}}/",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"subscriptions",
+						"{{subscription_id}}",
+						""
+					]
+				},
+				"description": "Elimina la suscripción propia y responde 204 No Content."
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8002",
+			"type": "string"
+		},
+		{
+			"key": "org_id",
+			"value": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+			"type": "string"
+		},
+		{
+			"key": "org_id_b",
+			"value": "b0eebc99-9c0b-4ef8-bb6d-6bb9bd380b22",
+			"type": "string"
+		},
+		{
+			"key": "subscription_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

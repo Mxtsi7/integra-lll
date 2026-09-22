@@ -296,23 +296,45 @@ docker compose down -v            # apagar y borrar la base (empezar de cero)
 > (`auth`, `connectors`, etc.). El `--rm` elimina el contenedor temporal
 > cuando termina.
 
-#### Pruebas del servicio `subscriptions` (Endpoints Update y Delete)
+#### Pruebas del servicio `subscriptions` (Tareas de Sprint 1)
 
-Para probar los endpoints `PUT`, `PATCH`, `DELETE` y el aislamiento multi-tenant del servicio `subscriptions`:
+Para comprobar el cumplimiento de las tareas asignadas en Trello para el servicio `subscriptions`:
 
-```bash
-# Dentro de Docker:
-docker compose run --rm subscriptions pytest tests/test_views.py -v
+1. **Tarea: "Enviar peticiones simuladas (por ejemplo, vía Postman) para asegurar que devuelven los códigos HTTP correctos"**:
+   - Colección oficial: [`services/subscriptions/subscriptions.postman_collection.json`](services/subscriptions/subscriptions.postman_collection.json) (importable en Postman con pruebas automáticas `pm.test`).
+   - Simulador directo por consola (sin abrir Postman):
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\python.exe simular_postman.py
+     ```
 
-# O fuera de Docker (Windows PowerShell en services/subscriptions):
-cd services/subscriptions
-.\venv\Scripts\pytest.exe tests\test_views.py -v
+2. **Tarea: "Endpoints create y list"**:
+   - Tests específicos con pytest:
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionCreateListViews" -v
+     ```
 
-# Demostración interactiva en vivo:
-.\venv\Scripts\python.exe verificar_todo.py
-```
+3. **Tarea: "Endpoints update y delete"**:
+   - Tests específicos con pytest:
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionUpdateDeleteViews" -v
+     ```
 
-Ver documentación completa en [services/subscriptions/README.md](services/subscriptions/README.md).
+4. **Suite completa y demostración interactiva:**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\pytest.exe -v              # 35 tests pasando al 100%
+   .\venv\Scripts\python.exe verificar_todo.py  # verificación en vivo de 9 requerimientos
+   ```
+
+   O dentro de Docker:
+   ```bash
+   docker compose run --rm subscriptions pytest -v
+   ```
+
+Ver documentación y guía detallada paso a paso en [services/subscriptions/README.md](services/subscriptions/README.md).
 
 ### Trabajar en un solo servicio
 
