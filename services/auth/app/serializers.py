@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
-
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
 
 
@@ -37,7 +37,22 @@ class RegisterSerializer(UserSerializer):
             **validated_data,
         )
 
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-    
+class LoginSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+        token["organizacion_id"] = str(user.organizacion_id) if user.organizacion_id else None
+        token["rol"] = user.rol
+        return token
+
+    def validate(self, attrs):
+        datos = super().validate(attrs)  # {"refresh": ..., "access": ...}
+        return {
+            "access_token": datos["access"],
+            "refresh_token": datos["refresh"],
+            "usuario": {
+                "id": str(self.user.id),
+                "nombre": self.user.nombre,
+                "correo": self.user.email,
+            },
+        }

@@ -33,9 +33,15 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+    class Rol(models.TextChoices):
+        TITULAR = "titular", "Titular"
+        INTEGRANTE = "integrante", "Integrante"
+
     email = models.EmailField(unique=True)
     nombre = models.CharField(max_length=150)
     consentimiento_en = models.DateTimeField(null=True, blank=True)
+    organizacion_id = models.UUIDField(null=True, blank=True)
+    rol = models.CharField(max_length=20, choices=Rol.choices, null=True, blank=True)
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
