@@ -52,16 +52,24 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
 }
 
 export type LoginPayload = { correo: string; password: string };
+
 export type RegisterPayload = {
   nombre: string;
   correo: string;
   password: string;
+  aceptaDatos: boolean;
 };
 
 export type AuthResponse = {
   access_token: string;
   refresh_token: string;
-  usuario: { id: string; nombre: string; correo: string };
+  usuario: { id: number; nombre: string; correo: string };
+};
+
+export type RegisterResponse = {
+  id: number;
+  email: string;
+  nombre: string;
 };
 
 export function login(payload: LoginPayload): Promise<AuthResponse> {
@@ -71,33 +79,30 @@ export function login(payload: LoginPayload): Promise<AuthResponse> {
   });
 }
 
-export function register(payload: RegisterPayload): Promise<AuthResponse> {
-  return postJSON<AuthResponse>(endpoints.register, {
-    // OJO: `nombre` puede desaparecer del modelo User — ver la nota de
-    // arriba. Si eso pasa, sacar esta línea (y el campo del formulario).
+export function register(payload: RegisterPayload): Promise<RegisterResponse> {
+  return postJSON<RegisterResponse>(endpoints.register, {
     nombre: payload.nombre,
     email: payload.correo,
     password: payload.password,
+    acepta_datos: payload.aceptaDatos,
   });
 }
-
 type TokenStorage = {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
 };
 
-// Web por defecto; móvil puede inyectar AsyncStorage adaptado
 const memoria: Record<string, string> = {};
 let storage: TokenStorage =
   typeof localStorage !== "undefined"
     ? localStorage
     : {
-        getItem: (k) => memoria[k] ?? null,
-        setItem: (k, v) => {
+        getItem: (k: string) => memoria[k] ?? null,
+        setItem: (k: string, v: string) => {
           memoria[k] = v;
         },
-        removeItem: (k) => {
+        removeItem: (k: string) => {
           delete memoria[k];
         },
       };
