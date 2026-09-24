@@ -31,6 +31,7 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/auth/register/", RegisterView.as_view(), name="register"),
+    path("api/auth/login/", LoginView.as_view(), name="login"),
     path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
     path("", inicio),
     path("admin/", admin.site.urls),
