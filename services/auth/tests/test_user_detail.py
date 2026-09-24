@@ -1,9 +1,11 @@
-import pytest
 from django.urls import reverse
 from rest_framework import status
+from django.contrib.auth import get_user_model
+from rest_framework.test import APITestCase
+import pytest
 from rest_framework.test import APIClient
 
-from app.models import User
+User = get_user_model()
 
 
 @pytest.mark.django_db
@@ -17,17 +19,23 @@ class TestUserDetailEndpoint:
         )
 
     def test_get_usuario_existente_devuelve_200(self):
-        url = reverse("user-detail", kwargs={"pk": self.usuario.id})
-        response = self.client.get(url)
+            r = self.client.get(reverse("usuario-actual"), HTTP_X_USUARIO_ID=str(self.usuario.id))
+            assert r.status_code == status.HTTP_200_OK
+            assert r.data["email"] == "ana@test.com"
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["email"] == "ana@test.com"
-        assert response.data["nombre"] == "Ana"
-        assert "password" not in response.data
+    def test_me_sin_cabecera_es_403(self):
+        assert self.client.get(reverse("usuario-actual")).status_code == status.HTTP_403_FORBIDDEN
 
-    def test_get_usuario_inexistente_devuelve_404_con_mensaje(self):
-        url = reverse("user-detail", kwargs={"pk": 9999})
-        response = self.client.get(url)
+    def test_me_devuelve_el_usuario_del_token(self):
+        r = self.client.get(reverse("usuario-actual"), HTTP_X_USUARIO_ID=str(self.usuario.id))
+        assert r.status_code == status.HTTP_200_OK
+        assert r.data["email"] == "ana@test.com"
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert "detail" in response.data
+    def test_me_sin_cabecera_es_403(self):
+        assert self.client.get(reverse("usuario-actual")).status_code == status.HTTP_403_FORBIDDEN
+
+    def test_no_puedo_leer_a_otro_usuario(self):
+        otro = User.objects.create_user(email="beto@test.com", password="ClaveSegura123", nombre="Beto")
+        url = reverse("user-detail", kwargs={"pk": otro.id})
+        r = self.client.get(url, HTTP_X_USUARIO_ID=str(self.usuario.id))
+        assert r.status_code == status.HTTP_404_NOT_FOUND
