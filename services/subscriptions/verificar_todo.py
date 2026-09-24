@@ -52,7 +52,7 @@ def main():
         "estado": "activo",
     }
     resp_create = client.post(
-        "/subscriptions/",
+        "/api/suscripciones/",
         post_payload,
         format="json",
         headers={"X-Organizacion-Id": str(org_a)},
@@ -78,7 +78,7 @@ def main():
         estado="activo",
     )
     resp_list_a = client.get(
-        "/subscriptions/",
+        "/api/suscripciones/",
         headers={"X-Organizacion-Id": str(org_a)},
     )
     items_a = resp_list_a.data["results"] if isinstance(resp_list_a.data, dict) and "results" in resp_list_a.data else resp_list_a.data
@@ -87,7 +87,7 @@ def main():
     print_check("Org A solo ve su suscripción ('Netflix')", "Netflix" in nombres_a and "Spotify Org B" not in nombres_a, f"Suscripciones devueltas: {nombres_a}")
 
     resp_list_b = client.get(
-        "/subscriptions/",
+        "/api/suscripciones/",
         headers={"X-Organizacion-Id": str(org_b)},
     )
     items_b = resp_list_b.data["results"] if isinstance(resp_list_b.data, dict) and "results" in resp_list_b.data else resp_list_b.data
@@ -96,7 +96,7 @@ def main():
 
     print("\n3. Requerimiento PATCH: Actualización parcial propia")
     resp_patch = client.patch(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         {"estado": "cancelada"},
         format="json",
         headers={"X-Organizacion-Id": str(org_a)}
@@ -116,7 +116,7 @@ def main():
         "estado": "activo",
     }
     resp_put = client.put(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         put_payload,
         format="json",
         headers={"X-Organizacion-Id": str(org_a)}
@@ -127,7 +127,7 @@ def main():
 
     print("\n5. Requerimiento AISLAMIENTO: Intento de acceso de Organización B")
     resp_patch_b = client.patch(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         {"estado": "fantasma"},
         format="json",
         headers={"X-Organizacion-Id": str(org_b)}
@@ -138,7 +138,7 @@ def main():
 
     print("\n6. Requerimiento SEGURIDAD: Petición sin cabecera de organización")
     resp_no_header = client.patch(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         {"estado": "cancelado"},
         format="json"
     )
@@ -147,7 +147,7 @@ def main():
 
     print("\n7. Requerimiento INMUTABILIDAD: Intento de reasignar organizacion_id")
     resp_reassign = client.patch(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         {"organizacion_id": str(org_b)},
         format="json",
         headers={"X-Organizacion-Id": str(org_a)}
@@ -157,13 +157,13 @@ def main():
 
     print("\n8. Requerimiento DELETE: Eliminación de suscripción propia")
     resp_delete_b = client.delete(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         headers={"X-Organizacion-Id": str(org_b)}
     )
     print_check("Org B no puede eliminar recurso de Org A (recibe 404)", resp_delete_b.status_code == status.HTTP_404_NOT_FOUND, f"Status: {resp_delete_b.status_code}")
 
     resp_delete = client.delete(
-        f"/subscriptions/{sub.id}/",
+        f"/api/suscripciones/{sub.id}/",
         headers={"X-Organizacion-Id": str(org_a)}
     )
     existe = Subscription.objects.filter(id=sub.id).exists()
