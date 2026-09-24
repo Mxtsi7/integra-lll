@@ -81,33 +81,55 @@ export function register(payload: RegisterPayload): Promise<AuthResponse> {
   });
 }
 
+type TokenStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+// Web por defecto; móvil puede inyectar AsyncStorage adaptado
+const memoria: Record<string, string> = {};
+let storage: TokenStorage =
+  typeof localStorage !== "undefined"
+    ? localStorage
+    : {
+        getItem: (k) => memoria[k] ?? null,
+        setItem: (k, v) => {
+          memoria[k] = v;
+        },
+        removeItem: (k) => {
+          delete memoria[k];
+        },
+      };
+
+export function configurarTokenStorage(s: TokenStorage) {
+  storage = s;
+}
+
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
- 
+
 export function guardarTokens(tokens: {
   access_token: string;
   refresh_token: string;
 }) {
-  localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
-  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+  storage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+  storage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
 }
- 
+
 export function obtenerAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return storage.getItem(ACCESS_TOKEN_KEY);
 }
- 
+
 export function obtenerRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  return storage.getItem(REFRESH_TOKEN_KEY);
 }
- 
+
 export function hayTokenGuardado(): boolean {
   return obtenerAccessToken() !== null;
 }
- 
-// La función que "Interceptor Axios para manejar errores 401 y forzar
-// logout" va a llamar cuando el backend responda 401 con un token
-// vencido o inválido.
+
 export function logout() {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  storage.removeItem(ACCESS_TOKEN_KEY);
+  storage.removeItem(REFRESH_TOKEN_KEY);
 }
