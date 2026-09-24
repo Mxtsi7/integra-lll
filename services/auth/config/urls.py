@@ -3,6 +3,8 @@ from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from app.views import RegisterView, UserDetailView, UsuarioActualView
+
 
 from app.views import LoginView, RegisterView, UserDetailView
 
@@ -27,4 +29,6 @@ urlpatterns = [
     path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="usuario-detalle"),
     path("", inicio),
     path("admin/", admin.site.urls),
+    path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
+    path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
 ]
