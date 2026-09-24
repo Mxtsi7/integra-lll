@@ -80,3 +80,34 @@ export function register(payload: RegisterPayload): Promise<AuthResponse> {
     password: payload.password,
   });
 }
+
+const ACCESS_TOKEN_KEY = "access_token";
+const REFRESH_TOKEN_KEY = "refresh_token";
+ 
+export function guardarTokens(tokens: {
+  access_token: string;
+  refresh_token: string;
+}) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access_token);
+  localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+}
+ 
+export function obtenerAccessToken(): string | null {
+  return localStorage.getItem(ACCESS_TOKEN_KEY);
+}
+ 
+export function obtenerRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
+}
+ 
+export function hayTokenGuardado(): boolean {
+  return obtenerAccessToken() !== null;
+}
+ 
+// La función que "Interceptor Axios para manejar errores 401 y forzar
+// logout" va a llamar cuando el backend responda 401 con un token
+// vencido o inválido.
+export function logout() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
