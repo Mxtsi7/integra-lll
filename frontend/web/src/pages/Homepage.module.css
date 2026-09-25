@@ -1,0 +1,136 @@
+
+.dashboard-page {
+  --ink: #1a1b3a;
+  --muted: #8990a3;
+  --border: #eef0f4;
+  --accent: #4f46e5;
+
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 32px 80px;
+
+  font-family:
+    "JetBrains Mono",
+    "Fira Code",
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+
+  color: var(--ink);
+}
+
+/* =========================
+   RESUMEN
+   ========================= */
+
+.dashboard-page__summary-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 32px;
+
+  max-width: 420px;
+  margin-bottom: 40px;
+}
+
+.dashboard-page__summary-label {
+  display: block;
+
+  font-size: 12px;
+  letter-spacing: 0.06em;
+
+  color: var(--muted);
+
+  margin-bottom: 10px;
+}
+
+.dashboard-page__summary-value {
+  margin: 0;
+
+  font-size: 44px;
+  font-weight: 700;
+}
+
+.dashboard-page__summary-period {
+  font-size: 18px;
+  font-weight: 500;
+
+  color: var(--muted);
+}
+
+/* =========================
+   LISTA DE SUSCRIPCIONES
+   ========================= */
+
+.dashboard-page__list-section {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+
+  overflow: hidden;
+}
+
+.dashboard-page__list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 20px 24px;
+
+  border-bottom: 1px solid var(--border);
+}
+
+.dashboard-page__list-title {
+  margin: 0;
+
+  font-size: 18px;
+  font-weight: 700;
+
+  padding-left: 12px;
+
+  border-left: 3px solid var(--ink);
+}
+
+.dashboard-page__add-button {
+  background: none;
+  border: none;
+
+  color: var(--accent);
+
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+
+  cursor: pointer;
+}
+
+.dashboard-page__add-button:hover {
+  text-decoration: underline;
+}
+
+.dashboard-page__list {
+  list-style: none;
+
+  margin: 0;
+  padding: 0;
+}
+
+/* =========================
+   RESPONSIVE
+   ========================= */
+
+@media (max-width: 640px) {
+  .dashboard-page {
+    padding: 32px 16px 60px;
+  }
+
+  .dashboard-page__summary-card {
+    max-width: none;
+  }
+
+  .dashboard-page__list-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+}

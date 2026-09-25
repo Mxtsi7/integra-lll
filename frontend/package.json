@@ -11,5 +11,8 @@
     "build": "npm run build --workspace=web",
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "dependencies": {
+    "react-router-dom": "^7.18.4"
   }
 }
