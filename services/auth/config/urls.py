@@ -4,20 +4,14 @@ from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from app.views import RegisterView, LoginView
+from app.views import LoginView, RegisterView, UserDetailView, UsuarioActualView
 
 
 def salud(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT current_schema()")
         esquema = cursor.fetchone()[0]
-    return JsonResponse(
-        {
-            "servicio": "auth",
-            "estado": "ok",
-            "esquema": esquema,
-        }
-    )
+    return JsonResponse({"servicio": "auth", "estado": "ok", "esquema": esquema})
 
 
 def inicio(request):
@@ -30,7 +24,8 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/auth/register/", RegisterView.as_view(), name="register"),
     path("api/auth/login/", LoginView.as_view(), name="login"),
+    path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
+    path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="usuario-detalle"),
     path("", inicio),
     path("admin/", admin.site.urls),
-    
 ]
