@@ -1,8 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User, Organizacion
-
+from django.db import transaction
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -32,15 +31,16 @@ class RegisterSerializer(UserSerializer):
 
     def create(self, validated_data):
         validated_data.pop("acepta_datos", None)
-        organizacion = Organizacion.objects.create(
-            nombre=f"Hogar de {validated_data.get('nombre', 'usuario')}"
-        )
-        return User.objects.create_user(
-            consentimiento_en=timezone.now(),
-            organizacion=organizacion,
-            rol=User.Rol.TITULAR,
-            **validated_data,
-        )
+        with transaction.atomic():
+            organizacion = Organizacion.objects.create(
+                nombre=f"Hogar de {validated_data.get('nombre', 'usuario')}"
+            )
+            return User.objects.create_user(
+                consentimiento_en=timezone.now(),
+                organizacion=organizacion,
+                rol=User.Rol.TITULAR,
+                **validated_data,
+            )
 
 
 class LoginSerializer(serializers.Serializer):
