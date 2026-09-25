@@ -1,0 +1,82 @@
+# Redis: el broker de Celery (el Temporizador del RF-13). Sin disco a
+# propósito: lo que guarda son tareas en vuelta, no datos del negocio.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: redis }
+  ports: [{ port: 6379, targetPort: 6379 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: redis } }
+  template:
+    metadata:
+      labels: { app: redis, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports: [{ name: redis, containerPort: 6379 }]
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 128Mi }
+---
+# RabbitMQ: el bus de eventos entre servicios del ADR-003. Todavía ningún
+# servicio publica eventos, pero va en el despliegue porque es parte de la
+# arquitectura declarada y así está listo cuando se use.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: rabbitmq }
+  ports:
+    - { name: amqp, port: 5672, targetPort: 5672 }
+    - { name: panel, port: 15672, targetPort: 15672 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: rabbitmq } }
+  template:
+    metadata:
+      labels: { app: rabbitmq, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-management-alpine
+          ports:
+            - { name: amqp, containerPort: 5672 }
+            - { name: panel, containerPort: 15672 }
+          readinessProbe:
+            exec: { command: ["rabbitmq-diagnostics", "-q", "ping"] }
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 25
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { cpu: 150m, memory: 384Mi }
