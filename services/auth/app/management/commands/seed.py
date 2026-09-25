@@ -13,9 +13,10 @@ escribe en texto plano dentro de un get_or_create.
 import os
 
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.utils import timezone
 
-from app.models import User
+from app.models import Organizacion, User
 
 CORREO_POR_DEFECTO = "demo@ojoalgasto.cl"
 CLAVE_POR_DEFECTO = "Demo-2026-ojo"
@@ -46,10 +47,20 @@ class Command(BaseCommand):
             self.stdout.write(f"seed: {correo} ya existía, no se toca")
             return
 
-        User.objects.create_user(
-            email=correo,
-            password=clave,
-            nombre=nombre,
-            consentimiento_en=timezone.now(),
+        # Con su propia organización, igual que cualquiera que se registre por
+        # la web. Sin esto el token sale sin `organizacion_id`, el gateway no
+        # inyecta la cabecera y `subscriptions` responde 403: el usuario de
+        # demostración serviría para entrar y para nada más.
+        with transaction.atomic():
+            organizacion = Organizacion.objects.create(nombre=f"Hogar de {nombre}")
+            User.objects.create_user(
+                email=correo,
+                password=clave,
+                nombre=nombre,
+                consentimiento_en=timezone.now(),
+                organizacion=organizacion,
+                rol=User.Rol.TITULAR,
+            )
+        self.stdout.write(
+            self.style.SUCCESS(f"seed: usuario {correo} creado, titular de «{organizacion.nombre}»")
         )
-        self.stdout.write(self.style.SUCCESS(f"seed: usuario {correo} creado"))
