@@ -96,6 +96,8 @@ JWT_SECRET = env("JWT_SECRET")
 JWT_ALGORITMO = env("JWT_ALGORITMO", default="HS256")
 
 SIMPLE_JWT = {
-    "SIGNING_KEY": JWT_SECRET,       # no SECRET_KEY: el gateway no lo conoce
+    "SIGNING_KEY": JWT_SECRET,
     "ALGORITHM": JWT_ALGORITMO,
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_MINUTOS_ACCESO", default=30)),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_DIAS_REFRESCO", default=7)),
 }
