@@ -1,0 +1,33 @@
+# La web, compilada y servida por nginx.
+#
+#     docker build -f k8s/Dockerfile.web \
+#       --build-arg VITE_API_URL=https://ojoalgasto-forellana.dev.censei.cl/api \
+#       frontend/
+#
+# En docker compose la web corre con `vite dev`, que sirve para desarrollar
+# pero no para Kubernetes: es lento, recarga solo y expone el código fuente.
+# Acá se compila una vez y nginx entrega archivos estáticos.
+#
+# OJO: `VITE_API_URL` se resuelve al COMPILAR, no al arrancar. Si cambia la
+# URL pública hay que reconstruir la imagen; no basta con editar un ConfigMap.
+
+FROM node:20-alpine AS compilacion
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY shared/package.json shared/
+COPY web/package.json web/
+RUN npm ci
+
+COPY . .
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+RUN npm run build --workspace=web
+
+
+FROM nginx:1.27-alpine
+
+COPY --from=compilacion /app/web/dist /usr/share/nginx/html
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 8080

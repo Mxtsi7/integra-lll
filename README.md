@@ -157,6 +157,37 @@ services/subscriptions/
 └─ tests/
 ```
 
+### Modelo `Subscription` (implementado)
+
+El modelo ya está migrado y operativo en el esquema `subscriptions` de
+PostgreSQL. Define una suscripción recurrente asociada a un usuario del
+sistema.
+
+| Campo | Tipo | Reglas |
+|---|---|---|
+| `nombre` | `CharField(100)` | Obligatorio |
+| `monto` | `DecimalField(10,2)` | Obligatorio · `CHECK monto > 0` · Validador `MinValueValidator(0.01)` |
+| `moneda` | `CharField(3)` | Choices: `CLP` · Default: `CLP` |
+| `ciclo` | `CharField(20)` | Choices: `MENSUAL`, `ANUAL` |
+| `fecha_cobro` | `DateField` | Obligatorio |
+| `estado` | `CharField(20)` | Choices: `ACTIVO`, `INACTIVO` |
+| `user` | `ForeignKey` → `auth_user` | `ON DELETE CASCADE` · `related_name="subscriptions"` |
+
+**Tabla física:** `subscription` (esquema `subscriptions`).
+
+**Constraint a nivel de BD:**
+
+```sql
+CHECK (monto > 0)   -- subscription_monto_positivo
+```
+
+**Ordenamiento por defecto:** `-fecha_cobro` (más reciente primero).
+
+> El campo `user` apunta a `settings.AUTH_USER_MODEL`. En el esquema
+> `subscriptions` la tabla `auth_user` existe porque Django la crea con
+> `migrate`; el servicio `auth` gestiona los datos reales de usuario en
+> su propio esquema.
+
 ---
 
 ## Quién es dueño de qué
@@ -192,7 +223,7 @@ entonces tiene que ser **3.12** (ver más abajo).
 git clone https://github.com/Mxtsi7/integra-lll.git
 cd integra-lll
 cp .env.example .env                        # con los valores de ejemplo alcanza
-docker compose up -d postgres auth subscriptions
+docker compose up -d --build
 ```
 
 La primera vez descarga las imágenes y tarda unos minutos. Después, segundos.
@@ -203,23 +234,38 @@ Para comprobar que quedó bien, abre en el navegador:
 |---|---|---|
 | Servicio `auth` | http://localhost:8001/health/ | `{"servicio": "auth", "esquema": "auth", "estado": "ok"}` |
 | Servicio `subscriptions` | http://localhost:8002/health/ | lo mismo, con `subscriptions` |
+| Gateway | http://localhost:8000/health/ | `{"servicio": "gateway", "estado": "ok"}` |
+| Web | http://localhost:5173 | la pantalla de login |
 | Panel de RabbitMQ | http://localhost:15672 | usuario y clave `guest` |
 
 Si `/health/` responde, el servicio leyó el `.env`, se conectó a PostgreSQL y
 está parado en su propio esquema. Es la prueba completa.
 
-> **Estado actual.** Hoy solo `auth` y `subscriptions` tienen proyecto Django y
-> arrancan. `connectors`, `analytics`, `notifications`, el gateway y el frontend
-> todavía son cascarones: `docker compose up --build` sin más los intenta
-> levantar y fallan. A medida que cada uno reciba su `manage.py`, se agrega al
-> comando de arriba hasta llegar al objetivo:
->
-> ```bash
-> docker compose up --build       # todo el sistema, un solo comando
-> ```
->
-> **Eso es innegociable**: si levantar el sistema toma más de un comando, con 6
-> personas el proyecto se vuelve inmanejable.
+> **Estado actual.** Con ese comando arrancan `postgres`, `rabbitmq`, `redis`,
+> `auth`, `subscriptions` (con su worker y su beat de Celery), el gateway y la
+> web. `connectors`, `analytics` y `notifications` todavía son cascarones sin
+> `manage.py`: aparecen como `Exited (2)` en `docker compose ps` y se ignoran
+> hasta que tengan código. Que todo el sistema se levante con un solo comando
+> **es innegociable**: con 6 personas, cualquier paso extra se olvida.
+
+### Usuario de demostración
+
+Al arrancar, `auth` deja creado un usuario de prueba para no tener que
+registrarse cada vez que se borra la base:
+
+| Correo | Clave |
+|---|---|
+| `demo@ojoalgasto.cl` | `Demo-2026-ojo` |
+
+Lo hace el comando `python manage.py seed`, que corre desde `entrypoint.sh`
+solo cuando `SEED_DEMO=1` (lo pone `docker-compose.yml`; en producción no
+existe). Es idempotente: la segunda vez no toca nada. Las credenciales se
+cambian con `SEED_CORREO`, `SEED_CLAVE` y `SEED_NOMBRE` en el `.env`, y la
+clave se guarda hasheada, como cualquier usuario real. Para correrlo a mano:
+
+```bash
+docker compose run --rm auth python manage.py seed
+```
 
 Comandos del día a día:
 
@@ -229,6 +275,66 @@ docker compose logs -f auth       # ver el log de un servicio (Ctrl+C para salir
 docker compose down               # apagar todo; los datos quedan
 docker compose down -v            # apagar y borrar la base (empezar de cero)
 ```
+
+### Desarrollo con Docker Compose
+
+> **Regla general:** ejecuta `manage.py` y las herramientas de cada servicio
+> **dentro del contenedor** con `docker compose run --rm`. Así usas la misma
+> versión de Python, las mismas dependencias y la misma red que en producción,
+> sin instalar nada en tu máquina.
+
+| Tarea | Comando |
+|---|---|
+| **Crear migraciones** | `docker compose run --rm subscriptions python manage.py makemigrations app` |
+| **Aplicar migraciones** | `docker compose run --rm subscriptions python manage.py migrate` |
+| **Correr pruebas** | `docker compose run --rm subscriptions pytest` |
+| **Consola Django** | `docker compose run --rm subscriptions python manage.py shell` |
+| **Conectarse a PostgreSQL** | `docker compose exec postgres psql -U postgres -d suscripciones` |
+| **Inspeccionar esquema** | `docker compose exec postgres psql -U postgres -d suscripciones -c '\dt subscriptions.*'` |
+
+> Cambia `subscriptions` por el nombre del servicio que necesites
+> (`auth`, `connectors`, etc.). El `--rm` elimina el contenedor temporal
+> cuando termina.
+
+#### Pruebas del servicio `subscriptions` (Tareas de Sprint 1)
+
+Para comprobar el cumplimiento de las tareas asignadas en Trello para el servicio `subscriptions`:
+
+1. **Tarea: "Enviar peticiones simuladas (por ejemplo, vía Postman) para asegurar que devuelven los códigos HTTP correctos"**:
+   - Colección oficial: [`services/subscriptions/subscriptions.postman_collection.json`](services/subscriptions/subscriptions.postman_collection.json) (importable en Postman con pruebas automáticas `pm.test`).
+   - Simulador directo por consola (sin abrir Postman):
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\python.exe simular_postman.py
+     ```
+
+2. **Tarea: "Endpoints create y list"**:
+   - Tests específicos con pytest:
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionCreateListViews" -v
+     ```
+
+3. **Tarea: "Endpoints update y delete"**:
+   - Tests específicos con pytest:
+     ```powershell
+     cd services/subscriptions
+     .\venv\Scripts\pytest.exe tests/test_views.py -k "TestSubscriptionUpdateDeleteViews" -v
+     ```
+
+4. **Suite completa y demostración interactiva:**
+   ```powershell
+   cd services/subscriptions
+   .\venv\Scripts\pytest.exe -v              # 35 tests pasando al 100%
+   .\venv\Scripts\python.exe verificar_todo.py  # verificación en vivo de 9 requerimientos
+   ```
+
+   O dentro de Docker:
+   ```bash
+   docker compose run --rm subscriptions pytest -v
+   ```
+
+Ver documentación y guía detallada paso a paso en [services/subscriptions/README.md](services/subscriptions/README.md).
 
 ### Trabajar en un solo servicio
 
@@ -272,6 +378,24 @@ host `postgres`, que solo existe dentro de la red de Docker. Cámbialo en tu
 `.env` local a `localhost` mientras trabajes así, y no lo subas.
 
 ---
+
+## Desplegar en Kubernetes
+
+El sistema completo corre en el cluster del ramo:
+
+**https://ojoalgasto-forellana.dev.censei.cl**
+
+> El navegador muestra una advertencia de certificado: el cluster no tiene
+> cert-manager. Entrar por «Avanzado → Continuar».
+
+```bash
+./k8s/desplegar.sh          # construye, publica y aplica
+kubectl get pods            # ver el estado
+```
+
+Los manifiestos, los Dockerfiles de producción y las reglas del cluster (que
+no se pueden consultar, solo chocar) están documentados en
+[k8s/README.md](k8s/README.md).
 
 ## Decisiones que hay que conocer
 

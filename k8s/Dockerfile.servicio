@@ -1,0 +1,30 @@
+# Imagen de cualquiera de los servicios Django, para Kubernetes.
+#
+# Se construye desde la RAÍZ del repo, no desde la carpeta del servicio:
+#     docker build -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/auth .
+#     docker build -f k8s/Dockerfile.servicio --build-arg SERVICIO=gateway .
+#
+# El Dockerfile de cada servicio no sirve tal cual acá porque su contexto es
+# la carpeta del servicio y deja `shared/` afuera: en docker compose eso se
+# tapa con un bind mount, pero en Kubernetes no hay bind mounts. La imagen
+# tiene que traer `shared/` adentro.
+#
+# El comando de arranque lo pone cada Deployment (runserver, celery worker,
+# celery beat), y las migraciones las corre un initContainer, no el arranque.
+
+FROM python:3.12-slim
+
+ARG SERVICIO
+WORKDIR /app
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential libpq-dev curl && rm -rf /var/lib/apt/lists/*
+
+COPY ${SERVICIO}/requirements.txt .
+# gunicorn se agrega solo acá: `runserver` es el servidor de desarrollo de
+# Django y no se usa fuera del PC. No toca el requirements.txt de nadie.
+RUN pip install --no-cache-dir -r requirements.txt gunicorn==23.0.0
+
+COPY ${SERVICIO}/ ./
+COPY shared/ ./shared/

@@ -1,0 +1,64 @@
+# PostgreSQL. Un StatefulSet y no un Deployment porque la base tiene estado:
+# el disco es suyo, tiene que volver al mismo pod después de un reinicio.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  clusterIP: None          # headless: el StatefulSet le da identidad al pod
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, value: suscripciones }
+            - { name: POSTGRES_USER, value: postgres }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: POSTGRES_PASSWORD }
+            # Los datos van en un subdirectorio: el punto de montaje trae un
+            # lost+found que hace fallar al initdb si se usa como PGDATA.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: datos, mountPath: /var/lib/postgresql/data }
+            - { name: inicio, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-d", "suscripciones"] }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres"] }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 384Mi }
+      volumes:
+        - name: inicio
+          configMap: { name: postgres-inicio }
+  volumeClaimTemplates:
+    - metadata: { name: datos }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 2Gi } }

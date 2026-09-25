@@ -1,24 +1,12 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-
-from .models import User
+from django.contrib.auth import get_user_model
 
 
-class UserAdmin(BaseUserAdmin):
-    model = User
-    list_display = ("email", "nombre", "is_active", "is_staff")
-    list_filter = ("is_active", "is_staff")
-    search_fields = ("email", "nombre")
-    ordering = ("email",)
-
-    fieldsets = (
-        (None, {"fields": ("email", "password")}),
-        ("Datos personales", {"fields": ("nombre",)}),
-        ("Permisos", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
-    )
-    add_fieldsets = (
-        (None, {"fields": ("email", "nombre", "password1", "password2")}),
-    )
+User = get_user_model()
 
 
-admin.site.register(User, UserAdmin)
+@admin.register(User)
+class UserAdmin(admin.ModelAdmin):
+    list_display = ("email", "is_staff", "is_superuser", "is_active")
+    list_filter = ("is_staff", "is_superuser", "is_active")
+    search_fields = ("email",)

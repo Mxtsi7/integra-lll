@@ -1,0 +1,38 @@
+:root {
+  --oag-bg: #eef1f7;
+  --oag-surface: #ffffff;
+  --oag-line: #e2e6ef;
+
+  --oag-ink: #101828;
+  --oag-ink-soft: #64748b;
+
+  --oag-navy: #16213e;
+  --oag-navy-soft: #1f2c4f;
+  --oag-navy-text: #aab6d3;
+  --oag-navy-text-soft: #6b7699;
+
+  --oag-alert-bg: #fef3c7;
+  --oag-alert-text: #92400e;
+  --oag-muted-bg: #e5e9f0;
+  --oag-muted-text: #64748b;
+
+  --oag-positive: #15803d;
+
+  --oag-radius-sm: 8px;
+  --oag-radius-md: 12px;
+  --oag-radius-lg: 14px;
+
+  --oag-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --oag-font-sans: -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--oag-bg);
+  color: var(--oag-ink);
+  font-family: var(--oag-font-sans);
+}

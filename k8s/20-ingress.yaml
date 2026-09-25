@@ -1,0 +1,37 @@
+# Entrada desde internet.
+#
+# Reglas del cluster del ramo (las impone la ValidatingAdmissionPolicy
+# 'rke2-edu-ingress-hostname'; no se pueden leer, se descubren al chocar):
+#   · ingressClassName tiene que ser "nginx"
+#   · el host tiene que ser <algo>.dev.censei.cl (un solo nivel)
+#   · la anotación de ExternalDNS tiene que apuntar a proxy.inf.uct.cl
+#   · cada hostname puede usar SOLO el path "/"
+#   · cada Ingress publica EXACTAMENTE UN hostname
+#
+# Por eso hay un solo dominio y el /api/ lo resuelve el nginx de la web hacia
+# el gateway (ver frontend/web/nginx.conf). Además el cluster no tiene
+# cert-manager: cada dominio extra sería otro certificado que el navegador
+# rechaza. Con uno solo, el usuario acepta una advertencia y ya.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ojoalgasto-web
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+  annotations:
+    external-dns.alpha.kubernetes.io/target: proxy.inf.uct.cl
+    # El cluster no trae cert-manager ni un certificado del dominio: nginx
+    # sirve su certificado falso y el navegador lo rechaza. Sin este redirect
+    # forzado, el sitio funciona por HTTP sin advertencias.
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ojoalgasto-forellana.dev.censei.cl
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port: { number: 80 }

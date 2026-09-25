@@ -1,0 +1,62 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: var(--oag-surface);
+  border: 1px solid var(--oag-line);
+  border-radius: var(--oag-radius-lg);
+  padding: 20px;
+}
+
+.cardDestacada {
+  border: 1.5px solid var(--oag-navy);
+}
+
+.etiqueta {
+  margin: 0 0 20px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--oag-ink-soft);
+  font-family: var(--oag-font-mono);
+}
+
+.valor {
+  font-family: var(--oag-font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--oag-ink);
+}
+
+.valorAlerta {
+  color: var(--oag-alert-text);
+}
+
+.pie {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--oag-ink-soft);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

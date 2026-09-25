@@ -1,0 +1,148 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.seccion {
+  background: var(--oag-surface);
+  border: 1px solid var(--oag-line);
+  border-radius: var(--oag-radius-lg);
+  padding: 20px 22px;
+  align-self: start;
+}
+
+.seccionTitulo {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 14px;
+  color: var(--oag-ink);
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--oag-line);
+  gap: 12px;
+}
+
+.fila:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.filaEtiqueta {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--oag-ink);
+}
+
+.filaDescripcion {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--oag-ink-soft);
+}
+
+.toggle,
+.toggleActivo {
+  width: 40px;
+  height: 22px;
+  border-radius: 12px;
+  border: none;
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toggle {
+  background: var(--oag-muted-bg);
+}
+
+.toggleActivo {
+  background: var(--oag-navy);
+}
+
+.toggleBola {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.15s ease;
+}
+
+.toggleActivo .toggleBola {
+  transform: translateX(18px);
+}
+
+.badgePendiente {
+  background: var(--oag-muted-bg);
+  color: var(--oag-muted-text);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.notaConectores {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--oag-ink-soft);
+  line-height: 1.5;
+}
+
+.filaTema {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.selectorTema {
+  display: flex;
+  gap: 6px;
+  background: var(--oag-bg);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.temaBoton,
+.temaBotonActivo {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.temaBoton {
+  background: transparent;
+  color: var(--oag-ink-soft);
+}
+
+.temaBotonActivo {
+  background: var(--oag-navy);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.flecha {
+  color: var(--oag-ink-soft);
+  font-size: 16px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

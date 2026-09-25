@@ -1,15 +1,21 @@
-import { configurarApi } from '@ojoalgasto/shared';
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import { configurarApi, configureAuthApi, configurarManejador401} from "@ojoalgasto/shared";
+import { App } from "./App";
+import "./styles/theme.css";
 
-import { App } from './App';
+const urlBase = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
+configurarApi({ urlBase });
+configureAuthApi({ baseUrl: urlBase });
+configurarManejador401(() => {
+  window.location.href = "/login";
+});
 
-// La URL de la API la define docker-compose.yml (VITE_API_URL). Se configura
-// una sola vez, antes de montar cualquier pantalla.
-configurarApi({ urlBase: import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api' });
-
-createRoot(document.getElementById('raiz')!).render(
+createRoot(document.getElementById("raiz")!).render(
   <StrictMode>
-    <App />
-  </StrictMode>,
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>
 );
