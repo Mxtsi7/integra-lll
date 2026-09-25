@@ -1,20 +1,25 @@
-import uuid
-
 import jwt
 import pytest
 from django.conf import settings
 from rest_framework.test import APIClient
 
-from app.models import User
+from app.models import Organizacion, User
+
+
+def _decode(token):
+    key = getattr(settings, "JWT_SECRET", None) or settings.SIMPLE_JWT["SIGNING_KEY"]
+    alg = getattr(settings, "JWT_ALGORITMO", None) or settings.SIMPLE_JWT["ALGORITHM"]
+    return jwt.decode(token, key, algorithms=[alg])
 
 
 @pytest.fixture()
 def usuario(db):
+    org = Organizacion.objects.create(nombre="Hogar de prueba")
     return User.objects.create_user(
         email="ana@test.com",
         password="ClaveSegura123",
         nombre="Ana",
-        organizacion_id=uuid.uuid4(),
+        organizacion=org,
         rol="titular",
     )
 
@@ -37,22 +42,24 @@ class TestLoginEndpoint:
             {"email": "ana@test.com", "password": "ClaveSegura123"},
             format="json",
         )
-        payload = jwt.decode(
-            resp.data["access_token"], settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITMO]
-        )
+        assert resp.status_code == 200
+        payload = _decode(resp.data["access_token"])
         assert payload["organizacion_id"] == str(usuario.organizacion_id)
         assert payload["rol"] == "titular"
 
     def test_usuario_sin_organizacion_no_rompe_el_login(self, db):
-        User.objects.create_user(email="sin-org@test.com", password="ClaveSegura123", nombre="Sin Org")
+        User.objects.create_user(
+            email="sin-org@test.com",
+            password="ClaveSegura123",
+            nombre="Sin Org",
+        )
         resp = APIClient().post(
             "/api/auth/login/",
             {"email": "sin-org@test.com", "password": "ClaveSegura123"},
             format="json",
         )
-        payload = jwt.decode(
-            resp.data["access_token"], settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITMO]
-        )
+        assert resp.status_code == 200
+        payload = _decode(resp.data["access_token"])
         assert payload["organizacion_id"] is None
         assert payload["rol"] is None
 
