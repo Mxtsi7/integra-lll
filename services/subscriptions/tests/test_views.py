@@ -48,7 +48,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """PATCH /subscriptions/<id>/ con estado 'cancelado' responde 200 y actualiza."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.patch(
             url,
             {"estado": "cancelado"},
@@ -65,7 +65,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """PATCH /subscriptions/<id>/ con 'cancelada' (ejemplo de la tarjeta) normaliza a 'cancelado'."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.patch(
             url,
             {"estado": "cancelada"},
@@ -82,7 +82,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """PUT /subscriptions/<id>/ actualiza completamente el recurso y responde 200."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         put_payload = {
             "nombre": "Spotify Premium",
             "monto": "4500.00",
@@ -110,7 +110,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """DELETE /subscriptions/<id>/ elimina el recurso y responde 204."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.delete(
             url,
             headers={"X-Organizacion-Id": str(org_a)},
@@ -122,7 +122,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_b: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """Si otra cuenta/organización intenta modificar la suscripción, responde 404 sin revelar datos."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.patch(
             url,
             {"estado": "cancelado"},
@@ -138,7 +138,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_b: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """Si otra cuenta/organización intenta eliminar la suscripción, responde 404."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.delete(
             url,
             headers={"X-Organizacion-Id": str(org_b)},
@@ -150,7 +150,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, subscription_org_a: Subscription
     ) -> None:
         """Peticiones sin X-Organizacion-Id deben responder 403 Forbidden."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.patch(
             url,
             {"estado": "cancelado"},
@@ -162,7 +162,7 @@ class TestSubscriptionUpdateDeleteViews:
         self, api_client: APIClient, org_a: uuid.UUID, org_b: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
         """No se permite reasignar el organizacion_id desde el cuerpo de la petición."""
-        url = f"/subscriptions/{subscription_org_a.id}/"
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.patch(
             url,
             {"organizacion_id": str(org_b)},
@@ -198,7 +198,7 @@ class TestSubscriptionCreateListViews:
     ) -> None:
         """POST /subscriptions/ con payload válido responde 201 y asigna organizacion_id de la cabecera."""
         response = api_client.post(
-            "/subscriptions/",
+            "/api/suscripciones/",
             self.VALID_PAYLOAD,
             format="json",
             headers={"X-Organizacion-Id": str(org_a)},
@@ -224,7 +224,7 @@ class TestSubscriptionCreateListViews:
             "estado": "activo",
         }
         response = api_client.post(
-            "/subscriptions/",
+            "/api/suscripciones/",
             legacy_payload,
             format="json",
             headers={"X-Organizacion-Id": str(org_a)},
@@ -239,7 +239,7 @@ class TestSubscriptionCreateListViews:
         """El organizacion_id del body es ignorado; se asigna el de la cabecera."""
         payload_with_org = {**self.VALID_PAYLOAD, "organizacion_id": str(org_b)}
         response = api_client.post(
-            "/subscriptions/",
+            "/api/suscripciones/",
             payload_with_org,
             format="json",
             headers={"X-Organizacion-Id": str(org_a)},
@@ -253,7 +253,7 @@ class TestSubscriptionCreateListViews:
     ) -> None:
         """POST sin cabecera X-Organizacion-Id responde 403 Forbidden."""
         response = api_client.post(
-            "/subscriptions/",
+            "/api/suscripciones/",
             self.VALID_PAYLOAD,
             format="json",
         )
@@ -265,7 +265,7 @@ class TestSubscriptionCreateListViews:
         """POST con monto <= 0 responde 400 Bad Request."""
         invalid_payload = {**self.VALID_PAYLOAD, "monto": "-100.00"}
         response = api_client.post(
-            "/subscriptions/",
+            "/api/suscripciones/",
             invalid_payload,
             format="json",
             headers={"X-Organizacion-Id": str(org_a)},
@@ -302,7 +302,7 @@ class TestSubscriptionCreateListViews:
 
         # Org A solo ve sus propias suscripciones
         resp_a = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert resp_a.status_code == status.HTTP_200_OK
@@ -313,7 +313,7 @@ class TestSubscriptionCreateListViews:
 
         # Org B solo ve sus propias suscripciones
         resp_b = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_b)},
         )
         assert resp_b.status_code == status.HTTP_200_OK
@@ -326,5 +326,5 @@ class TestSubscriptionCreateListViews:
         self, api_client: APIClient
     ) -> None:
         """GET /subscriptions/ sin cabecera responde 403 Forbidden."""
-        response = api_client.get("/subscriptions/")
+        response = api_client.get("/api/suscripciones/")
         assert response.status_code == status.HTTP_403_FORBIDDEN

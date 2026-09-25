@@ -70,9 +70,9 @@ def main():
         "estado": "activo"
     }
     headers_1 = {"X-Organizacion-Id": org_a}
-    print_request_info(1, "POST /subscriptions/ (Crear Suscripcion)", "POST", "/subscriptions/", headers_1, req_body_1)
+    print_request_info(1, "POST /subscriptions/ (Crear Suscripcion)", "POST", "/api/suscripciones/", headers_1, req_body_1)
     
-    resp_1 = client.post("/subscriptions/", req_body_1, format="json", headers=headers_1)
+    resp_1 = client.post("/api/suscripciones/", req_body_1, format="json", headers=headers_1)
     data_1 = resp_1.data if hasattr(resp_1, "data") else resp_1.json()
     print(f"    Status: {resp_1.status_code} Created")
     print(f"    Response JSON: {json.dumps(data_1, default=str)}")
@@ -90,9 +90,9 @@ def main():
     # 2. GET /subscriptions/ (Listar Suscripciones Propias)
     # -------------------------------------------------------------
     headers_2 = {"X-Organizacion-Id": org_a}
-    print_request_info(2, "GET /subscriptions/ (Listar Suscripciones Propias)", "GET", "/subscriptions/", headers_2)
+    print_request_info(2, "GET /subscriptions/ (Listar Suscripciones Propias)", "GET", "/api/suscripciones/", headers_2)
     
-    resp_2 = client.get("/subscriptions/", headers=headers_2)
+    resp_2 = client.get("/api/suscripciones/", headers=headers_2)
     data_2 = resp_2.data if hasattr(resp_2, "data") else resp_2.json()
     items_2 = data_2["results"] if isinstance(data_2, dict) and "results" in data_2 else data_2
     print(f"    Status: {resp_2.status_code} OK")
@@ -107,7 +107,7 @@ def main():
     # -------------------------------------------------------------
     # 3. GET /subscriptions/:id/ (Detalle de Suscripción)
     # -------------------------------------------------------------
-    path_3 = f"/subscriptions/{subscription_id}/"
+    path_3 = f"/api/suscripciones/{subscription_id}/"
     print_request_info(3, "GET /subscriptions/:id/ (Detalle Suscripcion)", "GET", path_3, headers_2)
     
     resp_3 = client.get(path_3, headers=headers_2)
@@ -134,9 +134,9 @@ def main():
     # 5. GET /subscriptions/ (Aislamiento: Organización B no ve las de A)
     # -------------------------------------------------------------
     headers_5 = {"X-Organizacion-Id": org_b}
-    print_request_info(5, "GET /subscriptions/ (Aislamiento: Organizacion B)", "GET", "/subscriptions/", headers_5)
+    print_request_info(5, "GET /subscriptions/ (Aislamiento: Organizacion B)", "GET", "/api/suscripciones/", headers_5)
     
-    resp_5 = client.get("/subscriptions/", headers=headers_5)
+    resp_5 = client.get("/api/suscripciones/", headers=headers_5)
     data_5 = resp_5.data if hasattr(resp_5, "data") else resp_5.json()
     items_5 = data_5["results"] if isinstance(data_5, dict) and "results" in data_5 else data_5
     encontrado_en_b = any(sub.get("id") == subscription_id for sub in items_5)
@@ -150,8 +150,8 @@ def main():
     # -------------------------------------------------------------
     # 6. GET /subscriptions/ (Seguridad: Sin Cabecera)
     # -------------------------------------------------------------
-    print_request_info(6, "GET /subscriptions/ (Seguridad: Sin Cabecera)", "GET", "/subscriptions/", {})
-    resp_6 = client.get("/subscriptions/")
+    print_request_info(6, "GET /subscriptions/ (Seguridad: Sin Cabecera)", "GET", "/api/suscripciones/", {})
+    resp_6 = client.get("/api/suscripciones/")
     print(f"    Status: {resp_6.status_code} Forbidden")
     print_test_assertion("Status code es 403 Forbidden", resp_6.status_code == 403)
 
