@@ -33,17 +33,43 @@ if [ "${SOLO_APLICAR:-0}" != "1" ]; then
 fi
 
 echo "── credencial del registro ──"
-# El cluster necesita poder bajar las imagenes de GHCR, que son privadas.
-kubectl create secret docker-registry ghcr   --docker-server=ghcr.io   --docker-username="${GHCR_USUARIO:-FelipeOrellanaCaro}"   --docker-password="$(gh auth token)"   --dry-run=client -o yaml | kubectl apply -f -
+# El cluster solo necesita BAJAR las imágenes, así que con un token de
+# `read:packages` basta. Pásalo en GHCR_TOKEN:
+#     https://github.com/settings/tokens/new?scopes=read:packages
+# Sin él se usa el de `gh`, que tiene permiso de escritura: funciona, pero
+# deja en el cluster una credencial que puede publicar paquetes a tu nombre.
+if [ -z "${GHCR_TOKEN:-}" ]; then
+  echo "   OJO: sin GHCR_TOKEN se usa el token de gh, que puede escribir."
+  GHCR_TOKEN="$(gh auth token)"
+fi
+kubectl create secret docker-registry ghcr \
+  --docker-server=ghcr.io \
+  --docker-username="${GHCR_USUARIO:-FelipeOrellanaCaro}" \
+  --docker-password="$GHCR_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
 
 echo "── secretos ──"
 # Se generan una sola vez y quedan en el cluster; no se guardan en el repo.
+#
+# DATABASE_URL va acá y no en el ConfigMap porque lleva la contraseña adentro,
+# y se arma con la MISMA clave que recibe Postgres: una sola fuente de verdad.
+# Tenerla en los dos lados era pedir que se desincronizaran.
 if ! kubectl get secret ojoalgasto >/dev/null 2>&1; then
+  CLAVE_POSTGRES="$(openssl rand -hex 16)"
   kubectl create secret generic ojoalgasto \
     --from-literal=SECRET_KEY="$(openssl rand -hex 32)" \
     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
-    --from-literal=POSTGRES_PASSWORD=postgres
-  echo "   secret creado"
+    --from-literal=POSTGRES_PASSWORD="$CLAVE_POSTGRES" \
+    --from-literal=DATABASE_URL="postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones"
+  echo "   secret creado (clave de Postgres aleatoria)"
+elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -q .; then
+  # Despliegue anterior: la base ya está inicializada con esa clave, así que
+  # NO se cambia (POSTGRES_PASSWORD solo se aplica en el primer arranque).
+  # Solo se agrega la URL que faltaba.
+  CLAVE_POSTGRES="$(kubectl get secret ojoalgasto -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
+  kubectl patch secret ojoalgasto --type=merge \
+    -p "{\"stringData\":{\"DATABASE_URL\":\"postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones\"}}" >/dev/null
+  echo "   secret al día: DATABASE_URL agregada con la clave que ya usaba la base"
 else
   echo "   ya existía, se deja como está"
 fi
