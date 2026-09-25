@@ -1,135 +1,26 @@
-/**
- * Home real de la app. Usa @ojoalgasto/shared para traer las suscripciones
- * y las adapta al formato que esperan componentes/Sidebar y pages/Homepage
- * (docs/mockup).
- *
- * NOTA: @ojoalgasto/shared todavía no expone un getter de transacciones, así
- * que esa sección del panel sigue con datos de ejemplo (ver MOCK_TRANSACTIONS
- * más abajo) hasta que exista esa función en el paquete compartido.
- */
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { DashboardPage } from './pages/DashboardPage';
+import { PerfilPage } from './pages/PerfilPage';
+import { ConfiguracionPage } from './pages/ConfiguracionPage';
+import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 
-import {
-  costoPorHora,
-  formatearFecha,
-  formatearMonto,
-  gastoProyectado,
-  getSuscripciones,
-  type Suscripcion,
-} from '@ojoalgasto/shared';
-import { useEffect, useState } from 'react';
+import Login from './pages/Login';
+import Register from './pages/register';
+import Homepage from './pages/Homepage';
 
-import { Sidebar, type NavItem } from './components/Sidebar';
-import Footer from './components/Footer';
-import Homepage, { type Stat, type Subscription, type Transaction } from './pages/Homepage';
-
-const NAV_ITEMS: NavItem[] = [
-  { key: 'panel', label: 'Panel' },
-  { key: 'calendario', label: 'Calendario de pagos' },
-  { key: 'recomendaciones', label: 'Recomendaciones' },
-  { key: 'cuentas', label: 'Cuentas conectadas' },
-  { key: 'informes', label: 'Informes' },
-  { key: 'configuracion', label: 'Configuración' },
-];
-
-// TODO: reemplazar cuando @ojoalgasto/shared exponga getTransacciones()
-const MOCK_TRANSACTIONS: Transaction[] = [
-  { id: 't1', name: 'Suscripción Netflix', date: 'Hoy, 10:45 AM', category: 'Entretenimiento', amount: '-17,99 €' },
-  { id: 't2', name: 'Cafetería La Linda', date: 'Ayer, 04:30 PM', category: 'Alimentación', amount: '-3,50 €' },
-  { id: 't3', name: 'Spotify Premium', date: '24 Octubre', category: 'Entretenimiento', amount: '-10,99 €' },
-];
-
-const DIAS_ALERTA_COBRO = 7;
-
-function esCobroProximo(fechaProximoCobro: string, dias: number): boolean {
-  const hoy = new Date();
-  const cobro = new Date(fechaProximoCobro);
-  const diffMs = cobro.getTime() - hoy.getTime();
-  const diffDias = diffMs / (1000 * 60 * 60 * 24);
-  return diffDias >= 0 && diffDias <= dias;
-}
-
-/** Convierte una Suscripcion de @ojoalgasto/shared al shape que espera el PanelView */
-function mapSuscripcionToSubscription(s: Suscripcion): Subscription {
-  return {
-    id: s.id,
-    name: s.nombre,
-    initial: s.nombre.charAt(0).toUpperCase(),
-    nextCharge: `Próximo cobro: ${formatearFecha(s.fecha_proximo_cobro)}`,
-    price: `${formatearMonto(s.monto, s.moneda)}/mes`,
-    alert: s.estado === 'activa' && esCobroProximo(s.fecha_proximo_cobro, DIAS_ALERTA_COBRO),
-  };
-}
-
-/** Arma las 3 tarjetas de stats a partir de las suscripciones reales */
-function buildStats(suscripciones: Suscripcion[]): Stat[] {
-  const moneda = suscripciones[0]?.moneda;
-
-  const proximas = suscripciones.filter((s) => esCobroProximo(s.fecha_proximo_cobro, DIAS_ALERTA_COBRO));
-  const totalProximos = proximas.reduce((acc, s) => acc + s.monto, 0);
-
-  return [
-    {
-      label: 'TOTAL GASTADO ESTE MES',
-      value: formatearMonto(gastoProyectado(suscripciones), moneda),
-      // TODO: comparar contra el mes anterior cuando haya histórico disponible
-      footnote: 'Basado en tus suscripciones activas',
-    },
-    {
-      label: `PRÓXIMOS COBROS (${DIAS_ALERTA_COBRO} DÍAS)`,
-      value: formatearMonto(totalProximos, moneda),
-      footnote: `${proximas.length} suscripciones pendientes de cobro`,
-      highlight: true,
-    },
-    {
-      label: 'AHORRO ESTIMADO',
-      // TODO: no hay función de ahorro en @ojoalgasto/shared todavía
-      value: '—',
-      footnote: 'Próximamente',
-    },
-  ];
-}
-
-type ViewKey = string;
 
 export function App() {
-  const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
-  const [cargando, setCargando] = useState(true);
-  const [selected, setSelected] = useState<ViewKey>('panel');
-
-  useEffect(() => {
-    getSuscripciones()
-      .then(setSuscripciones)
-      .finally(() => setCargando(false));
-  }, []);
-
-  const subscriptions = suscripciones.map(mapSuscripcionToSubscription);
-  const stats = buildStats(suscripciones);
-  const selectedItem = NAV_ITEMS.find((item) => item.key === selected);
-
   return (
-    <div className="app-shell">
-      <div className="app-body">
-        <Sidebar items={NAV_ITEMS} selected={selected} onSelect={setSelected} />
-
-        {selected === 'panel' ? (
-          cargando ? (
-            <main className="app-main-loading">Cargando tus suscripciones…</main>
-          ) : (
-            <Homepage
-              stats={stats}
-              subscriptions={subscriptions}
-              transactions={MOCK_TRANSACTIONS}
-            />
-          )
-        ) : (
-          <main className="app-main-placeholder">
-            <h1>{selectedItem?.label}</h1>
-            <p>Esta sección todavía no está conectada.</p>
-          </main>
-        )}
-      </div>
-
-      <Footer />
-    </div>
+    <Routes>
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/registro" element={<Register />} />
+      <Route path="/dashboard" element={<DashboardPage />} />
+      <Route path="/Home" element={<Homepage />} />
+      <Route path="/perfil" element={<PerfilPage />} />
+      <Route path="/configuracion" element={<ConfiguracionPage />} />
+      <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
   );
 }
