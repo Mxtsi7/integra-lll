@@ -1,7 +1,7 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Mail, Lock, ShieldCheck } from "lucide-react";
-import { login, AuthError } from "@ojoalgasto/shared";
+import { login, guardarTokens, AuthError } from "@ojoalgasto/shared";
 import "../styles/Login.css";
 
 export default function Login() {
@@ -17,14 +17,9 @@ export default function Login() {
     setLoading(true);
     try {
       const { access_token, refresh_token } = await login({ correo, password });
-      // TODO: mover esto a un AuthContext en vez de tocar localStorage
-      // directo desde la página.
-      localStorage.setItem("access_token", access_token);
-      localStorage.setItem("refresh_token", refresh_token);
+      guardarTokens({ access_token, refresh_token });
       navigate("/dashboard");
     } catch (err) {
-      // `err` llega como `unknown` con TS estricto — hay que angostarlo
-      // antes de leer .message.
       if (err instanceof AuthError && err.status === 401) {
         setError("Usuario o contraseña inválidos");
       } else if (err instanceof Error) {
