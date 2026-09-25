@@ -10,7 +10,11 @@ data:
 
   # Los servicios se hablan por el nombre del Service de Kubernetes, igual
   # que en compose se hablaban por el nombre del contenedor.
-  DATABASE_URL: postgres://postgres:postgres@postgres:5432/suscripciones
+  #
+  # DATABASE_URL NO está acá: lleva la contraseña adentro, así que vive en el
+  # Secret junto a POSTGRES_PASSWORD. Tenerla en los dos lados era pedir que
+  # se desincronizaran: al cambiar la clave, Postgres arrancaba con la nueva y
+  # los servicios seguían conectándose con la vieja.
   CELERY_BROKER_URL: redis://redis:6379/0
   RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
   EXCHANGE_EVENTOS: suscripciones
