@@ -4,6 +4,9 @@ from django.db import models
 
 
 class UserManager(BaseUserManager):
+    def get_by_natural_key(self, email):
+        return self.get(**{f"{self.model.USERNAME_FIELD}__iexact": email})
+
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError("El usuario debe tener un correo electrónico")

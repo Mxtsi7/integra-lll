@@ -61,7 +61,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 ESQUEMA_BD = env("ESQUEMA_BD", default=NOMBRE_SERVICIO)
 
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+if "sqlite" not in DATABASES["default"]["ENGINE"]:
+    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 # Cada servicio usa su propia base de test, para que las pruebas de dos
 # servicios puedan correr a la vez (en CI, por ejemplo) sin pisarse.
 DATABASES["default"]["TEST"] = {"NAME": f"test_{NOMBRE_SERVICIO}"}
