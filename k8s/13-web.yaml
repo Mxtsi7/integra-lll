@@ -1,0 +1,44 @@
+# La web compilada, servida por nginx.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: web }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata:
+      labels: { app: web, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: web
+          image: IMAGEN_WEB
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /salud, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /salud, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 128Mi }
