@@ -1,10 +1,8 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Mail, Lock, ShieldCheck } from "lucide-react";
-import "./Login.css";
-
-// TODO: reemplazar por el cliente real generado en frontend/shared (OpenAPI)
-// import { login } from "../../../shared/api/auth";
+import { login, guardarTokens, AuthError } from "@ojoalgasto/shared";
+import "../styles/Login.css";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -18,11 +16,17 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      // await login({ correo, password });
-      navigate("/panel");
+      const { access_token, refresh_token } = await login({ correo, password });
+      guardarTokens({ access_token, refresh_token });
+      navigate("/dashboard");
     } catch (err) {
-      // El backend responde con un mensaje genérico para no revelar cuál dato falló
-      setError("Usuario o contraseña inválidos");
+      if (err instanceof AuthError && err.status === 401) {
+        setError("Usuario o contraseña inválidos");
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("No se pudo iniciar sesión. Intenta de nuevo.");
+      }
     } finally {
       setLoading(false);
     }
@@ -32,7 +36,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-wrap">
         <div className="login-logo">
-          <Eye size={20} color="#1B2A4A" />
+          <Eye size={20} />
           <span>Ojo al Gasto</span>
         </div>
 
@@ -45,7 +49,7 @@ export default function Login() {
           <div className="login-field">
             <label htmlFor="correo">CORREO ELECTRÓNICO</label>
             <div className="login-field-input">
-              <Mail size={16} color="#8A93AB" />
+              <Mail size={16} />
               <input
                 id="correo"
                 type="email"
@@ -61,7 +65,7 @@ export default function Login() {
           <div className="login-field">
             <label htmlFor="password">CONTRASEÑA</label>
             <div className="login-field-input">
-              <Lock size={16} color="#8A93AB" />
+              <Lock size={16} />
               <input
                 id="password"
                 type="password"
@@ -96,7 +100,7 @@ export default function Login() {
         </form>
 
         <div className="login-footnote">
-          <ShieldCheck size={12} color="#8A93AB" />
+          <ShieldCheck size={12} />
           <span>Conexión cifrada de extremo a extremo</span>
         </div>
       </div>

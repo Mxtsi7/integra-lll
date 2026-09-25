@@ -1,0 +1,31 @@
+.footer {
+  background: var(--oag-navy);
+  color: var(--oag-navy-text-soft);
+  padding: 24px 32px;
+  margin-top: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-family: var(--oag-font-mono);
+  font-size: 14px;
+}
+
+.copyright {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.enlaces {
+  display: flex;
+  gap: 24px;
+  font-size: 13px;
+}

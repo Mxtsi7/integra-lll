@@ -1,0 +1,76 @@
+# Servicio auth: registro, login y emisión del JWT.
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: auth }
+  ports: [{ port: 8001, targetPort: 8001 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: auth } }
+  template:
+    metadata:
+      labels: { app: auth, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      initContainers:
+        # Las migraciones y el seed corren UNA vez, antes de levantar el
+        # servidor. En compose los hacía el entrypoint de cada contenedor;
+        # acá se separan para que no se repitan por cada réplica.
+        - name: migrar
+          image: IMAGEN_AUTH
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["sh", "entrypoint.sh", "echo", "migraciones listas"]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: auth }
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { cpu: 250m, memory: 384Mi }
+      containers:
+        - name: auth
+          image: IMAGEN_AUTH
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8001", "--workers", "2", "--access-logfile", "-"]
+          ports: [{ name: http, containerPort: 8001 }]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: auth }
+            # El initContainer ya sembró: que el contenedor principal no repita.
+            - { name: SEED_DEMO, value: "0" }
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8001
+              # Con DEBUG=False Django rechaza Hosts desconocidos, y la sonda
+              # llega con la IP del pod. Se le manda el Host a mano.
+              httpHeaders: [{ name: Host, value: auth }]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8001
+              httpHeaders: [{ name: Host, value: auth }]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { cpu: 250m, memory: 384Mi }
