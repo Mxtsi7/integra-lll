@@ -1,0 +1,55 @@
+# Gateway: el único punto de entrada (ADR-004). Valida el JWT una vez y
+# reenvía con la identidad en cabeceras. No tiene base de datos.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: gateway }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: gateway } }
+  template:
+    metadata:
+      labels: { app: gateway, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: gateway
+          image: IMAGEN_GATEWAY
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--access-logfile", "-"]
+          ports: [{ name: http, containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+              httpHeaders: [{ name: Host, value: gateway }]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+              httpHeaders: [{ name: Host, value: gateway }]
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 200m, memory: 320Mi }
