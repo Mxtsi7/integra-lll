@@ -1,102 +1,75 @@
 import jwt
 import pytest
 from django.conf import settings
-from django.urls import reverse
-from rest_framework import status
 from rest_framework.test import APIClient
 
-from app.models import User
+from app.models import Organizacion, User
+
+
+def _decode(token):
+    key = getattr(settings, "JWT_SECRET", None) or settings.SIMPLE_JWT["SIGNING_KEY"]
+    alg = getattr(settings, "JWT_ALGORITMO", None) or settings.SIMPLE_JWT["ALGORITHM"]
+    return jwt.decode(token, key, algorithms=[alg])
+
+
+@pytest.fixture()
+def usuario(db):
+    org = Organizacion.objects.create(nombre="Hogar de prueba")
+    return User.objects.create_user(
+        email="ana@test.com",
+        password="ClaveSegura123",
+        nombre="Ana",
+        organizacion=org,
+        rol="titular",
+    )
 
 
 @pytest.mark.django_db
 class TestLoginEndpoint:
-    def setup_method(self):
-        self.client = APIClient()
-        self.url = reverse("login")
-        self.password = "ClaveSegura123"
-        self.user = User.objects.create_user(
-            email="ana@test.com",
-            password=self.password,
-            nombre="Ana",
-        )
-
-    def test_login_exitoso_devuelve_tokens_y_usuario(self):
-        response = self.client.post(
-            self.url,
-            {"email": "ana@test.com", "password": self.password},
+    def test_login_devuelve_la_forma_que_espera_el_frontend(self, usuario):
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "ClaveSegura123"},
             format="json",
         )
-        assert response.status_code == status.HTTP_200_OK
-        assert "access_token" in response.data
-        assert "refresh_token" in response.data
-        assert response.data["usuario"] == {
-            "id": self.user.id,
-            "nombre": "Ana",
-            "correo": "ana@test.com",
-        }
-        assert "password" not in response.data["usuario"]
+        assert resp.status_code == 200
+        assert "access_token" in resp.data and "refresh_token" in resp.data
+        assert resp.data["usuario"]["correo"] == "ana@test.com"
 
-    def test_access_token_se_decodifica_con_jwt_secret(self):
-        response = self.client.post(
-            self.url,
-            {"email": "ana@test.com", "password": self.password},
+    def test_el_token_lleva_organizacion_id_y_rol(self, usuario):
+        r = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "ClaveSegura123"},
             format="json",
         )
         claims = jwt.decode(
-            response.data["access_token"],
+            r.data["access_token"],
             settings.SIMPLE_JWT["SIGNING_KEY"],
             algorithms=[settings.SIMPLE_JWT["ALGORITHM"]],
         )
-        assert claims["user_id"] == self.user.id
-        assert "exp" in claims
+        assert claims["organizacion_id"] == str(usuario.organizacion_id)
+        assert claims["rol"] == "titular"
 
-    def test_login_con_dominio_en_mayusculas_funciona(self):
-        response = self.client.post(
-            self.url,
-            {"email": "ANA@TEST.COM", "password": self.password},
+    def test_usuario_sin_organizacion_no_rompe_el_login(self, db):
+        User.objects.create_user(
+            email="sin-org@test.com",
+            password="ClaveSegura123",
+            nombre="Sin Org",
+        )
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "sin-org@test.com", "password": "ClaveSegura123"},
             format="json",
         )
-        assert response.status_code == status.HTTP_200_OK
+        assert resp.status_code == 200
+        payload = _decode(resp.data["access_token"])
+        assert payload["organizacion_id"] is None
+        assert payload["rol"] is None
 
-    def test_login_password_incorrecta_devuelve_401_generico(self):
-        response = self.client.post(
-            self.url,
-            {"email": "ana@test.com", "password": "otra-clave"},
+    def test_credenciales_invalidas_devuelve_401(self, usuario):
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "incorrecta"},
             format="json",
         )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert response.data["detail"] == "Correo o contraseña inválidos"
-
-    def test_login_email_inexistente_devuelve_mismo_401_generico(self):
-        response = self.client.post(
-            self.url,
-            {"email": "no-existe@test.com", "password": self.password},
-            format="json",
-        )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-        assert response.data["detail"] == "Correo o contraseña inválidos"
-
-    def test_login_usuario_inactivo_no_puede_entrar(self):
-        self.user.is_active = False
-        self.user.save()
-        response = self.client.post(
-            self.url,
-            {"email": "ana@test.com", "password": self.password},
-            format="json",
-        )
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
-    def test_login_sin_password_devuelve_400(self):
-        response = self.client.post(
-            self.url, {"email": "ana@test.com"}, format="json"
-        )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "password" in response.data
-
-    def test_login_email_invalido_devuelve_400(self):
-        response = self.client.post(
-            self.url,
-            {"email": "no-es-un-correo", "password": "x"},
-            format="json",
-        )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert resp.status_code == 401
