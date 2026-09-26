@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import SubscriptionItem, { Subscription } from "../components/subscriptions/Subcriptionitem";
+import SubscriptionItem, { Subscription } from "../components/subscriptions/Subscriptionitem";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
 import Pagination from "../components/subscriptions/pagination";
 
