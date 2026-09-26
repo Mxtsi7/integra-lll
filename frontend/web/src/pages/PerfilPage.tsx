@@ -67,7 +67,7 @@ function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
       <div className={styles.grid}>
         <Seccion titulo="Cuenta">
           <Fila etiqueta="Nombre" valor={usuario.nombre} accion="Editar" />
-          <Fila etiqueta="Correo electrónico" valor={usuario.correo} accion="Editar" />
+          <Fila etiqueta="Correo electrónico" valor={usuario.correo || (usuario as any).email} accion="Editar" />
           <Fila etiqueta="Contraseña" valor="••••••••" accion="Cambiar" />
         </Seccion>
 
