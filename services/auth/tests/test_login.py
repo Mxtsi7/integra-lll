@@ -7,9 +7,18 @@ from app.models import Organizacion, User
 
 
 def _decode(token):
-    key = getattr(settings, "JWT_SECRET", None) or settings.SIMPLE_JWT["SIGNING_KEY"]
-    alg = getattr(settings, "JWT_ALGORITMO", None) or settings.SIMPLE_JWT["ALGORITHM"]
-    return jwt.decode(token, key, algorithms=[alg])
+    """Verifica el token con el secreto del .env, NO con lo que tenga
+    configurado simplejwt.
+
+    La diferencia importa: si se validara con `SIMPLE_JWT["SIGNING_KEY"]` se
+    estaría comprobando la firma con la misma clave que la generó, que siempre
+    da verdadero. Usando `JWT_SECRET` directo, la prueba falla si alguien
+    cambia la clave de firma por otra —`SECRET_KEY`, por ejemplo— que es
+    exactamente el error que dejaría al gateway rechazando todos los tokens.
+    """
+    return jwt.decode(
+        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITMO]
+    )
 
 
 @pytest.fixture()
