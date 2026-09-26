@@ -10,8 +10,6 @@
 credentials.json
 token.json
 service-account*.json
-package-lock.json
-package.json
 
 # ─── Python / Django ──────────────────────────────────────────
 __pycache__/
