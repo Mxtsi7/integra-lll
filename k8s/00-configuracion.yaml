@@ -1,0 +1,62 @@
+# Configuración que NO es secreta. Los secretos van aparte, en un Secret que
+# se genera al desplegar (ver desplegar.sh) y que nunca se sube al repo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ojoalgasto
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+data:
+  DEBUG: "False"
+
+  # Los servicios se hablan por el nombre del Service de Kubernetes, igual
+  # que en compose se hablaban por el nombre del contenedor.
+  #
+  # DATABASE_URL NO está acá: lleva la contraseña adentro, así que vive en el
+  # Secret junto a POSTGRES_PASSWORD. Tenerla en los dos lados era pedir que
+  # se desincronizaran: al cambiar la clave, Postgres arrancaba con la nueva y
+  # los servicios seguían conectándose con la vieja.
+  CELERY_BROKER_URL: redis://redis:6379/0
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+  EXCHANGE_EVENTOS: suscripciones
+
+  # Con DEBUG=False Django exige Host conocido. Van los nombres internos, el
+  # host público y localhost (las sondas mandan Host explícito, ver los
+  # Deployments).
+  ALLOWED_HOSTS: localhost,127.0.0.1,auth,subscriptions,gateway,ojoalgasto-forellana.dev.censei.cl,api-ojoalgasto-forellana.dev.censei.cl
+
+  # En el cluster la web y la API salen por el mismo origen (el nginx de la
+  # web hace de proxy hacia el gateway), así que el navegador no hace CORS.
+  # Esto queda para quien levante la web con `vite dev` en su PC.
+  CORS_ALLOWED_ORIGINS: http://localhost:5173
+
+  JWT_ALGORITMO: HS256
+  JWT_MINUTOS_ACCESO: "30"
+  JWT_DIAS_REFRESCO: "7"
+
+  URL_AUTH: http://auth:8001
+  URL_SUBSCRIPTIONS: http://subscriptions:8002
+  URL_CONNECTORS: http://connectors:8003
+  URL_ANALYTICS: http://analytics:8004
+  URL_NOTIFICATIONS: http://notifications:8005
+
+  # Usuario de demostración (mismo del compose). Es de prueba, no es un secreto.
+  SEED_DEMO: "1"
+  SEED_CORREO: demo@ojoalgasto.cl
+  SEED_CLAVE: Demo-2026-ojo
+  SEED_NOMBRE: Usuario Demo
+---
+# El script que crea un esquema por servicio (ADR-002). Postgres ejecuta lo
+# que encuentre en /docker-entrypoint-initdb.d la primera vez que arranca con
+# el disco vacío; en compose esto era un bind mount del mismo archivo.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-inicio
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+data:
+  01-esquemas.sql: |
+    CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE SCHEMA IF NOT EXISTS subscriptions;
+    CREATE SCHEMA IF NOT EXISTS connectors;
+    CREATE SCHEMA IF NOT EXISTS analytics;
+    CREATE SCHEMA IF NOT EXISTS notifications;
