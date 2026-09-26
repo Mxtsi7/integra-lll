@@ -50,7 +50,7 @@ export function DashboardPage() {
     ) : undefined;
 
   return (
-    <AppLayout headerTitulo="Inicio" headerSubtitulo="Bienvenido."
+    <AppLayout
       headerTitulo="Panel"
       headerSubtitulo="Resumen de tu gasto en suscripciones."
       headerEtiquetaFecha="Octubre, 2026"
