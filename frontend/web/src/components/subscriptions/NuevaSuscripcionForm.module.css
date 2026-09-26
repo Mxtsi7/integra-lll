@@ -1,0 +1,77 @@
+.form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  align-items: end;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--list-card-border, #eef0f4);
+  background-color: rgba(127, 127, 127, 0.03);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--list-card-muted, #8990a3);
+}
+
+.field input,
+.field select {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--list-card-border, #eef0f4);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--list-card-ink, #1a1b3a);
+  background: #fff;
+}
+
+.field input:focus,
+.field select:focus {
+  outline: 2px solid var(--list-card-accent, #4f46e5);
+  outline-offset: -1px;
+}
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.cancelButton,
+.submitButton {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.cancelButton {
+  background: none;
+  border-color: var(--list-card-border, #eef0f4);
+  color: var(--list-card-ink, #1a1b3a);
+}
+
+.submitButton {
+  background-color: var(--list-card-accent, #4f46e5);
+  color: #fff;
+}
+
+@media (max-width: 720px) {
+  .form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .form {
+    grid-template-columns: 1fr;
+  }
+}
