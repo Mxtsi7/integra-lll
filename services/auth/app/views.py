@@ -7,7 +7,12 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import User
-from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
+from .serializers import (
+    LoginSerializer,
+    RegisterSerializer,
+    UserSerializer,
+    UsuarioActualSerializer,
+)
 
 
 class RegisterView(APIView):
@@ -81,7 +86,7 @@ class LoginView(APIView):
 class UsuarioActualView(generics.RetrieveAPIView):
     """GET /api/usuarios/me/ — el usuario del token. Es la que llama la web."""
 
-    serializer_class = UserSerializer
+    serializer_class = UsuarioActualSerializer
     authentication_classes = []
     permission_classes = []
 
