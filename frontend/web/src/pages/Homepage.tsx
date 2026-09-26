@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import SubscriptionItem, { Subscription } from "../components/subcriptions/Subcriptionitem";
-import AddSubscriptionForm from "../components/subcriptions/NuevaSuscripcionForm";
-import Pagination from "../components//subcriptions/pagination";
+import SubscriptionItem, { Subscription } from "../components/subscriptions/Subcriptionitem";
+import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
+import Pagination from "../components/subscriptions/pagination";
 
 //eliminar esta linea a futuro
-import subscriptionsData from "../components/subcriptions/sustest.json"
+import subscriptionsData from "../components/subscriptions/sustest.json"
 
 import styles from "./Homepage.module.css";
 import { AppLayout  } from "../components/layout/AppLayout";
@@ -56,7 +56,7 @@ const DashboardPage: React.FC = () => {
   };
  
   return (
-    <AppLayout>
+    <AppLayout headerTitulo="Inicio" headerSubtitulo="Bienvenido.">
     <div className={styles.dashboardPage}>
       <header className={styles.header}>
         <div>

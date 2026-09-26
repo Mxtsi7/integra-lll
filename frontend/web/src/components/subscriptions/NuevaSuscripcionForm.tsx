@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import styles from "./NuevaSuscripcionForm.module.css";
-import { BillingCycle, Subscription } from "./SubscriptionItem";
+import { BillingCycle, Subscription } from "./Subscriptionitem";
 
 interface AddSubscriptionFormProps {
   onAdd: (subscription: Omit<Subscription, "id">) => void;
