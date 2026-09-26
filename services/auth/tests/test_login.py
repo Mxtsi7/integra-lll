@@ -7,9 +7,18 @@ from app.models import Organizacion, User
 
 
 def _decode(token):
-    key = getattr(settings, "JWT_SECRET", None) or settings.SIMPLE_JWT["SIGNING_KEY"]
-    alg = getattr(settings, "JWT_ALGORITMO", None) or settings.SIMPLE_JWT["ALGORITHM"]
-    return jwt.decode(token, key, algorithms=[alg])
+    """Verifica el token con el secreto del .env, NO con lo que tenga
+    configurado simplejwt.
+
+    La diferencia importa: si se validara con `SIMPLE_JWT["SIGNING_KEY"]` se
+    estaría comprobando la firma con la misma clave que la generó, que siempre
+    da verdadero. Usando `JWT_SECRET` directo, la prueba falla si alguien
+    cambia la clave de firma por otra —`SECRET_KEY`, por ejemplo— que es
+    exactamente el error que dejaría al gateway rechazando todos los tokens.
+    """
+    return jwt.decode(
+        token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITMO]
+    )
 
 
 @pytest.fixture()
@@ -73,3 +82,75 @@ class TestLoginEndpoint:
             format="json",
         )
         assert resp.status_code == 401
+
+    # ── Las que cubren lo que ya costó arreglar una vez ──────────────
+    #
+    # Estas cinco se perdieron al reescribir el archivo. Vuelven porque cada
+    # una protege algo que se revirtió solo en alguna ronda de revisión.
+
+    def test_el_token_se_valida_con_el_secreto_del_gateway(self, usuario):
+        """El contrato del ADR-004: auth firma con JWT_SECRET y el gateway
+        valida con el mismo. Si alguien lo cambia por SECRET_KEY, el gateway
+        rechaza todos los tokens y esta prueba lo agarra antes."""
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "ClaveSegura123"},
+            format="json",
+        )
+        claims = _decode(resp.data["access_token"])
+
+        assert claims["user_id"] == usuario.id
+        assert claims["token_type"] == "access"
+        assert "exp" in claims
+
+    def test_login_con_el_correo_en_mayusculas(self, usuario):
+        """El correo se guarda como se escribió, pero entrar no distingue caja
+        (`get_by_natural_key` con `__iexact`). Ya se revirtió dos veces."""
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ANA@TEST.COM", "password": "ClaveSegura123"},
+            format="json",
+        )
+
+        assert resp.status_code == 200
+
+    def test_usuario_inactivo_no_puede_entrar(self, usuario):
+        usuario.is_active = False
+        usuario.save(update_fields=["is_active"])
+
+        resp = APIClient().post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "ClaveSegura123"},
+            format="json",
+        )
+
+        assert resp.status_code == 401
+
+    def test_payload_incompleto_es_400_y_no_401(self, usuario):
+        """400 es "mandaste mal la petición" y 401 es "tus credenciales no
+        sirven". Mezclarlos deja al formulario sin saber qué campo falló."""
+        resp = APIClient().post(
+            "/api/auth/login/", {"email": "ana@test.com"}, format="json"
+        )
+
+        assert resp.status_code == 400
+        assert "password" in resp.data
+
+    def test_correo_inexistente_responde_lo_mismo_que_clave_mala(self, usuario):
+        """Mismo código y mismo mensaje en los dos casos: si difirieran, se
+        podría averiguar qué correos están registrados."""
+        cliente = APIClient()
+        inexistente = cliente.post(
+            "/api/auth/login/",
+            {"email": "no-existe@test.com", "password": "ClaveSegura123"},
+            format="json",
+        )
+        clave_mala = cliente.post(
+            "/api/auth/login/",
+            {"email": "ana@test.com", "password": "otra-clave"},
+            format="json",
+        )
+
+        assert inexistente.status_code == clave_mala.status_code == 401
+        assert inexistente.data["detail"] == clave_mala.data["detail"]
+
