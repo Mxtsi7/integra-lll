@@ -379,6 +379,24 @@ host `postgres`, que solo existe dentro de la red de Docker. Cámbialo en tu
 
 ---
 
+## Desplegar en Kubernetes
+
+El sistema completo corre en el cluster del ramo:
+
+**https://ojoalgasto-forellana.dev.censei.cl**
+
+> El navegador muestra una advertencia de certificado: el cluster no tiene
+> cert-manager. Entrar por «Avanzado → Continuar».
+
+```bash
+./k8s/desplegar.sh          # construye, publica y aplica
+kubectl get pods            # ver el estado
+```
+
+Los manifiestos, los Dockerfiles de producción y las reglas del cluster (que
+no se pueden consultar, solo chocar) están documentados en
+[k8s/README.md](k8s/README.md).
+
 ## Decisiones que hay que conocer
 
 Están documentadas en `docs/arquitectura/`. Las tres que más se preguntan:

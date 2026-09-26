@@ -1,0 +1,141 @@
+# Servicio subscriptions: CRUD de suscripciones con aislamiento por
+# organización (RF-26), más el worker y el beat de Celery.
+apiVersion: v1
+kind: Service
+metadata:
+  name: subscriptions
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: subscriptions }
+  ports: [{ port: 8002, targetPort: 8002 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriptions
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: subscriptions } }
+  template:
+    metadata:
+      labels: { app: subscriptions, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      initContainers:
+        - name: migrar
+          image: IMAGEN_SUBSCRIPTIONS
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["sh", "entrypoint.sh", "echo", "migraciones listas"]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: subscriptions }
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { cpu: 250m, memory: 384Mi }
+      containers:
+        - name: subscriptions
+          image: IMAGEN_SUBSCRIPTIONS
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8002", "--workers", "2", "--access-logfile", "-"]
+          ports: [{ name: http, containerPort: 8002 }]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: subscriptions }
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8002
+              httpHeaders: [{ name: Host, value: subscriptions }]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8002
+              httpHeaders: [{ name: Host, value: subscriptions }]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { cpu: 250m, memory: 384Mi }
+---
+# El Temporizador del RF-13: beat programa, worker ejecuta. Misma imagen que
+# subscriptions, distinto comando. No corren migraciones: de eso ya se encargó
+# el initContainer de arriba.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriptions-worker
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: subscriptions-worker } }
+  template:
+    metadata:
+      labels: { app: subscriptions-worker, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: worker
+          image: IMAGEN_SUBSCRIPTIONS
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["celery", "-A", "config", "worker", "--loglevel=info"]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: subscriptions }
+          # Sin sonda: el worker no atiende tráfico (no tiene Service), así que
+          # "listo" no significa nada para nadie, y `celery inspect ping` tarda
+          # más que cualquier timeout razonable con el CPU acotado del ramo.
+          # Que está vivo se ve en sus logs: ejecuta el latido cada 60 s.
+          resources:
+            requests: { cpu: 50m, memory: 160Mi }
+            limits: { cpu: 200m, memory: 384Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscriptions-beat
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
+  # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: subscriptions-beat } }
+  template:
+    metadata:
+      labels: { app: subscriptions-beat, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      # Las imágenes viven en un registro privado (GHCR).
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: beat
+          image: IMAGEN_SUBSCRIPTIONS
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["celery", "-A", "config", "beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+            - secretRef: { name: ojoalgasto }
+          env:
+            - { name: ESQUEMA_BD, value: subscriptions }
+          resources:
+            requests: { cpu: 25m, memory: 96Mi }
+            limits: { cpu: 100m, memory: 256Mi }
