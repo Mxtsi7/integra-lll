@@ -43,7 +43,7 @@ const formatNextChargeDate = (isoDate: string): string => {
   return `${String(day).padStart(2, "0")} ${MESES_ABBR[month - 1]}`;
 };
 
-const EMPTY_FORM = (monedas: string[], ciclos: Subscription["cycle"][]): NuevaSuscripcionFormData => ({
+const EMPTY_FORM = (monedas: Moneda[], ciclos: Subscription["cycle"][]): NuevaSuscripcionFormData => ({
   nombre: "",
   monto: "",
   moneda: monedas[0],
