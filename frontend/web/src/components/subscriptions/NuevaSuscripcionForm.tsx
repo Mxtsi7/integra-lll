@@ -20,7 +20,7 @@ interface NuevaSuscripcionFormProps {
   ciclos?: Subscription["cycle"][];
 }
 
-const DEFAULT_MONEDAS = Moneda[] = ["CLP", "USD"];
+const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
 // Solo "Mensual" | "Anual": son los únicos valores que acepta Subscription["cycle"]
 const DEFAULT_CICLOS: Subscription["cycle"][] = ["Mensual", "Anual"];
 
