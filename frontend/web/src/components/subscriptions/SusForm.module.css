@@ -1,0 +1,164 @@
+.formCard {
+  --ink: var(--list-card-ink, #1a1b3a);
+  --muted: var(--list-card-muted, #8990a3);
+  --border: var(--list-card-border, #eef0f4);
+  --accent: var(--list-card-accent, #4f46e5);
+
+  width: 100%;
+  max-width: 440px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+.formHeaderRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.formHeaderBar {
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  background-color: var(--ink);
+}
+
+.formTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.formSubtitle {
+  margin-top: -12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.formDivider {
+  height: 1px;
+  background: var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.formDividerFill {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+.infoBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background-color: #eef1ff;
+}
+
+.infoIconPlaceholder {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background-color: var(--accent);
+}
+
+.infoText {
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 16px;
+}
+
+.fieldRow .field {
+  flex: 1;
+}
+
+.fieldCurrency {
+  max-width: 120px;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.fieldInput,
+.fieldSelect,
+.fieldTextarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: #fff;
+}
+
+.fieldTextarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.fieldInput:focus,
+.fieldSelect:focus,
+.fieldTextarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.btn {
+  width: 100%;
+  height: 42px;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.btnPrimary {
+  background-color: var(--accent);
+  color: #fff;
+}
+
+.btnPrimary:hover {
+  filter: brightness(1.05);
+}
+
+.btnSecondary {
+  background: none;
+  border-color: var(--border);
+  color: var(--ink);
+}
+
+.btnSecondary:hover {
+  background-color: rgba(127, 127, 127, 0.06);
+}

@@ -1,0 +1,96 @@
+.card {
+  --ink: var(--list-card-ink, #1a1b3a);
+  --muted: var(--list-card-muted, #8990a3);
+  --danger: #8a0e0e;
+  --danger-hover: #a31414;
+  --cancel-bg: #e4e7f2;
+  --cancel-bg-hover: #d7dbee;
+
+  width: 100%;
+  max-width: 380px;
+  background: #fff;
+  border-radius: 20px;
+  padding: 32px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  box-shadow: 0 20px 45px rgba(26, 27, 58, 0.18);
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+.iconCircle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background-color: #2a1209;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.warningIcon {
+  width: 28px;
+  height: 28px;
+}
+
+.title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.message strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.actions {
+  width: 100%;
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.cancelButton,
+.deleteButton {
+  flex: 1;
+  height: 46px;
+  border-radius: 10px;
+  border: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.cancelButton {
+  background-color: var(--cancel-bg);
+  color: var(--ink);
+}
+
+.cancelButton:hover {
+  background-color: var(--cancel-bg-hover);
+}
+
+.deleteButton {
+  background-color: var(--danger);
+  color: #fff;
+}
+
+.deleteButton:hover {
+  background-color: var(--danger-hover);
+}

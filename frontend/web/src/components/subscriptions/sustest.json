@@ -1,0 +1,122 @@
+[
+  {
+    "id": "netflix",
+    "name": "Netflix",
+    "initial": "N",
+    "color": "#e50914",
+    "cycle": "Mensual",
+    "price": 17.99,
+    "nextChargeDate": "02 Nov",
+    "hasAlert": true
+  },
+  {
+    "id": "spotify",
+    "name": "Spotify",
+    "initial": "S",
+    "color": "#1db954",
+    "cycle": "Mensual",
+    "price": 10.99,
+    "nextChargeDate": "05 Nov",
+    "hasAlert": true
+  },
+  {
+    "id": "amazon-prime",
+    "name": "Amazon Prime",
+    "initial": "A",
+    "color": "#f5a623",
+    "cycle": "Anual",
+    "price": 4.99,
+    "nextChargeDate": "12 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "disney-plus",
+    "name": "Disney+",
+    "initial": "D",
+    "color": "#6c3ce9",
+    "cycle": "Mensual",
+    "price": 11.9,
+    "nextChargeDate": "18 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "hbo-max",
+    "name": "HBO Max",
+    "initial": "H",
+    "color": "#7d2ae8",
+    "cycle": "Mensual",
+    "price": 9.99,
+    "nextChargeDate": "20 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "youtube-premium",
+    "name": "YouTube Premium",
+    "initial": "Y",
+    "color": "#ff0000",
+    "cycle": "Mensual",
+    "price": 13.99,
+    "nextChargeDate": "22 Nov",
+    "hasAlert": true
+  },
+  {
+    "id": "apple-music",
+    "name": "Apple Music",
+    "initial": "M",
+    "color": "#fa233b",
+    "cycle": "Mensual",
+    "price": 10.99,
+    "nextChargeDate": "24 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "icloud-plus",
+    "name": "iCloud+",
+    "initial": "I",
+    "color": "#3693f3",
+    "cycle": "Mensual",
+    "price": 2.99,
+    "nextChargeDate": "25 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "playstation-plus",
+    "name": "PlayStation Plus",
+    "initial": "P",
+    "color": "#0070d1",
+    "cycle": "Anual",
+    "price": 8.33,
+    "nextChargeDate": "28 Nov",
+    "hasAlert": false
+  },
+  {
+    "id": "adobe-cc",
+    "name": "Adobe Creative Cloud",
+    "initial": "C",
+    "color": "#da1f26",
+    "cycle": "Mensual",
+    "price": 59.99,
+    "nextChargeDate": "30 Nov",
+    "hasAlert": true
+  },
+  {
+    "id": "notion",
+    "name": "Notion",
+    "initial": "N",
+    "color": "#1a1b3a",
+    "cycle": "Mensual",
+    "price": 8.0,
+    "nextChargeDate": "01 Dic",
+    "hasAlert": false
+  },
+  {
+    "id": "dropbox",
+    "name": "Dropbox",
+    "initial": "D",
+    "color": "#0061fe",
+    "cycle": "Mensual",
+    "price": 11.99,
+    "nextChargeDate": "03 Dic",
+    "hasAlert": false
+  }
+]
