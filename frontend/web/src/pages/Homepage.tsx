@@ -6,7 +6,7 @@ import EditarSuscripcionForm, {
   EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
-
+import { formatearMonto } from '@ojoalgasto/shared';
 
 // SOLO TESTEO — este import trae los datos mock desde un JSON local.
 // Se eliminara todo lo relacionado a esto cuando ya este conectado al backend en el siguiente PR
@@ -17,10 +17,8 @@ import { AppLayout } from "../components/layout/AppLayout";
  
 const PAGE_SIZE = 5;
  
-const formatTotal = (subscriptions: Subscription[]) => {
-  const total = subscriptions.reduce((sum, s) => sum + s.price, 0);
-  return total.toFixed(2).replace(".", ",");
-};
+const totalMensual = (subscriptions: Subscription[]) =>
+  subscriptions.reduce((sum, s) => sum + s.price, 0);
  
 const DashboardPage: React.FC = () => {
   const userName = "Usuario";
@@ -226,7 +224,7 @@ const DashboardPage: React.FC = () => {
         <section className={styles.summaryCard}>
           <span className={styles.summaryLabel}>Total mensual</span>
           <p className={styles.summaryValue}>
-            {isLoading ? "···" : formatTotal(subscriptions)} €{" "}
+            {isLoading ? "···" : formatearMonto(totalMensual(subscriptions))}{" "}
             <span className={styles.summaryPeriod}>/mes</span>
           </p>
         </section>
@@ -305,7 +303,7 @@ const DashboardPage: React.FC = () => {
                 id: editingSubscription.id,
                 nombre: editingSubscription.name,
                 monto: String(editingSubscription.price),
-                moneda: "EUR",
+                moneda: "CLP",
                 cicloDeCobro: editingSubscription.cycle,
                 categoria: "Entretenimiento",
                 notas: "",
