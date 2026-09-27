@@ -1,0 +1,179 @@
+.dashboardPage {
+  --ink: #1a1b3a;
+  --muted: #8990a3;
+  --border: #eef0f4;
+  --accent: #4f46e5;
+ 
+  max-width: 1600px;                      /* antes: 1100px */
+  margin: 0 auto;
+  padding: 48px clamp(24px, 5vw, 64px) 80px; /* antes: 48px 32px 80px */
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 40px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.headerActions {
+  display: flex;.dashboardPage {
+  --ink: #1a1b3a;
+  --muted: #8990a3;
+  --border: #eef0f4;
+  --accent: #4f46e5;
+ 
+  max-width: 1600px;                      /* antes: 1100px */
+  margin: 0 auto;
+  padding: 48px clamp(24px, 5vw, 64px) 80px; /* antes: 48px 32px 80px */
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.dateIcon {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: var(--ink);
+}
+
+.summaryCard {
+  background: #fff;             
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px 32px;
+  max-width: 420px;
+  margin-bottom: 40px;
+}
+
+.summaryLabel {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.summaryValue {
+  margin: 0;
+  font-size: 44px;
+  font-weight: 700;
+}
+
+.summaryPeriod {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.listSection {
+  background: #fff; 
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.listTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  padding-left: 12px;
+  border-left: 3px solid var(--ink);
+}
+
+.addButton {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.addButton:hover {
+  text-decoration: underline;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+@media (max-width: 640px) {
+  .dashboardPage {
+    padding: 32px 16px 60px;
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+
+  .summaryCard {
+    max-width: none;
+  }
+}
+
+/* Overlay compartido por "Nueva suscripción" y "Editar suscripción":
+   los muestra como ventana flotante centrada sobre un fondo oscurecido. */
+.formOverlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(26, 27, 58, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 50;
+}
+ 
