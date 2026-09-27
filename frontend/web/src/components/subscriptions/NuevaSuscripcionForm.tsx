@@ -161,16 +161,12 @@ export function NuevaSuscripcionForm({
 
       <div className={styles.field}>
         <label className={styles.fieldLabel}>FECHA DE COBRO</label>
-        <div className={styles.dateWrapper}>
           <input
             type="date"
             className={styles.fieldInput}
             value={formData.fechaDeCobro}
             onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
           />
-          {/* Placeholder del icono de calendario */}
-          <div className={styles.iconPlaceholder} />
-        </div>
       </div>
 
       <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`}>

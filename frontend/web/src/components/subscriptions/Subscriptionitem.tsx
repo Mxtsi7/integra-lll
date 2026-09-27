@@ -1,6 +1,7 @@
 import React from "react";
 import ListCard from "./suscard";
 import styles from "./suscard.module.css";
+import { formatearMonto } from '@ojoalgasto/shared';
 
 export type BillingCycle = "Mensual" | "Anual";
 
@@ -27,9 +28,6 @@ interface SubscriptionItemProps {
   /** true mientras se reproduce el fade-out justo antes de quitarla de la lista. */
   isRemoving?: boolean;
 }
-
-const formatPrice = (value: number, currency: string = "CLP") =>
-  `${value.toFixed(2).replace(".", ",")} ${currency}`;
 
 const AlertIcon: React.FC = () => (
   <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" style={{ width: 12, height: 12 }}>
@@ -103,7 +101,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
       badge={hasAlert ? { label: "Alerta", tone: "warning", icon: <AlertIcon /> } : undefined}
       trailing={
         <>
-          {formatPrice(price, currency)}
+          {formatearMonto(price,currency)}
           <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginLeft: 2 }}>
             /mes
           </span>
