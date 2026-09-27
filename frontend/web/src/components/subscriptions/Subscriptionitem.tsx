@@ -1,7 +1,8 @@
 import React from "react";
 import ListCard from "./suscard";
 import styles from "./suscard.module.css";
-import { formatearMonto } from '@ojoalgasto/shared';
+import { formatearMonto, type Moneda } from '@ojoalgasto/shared';
+
 
 export type BillingCycle = "Mensual" | "Anual";
 
@@ -12,7 +13,7 @@ export interface Subscription {
   color: string;
   cycle: BillingCycle;
   price: number;
-  currency?: string;
+  currency?: Moneda;
   nextChargeDate: string;
   hasAlert?: boolean;
 }

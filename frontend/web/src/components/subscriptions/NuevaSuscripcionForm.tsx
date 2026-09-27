@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import styles from "./SusForm.module.css";
 import { Subscription } from "./Subscriptionitem";
+import type { Moneda } from "@ojoalgasto/shared";
 // 👆 ajusta esta ruta si Subscriptionitem no está en la misma carpeta
 
 export interface NuevaSuscripcionFormData {
@@ -23,10 +24,7 @@ const DEFAULT_MONEDAS = ["CLP", "USD"];
 // Solo "Mensual" | "Anual": son los únicos valores que acepta Subscription["cycle"]
 const DEFAULT_CICLOS: Subscription["cycle"][] = ["Mensual", "Anual"];
 
-const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: "$",
-  CLP: "$",
-};
+
 
 const PALETTE = ["#e50914", "#1db954", "#f5a623", "#6c3ce9", "#0070d1", "#da1f26", "#7d2ae8"];
 const randomColor = () => PALETTE[Math.floor(Math.random() * PALETTE.length)];
@@ -82,7 +80,7 @@ export function NuevaSuscripcionForm({
       color: randomColor(),
       cycle: formData.cicloDeCobro,
       price,
-      currency: CURRENCY_SYMBOLS[formData.moneda] ?? formData.moneda,
+      currency: formData.moneda,
       nextChargeDate: formatNextChargeDate(formData.fechaDeCobro),
       hasAlert: false,
     });
