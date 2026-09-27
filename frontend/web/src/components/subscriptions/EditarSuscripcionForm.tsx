@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import styles from "./SusForm.module.css";
 
 export interface EditarSuscripcionFormData {
   id?: string; // TODO: aquí carga el dato real del id de la suscripción
@@ -19,7 +20,7 @@ interface EditarSuscripcionFormProps {
   categorias?: string[];
 }
 
-const DEFAULT_MONEDAS = ["USD", "EUR", "CLP", "MXN", "ARS"];
+const DEFAULT_MONEDAS = ["CLP","USD"];
 const DEFAULT_CICLOS = ["Mensual", "Anual", "Semanal", "Trimestral"];
 const DEFAULT_CATEGORIAS = [
   "Entretenimiento",
@@ -63,53 +64,53 @@ export function EditarSuscripcionForm({
   };
 
   return (
-    <form className="form-card" onSubmit={handleSubmit}>
-      <div className="form-header-row">
-        <div className="form-header-bar" />
-        <h2 className="form-title">Editar Suscripción</h2>
+    <form className={styles.formCard} onSubmit={handleSubmit}>
+      <div className={styles.formHeaderRow}>
+        <div className={styles.formHeaderBar} />
+        <h2 className={styles.formTitle}>Editar Suscripción</h2>
       </div>
-      <div className="form-subtitle">
+      <div className={styles.formSubtitle}>
         ID: {formData.id ?? "—"} {/* TODO: aquí carga el dato real del id */}
       </div>
 
-      <div className="form-divider">
-        <div className="form-divider-fill" />
+      <div className={styles.formDivider}>
+        <div className={styles.formDividerFill} />
       </div>
 
-      <div className="info-banner">
+      <div className={styles.infoBanner}>
         {/* Placeholder del icono informativo */}
-        <div className="info-icon-placeholder" />
-        <div className="info-text">
+        <div className={styles.infoIconPlaceholder} />
+        <div className={styles.infoText}>
           Los cambios no afectarán el historial de cobros pasados.
         </div>
       </div>
 
-      <div className="field">
-        <label className="field-label">NOMBRE DEL SERVICIO</label>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel}>NOMBRE DEL SERVICIO</label>
         <input
           type="text"
-          className="field-input"
+          className={styles.fieldInput}
           value={formData.nombre}
           onChange={(e) => handleChange("nombre", e.target.value)}
         />
       </div>
 
-      <div className="field-row">
-        <div className="field">
-          <label className="field-label">MONTO</label>
+      <div className={styles.fieldRow}>
+        <div className={styles.field}>
+          <label className={styles.fieldLabel}>MONTO</label>
           <input
             type="number"
             step="0.01"
-            className="field-input"
+            className={styles.fieldInput}
             value={formData.monto}
             onChange={(e) => handleChange("monto", e.target.value)}
           />
         </div>
 
-        <div className="field field--currency">
-          <label className="field-label">MONEDA</label>
+        <div className={`${styles.field} ${styles.fieldCurrency}`}>
+          <label className={styles.fieldLabel}>MONEDA</label>
           <select
-            className="field-select"
+            className={styles.fieldSelect}
             value={formData.moneda}
             onChange={(e) => handleChange("moneda", e.target.value)}
           >
@@ -122,10 +123,10 @@ export function EditarSuscripcionForm({
         </div>
       </div>
 
-      <div className="field">
-        <label className="field-label">CICLO DE COBRO</label>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel}>CICLO DE COBRO</label>
         <select
-          className="field-select"
+          className={styles.fieldSelect}
           value={formData.cicloDeCobro}
           onChange={(e) => handleChange("cicloDeCobro", e.target.value)}
         >
@@ -137,10 +138,10 @@ export function EditarSuscripcionForm({
         </select>
       </div>
 
-      <div className="field">
-        <label className="field-label">CATEGORÍA</label>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel}>CATEGORÍA</label>
         <select
-          className="field-select"
+          className={styles.fieldSelect}
           value={formData.categoria}
           onChange={(e) => handleChange("categoria", e.target.value)}
         >
@@ -152,21 +153,25 @@ export function EditarSuscripcionForm({
         </select>
       </div>
 
-      <div className="field">
-        <label className="field-label">NOTAS</label>
+      <div className={styles.field}>
+        <label className={styles.fieldLabel}>NOTAS</label>
         <textarea
-          className="field-textarea"
+          className={styles.fieldTextarea}
           placeholder="Añade notas sobre esta suscripción..."
           value={formData.notas}
           onChange={(e) => handleChange("notas", e.target.value)}
         />
       </div>
 
-      <button type="submit" className="btn btn-primary">
+      <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`}>
         GUARDAR CAMBIOS
       </button>
 
-      <button type="button" className="btn btn-secondary" onClick={onCancel}>
+      <button
+        type="button"
+        className={`${styles.btn} ${styles.btnSecondary}`}
+        onClick={onCancel}
+      >
         CANCELAR
       </button>
     </form>

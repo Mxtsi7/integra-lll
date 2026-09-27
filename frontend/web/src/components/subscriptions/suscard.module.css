@@ -161,6 +161,49 @@
   height: 12px;
 }
 
+.rowWrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+ 
+.rowWrapper .row {
+  flex: 1 1 auto;
+}
+ 
+.trailingActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 24px;
+}
+ 
+.editButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--list-card-border, #eef0f4);
+  background: #fff;
+  color: var(--list-card-muted, #8990a3);
+  cursor: pointer;
+}
+ 
+.editButton:hover {
+  background-color: rgba(127, 127, 127, 0.08);
+  color: var(--list-card-ink, #1a1b3a);
+}
+ 
+.editIcon {
+  width: 14px;
+  height: 14px;
+}
+ 
+
+
 @keyframes shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: 0 0; }
@@ -180,5 +223,34 @@
 
   .amount {
     display: none;
+  }
+}
+
+.removing {
+  animation: susCardFadeOut 280ms ease forwards;
+  pointer-events: none;
+}
+ 
+@keyframes susCardFadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    max-height: 120px;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.97);
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+}
+ 
+@media (prefers-reduced-motion: reduce) {
+  .removing {
+    animation: none;
+    opacity: 0;
   }
 }
