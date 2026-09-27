@@ -7,7 +7,7 @@ import type { Moneda } from "@ojoalgasto/shared";
 export interface NuevaSuscripcionFormData {
   nombre: string;
   monto: string;
-  moneda: string;
+  moneda: Moneda;
   cicloDeCobro: Subscription["cycle"];
   fechaDeCobro: string;
 }
@@ -16,11 +16,11 @@ interface NuevaSuscripcionFormProps {
   /** Se llama con el objeto ya en el shape que espera la lista de suscripciones. */
   onAdd?: (subscription: Omit<Subscription, "id">) => void;
   onCancel?: () => void;
-  monedas?: string[];
+  monedas?: Moneda[];
   ciclos?: Subscription["cycle"][];
 }
 
-const DEFAULT_MONEDAS = ["CLP", "USD"];
+const DEFAULT_MONEDAS = Moneda[] = ["CLP", "USD"];
 // Solo "Mensual" | "Anual": son los únicos valores que acepta Subscription["cycle"]
 const DEFAULT_CICLOS: Subscription["cycle"][] = ["Mensual", "Anual"];
 
