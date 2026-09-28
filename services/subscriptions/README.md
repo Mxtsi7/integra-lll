@@ -127,3 +127,71 @@ Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualizaci
    docker compose run --rm subscriptions pytest -v
    ```
 
+---
+
+### 4. Tarea: "Filtro por estado y fecha de cobro" y "Testear filtros"
+
+Esta tarea exige añadir parámetros a la URL del endpoint GET para que el backend devuelva resultados filtrados, y realizar peticiones para verificar su correcto funcionamiento.
+
+#### Cómo comprobarlo:
+
+**1. Correr los tests con pytest**
+
+Abre una terminal y posiciónate en el servicio:
+```powershell
+cd C:\Users\vdavi\OneDrive\Documentos\GitHub\integra-lll\services\subscriptions
+```
+
+Correr solo los tests de filtros nuevos:
+```powershell
+venv\Scripts\python.exe -m pytest tests/test_views.py::TestSubscriptionFilters -v
+```
+
+Correr todos los tests de views:
+```powershell
+venv\Scripts\python.exe -m pytest tests/test_views.py -v
+```
+
+Correr un test específico por nombre (útil para debug):
+```powershell
+venv\Scripts\python.exe -m pytest tests/test_views.py::TestSubscriptionFilters::test_filter_estado_activo_devuelve_solo_activas -v
+```
+
+> **Nota sobre la salida de pytest:**  
+> Cuando corre con `-v`, verás algo así:
+> - `PASSED` → el test pasó ✅
+> - `FAILED` → el test falló ❌ (se muestra el assert que falló, ej: `AssertionError: assert "Spotify" not in ["Netflix", "Spotify"]`)
+> - `ERROR` → hubo una excepción antes de llegar al assert
+> 
+> *Truco útil*: Puedes usar `-k` para filtrar tests por nombre (por ejemplo: `venv\Scripts\python.exe -m pytest tests/test_views.py -k "fecha" -v`).
+
+**2. Prueba manual con curl (como en la tarjeta Trello)**
+
+Primero necesitas tener el servidor corriendo localmente:
+```powershell
+cd C:\Users\vdavi\OneDrive\Documentos\GitHub\integra-lll\services\subscriptions
+venv\Scripts\python.exe manage.py runserver 8002
+```
+
+Luego en otra terminal, pruebas los filtros (asegúrate de reemplazar `<tu-uuid>` por un UUID válido o el ID real de organización):
+
+Filtrar por estado activo:
+```powershell
+curl "http://localhost:8002/api/suscripciones/?estado=activo" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtrar por estado cancelado (verificas que el resultado cambia):
+```powershell
+curl "http://localhost:8002/api/suscripciones/?estado=cancelado" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtrar por fecha de cobro:
+```powershell
+curl "http://localhost:8002/api/suscripciones/?fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtro combinado:
+```powershell
+curl "http://localhost:8002/api/suscripciones/?estado=activo&fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
