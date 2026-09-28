@@ -9,6 +9,7 @@ from app.views import SubscriptionViewSet
 
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
+router.register(r"subscriptions", SubscriptionViewSet, basename="subscription_en")
 
 
 def salud(request):
@@ -32,4 +33,6 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/", include(router.urls)),
+    path("", include(router.urls)),
 ]
+

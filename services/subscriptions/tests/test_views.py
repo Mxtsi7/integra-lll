@@ -530,3 +530,194 @@ class TestSubscriptionFilters:
         assert "Disney+ (otra org)" not in nombres
         assert "Netflix" in nombres
 
+    def test_filter_fecha_invalida_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Una fecha mal escrita responde 400, no revienta con 500."""
+        response = api_client.get(
+            "/api/suscripciones/?fecha_cobro=hola",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_detalle_ignora_los_query_params_del_listado(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Un filtro colgado en la URL de detalle no debe esconder el recurso."""
+        response = api_client.get(
+            f"/api/suscripciones/{sub_activa.id}/?estado=cancelado",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+
+@pytest.mark.django_db
+class TestSubscriptionRegistrarUso:
+    """Pruebas del endpoint POST /subscriptions/<id>/uso/ (CU-23 / RF-15 / RF-16)."""
+
+    @pytest.fixture()
+    def org(self) -> uuid.UUID:
+        return uuid.uuid4()
+
+    @pytest.fixture()
+    def sub_activa(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Netflix",
+            monto=Decimal("9990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 1),
+            categoria="streaming",
+            estado="activo",
+            horas_uso_mes=Decimal("0.00"),
+        )
+
+    @pytest.fixture()
+    def sub_fantasma(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Gimnasio",
+            monto=Decimal("19990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 15),
+            categoria="salud",
+            estado="fantasma",
+            horas_uso_mes=Decimal("0.00"),
+        )
+
+    def test_registrar_uso_minutos_negativos_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Envía {"minutos": -10} y confirma 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": -10},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_registrar_uso_minutos_cero_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Envía {"minutos": 0} y confirma 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 0},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_registrar_uso_payload_vacio_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Petición sin minutos devuelve 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_registrar_uso_actualiza_ultima_actividad_y_horas(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Envía {"minutos": 30}; actualiza ultima_actividad y horas_uso_mes."""
+        assert sub_activa.ultima_actividad is None
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        sub_activa.refresh_from_db()
+        assert sub_activa.ultima_actividad is not None
+        # 30 minutos = 0.50 horas
+        assert sub_activa.horas_uso_mes == Decimal("0.50")
+        assert response.data["horas_uso_mes"] == "0.50"
+        assert response.data["ultima_actividad"] is not None
+
+    def test_registrar_uso_reactiva_suscripcion_fantasma_a_activo(
+        self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
+    ) -> None:
+        """Envía {"minutos": 30} sobre suscripción Fantasma y confirma que vuelve a Activo."""
+        assert sub_fantasma.estado == "fantasma"
+        response = api_client.post(
+            f"/api/suscripciones/{sub_fantasma.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["estado"] == "activo"
+
+        sub_fantasma.refresh_from_db()
+        assert sub_fantasma.estado == "activo"
+        assert sub_fantasma.ultima_actividad is not None
+        assert sub_fantasma.horas_uso_mes == Decimal("0.50")
+
+    def test_registrar_uso_acumula_horas_de_uso(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Múltiples registros de uso acumulan horas_uso_mes correctamente."""
+        # 1er registro: 30 minutos (0.50 horas)
+        api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        # 2do registro: 60 minutos (1.00 hora)
+        api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 60},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("1.50")
+
+    def test_registrar_uso_aislamiento_tenant_otra_org_devuelve_404(
+        self, api_client: APIClient, sub_activa: Subscription
+    ) -> None:
+        """Otra organización recibe 404 Not Found si intenta registrar uso."""
+        otra_org = uuid.uuid4()
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(otra_org)},
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_registrar_uso_sin_cabecera_devuelve_403(
+        self, api_client: APIClient, sub_activa: Subscription
+    ) -> None:
+        """Petición sin cabecera X-Organizacion-Id responde 403 Forbidden."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 30},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_registrar_uso_soporta_ruta_subscriptions_ingles(
+        self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
+    ) -> None:
+        """POST /subscriptions/<id>/uso/ (ruta de la tarjeta Trello) funciona correctamente."""
+        response = api_client.post(
+            f"/subscriptions/{sub_fantasma.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["estado"] == "activo"
+
+

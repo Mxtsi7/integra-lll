@@ -56,3 +56,17 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                 "El monto debe ser mayor a 0."
             )
         return value
+
+
+class RegistrarUsoSerializer(serializers.Serializer):
+    """Valida los minutos de uso enviados por el usuario."""
+
+    minutos = serializers.IntegerField(
+        min_value=1,
+        error_messages={
+            "min_value": "Los minutos de uso no pueden ser negativos ni cero.",
+            "invalid": "Los minutos deben ser un número entero válido.",
+            "required": "El campo minutos es obligatorio.",
+        },
+    )
+
