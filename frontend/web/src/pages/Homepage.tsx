@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import SubscriptionItem, { Subscription } from "../components/subscriptions/Subscriptionitem";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
 import Pagination from "../components/subscriptions/pagination";
+import EmptyState from "../components/subscriptions/EmptyState";
 import EditarSuscripcionForm, {
   EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
@@ -214,6 +215,9 @@ const DashboardPage: React.FC = () => {
     // }, FADE_OUT_MS);
   };
  
+  // true cuando ya terminó de cargar y no queda ninguna suscripción
+  const isEmpty = !isLoading && subscriptions.length === 0;
+
   return (
     <AppLayout
       headerTitulo="Inicio"
@@ -221,75 +225,90 @@ const DashboardPage: React.FC = () => {
       headerEtiquetaFecha="Octubre, 2026"
     >
       <div className={styles.dashboardPage}>
-        <section className={styles.summaryCard}>
-          <span className={styles.summaryLabel}>Total mensual</span>
-          <p className={styles.summaryValue}>
-            {isLoading ? "···" : formatearMonto(totalMensual(subscriptions))}{" "}
-            <span className={styles.summaryPeriod}>/mes</span>
-          </p>
-        </section>
- 
-        <section className={styles.listSection}>
-          <div className={styles.listHeader}>
-            <h2 className={styles.listTitle}>Tus suscripciones</h2>
-            <button
-              type="button"
-              className={styles.addButton}
-              onClick={() => setIsAdding((v) => !v)}
-            >
-              {isAdding ? "Cerrar" : "+ Agregar suscripción"}
-            </button>
-          </div>
- 
-          {isAdding && (
-            <div
-              className={styles.formOverlay}
-              onClick={(e) => {
-                if (e.target === e.currentTarget) setIsAdding(false);
-              }}
-            >
-              <AddSubscriptionForm
-                onAdd={handleAddSubscription}
-                onCancel={() => setIsAdding(false)}
-              />
-            </div>
-          )}
- 
-          <ul className={styles.list}>
-            {isLoading
-              ? // subscriptionsData[0] es solo para tener ALGO
-                // que mostrar en el skeleton antes de cargar. SubscriptionItem
-                // con isLoading ignora estos datos igual, pero si se elimina
-                // sustest.json, reemplazar por un objeto vacío/dummy cualquiera.
-                Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                  <SubscriptionItem
-                    key={`placeholder-${i}`}
-                    subscription={subscriptionsData[0] as Subscription}
-                    isLoading
-                  />
-                ))
-              : paginatedSubscriptions.map((subscription) => (
-                  <SubscriptionItem
-                    key={subscription.id}
-                    subscription={subscription}
-                    onClick={handleSubscriptionClick}
-                    onEdit={handleEditSubscription}
-                    onDelete={handleDeleteSubscription} // 👈 nuevo
-                    isRemoving={subscription.id === removingId} // 👈 nuevo
-                  />
-                ))}
-          </ul>
- 
-          {!isLoading && (
-            <Pagination
-              currentPage={currentPage}
-              totalItems={subscriptions.length}
-              pageSize={PAGE_SIZE}
-              onPageChange={setCurrentPage}
+        {isEmpty ? (
+          // estado vacío: no hay suscripciones registradas
+          <EmptyState
+            className={styles.emptyState}
+            title="No tienes suscripciones registradas"
+            description="Agrega suscripciones para controlar tus gastos recurrentes, recibir alertas de cobro y obtener recomendaciones personalizadas de ahorro."
+            actionLabel="Agregar suscripción"
+            onAction={() => setIsAdding(true)}
+          />
+        ) : (
+          <>
+            <section className={styles.summaryCard}>
+              <span className={styles.summaryLabel}>Total mensual</span>
+              <p className={styles.summaryValue}>
+                {isLoading ? "···" : formatearMonto(totalMensual(subscriptions))}{" "}
+                <span className={styles.summaryPeriod}>/mes</span>
+              </p>
+            </section>
+
+            <section className={styles.listSection}>
+              <div className={styles.listHeader}>
+                <h2 className={styles.listTitle}>Tus suscripciones</h2>
+                <button
+                  type="button"
+                  className={styles.addButton}
+                  onClick={() => setIsAdding((v) => !v)}
+                >
+                  {isAdding ? "Cerrar" : "+ Agregar suscripción"}
+                </button>
+              </div>
+
+              <ul className={styles.list}>
+                {isLoading
+                  ? // subscriptionsData[0] es solo para tener ALGO
+                    // que mostrar en el skeleton antes de cargar. SubscriptionItem
+                    // con isLoading ignora estos datos igual, pero si se elimina
+                    // sustest.json, reemplazar por un objeto vacío/dummy cualquiera.
+                    Array.from({ length: PAGE_SIZE }).map((_, i) => (
+                      <SubscriptionItem
+                        key={`placeholder-${i}`}
+                        subscription={subscriptionsData[0] as Subscription}
+                        isLoading
+                      />
+                    ))
+                  : paginatedSubscriptions.map((subscription) => (
+                      <SubscriptionItem
+                        key={subscription.id}
+                        subscription={subscription}
+                        onClick={handleSubscriptionClick}
+                        onEdit={handleEditSubscription}
+                        onDelete={handleDeleteSubscription}
+                        isRemoving={subscription.id === removingId}
+                      />
+                    ))}
+              </ul>
+
+              {!isLoading && (
+                <Pagination
+                  currentPage={currentPage}
+                  totalItems={subscriptions.length}
+                  pageSize={PAGE_SIZE}
+                  onPageChange={setCurrentPage}
+                />
+              )}
+            </section>
+          </>
+        )}
+
+        {/* Overlay de nueva suscripción (fuera de la lista para que también
+            funcione desde el estado vacío) */}
+        {isAdding && (
+          <div
+            className={styles.formOverlay}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setIsAdding(false);
+            }}
+          >
+            <AddSubscriptionForm
+              onAdd={handleAddSubscription}
+              onCancel={() => setIsAdding(false)}
             />
-          )}
-        </section>
- 
+          </div>
+        )}
+
         {/* Overlay del formulario de edición */}
         {editingSubscription && (
           <div
@@ -313,7 +332,7 @@ const DashboardPage: React.FC = () => {
             />
           </div>
         )}
- 
+
         {/* Overlay del diálogo de confirmación de eliminar */}
         {deletingSubscription && (
           <div
@@ -333,5 +352,5 @@ const DashboardPage: React.FC = () => {
     </AppLayout>
   );
 };
- 
+
 export default DashboardPage;
