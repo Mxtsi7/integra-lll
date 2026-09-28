@@ -530,3 +530,23 @@ class TestSubscriptionFilters:
         assert "Disney+ (otra org)" not in nombres
         assert "Netflix" in nombres
 
+    def test_filter_fecha_invalida_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Una fecha mal escrita responde 400, no revienta con 500."""
+        response = api_client.get(
+            "/api/suscripciones/?fecha_cobro=hola",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_detalle_ignora_los_query_params_del_listado(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Un filtro colgado en la URL de detalle no debe esconder el recurso."""
+        response = api_client.get(
+            f"/api/suscripciones/{sub_activa.id}/?estado=cancelado",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
