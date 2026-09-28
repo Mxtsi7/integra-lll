@@ -111,6 +111,27 @@ class Subscription(ModeloTenant):
         verbose_name="Horas de uso en el mes",
     )
 
+    ultima_actividad = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Última actividad",
+    )
+
+    def registrar_uso(self, minutos: int | Decimal) -> None:
+        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes y reactiva estado si era fantasma."""
+        from django.utils import timezone
+
+        self.ultima_actividad = timezone.now()
+        horas = Decimal(str(minutos)) / Decimal("60")
+        if self.horas_uso_mes is None:
+            self.horas_uso_mes = Decimal("0.00")
+        self.horas_uso_mes += round(horas, 2)
+
+        if self.estado == self.Estado.FANTASMA:
+            self.estado = self.Estado.ACTIVO
+
+        self.save()
+
     # ── meta ─────────────────────────────────────────────────────────
 
     class Meta(ModeloTenant.Meta):
