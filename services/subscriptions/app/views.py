@@ -1,5 +1,8 @@
 """Vistas del servicio de suscripciones."""
 
+from django.utils.dateparse import parse_date
+from rest_framework.exceptions import ValidationError
+
 from app.models import Subscription
 from app.serializers import SubscriptionSerializer
 from shared.tenant.base import TenantViewSet
@@ -28,6 +31,12 @@ class SubscriptionViewSet(TenantViewSet):
         """Filtra por tenant y aplica query params opcionales de estado y fecha de cobro."""
         qs = super().get_queryset()
 
+        # Solo el listado se filtra: get_queryset() también lo usan retrieve,
+        # update y destroy, y ahí un query param colgado haría desaparecer el
+        # recurso con un 404.
+        if self.action != "list":
+            return qs
+
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
@@ -37,6 +46,15 @@ class SubscriptionViewSet(TenantViewSet):
             "fecha_cobro"
         ) or self.request.query_params.get("fecha_proximo_cobro")
         if fecha_cobro:
-            qs = qs.filter(fecha_proximo_cobro=fecha_cobro)
+            try:
+                fecha = parse_date(fecha_cobro)
+            except ValueError:
+                # bien formada pero imposible: 2026-13-45
+                fecha = None
+
+            if fecha is None:
+                raise ValidationError({"fecha_cobro": "Debe tener el formato YYYY-MM-DD."})
+
+            qs = qs.filter(fecha_proximo_cobro=fecha)
 
         return qs

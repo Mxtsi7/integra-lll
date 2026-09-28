@@ -131,67 +131,66 @@ Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualizaci
 
 ### 4. Tarea: "Filtro por estado y fecha de cobro" y "Testear filtros"
 
-Esta tarea exige añadir parámetros a la URL del endpoint GET para que el backend devuelva resultados filtrados, y realizar peticiones para verificar su correcto funcionamiento.
+Esta tarea añade parámetros a la URL del endpoint GET para que el backend devuelva resultados filtrados, garantizando aislamiento multi-tenant y validación adecuada de formatos.
 
 #### Cómo comprobarlo:
 
-**1. Correr los tests con pytest**
+**1. Tests unitarios con pytest (Docker)**
 
-Abre una terminal y posiciónate en el servicio:
-```powershell
-cd C:\Users\vdavi\OneDrive\Documentos\GitHub\integra-lll\services\subscriptions
-```
-
-Correr solo los tests de filtros nuevos:
-```powershell
-venv\Scripts\python.exe -m pytest tests/test_views.py::TestSubscriptionFilters -v
+Correr solo los tests de filtros:
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionFilters -v
 ```
 
 Correr todos los tests de views:
-```powershell
-venv\Scripts\python.exe -m pytest tests/test_views.py -v
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py -v
 ```
 
-Correr un test específico por nombre (útil para debug):
-```powershell
-venv\Scripts\python.exe -m pytest tests/test_views.py::TestSubscriptionFilters::test_filter_estado_activo_devuelve_solo_activas -v
+Correr un test específico por nombre (ej. verificación de 400 ante fecha inválida):
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionFilters::test_filter_fecha_invalida_devuelve_400 -v
 ```
 
 > **Nota sobre la salida de pytest:**  
-> Cuando corre con `-v`, verás algo así:
+> Cuando corre con `-v`:
 > - `PASSED` → el test pasó ✅
-> - `FAILED` → el test falló ❌ (se muestra el assert que falló, ej: `AssertionError: assert "Spotify" not in ["Netflix", "Spotify"]`)
-> - `ERROR` → hubo una excepción antes de llegar al assert
+> - `FAILED` → el test falló ❌ (se muestra la aserción que falló)
+> - `ERROR` → hubo una excepción antes de llegar a la aserción
 > 
-> *Truco útil*: Puedes usar `-k` para filtrar tests por nombre (por ejemplo: `venv\Scripts\python.exe -m pytest tests/test_views.py -k "fecha" -v`).
+> *Filtro por nombre (`-k`)*: Puedes ejecutar por ejemplo `docker compose run --rm subscriptions pytest -k "fecha" -v`.
 
-**2. Prueba manual con curl (como en la tarjeta Trello)**
+**2. Prueba manual con curl (con el servicio levantado en el puerto 8002)**
 
-Primero necesitas tener el servidor corriendo localmente:
-```powershell
-cd C:\Users\vdavi\OneDrive\Documentos\GitHub\integra-lll\services\subscriptions
-venv\Scripts\python.exe manage.py runserver 8002
+Levantar los servicios con Docker:
+```bash
+docker compose up -d
 ```
 
-Luego en otra terminal, pruebas los filtros (asegúrate de reemplazar `<tu-uuid>` por un UUID válido o el ID real de organización):
+Realizar peticiones de prueba (reemplazar `<tu-uuid>` por el UUID de tu organización):
 
 Filtrar por estado activo:
-```powershell
+```bash
 curl "http://localhost:8002/api/suscripciones/?estado=activo" -H "X-Organizacion-Id: <tu-uuid>"
 ```
 
-Filtrar por estado cancelado (verificas que el resultado cambia):
-```powershell
+Filtrar por estado cancelado (verificando que el resultado cambia):
+```bash
 curl "http://localhost:8002/api/suscripciones/?estado=cancelado" -H "X-Organizacion-Id: <tu-uuid>"
 ```
 
-Filtrar por fecha de cobro:
-```powershell
+Filtrar por fecha de cobro (alias `fecha_cobro` o `fecha_proximo_cobro` en formato `YYYY-MM-DD`):
+```bash
 curl "http://localhost:8002/api/suscripciones/?fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
 ```
 
 Filtro combinado:
-```powershell
+```bash
 curl "http://localhost:8002/api/suscripciones/?estado=activo&fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Fecha inválida (devuelve 400 Bad Request):
+```bash
+curl "http://localhost:8002/api/suscripciones/?fecha_cobro=hola" -H "X-Organizacion-Id: <tu-uuid>"
 ```
 
