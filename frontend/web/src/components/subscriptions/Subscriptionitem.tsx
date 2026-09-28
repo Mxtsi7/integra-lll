@@ -115,7 +115,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           {onEdit && (
             <button
               type="button"
-              className={styles.editButton}
+              className={`${styles.editButton} ${styles.actionEdit}`}
               aria-label={`Editar ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -128,7 +128,7 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           {onDelete && (
             <button
               type="button"
-              className={styles.editButton}
+              className={`${styles.editButton} ${styles.actionDelete}`}
               aria-label={`Eliminar ${name}`}
               onClick={(e) => {
                 e.stopPropagation();
