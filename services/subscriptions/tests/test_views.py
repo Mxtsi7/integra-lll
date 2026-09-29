@@ -782,3 +782,192 @@ class TestSubscriptionRegistrarUso:
         assert "minutos" in response.data
 
 
+@pytest.mark.django_db
+class TestSubscriptionPagination:
+    """Pruebas de paginación para GET /subscriptions/ y GET /api/suscripciones/."""
+
+    @pytest.fixture()
+    def org(self) -> uuid.UUID:
+        return uuid.uuid4()
+
+    @pytest.fixture()
+    def org_otra(self) -> uuid.UUID:
+        return uuid.uuid4()
+
+    def _crear_lote_suscripciones(self, org_id: uuid.UUID, total: int, estado: str = "activo") -> list[Subscription]:
+        """Crea un lote de suscripciones con nombres y fechas para probar paginación."""
+        suscripciones = []
+        for i in range(1, total + 1):
+            suscripciones.append(
+                Subscription.objects.create(
+                    organizacion_id=org_id,
+                    nombre=f"Servicio {i:02d}",
+                    monto=Decimal(f"{1000 * i}.00"),
+                    moneda="CLP",
+                    frecuencia="mensual",
+                    fecha_proximo_cobro=date(2026, 10, min(i, 28)),
+                    categoria="streaming",
+                    estado=estado,
+                )
+            )
+        return suscripciones
+
+    def test_pagination_default_page_size_and_structure(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """GET /api/suscripciones/ con 15 suscripciones devuelve primera página con 10 items y next link."""
+        self._crear_lote_suscripciones(org, 15)
+
+        response = api_client.get(
+            "/api/suscripciones/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        data = response.data
+        assert set(data.keys()) == {"count", "next", "previous", "results"}
+        assert data["count"] == 15
+        assert len(data["results"]) == 10
+        assert data["next"] is not None
+        assert "page=2" in data["next"]
+        assert data["previous"] is None
+
+    def test_pagination_page_2_success(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """GET /api/suscripciones/?page=2 devuelve los 5 items restantes, count, next=None y previous con link."""
+        self._crear_lote_suscripciones(org, 15)
+
+        response = api_client.get(
+            "/api/suscripciones/?page=2",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        data = response.data
+        assert data["count"] == 15
+        assert len(data["results"]) == 5
+        assert data["next"] is None
+        assert data["previous"] is not None
+
+    def test_pagination_trello_card_example_subscriptions_page_2(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """GET /subscriptions/?page=2 (ejemplo exacto de la tarjeta Trello) devuelve la 2da página con count, next y previous."""
+        self._crear_lote_suscripciones(org, 15)
+
+        response = api_client.get(
+            "/subscriptions/?page=2",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        data = response.data
+        assert "count" in data
+        assert "next" in data
+        assert "previous" in data
+        assert "results" in data
+
+        assert data["count"] == 15
+        assert len(data["results"]) == 5
+        assert data["next"] is None
+        assert data["previous"] is not None
+
+    def test_pagination_custom_page_size_param(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """Permite parametrizar page_size mediante query param (ej. ?page_size=5)."""
+        self._crear_lote_suscripciones(org, 15)
+
+        response = api_client.get(
+            "/api/suscripciones/?page_size=5",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 15
+        assert len(response.data["results"]) == 5
+        assert response.data["next"] is not None
+
+    def test_pagination_invalid_page_returns_404(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """Una página fuera de rango responde 404 Not Found."""
+        self._crear_lote_suscripciones(org, 15)
+
+        response = api_client.get(
+            "/api/suscripciones/?page=999",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+        response_str = api_client.get(
+            "/api/suscripciones/?page=invalido",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response_str.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_pagination_combined_with_filters(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """La paginación interactúa correctamente con los filtros (ej. ?estado=activo&page=2)."""
+        self._crear_lote_suscripciones(org, 12, estado="activo")
+        self._crear_lote_suscripciones(org, 5, estado="cancelado")
+
+        response = api_client.get(
+            "/api/suscripciones/?estado=activo&page=2",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 12
+        assert len(response.data["results"]) == 2
+        for item in response.data["results"]:
+            assert item["estado"] == "activo"
+
+    def test_pagination_respects_tenant_isolation(
+        self, api_client: APIClient, org: uuid.UUID, org_otra: uuid.UUID
+    ) -> None:
+        """La paginación cuenta y devuelve solo los registros de la organización autenticada."""
+        self._crear_lote_suscripciones(org, 15)
+        self._crear_lote_suscripciones(org_otra, 8)
+
+        resp_p1 = api_client.get(
+            "/api/suscripciones/?page=1",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert resp_p1.status_code == status.HTTP_200_OK
+        assert resp_p1.data["count"] == 15
+        assert len(resp_p1.data["results"]) == 10
+
+        resp_p2 = api_client.get(
+            "/api/suscripciones/?page=2",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert resp_p2.status_code == status.HTTP_200_OK
+        assert resp_p2.data["count"] == 15
+        assert len(resp_p2.data["results"]) == 5
+
+        # Todos los items pertenecen a org
+        todos_los_ids = [sub["id"] for sub in resp_p1.data["results"] + resp_p2.data["results"]]
+        assert len(todos_los_ids) == 15
+        for sub_id in todos_los_ids:
+            sub = Subscription.objects.get(id=sub_id)
+            assert sub.organizacion_id == org
+
+    def test_pagination_single_page_when_fewer_than_page_size(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """Si hay menos de 10 elementos, devuelve count=5, next=None y previous=None."""
+        self._crear_lote_suscripciones(org, 5)
+
+        response = api_client.get(
+            "/api/suscripciones/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["count"] == 5
+        assert len(response.data["results"]) == 5
+        assert response.data["next"] is None
+        assert response.data["previous"] is None
+
+
+
