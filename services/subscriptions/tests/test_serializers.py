@@ -7,7 +7,7 @@ import uuid
 import pytest
 
 from app.models import Subscription
-from app.serializers import SubscriptionSerializer
+from app.serializers import RegistrarUsoSerializer, SubscriptionSerializer
 
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -124,3 +124,45 @@ class TestSubscriptionSerializerMissingFields:
         serializer = SubscriptionSerializer(data=valid_payload)
         assert not serializer.is_valid()
         assert missing_field in serializer.errors
+
+
+@pytest.mark.django_db
+class TestSubscriptionSerializerReadOnlyFields:
+    """Verifica que campos protegidos no sean alterables desde input de cliente."""
+
+    def test_horas_uso_mes_and_ultima_actividad_in_read_only(self) -> None:
+        """horas_uso_mes y ultima_actividad deben estar en read_only_fields."""
+        read_only = SubscriptionSerializer.Meta.read_only_fields
+        assert "horas_uso_mes" in read_only
+        assert "ultima_actividad" in read_only
+
+    def test_horas_uso_mes_ignored_on_create(self, valid_payload: dict) -> None:
+        """Si el cliente envía horas_uso_mes en creación, se ignora."""
+        valid_payload["horas_uso_mes"] = Decimal("100.00")
+        serializer = SubscriptionSerializer(data=valid_payload)
+        assert serializer.is_valid(), serializer.errors
+        instancia = serializer.save(organizacion_id=uuid.uuid4())
+        assert instancia.horas_uso_mes is None or instancia.horas_uso_mes != Decimal("100.00")
+
+
+class TestRegistrarUsoSerializer:
+    """Validaciones de minutos en RegistrarUsoSerializer."""
+
+    def test_minutos_validos(self) -> None:
+        """Minutos dentro del rango permitido [1, 44640]."""
+        s1 = RegistrarUsoSerializer(data={"minutos": 30})
+        assert s1.is_valid(), s1.errors
+        assert s1.validated_data["minutos"] == 30
+
+        # Tope mensual (24 * 60 * 31 = 44640)
+        s2 = RegistrarUsoSerializer(data={"minutos": 44640})
+        assert s2.is_valid(), s2.errors
+        assert s2.validated_data["minutos"] == 44640
+
+    @pytest.mark.parametrize("minutos_invalidos", [0, -1, -50, 44641, 100000])
+    def test_minutos_fuera_de_rango_invalido(self, minutos_invalidos: int) -> None:
+        """Valores <= 0 o superiores a 44640 son rechazados."""
+        s = RegistrarUsoSerializer(data={"minutos": minutos_invalidos})
+        assert not s.is_valid()
+        assert "minutos" in s.errors
+
