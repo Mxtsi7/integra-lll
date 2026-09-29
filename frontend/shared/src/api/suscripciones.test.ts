@@ -96,3 +96,77 @@ describe("getSuscripciones", () => {
     expect(await getSuscripciones()).toEqual([]);
   });
 });
+
+describe("getSuscripciones y la paginacion", () => {
+  /** Arma una respuesta paginada como la que devuelve DRF. */
+  function pagina(nombres: string[], hayOtra: boolean) {
+    return {
+      count: 0,
+      // El `next` real trae el host INTERNO del servicio, inalcanzable desde el
+      // navegador. Se replica tal cual para que la prueba refleje la realidad.
+      next: hayOtra ? "http://subscriptions:8002/api/suscripciones/?page=2" : null,
+      previous: null,
+      results: nombres.map((nombre, i) => ({
+        id: `${nombre}-${i}`,
+        nombre,
+        monto: "1000.00",
+        moneda: "CLP",
+        frecuencia: "mensual",
+        fecha_proximo_cobro: "2026-10-10",
+        categoria: "otro",
+        estado: "activo",
+        fin_prueba: null,
+        horas_uso_mes: null,
+      })),
+    };
+  }
+
+  it("junta todas las paginas, no solo la primera", async () => {
+    const respuestas = [pagina(["A", "B"], true), pagina(["C"], false)];
+    let llamada = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => respuestas[llamada++],
+      })),
+    );
+
+    const suscripciones = await getSuscripciones();
+
+    expect(suscripciones.map((s) => s.nombre)).toEqual(["A", "B", "C"]);
+  });
+
+  it("pide las paginas por numero, sin seguir el next del servidor", async () => {
+    const respuestas = [pagina(["A"], true), pagina(["B"], false)];
+    let llamada = 0;
+    const fetchFalso = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => respuestas[llamada++],
+    }));
+    vi.stubGlobal("fetch", fetchFalso);
+
+    await getSuscripciones();
+
+    const urls = fetchFalso.mock.calls.map((c) => c[0] as string);
+    expect(urls[0]).toContain("/suscripciones/?page=1");
+    expect(urls[1]).toContain("/suscripciones/?page=2");
+    // Nunca se le pega al host interno que viene en el `next`.
+    expect(urls.some((u) => u.includes("subscriptions:8002"))).toBe(false);
+  });
+
+  it("para cuando no hay siguiente, sin pedir de mas", async () => {
+    const fetchFalso = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => pagina(["unica"], false),
+    });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    await getSuscripciones();
+
+    expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+});
