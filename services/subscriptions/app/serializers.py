@@ -12,7 +12,14 @@ class SubscriptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subscription
         fields = "__all__"
-        read_only_fields = ("id", "organizacion_id", "creado_en", "actualizado_en")
+        read_only_fields = (
+            "id",
+            "organizacion_id",
+            "creado_en",
+            "actualizado_en",
+            "horas_uso_mes",
+            "ultima_actividad",
+        )
 
     # ── normalización pre-validación ────────────────────────────────
 
@@ -63,10 +70,13 @@ class RegistrarUsoSerializer(serializers.Serializer):
 
     minutos = serializers.IntegerField(
         min_value=1,
+        max_value=24 * 60 * 31,  # 44.640 minutos (tope de un mes de 31 días)
         error_messages={
             "min_value": "Los minutos de uso no pueden ser negativos ni cero.",
+            "max_value": "Los minutos de uso no pueden superar el máximo mensual (44.640 minutos).",
             "invalid": "Los minutos deben ser un número entero válido.",
             "required": "El campo minutos es obligatorio.",
         },
     )
+
 
