@@ -720,4 +720,3 @@ class TestSubscriptionRegistrarUso:
         assert response.status_code == status.HTTP_200_OK
         assert response.data["estado"] == "activo"
 
-
