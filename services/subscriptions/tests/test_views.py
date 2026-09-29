@@ -106,6 +106,54 @@ class TestSubscriptionUpdateDeleteViews:
         assert subscription_org_a.nombre == "Spotify Premium"
         assert subscription_org_a.monto == Decimal("4500.00")
 
+    def test_put_ignores_horas_uso_y_ultima_actividad(
+        self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
+    ) -> None:
+        """PUT no debe permitir modificar horas_uso_mes ni ultima_actividad directamente."""
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
+        put_payload = {
+            "nombre": "Spotify Premium",
+            "monto": "4500.00",
+            "moneda": "CLP",
+            "frecuencia": "mensual",
+            "fecha_proximo_cobro": "2026-11-01",
+            "categoria": "musica",
+            "estado": "activo",
+            "horas_uso_mes": "999.00",
+            "ultima_actividad": "2026-01-01T00:00:00Z",
+        }
+        response = api_client.put(
+            url,
+            put_payload,
+            format="json",
+            headers={"X-Organizacion-Id": str(org_a)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        subscription_org_a.refresh_from_db()
+        assert subscription_org_a.horas_uso_mes is None or subscription_org_a.horas_uso_mes != Decimal("999.00")
+        assert subscription_org_a.ultima_actividad is None
+
+    def test_patch_ignores_horas_uso_y_ultima_actividad(
+        self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
+    ) -> None:
+        """PATCH no debe permitir manipular horas_uso_mes ni ultima_actividad (son read_only)."""
+        url = f"/api/suscripciones/{subscription_org_a.id}/"
+        response = api_client.patch(
+            url,
+            {
+                "horas_uso_mes": "500.00",
+                "ultima_actividad": "2026-01-01T00:00:00Z",
+            },
+            format="json",
+            headers={"X-Organizacion-Id": str(org_a)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        subscription_org_a.refresh_from_db()
+        assert subscription_org_a.horas_uso_mes is None or subscription_org_a.horas_uso_mes != Decimal("500.00")
+        assert subscription_org_a.ultima_actividad is None
+
     def test_delete_subscription_success(
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
@@ -719,4 +767,18 @@ class TestSubscriptionRegistrarUso:
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["estado"] == "activo"
+
+    def test_registrar_uso_minutos_excede_maximo_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Envía minutos por encima del tope mensual (> 44640) y confirma 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 44641},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "minutos" in response.data
+
 

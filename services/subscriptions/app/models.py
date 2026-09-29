@@ -122,10 +122,10 @@ class Subscription(ModeloTenant):
         from django.utils import timezone
 
         self.ultima_actividad = timezone.now()
-        horas = Decimal(str(minutos)) / Decimal("60")
+        horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
         if self.horas_uso_mes is None:
             self.horas_uso_mes = Decimal("0.00")
-        self.horas_uso_mes += round(horas, 2)
+        self.horas_uso_mes += horas
 
         if self.estado == self.Estado.FANTASMA:
             self.estado = self.Estado.ACTIVO
