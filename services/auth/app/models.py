@@ -1,6 +1,22 @@
+import uuid
+
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import BaseUserManager, PermissionsMixin
 from django.db import models
+
+from shared.tenant.base import ModeloBase
+
+
+class Organizacion(ModeloBase):
+    nombre = models.CharField(max_length=100)
+
+    class Meta(ModeloBase.Meta):
+        db_table = "organizacion"
+        verbose_name = "Organización"
+        verbose_name_plural = "Organizaciones"
+
+    def __str__(self) -> str:
+        return self.nombre
 
 
 class UserManager(BaseUserManager):
@@ -33,9 +49,28 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+    class Rol(models.TextChoices):
+        TITULAR = "titular", "Titular"
+        INTEGRANTE = "integrante", "Integrante"
+
     email = models.EmailField(unique=True)
     nombre = models.CharField(max_length=150)
     consentimiento_en = models.DateTimeField(null=True, blank=True)
+
+    organizacion = models.ForeignKey(
+        Organizacion,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="usuarios",
+    )
+    rol = models.CharField(
+        max_length=20,
+        choices=Rol.choices,
+        null=True,
+        blank=True,
+    )
+
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
 
@@ -43,3 +78,6 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["nombre"]
+
+    def __str__(self) -> str:
+        return self.email

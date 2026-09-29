@@ -1,4 +1,7 @@
-﻿"""Vistas del servicio de suscripciones."""
+"""Vistas del servicio de suscripciones."""
+
+from django.utils.dateparse import parse_date
+from rest_framework.exceptions import ValidationError
 
 from app.models import Subscription
 from app.serializers import SubscriptionSerializer
@@ -15,7 +18,43 @@ class SubscriptionViewSet(TenantViewSet):
       PATCH (partial_update) y DELETE (destroy).
     - Devuelve 403 si falta la cabecera X-Organizacion-Id.
     - Devuelve 404 si el recurso solicitado no pertenece a la organización autenticada.
+    - Acepta query params opcionales para filtrar el listado:
+        ?estado=activo
+        ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
+        ?estado=activo&fecha_cobro=2026-10-01
     """
 
     queryset = Subscription.objects.all()
     serializer_class = SubscriptionSerializer
+
+    def get_queryset(self):
+        """Filtra por tenant y aplica query params opcionales de estado y fecha de cobro."""
+        qs = super().get_queryset()
+
+        # Solo el listado se filtra: get_queryset() también lo usan retrieve,
+        # update y destroy, y ahí un query param colgado haría desaparecer el
+        # recurso con un 404.
+        if self.action != "list":
+            return qs
+
+        estado = self.request.query_params.get("estado")
+        if estado:
+            qs = qs.filter(estado=estado)
+
+        # Acepta tanto 'fecha_cobro' (alias de la tarjeta) como 'fecha_proximo_cobro'
+        fecha_cobro = self.request.query_params.get(
+            "fecha_cobro"
+        ) or self.request.query_params.get("fecha_proximo_cobro")
+        if fecha_cobro:
+            try:
+                fecha = parse_date(fecha_cobro)
+            except ValueError:
+                # bien formada pero imposible: 2026-13-45
+                fecha = None
+
+            if fecha is None:
+                raise ValidationError({"fecha_cobro": "Debe tener el formato YYYY-MM-DD."})
+
+            qs = qs.filter(fecha_proximo_cobro=fecha)
+
+        return qs

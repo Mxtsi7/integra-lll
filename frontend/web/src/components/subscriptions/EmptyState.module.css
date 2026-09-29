@@ -1,0 +1,87 @@
+.card {
+  --ink: var(--list-card-ink, #1a1b3a);
+  --muted: var(--list-card-muted, #8990a3);
+  --accent: var(--list-card-accent, #4f46e5);
+
+  width: 100%;
+  min-height: 440px;
+  padding: 48px 24px;
+  background: #fff;
+  border: 1px solid var(--list-card-border, #eef0f4);
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 14px;
+  font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular,
+    Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+.iconCircle {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  background-color: #e4e7f2;
+  color: #6b7391;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+
+.icon {
+  width: 36px;
+  height: 36px;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.description {
+  margin: 0;
+  max-width: 520px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.actionButton {
+  margin-top: 14px;
+  height: 50px;
+  padding: 0 28px;
+  border: none;
+  border-radius: 10px;
+  background-color: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.actionButton:hover {
+  filter: brightness(1.08);
+}
+
+.actionButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 520px) {
+  .card {
+    min-height: 360px;
+    padding: 32px 16px;
+  }
+
+  .title {
+    font-size: 19px;
+  }
+}

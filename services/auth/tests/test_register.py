@@ -77,3 +77,18 @@ class TestRegisterEndpoint:
         response = self.client.post(self.url, payload, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "acepta_datos" in response.data
+
+    def test_al_registrarse_queda_como_titular_de_su_organizacion(self):
+        self.client.post(
+            reverse("register"),
+            {
+                "email": "ana@test.com",
+                "password": "ClaveSegura123",
+                "nombre": "Ana",
+                "acepta_datos": True,
+            },
+            format="json",
+        )
+        u = User.objects.get(email="ana@test.com")
+        assert u.organizacion is not None
+        assert u.rol == User.Rol.TITULAR
