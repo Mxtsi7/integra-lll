@@ -1,53 +1,38 @@
 import React, { useState } from "react";
 import styles from "./SusForm.module.css";
-import { Subscription } from "./Subscriptionitem";
-import type { Moneda } from "@ojoalgasto/shared";
-// 👆 ajusta esta ruta si Subscriptionitem no está en la misma carpeta
+import type { Frecuencia, Moneda, Suscripcion } from "@ojoalgasto/shared";
+import { CATEGORIAS, etiquetaFrecuencia } from "./presentacion";
 
 export interface NuevaSuscripcionFormData {
   nombre: string;
   monto: string;
   moneda: Moneda;
-  cicloDeCobro: Subscription["cycle"];
+  frecuencia: Frecuencia;
+  categoria: Suscripcion["categoria"];
   fechaDeCobro: string;
 }
 
 interface NuevaSuscripcionFormProps {
-  /** Se llama con el objeto ya en el shape que espera la lista de suscripciones. */
-  onAdd?: (subscription: Omit<Subscription, "id">) => void;
+  /** Se llama con la suscripción lista, sin `id`: ese lo asigna el backend. */
+  onAdd?: (suscripcion: Omit<Suscripcion, "id">) => void;
   onCancel?: () => void;
   monedas?: Moneda[];
-  ciclos?: Subscription["cycle"][];
+  frecuencias?: Frecuencia[];
 }
 
 const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
-// Solo "Mensual" | "Anual": son los únicos valores que acepta Subscription["cycle"]
-const DEFAULT_CICLOS: Subscription["cycle"][] = ["Mensual", "Anual"];
+// Solo 'mensual' | 'anual': son los únicos valores que acepta el backend.
+const DEFAULT_FRECUENCIAS: Frecuencia[] = ["mensual", "anual"];
 
-
-
-const PALETTE = ["#e50914", "#1db954", "#f5a623", "#6c3ce9", "#0070d1", "#da1f26", "#7d2ae8"];
-const randomColor = () => PALETTE[Math.floor(Math.random() * PALETTE.length)];
-
-const MESES_ABBR = [
-  "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-  "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
-];
-
-// "2026-11-02" -> "02 Nov". Se parsea por partes (no con Date) para
-// evitar corrimientos de un día por zona horaria.
-const formatNextChargeDate = (isoDate: string): string => {
-  if (!isoDate) return "—";
-  const [year, month, day] = isoDate.split("-").map(Number);
-  if (!year || !month || !day) return "—";
-  return `${String(day).padStart(2, "0")} ${MESES_ABBR[month - 1]}`;
-};
-
-const EMPTY_FORM = (monedas: Moneda[], ciclos: Subscription["cycle"][]): NuevaSuscripcionFormData => ({
+const EMPTY_FORM = (
+  monedas: Moneda[],
+  frecuencias: Frecuencia[]
+): NuevaSuscripcionFormData => ({
   nombre: "",
   monto: "",
   moneda: monedas[0],
-  cicloDeCobro: ciclos[0],
+  frecuencia: frecuencias[0],
+  categoria: "otro",
   fechaDeCobro: "",
 });
 
@@ -55,10 +40,10 @@ export function NuevaSuscripcionForm({
   onAdd,
   onCancel,
   monedas = DEFAULT_MONEDAS,
-  ciclos = DEFAULT_CICLOS,
+  frecuencias = DEFAULT_FRECUENCIAS,
 }: NuevaSuscripcionFormProps) {
   const [formData, setFormData] = useState<NuevaSuscripcionFormData>(
-    EMPTY_FORM(monedas, ciclos)
+    EMPTY_FORM(monedas, frecuencias)
   );
 
   const handleChange = (
@@ -71,21 +56,22 @@ export function NuevaSuscripcionForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const price = parseFloat(formData.monto.replace(",", "."));
-    if (!formData.nombre.trim() || Number.isNaN(price)) return;
+    const monto = parseFloat(formData.monto.replace(",", "."));
+    if (!formData.nombre.trim() || Number.isNaN(monto)) return;
 
     onAdd?.({
-      name: formData.nombre.trim(),
-      initial: formData.nombre.trim().charAt(0).toUpperCase(),
-      color: randomColor(),
-      cycle: formData.cicloDeCobro,
-      price,
-      currency: formData.moneda,
-      nextChargeDate: formatNextChargeDate(formData.fechaDeCobro),
-      hasAlert: false,
+      nombre: formData.nombre.trim(),
+      monto,
+      moneda: formData.moneda,
+      frecuencia: formData.frecuencia,
+      // La fecha viaja en ISO (YYYY-MM-DD), que es lo que espera la API.
+      // Formatearla para mostrar es cosa de la pantalla, no del dato.
+      fecha_proximo_cobro: formData.fechaDeCobro,
+      categoria: formData.categoria,
+      estado: "activo",
     });
 
-    setFormData(EMPTY_FORM(monedas, ciclos));
+    setFormData(EMPTY_FORM(monedas, frecuencias));
   };
 
   return (
@@ -119,7 +105,7 @@ export function NuevaSuscripcionForm({
             type="number"
             step="0.01"
             className={styles.fieldInput}
-            placeholder="0.00"
+            placeholder="0"
             value={formData.monto}
             onChange={(e) => handleChange("monto", e.target.value)}
             required
@@ -146,12 +132,27 @@ export function NuevaSuscripcionForm({
         <label className={styles.fieldLabel}>CICLO DE COBRO</label>
         <select
           className={styles.fieldSelect}
-          value={formData.cicloDeCobro}
-          onChange={(e) => handleChange("cicloDeCobro", e.target.value)}
+          value={formData.frecuencia}
+          onChange={(e) => handleChange("frecuencia", e.target.value)}
         >
-          {ciclos.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {frecuencias.map((f) => (
+            <option key={f} value={f}>
+              {etiquetaFrecuencia(f)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className={styles.field}>
+        <label className={styles.fieldLabel}>CATEGORÍA</label>
+        <select
+          className={styles.fieldSelect}
+          value={formData.categoria}
+          onChange={(e) => handleChange("categoria", e.target.value)}
+        >
+          {CATEGORIAS.map((c) => (
+            <option key={c.valor} value={c.valor}>
+              {c.etiqueta}
             </option>
           ))}
         </select>
@@ -164,6 +165,7 @@ export function NuevaSuscripcionForm({
             className={styles.fieldInput}
             value={formData.fechaDeCobro}
             onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
+            required
           />
       </div>
 
