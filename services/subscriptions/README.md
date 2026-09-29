@@ -233,4 +233,3 @@ curl -X POST "http://localhost:8002/subscriptions/<id>/uso/" \
   -d '{"minutos": -10}'
 ```
 
-
