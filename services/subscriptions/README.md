@@ -127,3 +127,70 @@ Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualizaci
    docker compose run --rm subscriptions pytest -v
    ```
 
+---
+
+### 4. Tarea: "Filtro por estado y fecha de cobro" y "Testear filtros"
+
+Esta tarea añade parámetros a la URL del endpoint GET para que el backend devuelva resultados filtrados, garantizando aislamiento multi-tenant y validación adecuada de formatos.
+
+#### Cómo comprobarlo:
+
+**1. Tests unitarios con pytest (Docker)**
+
+Correr solo los tests de filtros:
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionFilters -v
+```
+
+Correr todos los tests de views:
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py -v
+```
+
+Correr un test específico por nombre (ej. verificación de 400 ante fecha inválida):
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionFilters::test_filter_fecha_invalida_devuelve_400 -v
+```
+
+> **Nota sobre la salida de pytest:**  
+> Cuando corre con `-v`:
+> - `PASSED` → el test pasó ✅
+> - `FAILED` → el test falló ❌ (se muestra la aserción que falló)
+> - `ERROR` → hubo una excepción antes de llegar a la aserción
+> 
+> *Filtro por nombre (`-k`)*: Puedes ejecutar por ejemplo `docker compose run --rm subscriptions pytest -k "fecha" -v`.
+
+**2. Prueba manual con curl (con el servicio levantado en el puerto 8002)**
+
+Levantar los servicios con Docker:
+```bash
+docker compose up -d
+```
+
+Realizar peticiones de prueba (reemplazar `<tu-uuid>` por el UUID de tu organización):
+
+Filtrar por estado activo:
+```bash
+curl "http://localhost:8002/api/suscripciones/?estado=activo" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtrar por estado cancelado (verificando que el resultado cambia):
+```bash
+curl "http://localhost:8002/api/suscripciones/?estado=cancelado" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtrar por fecha de cobro (alias `fecha_cobro` o `fecha_proximo_cobro` en formato `YYYY-MM-DD`):
+```bash
+curl "http://localhost:8002/api/suscripciones/?fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Filtro combinado:
+```bash
+curl "http://localhost:8002/api/suscripciones/?estado=activo&fecha_cobro=2026-10-01" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+Fecha inválida (devuelve 400 Bad Request):
+```bash
+curl "http://localhost:8002/api/suscripciones/?fecha_cobro=hola" -H "X-Organizacion-Id: <tu-uuid>"
+```
+

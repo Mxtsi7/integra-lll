@@ -82,7 +82,14 @@ porque todo queda en el mismo origen.
   tiene Service) y `celery inspect ping` tarda más que cualquier timeout
   razonable con el CPU acotado. Que está vivo se ve en sus logs.
 - **Las imágenes son privadas** en GHCR: el cluster las baja con el Secret
-  `ghcr`, que crea el script de despliegue.
+  `ghcr`, que crea el script de despliegue. Pásale un token de solo lectura en
+  `GHCR_TOKEN` (`read:packages`); si no, usa el de `gh`, que puede publicar
+  paquetes a tu nombre y queda guardado dentro del cluster.
+- **`DATABASE_URL` vive en el Secret**, no en el ConfigMap: lleva la
+  contraseña adentro y se arma con la misma clave que recibe Postgres. Ojo:
+  `POSTGRES_PASSWORD` solo se aplica en el primer arranque, con el disco
+  vacío. Cambiarla después en el Secret no cambia la de la base; hay que
+  entrar con `psql` y hacer `ALTER USER`, o borrar el PVC y empezar de cero.
 
 ## Comandos del día a día
 

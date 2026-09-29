@@ -328,3 +328,225 @@ class TestSubscriptionCreateListViews:
         """GET /subscriptions/ sin cabecera responde 403 Forbidden."""
         response = api_client.get("/api/suscripciones/")
         assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
+class TestSubscriptionFilters:
+    """Pruebas del filtrado por estado y fecha_cobro en GET /api/suscripciones/."""
+
+    # ── fixtures de datos ────────────────────────────────────────────
+
+    @pytest.fixture()
+    def org(self) -> uuid.UUID:
+        return uuid.uuid4()
+
+    @pytest.fixture()
+    def sub_activa(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Netflix",
+            monto=Decimal("9990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 1),
+            categoria="streaming",
+            estado="activo",
+        )
+
+    @pytest.fixture()
+    def sub_cancelada(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Spotify",
+            monto=Decimal("4990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 11, 1),
+            categoria="musica",
+            estado="cancelado",
+        )
+
+    @pytest.fixture()
+    def sub_activa_otra_fecha(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Adobe CC",
+            monto=Decimal("25000.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 11, 15),
+            categoria="productividad",
+            estado="activo",
+        )
+
+    # ── helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _nombres(response) -> list[str]:
+        items = (
+            response.data["results"]
+            if isinstance(response.data, dict) and "results" in response.data
+            else response.data
+        )
+        return [s["nombre"] for s in items]
+
+    # ── tests: filtro por estado ─────────────────────────────────────
+
+    def test_filter_estado_activo_devuelve_solo_activas(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+        sub_cancelada: Subscription,
+        sub_activa_otra_fecha: Subscription,
+    ) -> None:
+        """GET ?estado=activo devuelve solo suscripciones con estado 'activo'."""
+        response = api_client.get(
+            "/api/suscripciones/?estado=activo",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Netflix" in nombres
+        assert "Adobe CC" in nombres
+        assert "Spotify" not in nombres
+
+    def test_filter_estado_cancelado_devuelve_solo_canceladas(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+        sub_cancelada: Subscription,
+    ) -> None:
+        """GET ?estado=cancelado devuelve solo suscripciones canceladas."""
+        response = api_client.get(
+            "/api/suscripciones/?estado=cancelado",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Spotify" in nombres
+        assert "Netflix" not in nombres
+
+    def test_filter_estado_invalido_devuelve_lista_vacia(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+    ) -> None:
+        """GET ?estado=inexistente devuelve lista vacía (no error)."""
+        response = api_client.get(
+            "/api/suscripciones/?estado=inexistente",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert len(self._nombres(response)) == 0
+
+    # ── tests: filtro por fecha de cobro ─────────────────────────────
+
+    def test_filter_fecha_cobro_alias_devuelve_solo_coincidentes(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+        sub_cancelada: Subscription,
+        sub_activa_otra_fecha: Subscription,
+    ) -> None:
+        """GET ?fecha_cobro=2026-10-01 (alias de la tarjeta) filtra por fecha_proximo_cobro."""
+        response = api_client.get(
+            "/api/suscripciones/?fecha_cobro=2026-10-01",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Netflix" in nombres
+        assert "Spotify" not in nombres
+        assert "Adobe CC" not in nombres
+
+    def test_filter_fecha_proximo_cobro_param_devuelve_coincidentes(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+        sub_cancelada: Subscription,
+    ) -> None:
+        """GET ?fecha_proximo_cobro=2026-11-01 filtra por el nombre canónico del campo."""
+        response = api_client.get(
+            "/api/suscripciones/?fecha_proximo_cobro=2026-11-01",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Spotify" in nombres
+        assert "Netflix" not in nombres
+
+    # ── tests: filtro combinado ───────────────────────────────────────
+
+    def test_filter_estado_y_fecha_combinados(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+        sub_cancelada: Subscription,
+        sub_activa_otra_fecha: Subscription,
+    ) -> None:
+        """GET ?estado=activo&fecha_cobro=2026-10-01 aplica ambos filtros a la vez."""
+        response = api_client.get(
+            "/api/suscripciones/?estado=activo&fecha_cobro=2026-10-01",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Netflix" in nombres
+        assert "Adobe CC" not in nombres   # distinta fecha
+        assert "Spotify" not in nombres    # distinto estado
+
+    # ── tests: los filtros respetan el aislamiento tenant ────────────
+
+    def test_filtro_estado_no_devuelve_datos_de_otro_tenant(
+        self,
+        api_client: APIClient,
+        org: uuid.UUID,
+        sub_activa: Subscription,
+    ) -> None:
+        """?estado=activo nunca revela suscripciones de otra organización."""
+        otra_org = uuid.uuid4()
+        Subscription.objects.create(
+            organizacion_id=otra_org,
+            nombre="Disney+ (otra org)",
+            monto=Decimal("7990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 1),
+            categoria="streaming",
+            estado="activo",
+        )
+        response = api_client.get(
+            "/api/suscripciones/?estado=activo",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        nombres = self._nombres(response)
+        assert "Disney+ (otra org)" not in nombres
+        assert "Netflix" in nombres
+
+    def test_filter_fecha_invalida_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Una fecha mal escrita responde 400, no revienta con 500."""
+        response = api_client.get(
+            "/api/suscripciones/?fecha_cobro=hola",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_detalle_ignora_los_query_params_del_listado(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Un filtro colgado en la URL de detalle no debe esconder el recurso."""
+        response = api_client.get(
+            f"/api/suscripciones/{sub_activa.id}/?estado=cancelado",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+

@@ -43,7 +43,8 @@ export function PerfilPage() {
 }
 
 function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
-  const etiquetaPlan = usuario.plan === 'premium' ? 'Plan Premium' : 'Plan Gratuito';
+  const plan = usuario.plan ?? 'gratuito';
+  const etiquetaPlan = plan === 'premium' ? 'Plan Premium' : 'Plan Gratuito';
   const etiquetaRol = usuario.rol === 'titular' ? 'Titular de la cuenta' : 'Integrante';
 
   return (
@@ -52,12 +53,12 @@ function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
         <div>
           <p className={styles.planTitulo}>{etiquetaPlan}</p>
           <p className={styles.planDescripcion}>
-            {usuario.plan === 'premium'
+            {plan === 'premium'
               ? 'Tienes acceso al asistente financiero y recomendaciones avanzadas.'
               : 'Alertas de cobro y de prueba gratuita incluidas.'}
           </p>
         </div>
-        {usuario.plan === 'gratuito' && (
+        {plan === 'gratuito' && (
           <button type="button" className={styles.botonMejorar}>
             Mejorar a Premium
           </button>
