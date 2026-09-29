@@ -1,13 +1,20 @@
 import React, { useState } from "react";
 import styles from "./SusForm.module.css";
+import type { Frecuencia, Moneda, Suscripcion } from "@ojoalgasto/shared";
+import { CATEGORIAS, etiquetaFrecuencia } from "./presentacion";
 
 export interface EditarSuscripcionFormData {
-  id?: string; // TODO: aquí carga el dato real del id de la suscripción
+  id: string;
   nombre: string;
   monto: string;
-  moneda: string;
-  cicloDeCobro: string;
-  categoria: string;
+  moneda: Moneda;
+  frecuencia: Frecuencia;
+  categoria: Suscripcion["categoria"];
+  /**
+   * OJO: `notas` no existe ni en el tipo `Suscripcion` ni en el modelo de
+   * Django, así que hoy se escribe y se pierde. O se agrega al backend o se
+   * saca del formulario; queda acá para no borrar el diseño sin conversarlo.
+   */
   notas: string;
 }
 
@@ -15,39 +22,44 @@ interface EditarSuscripcionFormProps {
   suscripcion?: EditarSuscripcionFormData;
   onSubmit?: (data: EditarSuscripcionFormData) => void;
   onCancel?: () => void;
-  monedas?: string[];
-  ciclos?: string[];
-  categorias?: string[];
+  monedas?: Moneda[];
+  frecuencias?: Frecuencia[];
 }
 
-const DEFAULT_MONEDAS = ["CLP","USD"];
-const DEFAULT_CICLOS = ["Mensual", "Anual", "Semanal", "Trimestral"];
-const DEFAULT_CATEGORIAS = [
-  "Entretenimiento",
-  "Alimentación",
-  "Productividad",
-  "Salud",
-  "Educación",
-  "Otro",
-];
+const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
+// Solo 'mensual' | 'anual'. Antes había "Semanal" y "Trimestral", que el
+// backend rechaza: el modelo solo acepta estos dos.
+const DEFAULT_FRECUENCIAS: Frecuencia[] = ["mensual", "anual"];
 
 const DEFAULT_SUSCRIPCION: EditarSuscripcionFormData = {
-  id: undefined, // TODO: aquí carga el dato real del id de la suscripción
+  id: "",
   nombre: "",
   monto: "",
-  moneda: "USD",
-  cicloDeCobro: "Mensual",
-  categoria: "Entretenimiento",
+  moneda: "CLP",
+  frecuencia: "mensual",
+  categoria: "otro",
   notas: "",
 };
+
+/** Pasa una suscripción del dominio al formulario. */
+export function aFormulario(s: Suscripcion): EditarSuscripcionFormData {
+  return {
+    id: s.id,
+    nombre: s.nombre,
+    monto: String(s.monto),
+    moneda: s.moneda,
+    frecuencia: s.frecuencia,
+    categoria: s.categoria,
+    notas: "",
+  };
+}
 
 export function EditarSuscripcionForm({
   suscripcion = DEFAULT_SUSCRIPCION,
   onSubmit,
   onCancel,
   monedas = DEFAULT_MONEDAS,
-  ciclos = DEFAULT_CICLOS,
-  categorias = DEFAULT_CATEGORIAS,
+  frecuencias = DEFAULT_FRECUENCIAS,
 }: EditarSuscripcionFormProps) {
   const [formData, setFormData] = useState<EditarSuscripcionFormData>(suscripcion);
 
@@ -55,7 +67,7 @@ export function EditarSuscripcionForm({
     field: keyof EditarSuscripcionFormData,
     value: string
   ) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((prev) => ({ ...prev, [field]: value } as EditarSuscripcionFormData));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -69,9 +81,7 @@ export function EditarSuscripcionForm({
         <div className={styles.formHeaderBar} />
         <h2 className={styles.formTitle}>Editar Suscripción</h2>
       </div>
-      <div className={styles.formSubtitle}>
-        ID: {formData.id ?? "—"} {/* TODO: aquí carga el dato real del id */}
-      </div>
+      <div className={styles.formSubtitle}>{formData.nombre || "Suscripción"}</div>
 
       <div className={styles.formDivider}>
         <div className={styles.formDividerFill} />
@@ -127,12 +137,12 @@ export function EditarSuscripcionForm({
         <label className={styles.fieldLabel}>CICLO DE COBRO</label>
         <select
           className={styles.fieldSelect}
-          value={formData.cicloDeCobro}
-          onChange={(e) => handleChange("cicloDeCobro", e.target.value)}
+          value={formData.frecuencia}
+          onChange={(e) => handleChange("frecuencia", e.target.value)}
         >
-          {ciclos.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {frecuencias.map((f) => (
+            <option key={f} value={f}>
+              {etiquetaFrecuencia(f)}
             </option>
           ))}
         </select>
@@ -145,9 +155,9 @@ export function EditarSuscripcionForm({
           value={formData.categoria}
           onChange={(e) => handleChange("categoria", e.target.value)}
         >
-          {categorias.map((c) => (
-            <option key={c} value={c}>
-              {c}
+          {CATEGORIAS.map((c) => (
+            <option key={c.valor} value={c.valor}>
+              {c.etiqueta}
             </option>
           ))}
         </select>

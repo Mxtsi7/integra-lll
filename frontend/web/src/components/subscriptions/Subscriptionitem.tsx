@@ -1,30 +1,26 @@
 import React from "react";
 import ListCard from "./suscard";
 import styles from "./suscard.module.css";
-import { formatearMonto, type Moneda } from '@ojoalgasto/shared';
-
-
-export type BillingCycle = "Mensual" | "Anual";
-
-export interface Subscription {
-  id: string;
-  name: string;
-  initial: string;
-  color: string;
-  cycle: BillingCycle;
-  price: number;
-  currency?: Moneda;
-  nextChargeDate: string;
-  hasAlert?: boolean;
-}
+import {
+  formatearFecha,
+  formatearMonto,
+  type Suscripcion,
+} from "@ojoalgasto/shared";
+import {
+  colorDe,
+  etiquetaFrecuencia,
+  inicialDe,
+  tieneAlerta,
+} from "./presentacion";
 
 interface SubscriptionItemProps {
-  subscription: Subscription;
-  onClick?: (subscription: Subscription) => void;
+  /** El dato del dominio, tal como lo entrega la API. */
+  suscripcion?: Suscripcion;
+  onClick?: (suscripcion: Suscripcion) => void;
   /** Abre el formulario de edición para esta suscripción. */
-  onEdit?: (subscription: Subscription) => void;
+  onEdit?: (suscripcion: Suscripcion) => void;
   /** Abre el diálogo de confirmación para eliminar esta suscripción. */
-  onDelete?: (subscription: Subscription) => void;
+  onDelete?: (suscripcion: Suscripcion) => void;
   isLoading?: boolean;
   /** true mientras se reproduce el fade-out justo antes de quitarla de la lista. */
   isRemoving?: boolean;
@@ -62,19 +58,19 @@ const TrashIcon: React.FC = () => (
 );
 
 const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
-  subscription,
+  suscripcion,
   onClick,
   onEdit,
   onDelete,
   isLoading = false,
   isRemoving = false,
 }) => {
-  if (isLoading) {
+  // El esqueleto no dibuja datos, así que no necesita una suscripción.
+  if (isLoading || !suscripcion) {
     return <ListCard title="" isLoading />;
   }
 
-  const { name, initial, color, cycle, price, currency, nextChargeDate, hasAlert } =
-    subscription;
+  const { nombre, monto, moneda, frecuencia, fecha_proximo_cobro } = suscripcion;
 
   return (
     <ListCard
@@ -91,35 +87,42 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
             color: "#fff",
             fontWeight: 700,
             fontSize: 16,
-            backgroundColor: color,
+            backgroundColor: colorDe(nombre),
           }}
         >
-          {initial}
+          {inicialDe(nombre)}
         </span>
       }
-      title={name}
-      subtitle={cycle}
-      badge={hasAlert ? { label: "Alerta", tone: "warning", icon: <AlertIcon /> } : undefined}
+      title={nombre}
+      subtitle={etiquetaFrecuencia(frecuencia)}
+      badge={
+        tieneAlerta(suscripcion)
+          ? { label: "Alerta", tone: "warning", icon: <AlertIcon /> }
+          : undefined
+      }
       trailing={
         <>
-          {formatearMonto(price,currency)}
+          {formatearMonto(monto, moneda)}
+          {/* El sufijo sale de la frecuencia: antes decía "/mes" siempre, así
+              que una suscripción anual mostraba su monto anual como si fuera
+              mensual. */}
           <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginLeft: 2 }}>
-            /mes
+            {frecuencia === "anual" ? "/año" : "/mes"}
           </span>
         </>
       }
-      trailingSubtext={`Próximo cobro: ${nextChargeDate}`}
-      onClick={onClick ? () => onClick(subscription) : undefined}
+      trailingSubtext={`Próximo cobro: ${formatearFecha(fecha_proximo_cobro)}`}
+      onClick={onClick ? () => onClick(suscripcion) : undefined}
       actions={
         <>
           {onEdit && (
             <button
               type="button"
               className={`${styles.editButton} ${styles.actionEdit}`}
-              aria-label={`Editar ${name}`}
+              aria-label={`Editar ${nombre}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onEdit(subscription);
+                onEdit(suscripcion);
               }}
             >
               <EditIcon />
@@ -129,10 +132,10 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
             <button
               type="button"
               className={`${styles.editButton} ${styles.actionDelete}`}
-              aria-label={`Eliminar ${name}`}
+              aria-label={`Eliminar ${nombre}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete(subscription);
+                onDelete(suscripcion);
               }}
             >
               <TrashIcon />
