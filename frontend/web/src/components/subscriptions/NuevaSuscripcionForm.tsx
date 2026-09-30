@@ -18,6 +18,8 @@ interface NuevaSuscripcionFormProps {
   onCancel?: () => void;
   monedas?: Moneda[];
   frecuencias?: Frecuencia[];
+  /** true mientras el POST está en vuelo: deshabilita el botón de enviar. */
+  isSaving?: boolean;
 }
 
 const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
@@ -41,6 +43,7 @@ export function NuevaSuscripcionForm({
   onCancel,
   monedas = DEFAULT_MONEDAS,
   frecuencias = DEFAULT_FRECUENCIAS,
+  isSaving = false,
 }: NuevaSuscripcionFormProps) {
   const [formData, setFormData] = useState<NuevaSuscripcionFormData>(
     EMPTY_FORM(monedas, frecuencias)
@@ -169,14 +172,19 @@ export function NuevaSuscripcionForm({
           />
       </div>
 
-      <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`}>
-        REGISTRAR SUSCRIPCIÓN
+      <button
+        type="submit"
+        className={`${styles.btn} ${styles.btnPrimary}`}
+        disabled={isSaving}
+      >
+        {isSaving ? "GUARDANDO..." : "REGISTRAR SUSCRIPCIÓN"}
       </button>
 
       <button
         type="button"
         className={`${styles.btn} ${styles.btnSecondary}`}
         onClick={onCancel}
+        disabled={isSaving}
       >
         CANCELAR
       </button>

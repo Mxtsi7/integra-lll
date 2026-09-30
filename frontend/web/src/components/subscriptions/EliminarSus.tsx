@@ -6,6 +6,8 @@ interface EliminarSuscripcionDialogProps {
   nombreSuscripcion: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** true mientras el DELETE está en vuelo: deshabilita ambos botones. */
+  isDeleting?: boolean;
 }
 
 const WarningIcon: React.FC = () => (
@@ -32,6 +34,7 @@ const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
   nombreSuscripcion,
   onConfirm,
   onCancel,
+  isDeleting = false,
 }) => {
   return (
     <div className={styles.card} role="alertdialog" aria-modal="true">
@@ -47,11 +50,21 @@ const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
       </p>
 
       <div className={styles.actions}>
-        <button type="button" className={styles.cancelButton} onClick={onCancel}>
+        <button
+          type="button"
+          className={styles.cancelButton}
+          onClick={onCancel}
+          disabled={isDeleting}
+        >
           Cancelar
         </button>
-        <button type="button" className={styles.deleteButton} onClick={onConfirm}>
-          Eliminar
+        <button
+          type="button"
+          className={styles.deleteButton}
+          onClick={onConfirm}
+          disabled={isDeleting}
+        >
+          {isDeleting ? "Eliminando..." : "Eliminar"}
         </button>
       </div>
     </div>
