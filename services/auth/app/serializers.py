@@ -1,7 +1,8 @@
 from django.utils import timezone
 from rest_framework import serializers
-from .models import User, Organizacion
 from django.db import transaction
+from .models import User, Organizacion
+
 
 
 class MiembroSerializer(serializers.ModelSerializer):
@@ -29,9 +30,14 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(UserSerializer):
     acepta_datos = serializers.BooleanField(write_only=True, required=True)
+    codigo_organizacion = serializers.UUIDField(
+        write_only=True,
+        required=False,
+        allow_null=True,
+    )
 
     class Meta(UserSerializer.Meta):
-        fields = UserSerializer.Meta.fields + ("acepta_datos",)
+        fields = UserSerializer.Meta.fields + ("acepta_datos", "codigo_organizacion")
 
     def validate_acepta_datos(self, value):
         if value is not True:
@@ -40,16 +46,37 @@ class RegisterSerializer(UserSerializer):
             )
         return value
 
+    def validate_codigo_organizacion(self, value):
+        """Si se envía un código, debe existir la organización."""
+        if value is None:
+            return value
+        if not Organizacion.objects.filter(id=value).exists():
+            raise serializers.ValidationError(
+                "El código de organización no es válido."
+            )
+        return value
+
     def create(self, validated_data):
         validated_data.pop("acepta_datos", None)
+        codigo = validated_data.pop("codigo_organizacion", None)
+
         with transaction.atomic():
-            organizacion = Organizacion.objects.create(
-                nombre=f"Hogar de {validated_data.get('nombre', 'usuario')}"
-            )
+            if codigo:
+                # Unirse a organización existente → integrante
+                organizacion = Organizacion.objects.get(id=codigo)
+                rol = User.Rol.INTEGRANTE
+            else:
+                # Crear organización propia → titular
+                nombre = validated_data.get("nombre", "usuario")
+                organizacion = Organizacion.objects.create(
+                    nombre=f"Hogar de {nombre}"
+                )
+                rol = User.Rol.TITULAR
+
             return User.objects.create_user(
                 consentimiento_en=timezone.now(),
                 organizacion=organizacion,
-                rol=User.Rol.TITULAR,
+                rol=rol,
                 **validated_data,
             )
 
