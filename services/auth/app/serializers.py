@@ -14,19 +14,6 @@ class MiembroSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class OrganizacionDetalleSerializer(serializers.ModelSerializer):
-    """Detalle de la organización del usuario autenticado.
-    Incluye lista de miembros activos y el rol del usuario que consulta.
-    """
-    miembros = MiembroSerializer(many=True, read_only=True)
-    mi_rol = serializers.CharField(read_only=True)
-
-    class Meta:
-        model = Organizacion
-        fields = ("id", "nombre", "miembros", "mi_rol")
-        read_only_fields = fields
-
-
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User

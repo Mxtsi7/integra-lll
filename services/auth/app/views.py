@@ -5,6 +5,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+import uuid
 
 from .models import Organizacion, User
 from .serializers import (
@@ -12,7 +13,6 @@ from .serializers import (
     RegisterSerializer,
     UserSerializer,
     UsuarioActualSerializer,
-    OrganizacionDetalleSerializer,
     MiembroSerializer,
 )
 
@@ -127,7 +127,6 @@ class OrganizacionView(APIView):
         # Leer identidad inyectada por el gateway (ADR-004).
         usuario_id = request.headers.get("X-Usuario-Id")
         organizacion_id = request.headers.get("X-Organizacion-Id")
-        rol_header = request.headers.get("X-Rol")
 
         # Validación de contexto mínimo: ambas cabeceras son obligatorias.
         if not usuario_id:
@@ -135,12 +134,22 @@ class OrganizacionView(APIView):
         if not organizacion_id:
             raise PermissionDenied("Falta el contexto de organización (X-Organizacion-Id)")
 
+        # Validar que X-Organizacion-Id es un UUID válido (evita 500 por UUID inválido).
+        try:
+            uuid.UUID(organizacion_id)
+        except ValueError:
+            raise PermissionDenied("Identificador de organización inválido")
+
         # Cargar organización y verificar que existe.
         organizacion = get_object_or_404(Organizacion, pk=organizacion_id)
 
-        # Verificar que el usuario pertenece a esta organización (defensa en profundidad).
-        # En producción el gateway ya garantiza esto, pero no cuesta nada validarlo aquí.
-        if not User.objects.filter(pk=usuario_id, organizacion_id=organizacion_id).exists():
+        # Verificar que el usuario pertenece a esta organización Y está activo.
+        # El gateway ya garantiza la pertenencia, pero validamos aquí por defensa en profundidad.
+        if not User.objects.filter(
+            pk=usuario_id,
+            organizacion_id=organizacion_id,
+            is_active=True,
+        ).exists():
             raise PermissionDenied("El usuario no pertenece a la organización indicada")
 
         # Obtener miembros ACTIVOS de la organización.
@@ -149,17 +158,12 @@ class OrganizacionView(APIView):
             is_active=True,
         )
 
-        # Determinar mi_rol: preferir cabecera X-Rol (viene del token validado por gateway),
-        # si no viene, leer el rol real del usuario en BD.
-        if rol_header:
-            mi_rol = rol_header
-        else:
-            # Fallback: consultar BD (caso raro, p.ej. llamada interna sin X-Rol).
-            usuario = User.objects.filter(pk=usuario_id).only("rol").first()
-            mi_rol = usuario.rol if usuario and usuario.rol else "integrante"
+        # Determinar mi_rol: leer el rol real del usuario en BD.
+        # X-Rol puede quedar desactualizado si el rol cambió; la BD es la fuente de verdad.
+        usuario = User.objects.filter(pk=usuario_id).only("rol").first()
+        mi_rol = usuario.rol if usuario and usuario.rol else "integrante"
 
         # Serializar respuesta: MiembroSerializer ya incluye "correo" (source="email").
-        # No hace falta wrapper extra; devolvemos el dict directamente.
         return Response(
             {
                 "id": str(organizacion.id),

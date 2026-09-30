@@ -11,7 +11,8 @@ class TestOrganizacionEndpoint:
     """Tests para GET /api/organizacion/
 
     El endpoint confía en las cabeceras inyectadas por el gateway (ADR-004):
-    X-Usuario-Id, X-Organizacion-Id, X-Rol. NO valida JWT directamente.
+    X-Usuario-Id, X-Organizacion-Id. NO valida JWT directamente.
+    mi_rol se lee de la BD (fuente de verdad); X-Rol ya no se usa.
     """
 
     def setup_method(self):
@@ -55,7 +56,6 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular_a.id),
             HTTP_X_ORGANIZACION_ID=str(org_a.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
         assert r_a.status_code == status.HTTP_200_OK
         assert r_a.data["id"] == str(org_a.id)
@@ -71,7 +71,6 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular_b.id),
             HTTP_X_ORGANIZACION_ID=str(org_b.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
         assert r_b.status_code == status.HTTP_200_OK
         assert r_b.data["id"] == str(org_b.id)
@@ -90,7 +89,7 @@ class TestOrganizacionEndpoint:
     # ── Acceso mediante cabeceras del gateway (RF-26) ─────────────────
 
     def test_gateway_headers_devuelven_organizacion_correcta(self):
-        """Cuando el gateway inyecta X-Usuario-Id, X-Organizacion-Id, X-Rol,
+        """Cuando el gateway inyecta X-Usuario-Id y X-Organizacion-Id,
         el endpoint debe usar esas cabeceras sin validar JWT.
         """
         org = Organizacion.objects.create(nombre="Hogar Gateway")
@@ -114,7 +113,6 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular.id),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_200_OK
@@ -123,25 +121,30 @@ class TestOrganizacionEndpoint:
         assert len(r.data["miembros"]) == 2
         assert r.data["mi_rol"] == "titular"
 
-    def test_gateway_headers_con_rol_integrante_devuelve_integrante(self):
-        """El rol viene de la cabecera X-Rol inyectada por el gateway."""
-        org = Organizacion.objects.create(nombre="Hogar Gateway")
-        integrante = User.objects.create_user(
-            email="integrante@test.com",
+    def test_mi_rol_se_lee_de_la_bd_no_de_x_rol(self):
+        """mi_rol proviene del rol real del usuario en BD, no de la cabecera X-Rol.
+        X-Rol puede quedar desactualizado si el rol cambió; la BD es la fuente de verdad.
+        """
+        org = Organizacion.objects.create(nombre="Hogar BD")
+        # Usuario creado como INTEGRANTE en BD
+        user = User.objects.create_user(
+            email="user@test.com",
             password="ClaveSegura123",
-            nombre="Integrante",
+            nombre="User",
             organizacion=org,
             rol=User.Rol.INTEGRANTE,
         )
 
+        # Gateway manda X-Rol=titular (desactualizado), pero BD dice integrante
         r = self.client.get(
             reverse("organizacion"),
-            HTTP_X_USUARIO_ID=str(integrante.id),
+            HTTP_X_USUARIO_ID=str(user.id),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.INTEGRANTE,
+            HTTP_X_ROL=User.Rol.TITULAR,  # Valor desactualizado
         )
 
         assert r.status_code == status.HTTP_200_OK
+        # Debe devolver el rol real de la BD, no el de la cabecera
         assert r.data["mi_rol"] == "integrante"
 
     def test_gateway_sin_usuario_devuelve_403(self):
@@ -158,7 +161,6 @@ class TestOrganizacionEndpoint:
         r = self.client.get(
             reverse("organizacion"),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
             # Sin X-Usuario-Id
         )
 
@@ -176,7 +178,6 @@ class TestOrganizacionEndpoint:
         r = self.client.get(
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(user.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
             # Sin X-Organizacion-Id
         )
 
@@ -200,7 +201,6 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(user.id),
             HTTP_X_ORGANIZACION_ID=str(org_b.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_403_FORBIDDEN
@@ -218,10 +218,47 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(user.id),
             HTTP_X_ORGANIZACION_ID="00000000-0000-0000-0000-000000000000",
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_gateway_organizacion_uuid_invalido_devuelve_403(self):
+        """Si X-Organizacion-Id no es un UUID válido, devuelve 403."""
+        user = User.objects.create_user(
+            email="test@test.com",
+            password="ClaveSegura123",
+            nombre="Test",
+        )
+
+        r = self.client.get(
+            reverse("organizacion"),
+            HTTP_X_USUARIO_ID=str(user.id),
+            HTTP_X_ORGANIZACION_ID="no-es-uuid",
+        )
+
+        assert r.status_code == status.HTTP_403_FORBIDDEN
+        assert "inválido" in r.data["detail"].lower()
+
+    def test_usuario_inactivo_devuelve_403(self):
+        """Usuario con is_active=False recibe 403 aunque pertenezca a la org."""
+        org = Organizacion.objects.create(nombre="Hogar Inactivo")
+        user = User.objects.create_user(
+            email="inactivo@test.com",
+            password="ClaveSegura123",
+            nombre="Inactivo",
+            organizacion=org,
+            rol=User.Rol.TITULAR,
+            is_active=False,
+        )
+
+        r = self.client.get(
+            reverse("organizacion"),
+            HTTP_X_USUARIO_ID=str(user.id),
+            HTTP_X_ORGANIZACION_ID=str(org.id),
+        )
+
+        assert r.status_code == status.HTTP_403_FORBIDDEN
+        assert "pertenece" in r.data["detail"].lower()
 
     # ── Validación de contexto (sin JWT) ──────────────────────────────
 
@@ -254,7 +291,6 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular.id),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_200_OK
@@ -290,14 +326,12 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular.id),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_200_OK
         for miembro in r.data["miembros"]:
             assert "correo" in miembro
             assert "email" not in miembro  # No debe venir 'email'
-            assert miembro["correo"] == miembro.get("email", miembro["correo"])
 
     # ── Miembros inactivos ──────────────────────────────────────────────
 
@@ -324,33 +358,8 @@ class TestOrganizacionEndpoint:
             reverse("organizacion"),
             HTTP_X_USUARIO_ID=str(titular.id),
             HTTP_X_ORGANIZACION_ID=str(org.id),
-            HTTP_X_ROL=User.Rol.TITULAR,
         )
 
         assert r.status_code == status.HTTP_200_OK
         assert len(r.data["miembros"]) == 1
         assert r.data["miembros"][0]["correo"] == "titular@test.com"
-
-    # ── Fallback mi_rol desde BD ──────────────────────────────────────
-
-    def test_mi_rol_fallback_desde_bd_si_falta_x_rol(self):
-        """Si no viene X-Rol, usa el rol real del usuario en BD."""
-        org = Organizacion.objects.create(nombre="Hogar Fallback")
-        integrante = User.objects.create_user(
-            email="integrante@test.com",
-            password="ClaveSegura123",
-            nombre="Integrante",
-            organizacion=org,
-            rol=User.Rol.INTEGRANTE,
-        )
-
-        # Simular gateway que NO inyecta X-Rol (caso raro)
-        r = self.client.get(
-            reverse("organizacion"),
-            HTTP_X_USUARIO_ID=str(integrante.id),
-            HTTP_X_ORGANIZACION_ID=str(org.id),
-            # Sin HTTP_X_ROL
-        )
-
-        assert r.status_code == status.HTTP_200_OK
-        assert r.data["mi_rol"] == "integrante"
