@@ -333,7 +333,7 @@
 			"response": []
 		},
 		{
-			"name": "8. GET /subscriptions/?page=2 (Paginación: PageNumberPagination con page_size=10)",
+			"name": "8. GET /api/suscripciones/?page=2 (Paginación: PageNumberPagination con page_size=10)",
 			"event": [
 				{
 					"listen": "test",
@@ -366,12 +366,13 @@
 					}
 				],
 				"url": {
-					"raw": "{{base_url}}/subscriptions/?page=2",
+					"raw": "{{base_url}}/api/suscripciones/?page=2",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
-						"subscriptions",
+						"api",
+						"suscripciones",
 						""
 					],
 					"query": [
