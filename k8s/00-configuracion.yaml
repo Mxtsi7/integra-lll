@@ -29,6 +29,13 @@ data:
   # Esto queda para quien levante la web con `vite dev` en su PC.
   CORS_ALLOWED_ORIGINS: http://localhost:5173
 
+  # Iteraciones de PBKDF2 para las contraseñas (auth). Los nodos son CPU
+  # virtuales viejas y auth tiene tope de 250m: con las 870.000 de Django un
+  # hash tardaba 15 s y el gateway cortaba a los 10 (login y registro en 504).
+  # Con 100.000 queda en ~1,7 s sin darle más CPU a auth, que la cuota libre
+  # es para los servicios que faltan. Local y CI siguen con las de Django.
+  PBKDF2_ITERACIONES: "100000"
+
   JWT_ALGORITMO: HS256
   JWT_MINUTOS_ACCESO: "30"
   JWT_DIAS_REFRESCO: "7"

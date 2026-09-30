@@ -92,3 +92,55 @@ class TestRegisterEndpoint:
         u = User.objects.get(email="ana@test.com")
         assert u.organizacion is not None
         assert u.rol == User.Rol.TITULAR
+
+@pytest.mark.django_db
+class TestRegisterConOrganizacion:
+    def setup_method(self):
+        self.client = APIClient()
+        self.url = reverse("register")
+
+    def test_sin_codigo_crea_organizacion_y_queda_titular(self):
+        payload = {
+            "email": "ana@test.com",
+            "password": "ClaveSegura123",
+            "nombre": "Ana",
+            "acepta_datos": True,
+        }
+        response = self.client.post(self.url, payload, format="json")
+        assert response.status_code == status.HTTP_201_CREATED
+
+        user = User.objects.get(email="ana@test.com")
+        assert user.organizacion is not None
+        assert user.rol == User.Rol.TITULAR
+        assert user.organizacion.nombre == "Hogar de Ana"
+
+    def test_con_codigo_valido_se_une_como_integrante(self):
+        from app.models import Organizacion
+
+        org = Organizacion.objects.create(nombre="Hogar de Familia")
+
+        payload = {
+            "email": "pedro@test.com",
+            "password": "ClaveSegura123",
+            "nombre": "Pedro",
+            "acepta_datos": True,
+            "codigo_organizacion": str(org.id),
+        }
+        response = self.client.post(self.url, payload, format="json")
+        assert response.status_code == status.HTTP_201_CREATED
+
+        user = User.objects.get(email="pedro@test.com")
+        assert user.organizacion_id == org.id
+        assert user.rol == User.Rol.INTEGRANTE
+
+    def test_codigo_invalido_devuelve_400(self):
+        payload = {
+            "email": "malo@test.com",
+            "password": "ClaveSegura123",
+            "nombre": "Malo",
+            "acepta_datos": True,
+            "codigo_organizacion": "00000000-0000-0000-0000-000000000000",
+        }
+        response = self.client.post(self.url, payload, format="json")
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "codigo_organizacion" in response.data
