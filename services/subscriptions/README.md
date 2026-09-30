@@ -24,6 +24,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PUT` | `/subscriptions/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/subscriptions/<id>/` | Actualiza parcialmente (ej. estado) | `200 OK` / `404` |
 | `DELETE` | `/subscriptions/<id>/` | Elimina una suscripción propia | `204 No Content` / `404` |
+| `POST` | `/subscriptions/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
 
@@ -192,5 +193,43 @@ curl "http://localhost:8002/api/suscripciones/?estado=activo&fecha_cobro=2026-10
 Fecha inválida (devuelve 400 Bad Request):
 ```bash
 curl "http://localhost:8002/api/suscripciones/?fecha_cobro=hola" -H "X-Organizacion-Id: <tu-uuid>"
+```
+
+---
+
+### 5. Tarea: "Endpoint para registrar uso de una suscripción" y "Test para registrar uso y validación de costo"
+
+Esta tarea expone `POST /subscriptions/<id>/uso/` para registrar manualmente minutos de uso de un servicio (CU-23 / RF-15 / RF-16), actualizando el campo `ultima_actividad`, acumulando `horas_uso_mes`, y reactivando a `activo` aquellas suscripciones que se encontraban en estado `fantasma` (CU-27 / RF-13). Además, rechaza valores negativos o inválidos con `400 Bad Request`.
+
+#### Cómo comprobarlo:
+
+**1. Tests unitarios con pytest (Docker)**
+
+Correr la suite completa de registrar uso:
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionRegistrarUso -v
+```
+
+Correr un test específico (ej. rechazo de minutos negativos):
+```bash
+docker compose run --rm subscriptions pytest tests/test_views.py::TestSubscriptionRegistrarUso::test_registrar_uso_minutos_negativos_devuelve_400 -v
+```
+
+**2. Prueba manual con curl (puerto 8002)**
+
+Registrar uso válido (actualiza `ultima_actividad` y si estaba en estado `fantasma` vuelve a `activo`):
+```bash
+curl -X POST "http://localhost:8002/subscriptions/<id>/uso/" \
+  -H "Content-Type: application/json" \
+  -H "X-Organizacion-Id: <tu-uuid>" \
+  -d '{"minutos": 30}'
+```
+
+Rechazar minutos negativos (devuelve `400 Bad Request`):
+```bash
+curl -X POST "http://localhost:8002/subscriptions/<id>/uso/" \
+  -H "Content-Type: application/json" \
+  -H "X-Organizacion-Id: <tu-uuid>" \
+  -d '{"minutos": -10}'
 ```
 
