@@ -6,12 +6,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User
+from .models import Organizacion, User
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
     UserSerializer,
     UsuarioActualSerializer,
+    OrganizacionDetalleSerializer,
+    MiembroSerializer,
 )
 
 
@@ -112,90 +114,57 @@ class UserDetailView(generics.RetrieveAPIView):
 
 
 class OrganizacionView(APIView):
-    """GET /api/organizacion/ o /organizacion/ -- detalles de la organizacion del usuario autenticado.
+    """GET /api/organizacion/ — detalle de la organización del usuario autenticado.
 
-    Requiere JWT valido en la cabecera Authorization: Bearer <token>.
-    El gateway ya inyecta las cabeceras X-Usuario-Id, X-Organizacion-Id y X-Rol
-    tras validar el token, pero tambien v�lido directamente aqu� para acceso
-    al servicio auth.
+    El gateway valida el JWT e inyecta X-Usuario-Id, X-Organizacion-Id y X-Rol.
+    Este servicio confía en esas cabeceras (ADR-004) y NO revalida el token.
     """
 
     authentication_classes = []
     permission_classes = []
 
     def get(self, request):
-        # Primero intentar usar las cabeceras inyectadas por el gateway
-        # (RF-26: el gateway valida el JWT y coloca la identidad en cabeceras,
-        # los servicios internos confian en estas cabeceras y no vuelven a validar).
+        # Leer identidad inyectada por el gateway (ADR-004).
         usuario_id = request.headers.get("X-Usuario-Id")
         organizacion_id = request.headers.get("X-Organizacion-Id")
-        rol = request.headers.get("X-Rol")
+        rol_header = request.headers.get("X-Rol")
 
-        # Si no vienen las cabeceras del gateway (llamada directa al servicio auth),
-        # validar el JWT manualmente para extraer la identidad.
+        # Validación de contexto mínimo: ambas cabeceras son obligatorias.
         if not usuario_id:
-            auth_header = request.headers.get("Authorization", "")
-            token = None
+            raise PermissionDenied("Falta el contexto de usuario (X-Usuario-Id)")
+        if not organizacion_id:
+            raise PermissionDenied("Falta el contexto de organización (X-Organizacion-Id)")
 
-            if auth_header.startswith("Bearer "):
-                token = auth_header[len("Bearer "):].strip()
-
-            if not token:
-                raise PermissionDenied("Falta el token: se espera 'Authorization: Bearer <token>'")
-
-            # Validar JWT usando la misma l�gica que el gateway
-            import jwt
-            from django.conf import settings
-
-            try:
-                claims = jwt.decode(
-                    token,
-                    settings.JWT_SECRET,
-                    algorithms=[settings.JWT_ALGORITMO],
-                    options={"require": ["exp"]},
-                )
-            except jwt.ExpiredSignatureError:
-                resp = Response(
-                    {"detail": "El token expiro"},
-                    status=status.HTTP_401_UNAUTHORIZED,
-                )
-                resp["WWW-Authenticate"] = "Bearer"
-                return resp
-            except jwt.InvalidTokenError:
-                resp = Response(
-                    {"detail": "Token invalido"},
-                    status=status.HTTP_401_UNAUTHORIZED,
-                )
-                resp["WWW-Authenticate"] = "Bearer"
-                return resp
-
-            usuario_id = claims.get("sub") or claims.get("user_id")
-            organizacion_id = claims.get("organizacion_id")
-            rol = claims.get("rol")
-
-        if not usuario_id or not organizacion_id:
-            raise PermissionDenied("El token no identifica al usuario o a la organizacion")
-
-        from django.shortcuts import get_object_or_404
-        from .models import Organizacion, User
-
+        # Cargar organización y verificar que existe.
         organizacion = get_object_or_404(Organizacion, pk=organizacion_id)
 
-        # Obtener todos los miembros ACTIVOS de la organizacion
-        miembros = User.objects.filter(
+        # Verificar que el usuario pertenece a esta organización (defensa en profundidad).
+        # En producción el gateway ya garantiza esto, pero no cuesta nada validarlo aquí.
+        if not User.objects.filter(pk=usuario_id, organizacion_id=organizacion_id).exists():
+            raise PermissionDenied("El usuario no pertenece a la organización indicada")
+
+        # Obtener miembros ACTIVOS de la organización.
+        miembros_qs = User.objects.filter(
             organizacion_id=organizacion_id,
             is_active=True,
-        ).values(
-            "id", "nombre", "email", "rol"
         )
 
-        mi_rol = rol if rol else "integrante"
+        # Determinar mi_rol: preferir cabecera X-Rol (viene del token validado por gateway),
+        # si no viene, leer el rol real del usuario en BD.
+        if rol_header:
+            mi_rol = rol_header
+        else:
+            # Fallback: consultar BD (caso raro, p.ej. llamada interna sin X-Rol).
+            usuario = User.objects.filter(pk=usuario_id).only("rol").first()
+            mi_rol = usuario.rol if usuario and usuario.rol else "integrante"
 
+        # Serializar respuesta: MiembroSerializer ya incluye "correo" (source="email").
+        # No hace falta wrapper extra; devolvemos el dict directamente.
         return Response(
             {
                 "id": str(organizacion.id),
                 "nombre": organizacion.nombre,
-                "miembros": list(miembros),
+                "miembros": MiembroSerializer(miembros_qs, many=True).data,
                 "mi_rol": mi_rol,
             },
             status=status.HTTP_200_OK,

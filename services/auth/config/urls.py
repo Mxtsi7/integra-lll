@@ -27,7 +27,6 @@ urlpatterns = [
     path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
     path("api/organizacion/", OrganizacionView.as_view(), name="organizacion"),
     path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="usuario-detalle"),
-    path("organizacion/", OrganizacionView.as_view(), name="organizacion-root"),
     path("", inicio),
     path("admin/", admin.site.urls),
 ]
