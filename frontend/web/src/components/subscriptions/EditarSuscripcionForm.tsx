@@ -24,6 +24,8 @@ interface EditarSuscripcionFormProps {
   onCancel?: () => void;
   monedas?: Moneda[];
   frecuencias?: Frecuencia[];
+  /** true mientras el PATCH está en vuelo: deshabilita el botón de guardar. */
+  isSaving?: boolean;
 }
 
 const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
@@ -60,6 +62,7 @@ export function EditarSuscripcionForm({
   onCancel,
   monedas = DEFAULT_MONEDAS,
   frecuencias = DEFAULT_FRECUENCIAS,
+  isSaving = false,
 }: EditarSuscripcionFormProps) {
   const [formData, setFormData] = useState<EditarSuscripcionFormData>(suscripcion);
 
@@ -173,14 +176,19 @@ export function EditarSuscripcionForm({
         />
       </div>
 
-      <button type="submit" className={`${styles.btn} ${styles.btnPrimary}`}>
-        GUARDAR CAMBIOS
+      <button
+        type="submit"
+        className={`${styles.btn} ${styles.btnPrimary}`}
+        disabled={isSaving}
+      >
+        {isSaving ? "GUARDANDO..." : "GUARDAR CAMBIOS"}
       </button>
 
       <button
         type="button"
         className={`${styles.btn} ${styles.btnSecondary}`}
         onClick={onCancel}
+        disabled={isSaving}
       >
         CANCELAR
       </button>
