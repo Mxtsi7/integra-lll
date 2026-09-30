@@ -155,9 +155,19 @@ class OrganizacionView(APIView):
                     options={"require": ["exp"]},
                 )
             except jwt.ExpiredSignatureError:
-                raise PermissionDenied("El token expiro")
+                resp = Response(
+                    {"detail": "El token expiro"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+                resp["WWW-Authenticate"] = "Bearer"
+                return resp
             except jwt.InvalidTokenError:
-                raise PermissionDenied("Token invalido")
+                resp = Response(
+                    {"detail": "Token invalido"},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+                resp["WWW-Authenticate"] = "Bearer"
+                return resp
 
             usuario_id = claims.get("sub") or claims.get("user_id")
             organizacion_id = claims.get("organizacion_id")
@@ -171,8 +181,11 @@ class OrganizacionView(APIView):
 
         organizacion = get_object_or_404(Organizacion, pk=organizacion_id)
 
-        # Obtener todos los miembros de la organizacion
-        miembros = User.objects.filter(organizacion_id=organizacion_id).values(
+        # Obtener todos los miembros ACTIVOS de la organizacion
+        miembros = User.objects.filter(
+            organizacion_id=organizacion_id,
+            is_active=True,
+        ).values(
             "id", "nombre", "email", "rol"
         )
 
