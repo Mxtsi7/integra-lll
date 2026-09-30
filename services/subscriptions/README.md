@@ -267,7 +267,7 @@ cd services/subscriptions
 Comprueba:
 - `test_pagination_default_page_size_and_structure`: Valida estructura con 10 items en página 1 y enlace `next`.
 - `test_pagination_page_2_success`: `GET ?page=2` devuelve los 5 items restantes, `next=None` y `previous` con URL.
-- `test_pagination_trello_card_example_subscriptions_page_2`: `GET /subscriptions/?page=2` funciona de forma idéntica a la tarjeta.
+- `test_pagination_trello_card_example_suscripciones_page_2`: `GET /api/suscripciones/?page=2` funciona con la estructura paginada.
 - `test_pagination_custom_page_size_param`: Soporte para `?page_size=5`.
 - `test_pagination_invalid_page_returns_404`: Páginas fuera de rango responden 404.
 - `test_pagination_combined_with_filters`: Paginación combinada con `?estado=activo&page=2`.
@@ -276,7 +276,7 @@ Comprueba:
 
 **2. Prueba manual con curl (puerto 8002):**
 ```bash
-curl "http://localhost:8002/subscriptions/?page=2" \
+curl "http://localhost:8002/api/suscripciones/?page=2" \
   -H "X-Organizacion-Id: <tu-uuid>"
 ```
 

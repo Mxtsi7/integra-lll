@@ -17,7 +17,7 @@ Verifica:
 3. Recorrido secuencial completo sin duplicados ni omisiones.
 4. Aislamiento multi-tenant con distintos volúmenes por organización.
 5. Combinación de paginación con filtros (?estado=...&page=...).
-6. Compatibilidad en rutas: /subscriptions/ y /api/suscripciones/.
+6. Validación del shape de paginación en segunda página.
 """
 
 from datetime import date
@@ -80,7 +80,7 @@ class TestPaginacionDistintosVolumenes:
         crear_suscripciones(org_a, 25)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
 
@@ -105,7 +105,7 @@ class TestPaginacionDistintosVolumenes:
         todos_los_ids_creados = {str(s.id) for s in suscripciones_creadas}
 
         # ── Página 1 ──────────────────────────────────────────────────
-        resp1 = api_client.get("/subscriptions/?page=1", headers={"X-Organizacion-Id": str(org_a)})
+        resp1 = api_client.get("/api/suscripciones/?page=1", headers={"X-Organizacion-Id": str(org_a)})
         assert resp1.status_code == status.HTTP_200_OK
         assert resp1.data["count"] == 25
         assert len(resp1.data["results"]) == 10
@@ -114,7 +114,7 @@ class TestPaginacionDistintosVolumenes:
         assert resp1.data["previous"] is None
 
         # ── Página 2 ──────────────────────────────────────────────────
-        resp2 = api_client.get("/subscriptions/?page=2", headers={"X-Organizacion-Id": str(org_a)})
+        resp2 = api_client.get("/api/suscripciones/?page=2", headers={"X-Organizacion-Id": str(org_a)})
         assert resp2.status_code == status.HTTP_200_OK
         assert resp2.data["count"] == 25
         assert len(resp2.data["results"]) == 10
@@ -123,7 +123,7 @@ class TestPaginacionDistintosVolumenes:
         assert resp2.data["previous"] is not None
 
         # ── Página 3 ──────────────────────────────────────────────────
-        resp3 = api_client.get("/subscriptions/?page=3", headers={"X-Organizacion-Id": str(org_a)})
+        resp3 = api_client.get("/api/suscripciones/?page=3", headers={"X-Organizacion-Id": str(org_a)})
         assert resp3.status_code == status.HTTP_200_OK
         assert resp3.data["count"] == 25
         assert len(resp3.data["results"]) == 5
@@ -131,7 +131,7 @@ class TestPaginacionDistintosVolumenes:
         assert resp3.data["previous"] is not None
 
         # ── Página 4 (fuera de rango) ─────────────────────────────────
-        resp4 = api_client.get("/subscriptions/?page=4", headers={"X-Organizacion-Id": str(org_a)})
+        resp4 = api_client.get("/api/suscripciones/?page=4", headers={"X-Organizacion-Id": str(org_a)})
         assert resp4.status_code == status.HTTP_404_NOT_FOUND
 
         # ── Integridad total: no hay duplicados ni elementos omitidos ─
@@ -149,7 +149,7 @@ class TestPaginacionDistintosVolumenes:
     ) -> None:
         """Con 0 suscripciones: count=0, results=[], next=None, previous=None."""
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -165,7 +165,7 @@ class TestPaginacionDistintosVolumenes:
         crear_suscripciones(org_a, 1)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -181,7 +181,7 @@ class TestPaginacionDistintosVolumenes:
         crear_suscripciones(org_a, 7)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -197,7 +197,7 @@ class TestPaginacionDistintosVolumenes:
         crear_suscripciones(org_a, 10)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -208,7 +208,7 @@ class TestPaginacionDistintosVolumenes:
 
         # Página 2 no existe
         resp_p2 = api_client.get(
-            "/subscriptions/?page=2",
+            "/api/suscripciones/?page=2",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert resp_p2.status_code == status.HTTP_404_NOT_FOUND
@@ -219,13 +219,13 @@ class TestPaginacionDistintosVolumenes:
         """Con 11 suscripciones: página 1 tiene 10 items y next; página 2 tiene 1 item y previous."""
         crear_suscripciones(org_a, 11)
 
-        resp1 = api_client.get("/subscriptions/", headers={"X-Organizacion-Id": str(org_a)})
+        resp1 = api_client.get("/api/suscripciones/", headers={"X-Organizacion-Id": str(org_a)})
         assert resp1.status_code == status.HTTP_200_OK
         assert resp1.data["count"] == 11
         assert len(resp1.data["results"]) == 10
         assert resp1.data["next"] is not None
 
-        resp2 = api_client.get("/subscriptions/?page=2", headers={"X-Organizacion-Id": str(org_a)})
+        resp2 = api_client.get("/api/suscripciones/?page=2", headers={"X-Organizacion-Id": str(org_a)})
         assert resp2.status_code == status.HTTP_200_OK
         assert resp2.data["count"] == 11
         assert len(resp2.data["results"]) == 1
@@ -239,13 +239,13 @@ class TestPaginacionDistintosVolumenes:
         crear_suscripciones(org_a, 50)
 
         # Página 1
-        resp1 = api_client.get("/subscriptions/", headers={"X-Organizacion-Id": str(org_a)})
+        resp1 = api_client.get("/api/suscripciones/", headers={"X-Organizacion-Id": str(org_a)})
         assert resp1.status_code == status.HTTP_200_OK
         assert resp1.data["count"] == 50
         assert len(resp1.data["results"]) == 10
 
         # Última página válida: página 5
-        resp5 = api_client.get("/subscriptions/?page=5", headers={"X-Organizacion-Id": str(org_a)})
+        resp5 = api_client.get("/api/suscripciones/?page=5", headers={"X-Organizacion-Id": str(org_a)})
         assert resp5.status_code == status.HTTP_200_OK
         assert resp5.data["count"] == 50
         assert len(resp5.data["results"]) == 10
@@ -253,7 +253,7 @@ class TestPaginacionDistintosVolumenes:
         assert resp5.data["previous"] is not None
 
         # Página 6 debe ser 404
-        resp6 = api_client.get("/subscriptions/?page=6", headers={"X-Organizacion-Id": str(org_a)})
+        resp6 = api_client.get("/api/suscripciones/?page=6", headers={"X-Organizacion-Id": str(org_a)})
         assert resp6.status_code == status.HTTP_404_NOT_FOUND
 
 
@@ -292,7 +292,7 @@ class TestShapePaginacionContratoFrontend:
         crear_suscripciones(org_a, 15)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -316,7 +316,7 @@ class TestShapePaginacionContratoFrontend:
         crear_suscripciones(org_a, 3)
 
         response = api_client.get(
-            "/subscriptions/",
+            "/api/suscripciones/",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         data = response.data
@@ -334,22 +334,20 @@ class TestShapePaginacionContratoFrontend:
             assert isinstance(item["estado"], str)
             assert str(item["organizacion_id"]) == str(org_a)
 
-    def test_shape_identico_en_ruta_espanol_y_ruta_ingles(
+    def test_shape_paginacion_segunda_pagina(
         self, api_client: APIClient, org_a: uuid.UUID
     ) -> None:
-        """Tanto /subscriptions/ como /api/suscripciones/ devuelven exactamente el mismo contrato."""
+        """Verifica que /api/suscripciones/?page=2 devuelve el contrato correcto en la segunda página."""
         crear_suscripciones(org_a, 12)
 
-        resp_ingles = api_client.get("/subscriptions/?page=2", headers={"X-Organizacion-Id": str(org_a)})
-        resp_espanol = api_client.get("/api/suscripciones/?page=2", headers={"X-Organizacion-Id": str(org_a)})
+        resp = api_client.get("/api/suscripciones/?page=2", headers={"X-Organizacion-Id": str(org_a)})
 
-        assert resp_ingles.status_code == status.HTTP_200_OK
-        assert resp_espanol.status_code == status.HTTP_200_OK
+        assert resp.status_code == status.HTTP_200_OK
 
-        assert resp_ingles.data["count"] == resp_espanol.data["count"] == 12
-        assert len(resp_ingles.data["results"]) == len(resp_espanol.data["results"]) == 2
-        assert resp_ingles.data["next"] is None and resp_espanol.data["next"] is None
-        assert resp_ingles.data["previous"] is not None and resp_espanol.data["previous"] is not None
+        assert resp.data["count"] == 12
+        assert len(resp.data["results"]) == 2
+        assert resp.data["next"] is None
+        assert resp.data["previous"] is not None
 
 
 @pytest.mark.django_db
@@ -364,31 +362,31 @@ class TestPaginacionAislamientoYFiltros:
         crear_suscripciones(org_b, 15)
 
         # Org A
-        resp_a1 = api_client.get("/subscriptions/", headers={"X-Organizacion-Id": str(org_a)})
+        resp_a1 = api_client.get("/api/suscripciones/", headers={"X-Organizacion-Id": str(org_a)})
         assert resp_a1.data["count"] == 25
         assert len(resp_a1.data["results"]) == 10
         for s in resp_a1.data["results"]:
             assert str(s["organizacion_id"]) == str(org_a)
 
         # Org B
-        resp_b1 = api_client.get("/subscriptions/", headers={"X-Organizacion-Id": str(org_b)})
+        resp_b1 = api_client.get("/api/suscripciones/", headers={"X-Organizacion-Id": str(org_b)})
         assert resp_b1.data["count"] == 15
         assert len(resp_b1.data["results"]) == 10
         for s in resp_b1.data["results"]:
             assert str(s["organizacion_id"]) == str(org_b)
 
         # Página 2 de B solo tiene 5 elementos
-        resp_b2 = api_client.get("/subscriptions/?page=2", headers={"X-Organizacion-Id": str(org_b)})
+        resp_b2 = api_client.get("/api/suscripciones/?page=2", headers={"X-Organizacion-Id": str(org_b)})
         assert resp_b2.data["count"] == 15
         assert len(resp_b2.data["results"]) == 5
         assert resp_b2.data["next"] is None
 
         # Página 3 de B responde 404 (B solo tiene 15)
-        resp_b3 = api_client.get("/subscriptions/?page=3", headers={"X-Organizacion-Id": str(org_b)})
+        resp_b3 = api_client.get("/api/suscripciones/?page=3", headers={"X-Organizacion-Id": str(org_b)})
         assert resp_b3.status_code == status.HTTP_404_NOT_FOUND
 
         # Página 3 de A sí existe y tiene 5 elementos (A tiene 25)
-        resp_a3 = api_client.get("/subscriptions/?page=3", headers={"X-Organizacion-Id": str(org_a)})
+        resp_a3 = api_client.get("/api/suscripciones/?page=3", headers={"X-Organizacion-Id": str(org_a)})
         assert resp_a3.status_code == status.HTTP_200_OK
         assert resp_a3.data["count"] == 25
         assert len(resp_a3.data["results"]) == 5
@@ -402,7 +400,7 @@ class TestPaginacionAislamientoYFiltros:
 
         # Activas: total 18 -> página 1 (10), página 2 (8)
         resp_act_p1 = api_client.get(
-            "/subscriptions/?estado=activo",
+            "/api/suscripciones/?estado=activo",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert resp_act_p1.data["count"] == 18
@@ -410,7 +408,7 @@ class TestPaginacionAislamientoYFiltros:
         assert resp_act_p1.data["next"] is not None
 
         resp_act_p2 = api_client.get(
-            "/subscriptions/?estado=activo&page=2",
+            "/api/suscripciones/?estado=activo&page=2",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert resp_act_p2.data["count"] == 18
@@ -420,7 +418,7 @@ class TestPaginacionAislamientoYFiltros:
 
         # Canceladas: total 7 -> solo 1 página (7), next=None
         resp_canc = api_client.get(
-            "/subscriptions/?estado=cancelado",
+            "/api/suscripciones/?estado=cancelado",
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert resp_canc.data["count"] == 7
