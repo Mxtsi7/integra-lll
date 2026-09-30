@@ -6,7 +6,7 @@ from .models import User, Organizacion
 
 
 class MiembroSerializer(serializers.ModelSerializer):
-    """Miembro de una organización para respuesta de OrganizacionDetalleSerializer."""
+    """Miembro activo de una organización (respuesta de GET /api/organizacion/)."""
     correo = serializers.EmailField(source="email", read_only=True)
 
     class Meta:
