@@ -3,6 +3,30 @@ from rest_framework import serializers
 from .models import User, Organizacion
 from django.db import transaction
 
+
+class MiembroSerializer(serializers.ModelSerializer):
+    """Miembro de una organización para respuesta de OrganizacionDetalleSerializer."""
+    correo = serializers.EmailField(source="email", read_only=True)
+
+    class Meta:
+        model = User
+        fields = ("id", "nombre", "correo", "rol")
+        read_only_fields = fields
+
+
+class OrganizacionDetalleSerializer(serializers.ModelSerializer):
+    """Detalle de la organización del usuario autenticado.
+    Incluye lista de miembros activos y el rol del usuario que consulta.
+    """
+    miembros = MiembroSerializer(many=True, read_only=True)
+    mi_rol = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = Organizacion
+        fields = ("id", "nombre", "miembros", "mi_rol")
+        read_only_fields = fields
+
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
