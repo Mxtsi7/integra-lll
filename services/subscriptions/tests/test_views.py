@@ -755,12 +755,12 @@ class TestSubscriptionRegistrarUso:
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_registrar_uso_soporta_ruta_subscriptions_ingles(
+    def test_registrar_uso_soporta_ruta_api_suscripciones(
         self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
     ) -> None:
-        """POST /subscriptions/<id>/uso/ (ruta de la tarjeta Trello) funciona correctamente."""
+        """POST /api/suscripciones/<id>/uso/ reactiva una suscripción fantasma."""
         response = api_client.post(
-            f"/subscriptions/{sub_fantasma.id}/uso/",
+            f"/api/suscripciones/{sub_fantasma.id}/uso/",
             {"minutos": 30},
             format="json",
             headers={"X-Organizacion-Id": str(org)},
