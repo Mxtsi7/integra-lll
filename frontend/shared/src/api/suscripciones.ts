@@ -38,8 +38,30 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
   };
 }
 
+/**
+ * Tope de paginas a recorrer. Con el PAGE_SIZE actual del backend son miles de
+ * suscripciones: mucho mas de lo que un hogar puede tener. Existe solo para que
+ * un `next` mal formado no deje el navegador girando para siempre.
+ */
+const MAX_PAGINAS = 20;
+
 export async function getSuscripciones(): Promise<Suscripcion[]> {
   if (USAR_DATOS_DE_EJEMPLO) return SUSCRIPCIONES_DE_EJEMPLO;
-  const pagina = await pedir<Paginado<SuscripcionDeApi>>('/suscripciones/');
-  return pagina.results.map(desdeLaApi);
+
+  const todas: SuscripcionDeApi[] = [];
+
+  // Se arma la URL de cada pagina en vez de seguir el `next` que manda la API.
+  // Ese `next` viene con el host interno del servicio
+  // (http://subscriptions:8002/...), que el navegador no puede alcanzar: lo
+  // construye Django desde la peticion que le llego del gateway, no desde la
+  // que hizo el navegador. Solo se usa para saber si queda otra pagina.
+  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina += 1) {
+    const respuesta = await pedir<Paginado<SuscripcionDeApi>>(
+      `/suscripciones/?page=${pagina}`,
+    );
+    todas.push(...respuesta.results);
+    if (!respuesta.next) break;
+  }
+
+  return todas.map(desdeLaApi);
 }
