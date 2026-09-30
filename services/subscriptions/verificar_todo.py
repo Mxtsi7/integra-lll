@@ -197,13 +197,13 @@ def main():
             estado="activo",
         )
 
-    # Probar endpoint GET /subscriptions/?page=2 (ruta de la tarjeta Trello)
+    # Probar endpoint GET /api/suscripciones/?page=2
     resp_pag_trello = client.get(
-        "/subscriptions/?page=2",
+        "/api/suscripciones/?page=2",
         headers={"X-Organizacion-Id": str(org_pag)},
     )
     data_pag = resp_pag_trello.data
-    print_check("GET /subscriptions/?page=2 responde HTTP 200 OK", resp_pag_trello.status_code == status.HTTP_200_OK, f"Status: {resp_pag_trello.status_code}")
+    print_check("GET /api/suscripciones/?page=2 responde HTTP 200 OK", resp_pag_trello.status_code == status.HTTP_200_OK, f"Status: {resp_pag_trello.status_code}")
     print_check("Respuesta incluye estructura de paginación ('count', 'next', 'previous')",
                 "count" in data_pag and "next" in data_pag and "previous" in data_pag,
                 f"count: {data_pag.get('count')} | next: {data_pag.get('next')} | previous: {data_pag.get('previous')}")

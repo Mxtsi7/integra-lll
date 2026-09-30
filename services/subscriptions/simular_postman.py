@@ -168,7 +168,7 @@ def main():
     print_test_assertion("Recurso ya no existe en el sistema (404 Not Found)", resp_check.status_code == 404)
 
     # -------------------------------------------------------------
-    # 8. GET /subscriptions/?page=2 (Paginación: PageNumberPagination con page_size=10)
+    # 8. GET /api/suscripciones/?page=2 (Paginación: PageNumberPagination con page_size=10)
     # -------------------------------------------------------------
     from app.models import Subscription
     from decimal import Decimal
@@ -184,8 +184,8 @@ def main():
             estado="activo",
         )
 
-    print_request_info(8, "GET /subscriptions/?page=2 (Paginacion)", "GET", "/subscriptions/?page=2", headers_2)
-    resp_8 = client.get("/subscriptions/?page=2", headers=headers_2)
+    print_request_info(8, "GET /api/suscripciones/?page=2 (Paginacion)", "GET", "/api/suscripciones/?page=2", headers_2)
+    resp_8 = client.get("/api/suscripciones/?page=2", headers=headers_2)
     data_8 = resp_8.data if hasattr(resp_8, "data") else resp_8.json()
     print(f"    Status: {resp_8.status_code} OK")
     print(f"    count: {data_8.get('count')}, items en pagina 2: {len(data_8.get('results', []))}")
