@@ -108,3 +108,83 @@ class UserDetailView(generics.RetrieveAPIView):
         if not usuario_id:
             raise PermissionDenied("Falta el contexto de usuario")
         return User.objects.filter(pk=usuario_id)
+
+
+
+class OrganizacionView(APIView):
+    """GET /api/organizacion/ o /organizacion/ -- detalles de la organizacion del usuario autenticado.
+
+    Requiere JWT valido en la cabecera Authorization: Bearer <token>.
+    El gateway ya inyecta las cabeceras X-Usuario-Id, X-Organizacion-Id y X-Rol
+    tras validar el token, pero tambien v�lido directamente aqu� para acceso
+    al servicio auth.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        # Primero intentar usar las cabeceras inyectadas por el gateway
+        # (RF-26: el gateway valida el JWT y coloca la identidad en cabeceras,
+        # los servicios internos confian en estas cabeceras y no vuelven a validar).
+        usuario_id = request.headers.get("X-Usuario-Id")
+        organizacion_id = request.headers.get("X-Organizacion-Id")
+        rol = request.headers.get("X-Rol")
+
+        # Si no vienen las cabeceras del gateway (llamada directa al servicio auth),
+        # validar el JWT manualmente para extraer la identidad.
+        if not usuario_id:
+            auth_header = request.headers.get("Authorization", "")
+            token = None
+
+            if auth_header.startswith("Bearer "):
+                token = auth_header[len("Bearer "):].strip()
+
+            if not token:
+                raise PermissionDenied("Falta el token: se espera 'Authorization: Bearer <token>'")
+
+            # Validar JWT usando la misma l�gica que el gateway
+            import jwt
+            from django.conf import settings
+
+            try:
+                claims = jwt.decode(
+                    token,
+                    settings.JWT_SECRET,
+                    algorithms=[settings.JWT_ALGORITMO],
+                    options={"require": ["exp"]},
+                )
+            except jwt.ExpiredSignatureError:
+                raise PermissionDenied("El token expiro")
+            except jwt.InvalidTokenError:
+                raise PermissionDenied("Token invalido")
+
+            usuario_id = claims.get("sub") or claims.get("user_id")
+            organizacion_id = claims.get("organizacion_id")
+            rol = claims.get("rol")
+
+        if not usuario_id or not organizacion_id:
+            raise PermissionDenied("El token no identifica al usuario o a la organizacion")
+
+        from django.shortcuts import get_object_or_404
+        from .models import Organizacion, User
+
+        organizacion = get_object_or_404(Organizacion, pk=organizacion_id)
+
+        # Obtener todos los miembros de la organizacion
+        miembros = User.objects.filter(organizacion_id=organizacion_id).values(
+            "id", "nombre", "email", "rol"
+        )
+
+        mi_rol = rol if rol else "integrante"
+
+        return Response(
+            {
+                "id": str(organizacion.id),
+                "nombre": organizacion.nombre,
+                "miembros": list(miembros),
+                "mi_rol": mi_rol,
+            },
+            status=status.HTTP_200_OK,
+        )
+
