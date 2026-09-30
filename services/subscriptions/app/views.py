@@ -1,10 +1,13 @@
 """Vistas del servicio de suscripciones."""
 
 from django.utils.dateparse import parse_date
+from rest_framework import status
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 
 from app.models import Subscription
-from app.serializers import SubscriptionSerializer
+from app.serializers import RegistrarUsoSerializer, SubscriptionSerializer
 from shared.tenant.base import TenantViewSet
 
 
@@ -22,6 +25,7 @@ class SubscriptionViewSet(TenantViewSet):
         ?estado=activo
         ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
         ?estado=activo&fecha_cobro=2026-10-01
+    - Expone POST /subscriptions/<id>/uso/ para registrar minutos de uso.
     """
 
     queryset = Subscription.objects.all()
@@ -58,3 +62,26 @@ class SubscriptionViewSet(TenantViewSet):
             qs = qs.filter(fecha_proximo_cobro=fecha)
 
         return qs
+
+    @action(detail=True, methods=["post"], url_path="uso")
+    def uso(self, request, pk=None):
+        """
+        Registra minutos de uso para una suscripción (CU-23 / RF-15 / RF-16).
+
+        - Actualiza el campo 'ultima_actividad' con la fecha/hora actual.
+        - Suma los minutos convertidos a horas en 'horas_uso_mes'.
+        - Si la suscripción estaba en estado 'fantasma', la devuelve a 'activo' (CU-27 / RF-13).
+        - No permite valores negativos ni cero en minutos (responde 400).
+        """
+        subscription = self.get_object()
+        serializer = RegistrarUsoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        minutos = serializer.validated_data["minutos"]
+        subscription.registrar_uso(minutos)
+
+        return Response(
+            SubscriptionSerializer(subscription).data,
+            status=status.HTTP_200_OK,
+        )
+
