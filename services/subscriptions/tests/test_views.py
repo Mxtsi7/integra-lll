@@ -850,14 +850,14 @@ class TestSubscriptionPagination:
         assert data["next"] is None
         assert data["previous"] is not None
 
-    def test_pagination_trello_card_example_subscriptions_page_2(
+    def test_pagination_trello_card_example_suscripciones_page_2(
         self, api_client: APIClient, org: uuid.UUID
     ) -> None:
-        """GET /subscriptions/?page=2 (ejemplo exacto de la tarjeta Trello) devuelve la 2da página con count, next y previous."""
+        """GET /api/suscripciones/?page=2 devuelve la 2da página con count, next y previous."""
         self._crear_lote_suscripciones(org, 15)
 
         response = api_client.get(
-            "/subscriptions/?page=2",
+            "/api/suscripciones/?page=2",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert response.status_code == status.HTTP_200_OK

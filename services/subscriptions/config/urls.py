@@ -9,8 +9,6 @@ from app.views import SubscriptionViewSet
 
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
-router.register(r"subscriptions", SubscriptionViewSet, basename="subscription-en")
-
 
 def salud(request):
     """
@@ -33,12 +31,5 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/", include(router.urls)),
-    path("", include(router.urls)),
-    # Compatibilidad explícita con la ruta en inglés de la tarjeta Trello
-    path(
-        "subscriptions/<str:pk>/uso/",
-        SubscriptionViewSet.as_view({"post": "uso"}),
-        name="subscription-uso-trello",
-    ),
 ]
 
