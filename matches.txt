@@ -1,0 +1,6 @@
+21:                                               │  X-Usuario-Id / X-Organizacion-Id / X-Rol  ◀── del token
+40: | `/api/usuarios/`, `/api/organizacion/` | `auth` |
+57: | `organizacion_id` | id de la organización. Opcional mientras no exista el modelo; si viene, se propaga |
+70: y un serializer de token que agregue `organizacion_id` y `rol` a los claims
+91: Cualquier `X-Usuario-Id`, `X-Organizacion-Id` o `X-Rol` que venga del cliente
+123: print(jwt.encode({'sub': 'demo', 'organizacion_id': 'org', 'rol': 'titular',
