@@ -5,7 +5,7 @@ import { register, AuthError } from "@ojoalgasto/shared";
 import { useToast } from "../context/ToastContext";
 import { Spinner } from "../components/Spinner";
 import RegisterSuccess from "./registersuccess";
-import "../styles/Register.css";
+import "../styles/register.css";
 
 export default function Register() {
   const toast = useToast();

@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { configurarApi, configurarManejador401, ErrorDeApi, pedir} from "./cliente";
-import { guardarTokens, obtenerAccessToken, obtenerRefreshToken } from "../auth";
+import {
+  configurarApi,
+  configurarManejador401,
+  ErrorDeApi,
+  pedir,
+} from "./cliente";
+import {
+  configurarTokenStorage,
+  guardarTokens,
+  obtenerAccessToken,
+  obtenerRefreshToken,
+} from "../auth";
+
+const almacen: Record<string, string> = {};
 
 function respuesta(status: number, cuerpo: unknown = {}) {
   return new Response(JSON.stringify(cuerpo), {
@@ -14,15 +26,21 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
   let manejador401: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    localStorage.clear();
+    for (const k of Object.keys(almacen)) delete almacen[k];
+
+    configurarTokenStorage({
+      getItem: (k: string) => almacen[k] ?? null,
+      setItem: (k: string, v: string) => {
+        almacen[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete almacen[k];
+      },
+    });
+
     fetchMock.mockReset();
-    // pedir() llama a `fetch` global en cada invocación, así que
-    // reemplazarlo acá alcanza: ninguna prueba toca la red de verdad.
     vi.stubGlobal("fetch", fetchMock);
     configurarApi({ urlBase: "http://api.test" });
-    // Manejador nuevo por prueba: configurarManejador401 guarda estado a
-    // nivel de módulo, y sin esto una prueba vería las llamadas de la
-    // anterior.
     manejador401 = vi.fn();
     configurarManejador401(manejador401);
   });
@@ -62,17 +80,13 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
       guardarTokens({ access_token: "vencido", refresh_token: "tambien" });
       fetchMock.mockResolvedValue(respuesta(401, { detail: "Token vencido" }));
 
-      const promesa = pedir("/suscripciones/");
-
-      await expect(promesa).rejects.toBeInstanceOf(ErrorDeApi);
-      await expect(promesa).rejects.toMatchObject({
+      await expect(pedir("/suscripciones/")).rejects.toMatchObject({
         status: 401,
         message: "Token vencido",
       });
-      // "forzar logout": no queda ningún token en el storage
+
       expect(obtenerAccessToken()).toBeNull();
       expect(obtenerRefreshToken()).toBeNull();
-      // y la app (web/móvil) fue avisada para redirigir a login
       expect(manejador401).toHaveBeenCalledTimes(1);
     });
 
@@ -84,8 +98,6 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
         status: 500,
       });
 
-      // Un error del servidor no significa que la sesión sea inválida:
-      // desloguear acá sacaría al usuario por un fallo que no es suyo.
       expect(obtenerAccessToken()).toBe("valido");
       expect(manejador401).not.toHaveBeenCalled();
     });
@@ -96,8 +108,6 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
 
       await expect(pedir("/admin/")).rejects.toMatchObject({ status: 403 });
 
-      // 403 = autenticado pero sin permiso para ese recurso. El token
-      // sigue siendo válido; solo se rechazó esa acción puntual.
       expect(obtenerAccessToken()).toBe("valido");
       expect(manejador401).not.toHaveBeenCalled();
     });
