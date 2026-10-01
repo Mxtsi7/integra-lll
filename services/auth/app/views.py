@@ -6,13 +6,15 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+import uuid
 
-from .models import User
+from .models import Organizacion, User
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
     UserSerializer,
     UsuarioActualSerializer,
+    MiembroSerializer,
 )
 
 
@@ -226,3 +228,67 @@ class UserDetailView(generics.RetrieveAPIView):
         if not usuario_id:
             raise PermissionDenied("Falta el contexto de usuario")
         return User.objects.filter(pk=usuario_id)
+
+
+
+class OrganizacionView(APIView):
+    """GET /api/organizacion/ — detalle de la organización del usuario autenticado.
+
+    El gateway valida el JWT e inyecta X-Usuario-Id, X-Organizacion-Id y X-Rol.
+    Este servicio confía en esas cabeceras (ADR-004) y NO revalida el token.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        # Leer identidad inyectada por el gateway (ADR-004).
+        usuario_id = request.headers.get("X-Usuario-Id")
+        organizacion_id = request.headers.get("X-Organizacion-Id")
+
+        # Validación de contexto mínimo: ambas cabeceras son obligatorias.
+        if not usuario_id:
+            raise PermissionDenied("Falta el contexto de usuario (X-Usuario-Id)")
+        if not organizacion_id:
+            raise PermissionDenied("Falta el contexto de organización (X-Organizacion-Id)")
+
+        # Validar que X-Organizacion-Id es un UUID válido (evita 500 por UUID inválido).
+        try:
+            uuid.UUID(organizacion_id)
+        except ValueError:
+            raise PermissionDenied("Identificador de organización inválido")
+
+        # Cargar organización y verificar que existe.
+        organizacion = get_object_or_404(Organizacion, pk=organizacion_id)
+
+        # Verificar que el usuario pertenece a esta organización Y está activo.
+        # El gateway ya garantiza la pertenencia, pero validamos aquí por defensa en profundidad.
+        if not User.objects.filter(
+            pk=usuario_id,
+            organizacion_id=organizacion_id,
+            is_active=True,
+        ).exists():
+            raise PermissionDenied("El usuario no pertenece a la organización indicada")
+
+        # Obtener miembros ACTIVOS de la organización.
+        miembros_qs = User.objects.filter(
+            organizacion_id=organizacion_id,
+            is_active=True,
+        )
+
+        # Determinar mi_rol: leer el rol real del usuario en BD.
+        # X-Rol puede quedar desactualizado si el rol cambió; la BD es la fuente de verdad.
+        usuario = User.objects.filter(pk=usuario_id).only("rol").first()
+        mi_rol = usuario.rol if usuario and usuario.rol else "integrante"
+
+        # Serializar respuesta: MiembroSerializer ya incluye "correo" (source="email").
+        return Response(
+            {
+                "id": str(organizacion.id),
+                "nombre": organizacion.nombre,
+                "miembros": MiembroSerializer(miembros_qs, many=True).data,
+                "mi_rol": mi_rol,
+            },
+            status=status.HTTP_200_OK,
+        )
+
