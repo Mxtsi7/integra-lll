@@ -3,6 +3,7 @@ import sys
 
 import environ
 from datetime import timedelta
+from django.contrib.auth.hashers import PBKDF2PasswordHasher
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAIZ_REPO = BASE_DIR.parent.parent
@@ -33,6 +34,14 @@ INSTALLED_APPS = [
 ]
 
 AUTH_USER_MODEL = "app.User"
+
+# Iteraciones de PBKDF2 para las contraseñas. Por defecto, las de Django; el
+# cluster las baja en su ConfigMap porque ahí un hash tarda 15 s y el login
+# da 504 (ver app/hashers.py).
+PBKDF2_ITERACIONES = env.int(
+    "PBKDF2_ITERACIONES", default=PBKDF2PasswordHasher.iterations
+)
+PASSWORD_HASHERS = ["app.hashers.PBKDF2Configurable"]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
