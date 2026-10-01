@@ -112,3 +112,15 @@ class UsuarioActualSerializer(serializers.ModelSerializer):
         fields = ("id", "nombre", "correo", "rol", "organizacion_id")
         # `correo` y `organizacion_id` van declarados arriba, no pueden repetirse aca.
         read_only_fields = ("id", "nombre", "rol")
+
+
+class OrganizacionDetalleSerializer(serializers.Serializer):
+    """Esquema de respuesta de GET /api/organizacion/."""
+
+    id = serializers.UUIDField(help_text="Identificador de la organización")
+    nombre = serializers.CharField(help_text="Nombre del hogar / organización")
+    miembros = MiembroSerializer(many=True, help_text="Miembros activos")
+    mi_rol = serializers.ChoiceField(
+        choices=["titular", "integrante"],
+        help_text="Rol del usuario que hace la petición",
+    )

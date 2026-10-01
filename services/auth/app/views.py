@@ -15,6 +15,7 @@ from .serializers import (
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
+    OrganizacionDetalleSerializer,  # nuevo
 )
 
 
@@ -232,6 +233,7 @@ class UserDetailView(generics.RetrieveAPIView):
 
 
 class OrganizacionView(APIView):
+class OrganizacionView(APIView):
     """GET /api/organizacion/ — detalle de la organización del usuario autenticado.
 
     El gateway valida el JWT e inyecta X-Usuario-Id, X-Organizacion-Id y X-Rol.
@@ -240,6 +242,76 @@ class OrganizacionView(APIView):
 
     authentication_classes = []
     permission_classes = []
+
+    @extend_schema(
+        tags=["Organización"],
+        summary="Detalle de la organización actual",
+        description=(
+            "Devuelve la organización del contexto (X-Organizacion-Id), "
+            "sus miembros activos y el rol del usuario que consulta (mi_rol). "
+            "Requiere las cabeceras que inyecta el gateway tras validar el JWT (ADR-004)."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="X-Usuario-Id",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="Id del usuario autenticado (inyectado por el gateway).",
+            ),
+            OpenApiParameter(
+                name="X-Organizacion-Id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="UUID de la organización del token (inyectado por el gateway).",
+            ),
+            OpenApiParameter(
+                name="X-Rol",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.HEADER,
+                required=False,
+                description="Rol en el JWT (informativo; la vista lee el rol real desde BD).",
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=OrganizacionDetalleSerializer,
+                description="Organización, miembros activos y mi_rol.",
+                examples=[
+                    OpenApiExample(
+                        "Ejemplo de hogar",
+                        value={
+                            "id": "9c2140a0-0000-0000-0000-000000000001",
+                            "nombre": "Hogar de Ana",
+                            "miembros": [
+                                {
+                                    "id": 1,
+                                    "nombre": "Ana",
+                                    "correo": "ana@ejemplo.com",
+                                    "rol": "titular",
+                                },
+                                {
+                                    "id": 2,
+                                    "nombre": "Pedro",
+                                    "correo": "pedro@ejemplo.com",
+                                    "rol": "integrante",
+                                },
+                            ],
+                            "mi_rol": "titular",
+                        },
+                    )
+                ],
+            ),
+            403: OpenApiResponse(
+                description=(
+                    "Falta X-Usuario-Id o X-Organizacion-Id, UUID inválido, "
+                    "o el usuario no pertenece a esa organización."
+                ),
+            ),
+            404: OpenApiResponse(description="La organización no existe."),
+        },
+    )
 
     def get(self, request):
         # Leer identidad inyectada por el gateway (ADR-004).
