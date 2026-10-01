@@ -1,81 +1,107 @@
-import { obtenerAccessToken, logout } from "../auth";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configurarApi, configurarManejador401, ErrorDeApi, pedir} from "./cliente";
+import { guardarTokens, obtenerAccessToken, obtenerRefreshToken } from "../auth";
 
-let urlBase = "";
-
-export function configurarApi(config: { urlBase: string }) {
-  urlBase = config.urlBase.replace(/\/+$/, "");
+function respuesta(status: number, cuerpo: unknown = {}) {
+  return new Response(JSON.stringify(cuerpo), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
-export class ErrorDeApi extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
+describe("pedir(): JWT en cada petición e interceptor 401", () => {
+  const fetchMock = vi.fn();
+  let manejador401: ReturnType<typeof vi.fn>;
 
-export type Paginado<T> = {
-  count: number;
-  next: string | null;
-  previous: string | null;
-  results: T[];
-};
-
-type ManejadorNoAutorizado = () => void;
-let manejadorNoAutorizado: ManejadorNoAutorizado | null = null;
-
-export function configurarManejador401(fn: ManejadorNoAutorizado) {
-  manejadorNoAutorizado = fn;
-}
-
-type Opciones = {
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: unknown;
-};
-
-function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
-  if (typeof data.detail === "string") return data.detail;
-  const primero = Object.values(data)[0];
-  if (Array.isArray(primero) && typeof primero[0] === "string") return primero[0];
-  if (typeof primero === "string") return primero;
-  return "Ocurrió un error inesperado";
-}
-
-export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T> {
-  if (!urlBase) {
-    throw new Error("API sin configurar: llamar configurarApi({ urlBase }) al iniciar la app");
-  }
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-
-  const token = obtenerAccessToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  const res = await fetch(`${urlBase}${path}`, {
-    method: opciones.method ?? "GET",
-    headers,
-    body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+  beforeEach(() => {
+    localStorage.clear();
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    configurarApi({ urlBase: "http://api.test" });
+    manejador401 = vi.fn();
+    configurarManejador401(manejador401);
   });
 
-  if (res.status === 401) {
-    logout();
-    manejadorNoAutorizado?.();
-  }
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-  if (!res.ok) {
-    let message = "Ocurrió un error inesperado";
-    try {
-      message = mensajeDesdeCuerpo((await res.json()) as Record<string, unknown>);
-    } catch {
-      // cuerpo no JSON
-    }
-    throw new ErrorDeApi(message, res.status);
-  }
+  describe("envío del JWT", () => {
+    it("manda Authorization: Bearer cuando hay un token guardado", async () => {
+      guardarTokens({ access_token: "abc123", refresh_token: "def456" });
+      fetchMock.mockResolvedValue(respuesta(200, { ok: true }));
 
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
-}
+      await pedir("/suscripciones/");
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("http://api.test/suscripciones/");
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe(
+        "Bearer abc123",
+      );
+    });
+
+    it("no manda Authorization cuando no hay token", async () => {
+      fetchMock.mockResolvedValue(respuesta(200, { ok: true }));
+
+      await pedir("/publico/");
+
+      const [, init] = fetchMock.mock.calls[0];
+      expect(init.headers as Record<string, string>).not.toHaveProperty(
+        "Authorization",
+      );
+    });
+  });
+
+  describe("interceptor 401", () => {
+    it("borra los tokens, avisa al manejador y rechaza con ErrorDeApi", async () => {
+      guardarTokens({ access_token: "vencido", refresh_token: "tambien" });
+      fetchMock.mockResolvedValue(respuesta(401, { detail: "Token vencido" }));
+
+      const promesa = pedir("/suscripciones/");
+
+      await expect(promesa).rejects.toBeInstanceOf(ErrorDeApi);
+      await expect(promesa).rejects.toMatchObject({
+        status: 401,
+        message: "Token vencido",
+      });
+      // "forzar logout": no queda ningún token en el storage
+      expect(obtenerAccessToken()).toBeNull();
+      expect(obtenerRefreshToken()).toBeNull();
+      // y la app fue avisada para redirigir a login
+      expect(manejador401).toHaveBeenCalledTimes(1);
+    });
+
+    it("con un 500 no toca la sesión ni dispara el manejador", async () => {
+      guardarTokens({ access_token: "valido", refresh_token: "valido" });
+      fetchMock.mockResolvedValue(respuesta(500, { detail: "Error interno" }));
+
+      await expect(pedir("/suscripciones/")).rejects.toMatchObject({
+        status: 500,
+      });
+      // Un error del servidor no significa que la sesión sea inválida: desloguear acá sacaría al usuario por un fallo que no es suyo.
+      expect(obtenerAccessToken()).toBe("valido");
+      expect(manejador401).not.toHaveBeenCalled();
+    });
+
+    it("con un 403 tampoco cierra la sesión", async () => {
+      guardarTokens({ access_token: "valido", refresh_token: "valido" });
+      fetchMock.mockResolvedValue(respuesta(403, { detail: "Sin permiso" }));
+
+      await expect(pedir("/admin/")).rejects.toMatchObject({ status: 403 });
+
+      // 403 = autenticado pero sin permiso para ese recurso. El token sigue siendo válido; solo se rechazó esa acción puntual.
+      expect(obtenerAccessToken()).toBe("valido");
+      expect(manejador401).not.toHaveBeenCalled();
+    });
+
+    it("con una respuesta exitosa no dispara el manejador", async () => {
+      guardarTokens({ access_token: "valido", refresh_token: "valido" });
+      fetchMock.mockResolvedValue(respuesta(200, { ok: true }));
+
+      await pedir("/suscripciones/");
+
+      expect(manejador401).not.toHaveBeenCalled();
+      expect(obtenerAccessToken()).toBe("valido");
+    });
+  });
+});
