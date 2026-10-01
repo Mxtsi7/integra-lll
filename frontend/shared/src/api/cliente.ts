@@ -1,9 +1,9 @@
 import { obtenerAccessToken, logout } from "../auth";
 
-let urlBase = "http://localhost:8000/api";
+let urlBase = "";
 
 export function configurarApi(config: { urlBase: string }) {
-  urlBase = config.urlBase;
+  urlBase = config.urlBase.replace(/\/+$/, "");
 }
 
 export class ErrorDeApi extends Error {
@@ -33,22 +33,41 @@ type Opciones = {
   body?: unknown;
 };
 
-export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T> {
+function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
+  if (typeof data.detail === "string") return data.detail;
+  const valores = Object.values(data);
+  const primero = valores.length > 0 ? valores[0] : undefined;
+  if (Array.isArray(primero) && typeof primero[0] === "string") {
+    return primero[0];
+  }
+  if (typeof primero === "string") return primero;
+  return "Ocurrió un error inesperado";
+}
+
+export async function pedir<T>(
+  path: string,
+  opciones: Opciones = {},
+): Promise<T> {
+  if (!urlBase) {
+    throw new Error(
+      "API sin configurar: llamar configurarApi({ urlBase }) al iniciar la app",
+    );
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  // Inyección del JWT (tarea anterior): si hay token guardado, viaja en
-  // cada petición que pase por acá.
   const token = obtenerAccessToken();
   if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   const res = await fetch(`${urlBase}${path}`, {
     method: opciones.method ?? "GET",
     headers,
-    body: opciones.body ? JSON.stringify(opciones.body) : undefined,
+    body:
+      opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
   });
 
   if (res.status === 401) {
@@ -59,18 +78,9 @@ export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T
   if (!res.ok) {
     let message = "Ocurrió un error inesperado";
     try {
-      const data = (await res.json()) as Record<string, unknown>;
-      if (typeof data.detail === "string") {
-        message = data.detail;
-      } else {
-        const valores = Object.values(data);
-        const primero = valores.length > 0 ? valores[0] : undefined;
-        if (Array.isArray(primero) && typeof primero[0] === "string") {
-          message = primero[0];
-        } else if (typeof primero === "string") {
-          message = primero;
-        }
-      }
+      message = mensajeDesdeCuerpo(
+        (await res.json()) as Record<string, unknown>,
+      );
     } catch {
       // el cuerpo no era JSON
     }
@@ -78,5 +88,5 @@ export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+  return res.json() as Promise<T>;
 }
