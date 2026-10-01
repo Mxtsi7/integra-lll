@@ -18,6 +18,9 @@ from .serializers import (
     OrganizacionDetalleSerializer,  # nuevo
 )
 
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.types import OpenApiTypes
+
 
 class RegisterView(APIView):
     authentication_classes = []
@@ -232,7 +235,6 @@ class UserDetailView(generics.RetrieveAPIView):
 
 
 
-class OrganizacionView(APIView):
 class OrganizacionView(APIView):
     """GET /api/organizacion/ — detalle de la organización del usuario autenticado.
 
