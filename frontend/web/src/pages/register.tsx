@@ -35,7 +35,7 @@ export default function Register() {
 
     setLoading(true);
     try {
-      await register({ nombre, correo, password });
+      await register({ nombre, correo, password, aceptaDatos: accepted });
       // No redirigimos directo al dashboard: el diseño pide mostrar
       // "cuenta creada, ir a Login" en vez de loguear automáticamente.
       setSuccess(true);
