@@ -2,30 +2,44 @@ import { useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, Mail, Lock, ShieldCheck } from "lucide-react";
 import { login, guardarTokens, AuthError } from "@ojoalgasto/shared";
+import { useToast } from "../context/ToastContext";
+import { Spinner } from "../components/Spinner";
 import "../styles/Login.css";
 
 export default function Login() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Se quitó el estado `error` y el <p className="login-error">: los fallos
+  // ahora salen como toast (tarea "Integrar Toasts de error en fallos de
+  // Login/Register"). Tener los dos habría mostrado el mismo mensaje dos
+  // veces a la vez.
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
     setLoading(true);
     try {
       const { access_token, refresh_token } = await login({ correo, password });
       guardarTokens({ access_token, refresh_token });
       navigate("/dashboard");
     } catch (err) {
+      // `err` llega como `unknown` con TS estricto — hay que angostarlo
+      // antes de leer .message.
       if (err instanceof AuthError && err.status === 401) {
-        setError("Usuario o contraseña inválidos");
-      } else if (err instanceof Error) {
-        setError(err.message);
+        toast.error("Usuario o contraseña inválidos");
+      } else if (err instanceof AuthError) {
+        toast.error(err.message);
+      } else if (err instanceof TypeError) {
+        // fetch() lanza TypeError cuando no logra ni conectarse (servidor
+        // caído, sin red, CORS). Separarlo de "credenciales inválidas" era
+        // una sugerencia de la revisión del PR #5: el usuario que ve
+        // "contraseña inválida" cuando en realidad el servidor no
+        // responde se pone a resetear una clave que estaba bien.
+        toast.error("No se pudo conectar con el servidor. Intenta de nuevo en un momento.");
       } else {
-        setError("No se pudo iniciar sesión. Intenta de nuevo.");
+        toast.error("No se pudo iniciar sesión. Intenta de nuevo.");
       }
     } finally {
       setLoading(false);
@@ -78,14 +92,23 @@ export default function Login() {
             </div>
           </div>
 
-          {error && <p className="login-error">{error}</p>}
-
           <div className="login-forgot">
             <Link to="/recuperar-contrasena">¿Olvidaste tu contraseña?</Link>
           </div>
 
-          <button type="submit" className="login-submit" disabled={loading}>
-            {loading ? "Ingresando…" : "Iniciar sesión"}
+          <button
+            type="submit"
+            className="login-submit btn-con-spinner"
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <Spinner size={14} decorativo />
+                Ingresando…
+              </>
+            ) : (
+              "Iniciar sesión"
+            )}
           </button>
 
           <div className="login-divider">

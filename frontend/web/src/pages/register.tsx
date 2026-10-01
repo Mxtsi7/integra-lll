@@ -2,44 +2,52 @@ import { useState, FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { Eye, User, Mail, Lock, Check } from "lucide-react";
 import { register, AuthError } from "@ojoalgasto/shared";
+import { useToast } from "../context/ToastContext";
+import { Spinner } from "../components/Spinner";
 import RegisterSuccess from "./registersuccess";
-import "../styles/register.css";
+import "../styles/Register.css";
 
 export default function Register() {
+  const toast = useToast();
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // Igual que en Login: se quitó el estado `error` y el <p> inline. Tanto
+  // las validaciones del formulario (contraseñas distintas, términos sin
+  // aceptar) como los fallos del backend salen por toast, para que el
+  // usuario vea un solo lugar donde aparecen los errores.
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setError(null);
 
     if (password !== confirm) {
-      setError("Las contraseñas no coinciden");
+      toast.error("Las contraseñas no coinciden");
       return;
     }
     if (!accepted) {
-      setError("Debes aceptar los términos y condiciones");
+      toast.error("Debes aceptar los términos y condiciones");
       return;
     }
 
     setLoading(true);
-    try {await register({ nombre, correo, password, aceptaDatos: accepted });
-      // No redirigimos directo a /panel: el diseño pide mostrar
+    try {
+      await register({ nombre, correo, password });
+      // No redirigimos directo al dashboard: el diseño pide mostrar
       // "cuenta creada, ir a Login" en vez de loguear automáticamente.
       setSuccess(true);
     } catch (err) {
       if (err instanceof AuthError) {
-        setError(err.message);
-      } else if (err instanceof Error) {
-        setError(err.message);
+        toast.error(err.message);
+      } else if (err instanceof TypeError) {
+        // Ver el comentario equivalente en Login.tsx: fetch() no logró
+        // conectarse, no es un problema de los datos del usuario.
+        toast.error("No se pudo conectar con el servidor. Intenta de nuevo en un momento.");
       } else {
-        setError("No se pudo crear la cuenta. Intenta de nuevo.");
+        toast.error("No se pudo crear la cuenta. Intenta de nuevo.");
       }
     } finally {
       setLoading(false);
@@ -163,10 +171,19 @@ export default function Register() {
             </span>
           </label>
 
-          {error && <p className="register-error">{error}</p>}
-
-          <button type="submit" className="register-submit" disabled={loading}>
-            {loading ? "Creando cuenta…" : "Crear cuenta"}
+          <button
+            type="submit"
+            className="register-submit btn-con-spinner"
+            disabled={loading}
+          >
+            {loading ? (
+              <>
+                <Spinner size={14} decorativo />
+                Creando cuenta…
+              </>
+            ) : (
+              "Crear cuenta"
+            )}
           </button>
 
           <div className="register-divider">

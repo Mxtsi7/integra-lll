@@ -1,0 +1,37 @@
+/* El spinner dibuja su borde con `currentColor`: hereda el color del texto
+   de donde se lo ponga. En el botón navy de Login/Register (texto blanco)
+   se ve blanco sin tocar nada. */
+.spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spinner-giro 0.7s linear infinite;
+}
+
+@keyframes spinner-giro {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Con "reducir movimiento" activado en el sistema no se apaga el spinner
+   (sin él, el usuario no sabría que algo está cargando), solo se hace
+   más lento y menos agresivo. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s;
+  }
+}
+
+/* Clase auxiliar para alinear spinner + texto dentro de un botón.
+   Se agrega junto a .login-submit / .register-submit sin editar esos
+   CSS: ambos ya traen width: 100%, esto solo cambia el display. */
+.btn-con-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
