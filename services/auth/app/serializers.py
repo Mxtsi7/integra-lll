@@ -4,6 +4,17 @@ from django.db import transaction
 from .models import User, Organizacion
 
 
+
+class MiembroSerializer(serializers.ModelSerializer):
+    """Miembro activo de una organización (respuesta de GET /api/organizacion/)."""
+    correo = serializers.EmailField(source="email", read_only=True)
+
+    class Meta:
+        model = User
+        fields = ("id", "nombre", "correo", "rol")
+        read_only_fields = fields
+
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
