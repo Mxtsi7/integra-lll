@@ -4,7 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from app.views import LoginView, RegisterView, UserDetailView, UsuarioActualView
+from app.views import LoginView, RegisterView, UserDetailView, UsuarioActualView, OrganizacionView
 
 
 def salud(request):
@@ -25,6 +25,7 @@ urlpatterns = [
     path("api/auth/register/", RegisterView.as_view(), name="register"),
     path("api/auth/login/", LoginView.as_view(), name="login"),
     path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
+    path("api/organizacion/", OrganizacionView.as_view(), name="organizacion"),
     path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="usuario-detalle"),
     path("", inicio),
     path("admin/", admin.site.urls),
