@@ -191,7 +191,7 @@ class UsuarioActualView(generics.RetrieveAPIView):
         responses={
             200: UsuarioActualSerializer,
             403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
-            404: OpenApiResponse(description="El usuario no existe, o el id pedido no es el del token."),
+            404: OpenApiResponse(description="El usuario del token ya no existe."),
         },
     )
     def get(self, request, *args, **kwargs):
@@ -219,8 +219,8 @@ class UserDetailView(generics.RetrieveAPIView):
         ),
         responses={
             200: UserSerializer,
-            403: OpenApiResponse(description="Falta X-Usuario-Id o no coincide con el id solicitado."),
-            404: OpenApiResponse(description="Usuario no encontrado."),
+            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
+            404: OpenApiResponse(description="El usuario no existe, o el id pedido no es el del token."),
         },
     )
     def get(self, request, *args, **kwargs):
