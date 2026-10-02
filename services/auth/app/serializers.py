@@ -124,3 +124,4 @@ class OrganizacionDetalleSerializer(serializers.Serializer):
         choices=["titular", "integrante"],
         help_text="Rol del usuario que hace la petición",
     )
+    
