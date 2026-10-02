@@ -9,6 +9,10 @@ import EditarSuscripcionForm, {
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
 import {
+  actualizarSuscripcion,
+  crearSuscripcion,
+  eliminarSuscripcion,
+  ErrorDeApi,
   formatearMonto,
   gastoProyectado,
   getSuscripciones,
@@ -20,12 +24,28 @@ import { AppLayout } from "../components/layout/AppLayout";
 
 const PAGE_SIZE = 5;
 
+/** Saca un mensaje legible de cualquier error que puedan tirar las llamadas a la API. */
+function mensajeDeError(e: unknown, fallback: string): string {
+  if (e instanceof ErrorDeApi) return e.message;
+  return fallback;
+}
+
 export const Homepage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+
+  // error propio de cada acción (no pisa el error de carga de la lista)
+  const [addError, setAddError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // se deshabilitan los botones de los formularios mientras la llamada está en vuelo
+  const [isSavingAdd, setIsSavingAdd] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // qué suscripción se está editando (null = modal cerrado)
   const [editando, setEditando] = useState<Suscripcion | null>(null);
@@ -76,51 +96,68 @@ export const Homepage: React.FC = () => {
     console.log("Suscripción seleccionada:", s.nombre);
   };
 
-  // TODO (backend): falta el POST. `crearSuscripcion()` todavía no existe en
-  // shared; mientras tanto el alta solo vive en el estado local y se pierde
-  // al recargar.
-  const handleAdd = (nueva: Omit<Suscripcion, "id">) => {
-    const id = `local-${Date.now()}`;
-    setSuscripciones((prev) => [...prev, { ...nueva, id }]);
-    setIsAdding(false);
-    setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
+  const handleAdd = async (nueva: Omit<Suscripcion, "id">) => {
+    setAddError(null);
+    setIsSavingAdd(true);
+    try {
+      const creada = await crearSuscripcion(nueva);
+      setSuscripciones((prev) => [...prev, creada]);
+      setIsAdding(false);
+      setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
+    } catch (e) {
+      setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+    } finally {
+      setIsSavingAdd(false);
+    }
   };
 
-  // TODO (backend): falta el PATCH.
-  const handleEditSubmit = (data: EditarSuscripcionFormData) => {
-    setSuscripciones((prev) =>
-      prev.map((s) =>
-        s.id === data.id
-          ? {
-              ...s,
-              nombre: data.nombre,
-              monto: parseFloat(data.monto) || s.monto,
-              moneda: data.moneda,
-              frecuencia: data.frecuencia,
-              categoria: data.categoria,
-            }
-          : s
-      )
-    );
-    setEditando(null);
+  const handleEditSubmit = async (data: EditarSuscripcionFormData) => {
+    setEditError(null);
+    setIsSavingEdit(true);
+    try {
+      const actualizada = await actualizarSuscripcion(data.id, {
+        nombre: data.nombre,
+        monto: parseFloat(data.monto),
+        moneda: data.moneda,
+        frecuencia: data.frecuencia,
+        categoria: data.categoria,
+      });
+      setSuscripciones((prev) =>
+        prev.map((s) => (s.id === data.id ? actualizada : s))
+      );
+      setEditando(null);
+    } catch (e) {
+      setEditError(mensajeDeError(e, "No pudimos guardar los cambios. Intenta de nuevo."));
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   // debe coincidir con la duración de la animación en suscard.module.css
   const FADE_OUT_MS = 280;
 
-  // TODO (backend): falta el DELETE. Cuando exista, conviene dispararlo en
-  // paralelo al fade-out y revertir la animación si el servidor falla.
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!eliminando) return;
     const idToRemove = eliminando.id;
 
-    setEliminando(null);
-    setRemovingId(idToRemove);
+    setDeleteError(null);
+    setIsDeleting(true);
+    try {
+      await eliminarSuscripcion(idToRemove);
+      setEliminando(null);
+      setRemovingId(idToRemove);
 
-    setTimeout(() => {
-      setSuscripciones((prev) => prev.filter((s) => s.id !== idToRemove));
-      setRemovingId(null);
-    }, FADE_OUT_MS);
+      setTimeout(() => {
+        setSuscripciones((prev) => prev.filter((s) => s.id !== idToRemove));
+        setRemovingId(null);
+      }, FADE_OUT_MS);
+    } catch (e) {
+      // si falla el DELETE, no se dispara el fade-out y la suscripción se
+      // queda en la lista tal como estaba
+      setDeleteError(mensajeDeError(e, "No pudimos eliminar la suscripción. Intenta de nuevo."));
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const isEmpty = !isLoading && !error && suscripciones.length === 0;
@@ -164,6 +201,8 @@ export const Homepage: React.FC = () => {
                 </button>
               </div>
 
+              {deleteError && <p className={styles.summaryLabel}>{deleteError}</p>}
+
               <ul className={styles.list}>
                 {isLoading
                   ? Array.from({ length: PAGE_SIZE }).map((_, i) => (
@@ -202,9 +241,11 @@ export const Homepage: React.FC = () => {
               if (e.target === e.currentTarget) setIsAdding(false);
             }}
           >
+            {addError && <p className={styles.summaryLabel}>{addError}</p>}
             <AddSubscriptionForm
               onAdd={handleAdd}
               onCancel={() => setIsAdding(false)}
+              isSaving={isSavingAdd}
             />
           </div>
         )}
@@ -217,10 +258,12 @@ export const Homepage: React.FC = () => {
               if (e.target === e.currentTarget) setEditando(null);
             }}
           >
+            {editError && <p className={styles.summaryLabel}>{editError}</p>}
             <EditarSuscripcionForm
               suscripcion={aFormulario(editando)}
               onSubmit={handleEditSubmit}
               onCancel={() => setEditando(null)}
+              isSaving={isSavingEdit}
             />
           </div>
         )}
@@ -237,6 +280,7 @@ export const Homepage: React.FC = () => {
               nombreSuscripcion={eliminando.nombre}
               onConfirm={handleConfirmDelete}
               onCancel={() => setEliminando(null)}
+              isDeleting={isDeleting}
             />
           </div>
         )}
