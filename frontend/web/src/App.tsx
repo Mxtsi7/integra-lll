@@ -11,11 +11,7 @@ import Homepage from './pages/Homepage';
 
 export function App() {
   return (
-    // ToastProvider envuelve todas las rutas para que cualquier página
-    // pueda llamar a useToast(). Va dentro de App y no en main.tsx porque
-    // este es el archivo que ya tengo visto en su versión real; mover el
-    // provider a main.tsx sería equivalente, pero habría que editar un
-    // archivo que no pude ver actualizado.
+// Cualquier página puede usar useToast() porque el provider envuelve las rutas.
     <ToastProvider>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
