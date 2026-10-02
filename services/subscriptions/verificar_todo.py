@@ -183,6 +183,34 @@ def main():
                     todos_323 = False
     print_check("Los 5 servicios tienen psycopg[binary]==3.2.3", todos_323, f"Servicios: {', '.join(servicios)}")
 
+    print("\n10. Requerimiento PAGINACION (GET): PageNumberPagination con page_size=10")
+    org_pag = uuid.uuid4()
+    for i in range(1, 16):
+        Subscription.objects.create(
+            organizacion_id=org_pag,
+            nombre=f"Servicio Paginado {i:02d}",
+            monto=Decimal("5000.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, min(i, 28)),
+            categoria="streaming",
+            estado="activo",
+        )
+
+    # Probar endpoint GET /api/suscripciones/?page=2
+    resp_pag_trello = client.get(
+        "/api/suscripciones/?page=2",
+        headers={"X-Organizacion-Id": str(org_pag)},
+    )
+    data_pag = resp_pag_trello.data
+    print_check("GET /api/suscripciones/?page=2 responde HTTP 200 OK", resp_pag_trello.status_code == status.HTTP_200_OK, f"Status: {resp_pag_trello.status_code}")
+    print_check("Respuesta incluye estructura de paginación ('count', 'next', 'previous')",
+                "count" in data_pag and "next" in data_pag and "previous" in data_pag,
+                f"count: {data_pag.get('count')} | next: {data_pag.get('next')} | previous: {data_pag.get('previous')}")
+    print_check("Página 2 contiene los 5 registros restantes (page_size=10 para 15 registros)",
+                data_pag.get("count") == 15 and len(data_pag.get("results", [])) == 5 and data_pag.get("next") is None and data_pag.get("previous") is not None,
+                f"Items en página 2: {len(data_pag.get('results', []))}")
+
     print("\n" + "=" * 66)
     print("  TODOS LOS REQUERIMIENTOS CUMPLIDOS AL 100%")
     print("=" * 66 + "\n")

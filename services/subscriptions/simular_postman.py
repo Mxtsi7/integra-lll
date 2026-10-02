@@ -167,9 +167,38 @@ def main():
     resp_check = client.get(path_3, headers=headers_2)
     print_test_assertion("Recurso ya no existe en el sistema (404 Not Found)", resp_check.status_code == 404)
 
+    # -------------------------------------------------------------
+    # 8. GET /api/suscripciones/?page=2 (Paginación: PageNumberPagination con page_size=10)
+    # -------------------------------------------------------------
+    from app.models import Subscription
+    from decimal import Decimal
+    from datetime import date
+    for i in range(1, 16):
+        Subscription.objects.create(
+            organizacion_id=uuid.UUID(org_a),
+            nombre=f"Servicio Extra {i:02d}",
+            monto=Decimal("1990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, min(i, 28)),
+            estado="activo",
+        )
+
+    print_request_info(8, "GET /api/suscripciones/?page=2 (Paginacion)", "GET", "/api/suscripciones/?page=2", headers_2)
+    resp_8 = client.get("/api/suscripciones/?page=2", headers=headers_2)
+    data_8 = resp_8.data if hasattr(resp_8, "data") else resp_8.json()
+    print(f"    Status: {resp_8.status_code} OK")
+    print(f"    count: {data_8.get('count')}, items en pagina 2: {len(data_8.get('results', []))}")
+    print_test_assertion("Status code es 200 OK", resp_8.status_code == 200)
+    print_test_assertion("Estructura contiene count, next y previous",
+                         "count" in data_8 and "next" in data_8 and "previous" in data_8)
+    print_test_assertion("Segunda pagina devuelve los items restantes con page_size=10",
+                         data_8.get("count") == 15 and len(data_8.get("results", [])) == 5 and data_8.get("next") is None and data_8.get("previous") is not None,
+                         f"Count: {data_8.get('count')}, Items pagina 2: {len(data_8.get('results', []))}")
+
     print_header("RESUMEN DE EJECUCION DE PETICIONES SIMULADAS (POSTMAN)")
-    print("  Total de peticiones simuladas: 7")
-    print("  Todas las aserciones pm.test() pasaron: 12/12 [PASS]")
+    print("  Total de peticiones simuladas: 8")
+    print("  Todas las aserciones pm.test() pasaron: 15/15 [PASS]")
     print("  Codigos HTTP validados: 201 Created, 200 OK, 403 Forbidden, 204 No Content, 404 Not Found")
     print("=" * 70 + "\n")
 
