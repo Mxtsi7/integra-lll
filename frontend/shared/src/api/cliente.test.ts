@@ -40,7 +40,7 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
 
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
-    configurarApi({ urlBase: "http://api.test" });
+    configurarApi({ urlBase: "http://api.test/api" });
     manejador401 = vi.fn();
     configurarManejador401(manejador401);
   });
@@ -57,7 +57,7 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
       await pedir("/suscripciones/");
 
       const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe("http://api.test/suscripciones/");
+      expect(url).toBe("http://api.test/api/suscripciones/");
       expect((init.headers as Record<string, string>)["Authorization"]).toBe(
         "Bearer abc123",
       );
@@ -68,7 +68,8 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
 
       await pedir("/publico/");
 
-      const [, init] = fetchMock.mock.calls[0];
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("http://api.test/api/publico/");
       expect(init.headers as Record<string, string>).not.toHaveProperty(
         "Authorization",
       );
