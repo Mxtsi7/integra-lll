@@ -1,6 +1,5 @@
 from django.contrib.auth import authenticate
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -191,8 +190,8 @@ class UsuarioActualView(generics.RetrieveAPIView):
         ),
         responses={
             200: UsuarioActualSerializer,
-            403: OpenApiResponse(description="Falta X-Usuario-Id."),
-            404: OpenApiResponse(description="Usuario no encontrado."),
+            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
+            404: OpenApiResponse(description="El usuario no existe, o el id pedido no es el del token."),
         },
     )
     def get(self, request, *args, **kwargs):
