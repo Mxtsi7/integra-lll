@@ -45,35 +45,77 @@ kubectl oidc-login --version
 > ```
 > y agrégala al PATH, o copia ese `.exe` a la misma carpeta donde está `kubectl`.
 
-## 2. Poner el kubeconfig
+## 2. Averiguar tu usuario y tu namespace
 
-Felipe les pasa el archivo **`kubeconfig-plantilla.yaml`** por el grupo.
-No está en el repositorio a propósito: es público, y un archivo de
-configuración de cluster ahí se presta a confusiones aunque no lleve claves.
+**No asumas que es el prefijo de tu correo.** No coinciden: el correo de Felipe
+es `forellana2020@alu.uct.cl` pero su usuario en el cluster es `forellana`, sin
+el 2020.
 
-**No tiene contraseñas ni tokens**: solo dice dónde está el cluster. Tú entras
-con tu propio usuario LDAP desde el navegador.
-
-Ábrelo con el Bloc de notas y **reemplaza las 3 apariciones de `TUUSUARIO`** por
-tu usuario institucional (el del correo, sin el `@alu.uct.cl`).
-
-Por ejemplo, si tu correo es `jperez2024@alu.uct.cl`, tu usuario es `jperez2024`:
-
-```yaml
-    namespace: student-jperez2024
-  name: estudiante-jperez2024
-current-context: estudiante-jperez2024
-```
-
-Guárdalo como el archivo `config` (sin extensión) dentro de la carpeta `.kube`
-de tu usuario:
+Primero necesitas el kubeconfig que te pasa Felipe. Ponlo como el archivo
+`config` dentro de la carpeta `.kube` de tu usuario:
 
 ```powershell
 mkdir "$env:USERPROFILE\.kube" -Force
-# después copia ahí el archivo, renombrado a  config  (sin .yaml)
+# copia ahi el archivo, renombrado a  config  (sin extension)
 ```
 
-## 3. Entrar al cluster
+Todavia no edites nada. Primero averigua quien eres:
+
+```powershell
+kubectl auth whoami
+```
+
+Te va a abrir el navegador para que entres con tu cuenta institucional. Despues
+responde algo asi:
+
+```
+ATTRIBUTE   VALUE
+Username    ldap:forellana
+Groups      [system:authenticated]
+```
+
+**Lo que va despues de `ldap:` es tu usuario.**
+
+### Ahora encuentra tu namespace
+
+El namespace normalmente es `student-` mas tu usuario, pero **si tu usuario
+tiene un punto, el namespace no lo puede tener** (Kubernetes no admite puntos en
+los nombres de namespace). Asi que hay que probar.
+
+Este comando responde `yes` o `no` sin necesitar permisos especiales. Prueba los
+candidatos hasta que uno diga `yes`:
+
+```powershell
+kubectl auth can-i create pods -n student-TUUSUARIO
+kubectl auth can-i create pods -n student-TU-USUARIO-CON-GUION
+```
+
+Por ejemplo, si eres `ldap:maximiliano.saez`, prueba:
+
+```powershell
+kubectl auth can-i create pods -n student-maximiliano.saez
+kubectl auth can-i create pods -n student-maximiliano-saez
+kubectl auth can-i create pods -n student-msaez
+```
+
+**El que responda `yes` es el tuyo.**
+
+Si ninguno responde `yes`, **no insistas: el namespace lo crea el profesor, no
+Felipe.** Felipe no puede asignar permisos (lo verificamos: su cuenta no puede
+crear RoleBindings). Avisa en el grupo y se le pide al profe.
+
+### Recien ahora edita el kubeconfig
+
+Abre el archivo `config` y reemplaza las 3 apariciones de `TUUSUARIO` por el
+namespace que encontraste:
+
+```yaml
+    namespace: student-loquehayasencontrado
+  name: estudiante-loquehayasencontrado
+current-context: estudiante-loquehayasencontrado
+```
+
+## 3. Comprobar que entras a TU namespace
 
 ```powershell
 kubectl get pods
