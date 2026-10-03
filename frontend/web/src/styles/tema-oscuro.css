@@ -1,0 +1,15 @@
+
+:root[data-tema='oscuro'] {
+  color-scheme: dark;
+
+  --oag-bg: #0f1424;
+  --oag-surface: #171d33;
+  --oag-line: #2a3350;
+  --oag-ink: #e8ecf8;
+  --oag-ink-soft: #9aa5c4;
+  --oag-muted-bg: #2a3350;
+  --oag-muted-text: #b4bdd8;
+
+  /* Color de botones/toggles activos: el navy se perdería sobre fondo oscuro */
+  --oag-accion: #5b7cff;
+}

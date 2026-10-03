@@ -4,6 +4,10 @@ import { BrowserRouter } from "react-router-dom";
 import { configurarApi, configureAuthApi, configurarManejador401} from "@ojoalgasto/shared";
 import { App } from "./App";
 import "./styles/theme.css";
+import './styles/tema-oscuro.css';
+import { iniciarTema } from './hooks/useTema';
+
+iniciarTema();
 
 const urlBase = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 configurarApi({ urlBase });
