@@ -1,7 +1,16 @@
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 16px;
+  align-items: start;
+}
+
+.columna {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .seccion {
@@ -9,7 +18,8 @@
   border: 1px solid var(--oag-line);
   border-radius: var(--oag-radius-lg);
   padding: 20px 22px;
-  align-self: start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .seccionTitulo {
@@ -17,6 +27,8 @@
   font-weight: 600;
   margin: 0 0 14px;
   color: var(--oag-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .lista {
@@ -50,6 +62,71 @@
   color: var(--oag-ink-soft);
 }
 
+/* ───────── Perfil: campos ───────── */
+
+.campos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.campoEtiqueta {
+  font-size: 12px;
+  color: var(--oag-ink-soft);
+}
+
+.input,
+.inputConAccion {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--oag-surface);
+  border: 1px solid var(--oag-line);
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--oag-ink);
+}
+
+.input {
+  padding: 10px 12px;
+  font-family: inherit;
+}
+
+.input::placeholder {
+  color: var(--oag-ink-soft);
+}
+
+.input:focus,
+.inputConAccion:focus-within {
+  outline: 2px solid var(--oag-accion, var(--oag-navy));
+  outline-offset: -1px;
+}
+
+.inputConAccion {
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 0;
+}
+
+.inputSinBorde {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: var(--oag-ink);
+  outline: none;
+}
+
+/* ───────── Toggles ───────── */
+
 .toggle,
 .toggleActivo {
   width: 40px;
@@ -60,6 +137,7 @@
   flex-shrink: 0;
   cursor: pointer;
   padding: 0;
+  transition: background 0.15s ease;
 }
 
 .toggle {
@@ -67,7 +145,7 @@
 }
 
 .toggleActivo {
-  background: var(--oag-navy);
+  background: var(--oag-accion, var(--oag-navy));
 }
 
 .toggleBola {
@@ -85,9 +163,10 @@
   transform: translateX(18px);
 }
 
-.badgePendiente {
-  background: var(--oag-muted-bg);
-  color: var(--oag-muted-text);
+/* ───────── Badges de estado ───────── */
+
+.badgePendiente,
+.badgeConectado {
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
@@ -95,12 +174,65 @@
   white-space: nowrap;
 }
 
-.notaConectores {
-  margin: 12px 0 0;
-  font-size: 11.5px;
-  color: var(--oag-ink-soft);
-  line-height: 1.5;
+.badgePendiente {
+  background: var(--oag-muted-bg);
+  color: var(--oag-muted-text);
 }
+
+.badgeConectado {
+  background: var(--oag-accion, var(--oag-navy));
+  color: #ffffff;
+}
+
+/* ───────── Botones ───────── */
+
+.botonPrimario,
+.botonPeligro {
+  width: 100%;
+  margin-top: 14px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.botonPrimario {
+  background: var(--oag-accion, var(--oag-navy));
+  color: #ffffff;
+  border: none;
+}
+
+.botonPrimario:hover {
+  opacity: 0.9;
+}
+
+.botonPeligro {
+  background: transparent;
+  color: #c62828;
+  border: 1px solid #c62828;
+}
+
+.botonPeligro:hover {
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.accionTexto {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--oag-accion, var(--oag-navy));
+  cursor: pointer;
+}
+
+.accionTexto:hover {
+  text-decoration: underline;
+}
+
+/* ───────── Selector de tema ───────── */
 
 .filaTema {
   display: flex;
@@ -122,6 +254,7 @@
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 12.5px;
+  font-family: inherit;
   cursor: pointer;
 }
 
@@ -131,7 +264,7 @@
 }
 
 .temaBotonActivo {
-  background: var(--oag-navy);
+  background: var(--oag-accion, var(--oag-navy));
   color: #ffffff;
   font-weight: 600;
 }
