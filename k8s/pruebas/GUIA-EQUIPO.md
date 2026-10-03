@@ -45,74 +45,49 @@ kubectl oidc-login --version
 > ```
 > y agrégala al PATH, o copia ese `.exe` a la misma carpeta donde está `kubectl`.
 
-## 2. Averiguar tu usuario y tu namespace
+## 2. Conseguir TU kubeconfig
 
-**No asumas que es el prefijo de tu correo.** No coinciden: el correo de Felipe
-es `forellana2020@alu.uct.cl` pero su usuario en el cluster es `forellana`, sin
-el 2020.
+**Cada persona tiene el suyo y no se puede deducir.** Los namespaces llevan un
+hash al final, por ejemplo:
 
-Primero necesitas el kubeconfig que te pasa Felipe. Ponlo como el archivo
-`config` dentro de la carpeta `.kube` de tu usuario:
+```
+student-juan-perez-cd928ab3cf06
+```
+
+No sirve adivinar ni copiar el de otro: el archivo dice a que namespace apuntar,
+y si apunta al de otra persona vas a recibir Forbidden en todo.
+
+**Pidele al profesor TU kubeconfig.** Te va a pasar un archivo parecido a
+`estudiantes-TUNOMBRE.kubeconfig`.
+
+Guardalo como el archivo `config` (sin extension) dentro de la carpeta `.kube`
+de tu usuario:
 
 ```powershell
 mkdir "$env:USERPROFILE\.kube" -Force
-# copia ahi el archivo, renombrado a  config  (sin extension)
+# copia ahi TU archivo, renombrado a  config  (sin extension)
 ```
 
-Todavia no edites nada. Primero averigua quien eres:
+### Un ajuste que conviene hacerle
 
-```powershell
-kubectl auth whoami
-```
-
-Te va a abrir el navegador para que entres con tu cuenta institucional. Despues
-responde algo asi:
-
-```
-ATTRIBUTE   VALUE
-Username    ldap:forellana
-Groups      [system:authenticated]
-```
-
-**Lo que va despues de `ldap:` es tu usuario.**
-
-### Ahora encuentra tu namespace
-
-El namespace normalmente es `student-` mas tu usuario, pero **si tu usuario
-tiene un punto, el namespace no lo puede tener** (Kubernetes no admite puntos en
-los nombres de namespace). Asi que hay que probar.
-
-Este comando responde `yes` o `no` sin necesitar permisos especiales. Prueba los
-candidatos hasta que uno diga `yes`:
-
-```powershell
-kubectl auth can-i create pods -n student-TUUSUARIO
-kubectl auth can-i create pods -n student-TU-USUARIO-CON-GUION
-```
-
-Por ejemplo, si eres `ldap:maximiliano.saez`, prueba:
-
-```powershell
-kubectl auth can-i create pods -n student-maximiliano.saez
-kubectl auth can-i create pods -n student-maximiliano-saez
-kubectl auth can-i create pods -n student-msaez
-```
-
-**El que responda `yes` es el tuyo.**
-
-Si ninguno responde `yes`, **no insistas: el namespace lo crea el profesor, no
-Felipe.** Felipe no puede asignar permisos (lo verificamos: su cuenta no puede
-crear RoleBindings). Avisa en el grupo y se le pide al profe.
-
-### Recien ahora edita el kubeconfig
-
-Abre el archivo `config` y reemplaza las 3 apariciones de `TUUSUARIO` por el
-namespace que encontraste:
+Abrilo con el Bloc de notas y busca la linea `- --grant-type=authcode`. Justo
+debajo, agrega esta:
 
 ```yaml
-    namespace: student-loquehayasencontrado
-  name: estudiante-loquehayasencontrado
-current-context: estudiante-loquehayasencontrado
+      - --listen-address=127.0.0.1:18000
+```
+
+Respetando la sangria (va alineada con las otras lineas que empiezan con `-`).
+
+**Por que:** el login por navegador abre un servidor local, y por defecto usa el
+puerto 8000 — el mismo que ocupa el gateway del proyecto en Docker Compose. Si
+tienes el proyecto levantado, el login falla sin decirte por que. Con esta linea
+usa el 18000 y deja de chocar.
+
+Para ver que namespace te toco:
+
+```powershell
+kubectl config view --minify -o jsonpath="{.contexts[0].context.namespace}"
 ```
 
 ## 3. Comprobar que entras a TU namespace
@@ -127,7 +102,7 @@ dice *"authentication complete"* y puedes cerrar esa pestaña.
 Si tu namespace está vacío, la respuesta normal es:
 
 ```
-No resources found in student-TUUSUARIO namespace.
+No resources found in student-xxxxx namespace.
 ```
 
 **Eso significa que funcionó.** Estás dentro.
@@ -247,3 +222,5 @@ cuesta la base.
 | `couldn't get current server API group list` | se venció el login, corre `kubectl get pods` de nuevo |
 | `context deadline exceeded` | el login del navegador expiró (3 min), repítelo |
 | `No resources found` | **no es error**, tu namespace está vacío |
+| `Forbidden` en todo | estás usando el kubeconfig de otra persona, o no es el tuyo |
+| El login no abre o se cuelga | te falta `--listen-address=127.0.0.1:18000` (paso 2) |
