@@ -1,3 +1,4 @@
+/* Variables del modo oscuro. Se aplican cuando <html> tiene data-tema="oscuro". */
 
 :root[data-tema='oscuro'] {
   color-scheme: dark;
@@ -10,6 +11,9 @@
   --oag-muted-bg: #2a3350;
   --oag-muted-text: #b4bdd8;
 
-  /* Color de botones/toggles activos: el navy se perdería sobre fondo oscuro */
+  /* Color de botones/toggles/gráficos activos: el navy se perdería sobre fondo oscuro */
   --oag-accion: #5b7cff;
+
+  /* Fondo de la fila de "Suscripciones fantasma" (en claro es #fffbeb) */
+  --oag-fantasma-bg: #3a3320;
 }

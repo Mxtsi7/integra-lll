@@ -9,7 +9,7 @@ function leerTemaGuardado(): Tema {
     const guardado = localStorage.getItem(CLAVE);
     if (guardado === 'claro' || guardado === 'oscuro') return guardado;
   } catch {
-    
+    // localStorage no disponible (p. ej. modo privado): usamos el valor por defecto
   }
   return 'claro';
 }
@@ -32,7 +32,7 @@ export function useTema() {
     try {
       localStorage.setItem(CLAVE, tema);
     } catch {
-      // ignoramos errores de almacenamiento
+      // Sin localStorage el tema sigue aplicado, solo no se recuerda al recargar
     }
   }, [tema]);
 
