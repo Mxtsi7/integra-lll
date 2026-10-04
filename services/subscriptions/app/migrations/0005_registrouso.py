@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('app', '0003_subscription_ultima_actividad'),
+        ('app', '0004_alter_subscription_options'),
     ]
 
     operations = [

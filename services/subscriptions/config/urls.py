@@ -32,11 +32,5 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/", include(router.urls)),
-    # Compatibilidad explícita con la ruta en inglés de la tarjeta Trello
-    path(
-        "subscriptions/<str:pk>/uso/",
-        SubscriptionViewSet.as_view({"get": "uso", "post": "uso"}),
-        name="subscription-uso-trello",
-    ),
 ]
 
