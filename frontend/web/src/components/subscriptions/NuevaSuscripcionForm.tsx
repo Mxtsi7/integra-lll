@@ -13,8 +13,14 @@ export interface NuevaSuscripcionFormData {
 }
 
 interface NuevaSuscripcionFormProps {
-  /** Se llama con la suscripción lista, sin `id`: ese lo asigna el backend. */
-  onAdd?: (suscripcion: Omit<Suscripcion, "id">) => void;
+  /**
+   * Se llama con la suscripción lista, sin `id`: ese lo asigna el backend.
+   * Devuelve `true` si el guardado fue exitoso. El form solo se limpia
+   * cuando la respuesta es `true`; si falla (o se devuelve `false`), los
+   * datos tipeados por el usuario se mantienen para que no tenga que
+   * reescribirlos.
+   */
+  onAdd?: (suscripcion: Omit<Suscripcion, "id">) => Promise<boolean> | boolean;
   onCancel?: () => void;
   monedas?: Moneda[];
   frecuencias?: Frecuencia[];
@@ -56,13 +62,13 @@ export function NuevaSuscripcionForm({
     setFormData((prev) => ({ ...prev, [field]: value } as NuevaSuscripcionFormData));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const monto = parseFloat(formData.monto.replace(",", "."));
     if (!formData.nombre.trim() || Number.isNaN(monto)) return;
 
-    onAdd?.({
+    const exito = await onAdd?.({
       nombre: formData.nombre.trim(),
       monto,
       moneda: formData.moneda,
@@ -74,7 +80,11 @@ export function NuevaSuscripcionForm({
       estado: "activo",
     });
 
-    setFormData(EMPTY_FORM(monedas, frecuencias));
+    // Solo se limpia si el guardado salió bien; si falló, el usuario no
+    // pierde lo que ya había escrito.
+    if (exito) {
+      setFormData(EMPTY_FORM(monedas, frecuencias));
+    }
   };
 
   return (

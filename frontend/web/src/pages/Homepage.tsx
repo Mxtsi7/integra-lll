@@ -96,16 +96,25 @@ export const Homepage: React.FC = () => {
     console.log("Suscripción seleccionada:", s.nombre);
   };
 
-  const handleAdd = async (nueva: Omit<Suscripcion, "id">) => {
+  const handleAdd = async (nueva: Omit<Suscripcion, "id">): Promise<boolean> => {
     setAddError(null);
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
-      setSuscripciones((prev) => [...prev, creada]);
+      // Se calcula currentPage con el próximo array (next.length), no con
+      // `suscripciones.length` capturado en el closure: así no depende de
+      // que este handler corra sin ningún await de por medio entre ambas
+      // líneas.
+      setSuscripciones((prev) => {
+        const next = [...prev, creada];
+        setCurrentPage(Math.ceil(next.length / PAGE_SIZE));
+        return next;
+      });
       setIsAdding(false);
-      setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
+      return true;
     } catch (e) {
       setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+      return false;
     } finally {
       setIsSavingAdd(false);
     }
@@ -113,11 +122,22 @@ export const Homepage: React.FC = () => {
 
   const handleEditSubmit = async (data: EditarSuscripcionFormData) => {
     setEditError(null);
+
+    // Misma validación que ya hace NuevaSuscripcionForm antes de llamar a
+    // onAdd: sin esto, un monto vacío o no numérico manda `null` en el PATCH
+    // y el backend responde 400 con un mensaje genérico ("Este campo no
+    // puede ser nulo."), sin indicar cuál es el campo problemático.
+    const monto = parseFloat(data.monto.replace(",", "."));
+    if (!data.nombre.trim() || Number.isNaN(monto)) {
+      setEditError("Revisa el nombre y el monto: no pueden quedar vacíos.");
+      return;
+    }
+
     setIsSavingEdit(true);
     try {
       const actualizada = await actualizarSuscripcion(data.id, {
-        nombre: data.nombre,
-        monto: parseFloat(data.monto),
+        nombre: data.nombre.trim(),
+        monto,
         moneda: data.moneda,
         frecuencia: data.frecuencia,
         categoria: data.categoria,
@@ -177,7 +197,10 @@ export const Homepage: React.FC = () => {
             title="No tienes suscripciones registradas"
             description="Agrega suscripciones para controlar tus gastos recurrentes, recibir alertas de cobro y obtener recomendaciones personalizadas de ahorro."
             actionLabel="Agregar suscripción"
-            onAction={() => setIsAdding(true)}
+            onAction={() => {
+              setAddError(null);
+              setIsAdding(true);
+            }}
           />
         ) : (
           <>
@@ -195,13 +218,14 @@ export const Homepage: React.FC = () => {
                 <button
                   type="button"
                   className={styles.addButton}
-                  onClick={() => setIsAdding((v) => !v)}
+                  onClick={() => {
+                    setAddError(null);
+                    setIsAdding((v) => !v);
+                  }}
                 >
                   {isAdding ? "Cerrar" : "+ Agregar suscripción"}
                 </button>
               </div>
-
-              {deleteError && <p className={styles.summaryLabel}>{deleteError}</p>}
 
               <ul className={styles.list}>
                 {isLoading
@@ -213,8 +237,14 @@ export const Homepage: React.FC = () => {
                         key={s.id}
                         suscripcion={s}
                         onClick={handleClick}
-                        onEdit={setEditando}
-                        onDelete={setEliminando}
+                        onEdit={(s) => {
+                          setEditError(null);
+                          setEditando(s);
+                        }}
+                        onDelete={(s) => {
+                          setDeleteError(null);
+                          setEliminando(s);
+                        }}
                         isRemoving={s.id === removingId}
                       />
                     ))}
@@ -238,13 +268,19 @@ export const Homepage: React.FC = () => {
           <div
             className={styles.formOverlay}
             onClick={(e) => {
-              if (e.target === e.currentTarget) setIsAdding(false);
+              if (e.target === e.currentTarget) {
+                setAddError(null);
+                setIsAdding(false);
+              }
             }}
           >
             {addError && <p className={styles.summaryLabel}>{addError}</p>}
             <AddSubscriptionForm
               onAdd={handleAdd}
-              onCancel={() => setIsAdding(false)}
+              onCancel={() => {
+                setAddError(null);
+                setIsAdding(false);
+              }}
               isSaving={isSavingAdd}
             />
           </div>
@@ -255,14 +291,20 @@ export const Homepage: React.FC = () => {
           <div
             className={styles.formOverlay}
             onClick={(e) => {
-              if (e.target === e.currentTarget) setEditando(null);
+              if (e.target === e.currentTarget) {
+                setEditError(null);
+                setEditando(null);
+              }
             }}
           >
             {editError && <p className={styles.summaryLabel}>{editError}</p>}
             <EditarSuscripcionForm
               suscripcion={aFormulario(editando)}
               onSubmit={handleEditSubmit}
-              onCancel={() => setEditando(null)}
+              onCancel={() => {
+                setEditError(null);
+                setEditando(null);
+              }}
               isSaving={isSavingEdit}
             />
           </div>
@@ -273,14 +315,21 @@ export const Homepage: React.FC = () => {
           <div
             className={styles.formOverlay}
             onClick={(e) => {
-              if (e.target === e.currentTarget) setEliminando(null);
+              if (e.target === e.currentTarget) {
+                setDeleteError(null);
+                setEliminando(null);
+              }
             }}
           >
             <EliminarSuscripcionDialog
               nombreSuscripcion={eliminando.nombre}
               onConfirm={handleConfirmDelete}
-              onCancel={() => setEliminando(null)}
+              onCancel={() => {
+                setDeleteError(null);
+                setEliminando(null);
+              }}
               isDeleting={isDeleting}
+              error={deleteError}
             />
           </div>
         )}
