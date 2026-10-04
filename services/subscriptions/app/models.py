@@ -117,8 +117,8 @@ class Subscription(ModeloTenant):
         verbose_name="Última actividad",
     )
 
-    def registrar_uso(self, minutos: int | Decimal) -> None:
-        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes y reactiva estado si era fantasma."""
+    def registrar_uso(self, minutos: int | Decimal, fecha=None) -> "RegistroUso":
+        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
         from django.utils import timezone
 
         self.ultima_actividad = timezone.now()
@@ -131,6 +131,16 @@ class Subscription(ModeloTenant):
             self.estado = self.Estado.ACTIVO
 
         self.save()
+
+        if fecha is None:
+            fecha = timezone.now().date()
+
+        return RegistroUso.objects.create(
+            organizacion_id=self.organizacion_id,
+            suscripcion=self,
+            fecha=fecha,
+            minutos=int(minutos),
+        )
 
     # ── meta ─────────────────────────────────────────────────────────
 
@@ -238,3 +248,34 @@ class Cobro(ModeloTenant):
     def hubo_alza(self) -> bool:
         """True si se cobró más de lo que la suscripción decía esperar."""
         return self.monto > self.suscripcion.monto
+
+
+class RegistroUso(ModeloTenant):
+    """Registro histórico de uso de una suscripción en una fecha determinada (CU-23 / RF-04 / RF-15)."""
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="usos",
+        verbose_name="Suscripción",
+    )
+
+    fecha = models.DateField(verbose_name="Fecha de uso")
+
+    minutos = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)],
+        verbose_name="Minutos de uso",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "registro_uso"
+        ordering = ["-fecha", "-creado_en"]
+        indexes = [
+            models.Index(fields=["organizacion_id", "-fecha"]),
+            models.Index(fields=["suscripcion", "-fecha"]),
+        ]
+        verbose_name = "Registro de uso"
+        verbose_name_plural = "Registros de uso"
+
+    def __str__(self) -> str:
+        return f"{self.suscripcion.nombre} - {self.fecha}: {self.minutos} min"
