@@ -37,7 +37,7 @@ su API bajo `/api/` y no hay traducción.
 | Prefijo | Servicio |
 |---|---|
 | `/api/auth/` | `auth` — **pública**, no exige token (registro, login, refresco) |
-| `/api/usuarios/`, `/api/organizaciones/` | `auth` |
+| `/api/usuarios/`, `/api/organizacion/` | `auth` |
 | `/api/suscripciones/`, `/api/usos/` | `subscriptions` |
 | `/api/conectores/` | `connectors` |
 | `/api/recomendaciones/`, `/api/asistente/` | `analytics` |
