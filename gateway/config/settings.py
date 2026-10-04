@@ -77,7 +77,7 @@ SERVICIOS = {
 RUTAS = {
     "/api/auth/": "auth",
     "/api/usuarios/": "auth",
-    "/api/organizaciones/": "auth",
+    "/api/organizacion/": "auth",
     "/api/suscripciones/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
