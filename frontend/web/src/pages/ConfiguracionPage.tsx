@@ -17,13 +17,6 @@ export function ConfiguracionPage() {
   // Apariencia (persistente y aplicada a toda la app)
   const [tema, setTema] = useTema();
 
-  function handleEliminarCuenta() {
-    // TODO: llamar al endpoint de eliminación cuando exista
-    if (window.confirm('¿Seguro que quieres eliminar tu cuenta? Esta acción no se puede deshacer.')) {
-      console.log('Eliminar cuenta');
-    }
-  }
-
   return (
     <AppLayout
       headerTitulo="Configuración"
@@ -87,20 +80,25 @@ export function ConfiguracionPage() {
         {/* ───────── Columna derecha ───────── */}
         <div className={styles.columna}>
           <Seccion titulo="Cuentas conectadas">
-            <FilaEstado etiqueta="Correo electrónico" estado="conectado" textoEstado="Conectado" />
-            <FilaEstado etiqueta="Cuenta bancaria (OAuth)" estado="pendiente" textoEstado="En trámite" />
+            <FilaEstado etiqueta="Correo electrónico" estado="pendiente" textoEstado="No conectado" />
+            <FilaEstado etiqueta="Cuenta bancaria" estado="pendiente" textoEstado="No disponible" />
+            <p className={styles.notaConectores}>
+              La conexión de cuentas todavía no está disponible — el servicio de conectores está en
+              desarrollo.
+            </p>
             {/* TODO: habilitar cuando el servicio de conectores esté listo */}
-            <button type="button" className={styles.botonPrimario}>
+            <button type="button" className={styles.botonPrimario} disabled title="Próximamente">
               Conectar cuenta
             </button>
           </Seccion>
 
           <Seccion titulo="Privacidad y datos">
-            {/* TODO: conectar la exportación cuando exista el endpoint */}
+            {/* TODO: habilitar cuando existan los endpoints correspondientes */}
             <FilaAccion etiqueta="Exportar mis datos" accion="Descargar" />
             <FilaAccion etiqueta="Historial de accesos" accion="Ver" />
-            <button type="button" className={styles.botonPeligro} onClick={handleEliminarCuenta}>
-              Eliminar cuenta
+            {/* TODO: habilitar y pedir confirmación cuando exista el endpoint de eliminación */}
+            <button type="button" className={styles.botonPeligro} disabled title="Próximamente">
+              Eliminar cuenta · Próximamente
             </button>
           </Seccion>
 
@@ -109,7 +107,8 @@ export function ConfiguracionPage() {
               <span className={styles.filaEtiqueta}>Plan gratuito</span>
               <span className={styles.filaDescripcion}>Meses consecutivos sin costo</span>
             </div>
-            <button type="button" className={styles.botonPrimario}>
+            {/* TODO: habilitar cuando exista el flujo de pago */}
+            <button type="button" className={styles.botonPrimario} disabled title="Próximamente">
               Mejorar a premium
             </button>
           </Seccion>
@@ -185,11 +184,12 @@ function FilaEstado({
   );
 }
 
+// Acción deshabilitada hasta que exista el endpoint correspondiente.
 function FilaAccion({ etiqueta, accion }: { etiqueta: string; accion: string }) {
   return (
     <div className={styles.fila}>
       <span className={styles.filaEtiqueta}>{etiqueta}</span>
-      <button type="button" className={styles.accionTexto}>
+      <button type="button" className={styles.accionTexto} disabled title="Próximamente">
         {accion}
       </button>
     </div>

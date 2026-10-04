@@ -1,3 +1,4 @@
+/* Color de acción: usa --oag-accion si existe (modo oscuro), si no el navy de siempre */
 
 .grid {
   display: grid;
@@ -62,69 +63,6 @@
   color: var(--oag-ink-soft);
 }
 
-/* ───────── Perfil: campos ───────── */
-
-.campos {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.campo {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.campoEtiqueta {
-  font-size: 12px;
-  color: var(--oag-ink-soft);
-}
-
-.input,
-.inputConAccion {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--oag-surface);
-  border: 1px solid var(--oag-line);
-  border-radius: 8px;
-  font-size: 13.5px;
-  color: var(--oag-ink);
-}
-
-.input {
-  padding: 10px 12px;
-  font-family: inherit;
-}
-
-.input::placeholder {
-  color: var(--oag-ink-soft);
-}
-
-.input:focus,
-.inputConAccion:focus-within {
-  outline: 2px solid var(--oag-accion, var(--oag-navy));
-  outline-offset: -1px;
-}
-
-.inputConAccion {
-  display: flex;
-  align-items: center;
-  padding: 0 12px 0 0;
-}
-
-.inputSinBorde {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  padding: 10px 12px;
-  font-size: 13.5px;
-  font-family: inherit;
-  color: var(--oag-ink);
-  outline: none;
-}
-
 /* ───────── Toggles ───────── */
 
 .toggle,
@@ -184,6 +122,13 @@
   color: #ffffff;
 }
 
+.notaConectores {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--oag-ink-soft);
+  line-height: 1.5;
+}
+
 /* ───────── Botones ───────── */
 
 .botonPrimario,
@@ -204,7 +149,7 @@
   border: none;
 }
 
-.botonPrimario:hover {
+.botonPrimario:hover:not(:disabled) {
   opacity: 0.9;
 }
 
@@ -214,8 +159,14 @@
   border: 1px solid #c62828;
 }
 
-.botonPeligro:hover {
+.botonPeligro:hover:not(:disabled) {
   background: rgba(198, 40, 40, 0.08);
+}
+
+.botonPrimario:disabled,
+.botonPeligro:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .accionTexto {
@@ -228,8 +179,14 @@
   cursor: pointer;
 }
 
-.accionTexto:hover {
+.accionTexto:hover:not(:disabled) {
   text-decoration: underline;
+}
+
+.accionTexto:disabled {
+  color: var(--oag-ink-soft);
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 /* ───────── Selector de tema ───────── */
