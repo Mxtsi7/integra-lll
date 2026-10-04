@@ -166,6 +166,22 @@ class TestRegistrarUsoSerializer:
         assert not s.is_valid()
         assert "minutos" in s.errors
 
+    def test_fecha_futura_rechazada(self) -> None:
+        """Fechas posteriores a hoy son rechazadas con error de validacion."""
+        s = RegistrarUsoSerializer(data={"minutos": 30, "fecha": "2035-01-01"})
+        assert not s.is_valid()
+        assert "fecha" in s.errors
+
+    def test_fecha_valida_o_ausente(self) -> None:
+        """Fechas pasadas o ausencia de fecha son aceptadas."""
+        s1 = RegistrarUsoSerializer(data={"minutos": 30, "fecha": "2026-09-01"})
+        assert s1.is_valid(), s1.errors
+        assert str(s1.validated_data["fecha"]) == "2026-09-01"
+
+        s2 = RegistrarUsoSerializer(data={"minutos": 30})
+        assert s2.is_valid(), s2.errors
+        assert s2.validated_data.get("fecha") is None
+
 
 
 @pytest.mark.django_db

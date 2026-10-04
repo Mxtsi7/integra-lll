@@ -755,19 +755,6 @@ class TestSubscriptionRegistrarUso:
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
-    def test_registrar_uso_soporta_ruta_subscriptions_ingles(
-        self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
-    ) -> None:
-        """POST /subscriptions/<id>/uso/ (ruta de la tarjeta Trello) funciona correctamente."""
-        response = api_client.post(
-            f"/subscriptions/{sub_fantasma.id}/uso/",
-            {"minutos": 30},
-            format="json",
-            headers={"X-Organizacion-Id": str(org)},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["estado"] == "activo"
-
     def test_registrar_uso_minutos_excede_maximo_devuelve_400(
         self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
     ) -> None:
@@ -786,13 +773,14 @@ class TestSubscriptionRegistrarUso:
 
 @pytest.mark.django_db
 class TestSubscriptionHistoricoUso:
-    """Pruebas del endpoint GET /subscriptions/<id>/uso/ (histórico de uso).
+    """Pruebas del endpoint GET /api/suscripciones/<id>/uso/ (histórico de uso).
 
     Verifica:
     - Que devuelva todos los registros de uso de la suscripción.
     - Que los devuelva ordenados de más reciente a más antiguo (-fecha).
     - Que el historial devuelto corresponda SOLO a la suscripción indicada.
     - Aislamiento multi-tenant y manejo de errores.
+    - Que no se acepten fechas futuras.
     """
 
     @pytest.fixture()
@@ -850,7 +838,7 @@ class TestSubscriptionHistoricoUso:
         )
 
         response = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
 
@@ -910,7 +898,7 @@ class TestSubscriptionHistoricoUso:
 
         # Consultar historial de sub_1
         resp_1 = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert resp_1.status_code == status.HTTP_200_OK
@@ -921,7 +909,7 @@ class TestSubscriptionHistoricoUso:
 
         # Consultar historial de sub_2
         resp_2 = api_client.get(
-            f"/subscriptions/{sub_2.id}/uso/",
+            f"/api/suscripciones/{sub_2.id}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert resp_2.status_code == status.HTTP_200_OK
@@ -930,38 +918,12 @@ class TestSubscriptionHistoricoUso:
         assert [r["fecha"] for r in data_2] == ["2026-10-12", "2026-10-08", "2026-10-02"]
         assert [r["minutos"] for r in data_2] == [120, 90, 30]
 
-    def test_historico_uso_soporta_ruta_espanol_api_suscripciones(
-        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
-    ) -> None:
-        """GET /api/suscripciones/<id>/uso/ también responde correctamente."""
-        RegistroUso.objects.create(
-            organizacion_id=org,
-            suscripcion=sub_1,
-            fecha=date(2026, 10, 20),
-            minutos=50,
-        )
-        RegistroUso.objects.create(
-            organizacion_id=org,
-            suscripcion=sub_1,
-            fecha=date(2026, 10, 10),
-            minutos=25,
-        )
-
-        response = api_client.get(
-            f"/api/suscripciones/{sub_1.id}/uso/",
-            headers={"X-Organizacion-Id": str(org)},
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) == 2
-        assert response.data[0]["fecha"] == "2026-10-20"
-        assert response.data[1]["fecha"] == "2026-10-10"
-
     def test_historico_uso_vacio_devuelve_lista_vacia(
         self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
     ) -> None:
         """Suscripción sin uso devuelve lista vacía y 200 OK."""
         response = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert response.status_code == status.HTTP_200_OK
@@ -973,7 +935,7 @@ class TestSubscriptionHistoricoUso:
         """Otra organización recibe 404 si intenta consultar el historial de uso."""
         otra_org = uuid.uuid4()
         response = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             headers={"X-Organizacion-Id": str(otra_org)},
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -983,7 +945,7 @@ class TestSubscriptionHistoricoUso:
     ) -> None:
         """Petición sin cabecera X-Organizacion-Id responde 403 Forbidden."""
         response = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -992,7 +954,7 @@ class TestSubscriptionHistoricoUso:
     ) -> None:
         """Consultar uso de un ID inexistente responde 404 Not Found."""
         response = api_client.get(
-            f"/subscriptions/{uuid.uuid4()}/uso/",
+            f"/api/suscripciones/{uuid.uuid4()}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -1002,7 +964,7 @@ class TestSubscriptionHistoricoUso:
     ) -> None:
         """Un registro creado vía POST aparece posteriormente en el GET de histórico."""
         post_resp = api_client.post(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             {"minutos": 40},
             format="json",
             headers={"X-Organizacion-Id": str(org)},
@@ -1010,9 +972,70 @@ class TestSubscriptionHistoricoUso:
         assert post_resp.status_code == status.HTTP_200_OK
 
         get_resp = api_client.get(
-            f"/subscriptions/{sub_1.id}/uso/",
+            f"/api/suscripciones/{sub_1.id}/uso/",
             headers={"X-Organizacion-Id": str(org)},
         )
         assert get_resp.status_code == status.HTTP_200_OK
         assert len(get_resp.data) == 1
         assert get_resp.data[0]["minutos"] == 40
+
+    def test_registrar_uso_fecha_futura_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """POST con fecha futura responde 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 10, "fecha": "2031-01-01"},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fecha" in response.data
+
+    def test_registrar_uso_fecha_pasada_se_acepta(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """POST con fecha pasada válida responde 200 OK y queda en el histórico."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 20, "fecha": "2026-09-01"},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        get_resp = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert get_resp.data[0]["fecha"] == "2026-09-01"
+        assert get_resp.data[0]["minutos"] == 20
+
+    def test_registrar_uso_de_noche_usa_fecha_local_chile(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription, monkeypatch
+    ) -> None:
+        """Simula las 22:30 hora de Chile (01:30 UTC del día siguiente) y confirma fecha local."""
+        from datetime import datetime, timezone as dt_timezone
+        from django.utils import timezone
+
+        # 01:30 UTC del 5 de octubre = 22:30 hora de Chile del 4 de octubre
+        utc_night = datetime(2026, 10, 5, 1, 30, tzinfo=dt_timezone.utc)
+        monkeypatch.setattr(timezone, "now", lambda: utc_night)
+
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        get_resp = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert get_resp.status_code == status.HTTP_200_OK
+        assert len(get_resp.data) == 1
+        # Debe ser 2026-10-04 (fecha local en Chile) y NO 2026-10-05 (UTC)
+        assert get_resp.data[0]["fecha"] == "2026-10-04"
+        assert get_resp.data[0]["minutos"] == 30

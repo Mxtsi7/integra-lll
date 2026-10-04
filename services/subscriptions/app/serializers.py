@@ -80,6 +80,16 @@ class RegistrarUsoSerializer(serializers.Serializer):
     )
     fecha = serializers.DateField(required=False, default=None)
 
+    def validate_fecha(self, value):
+        """Rechaza fechas posteriores a hoy (hora local del servidor)."""
+        from django.utils import timezone
+
+        if value is not None and value > timezone.localdate():
+            raise serializers.ValidationError(
+                "No se puede registrar uso de una fecha futura."
+            )
+        return value
+
 
 class RegistroUsoSerializer(serializers.ModelSerializer):
     """Serializa los registros históricos de uso de una suscripción (CU-23 / RF-04 / RF-15)."""

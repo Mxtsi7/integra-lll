@@ -25,7 +25,7 @@ class SubscriptionViewSet(TenantViewSet):
         ?estado=activo
         ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
         ?estado=activo&fecha_cobro=2026-10-01
-    - Expone GET y POST /subscriptions/<id>/uso/ para consultar el histórico y registrar minutos de uso.
+    - Expone GET y POST /api/suscripciones/<id>/uso/ para consultar el histórico y registrar minutos de uso.
     """
 
     queryset = Subscription.objects.all()
@@ -66,11 +66,11 @@ class SubscriptionViewSet(TenantViewSet):
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
         """
-        GET /subscriptions/<id>/uso/ (o /api/suscripciones/<id>/uso/)
+        GET /api/suscripciones/<id>/uso/
         Devuelve todos los registros de uso de esa suscripción ordenados por fecha
         del más reciente al más antiguo (CU-23 / RF-04 / RF-15).
 
-        POST /subscriptions/<id>/uso/ (o /api/suscripciones/<id>/uso/)
+        POST /api/suscripciones/<id>/uso/
         Registra minutos de uso para una suscripción (CU-23 / RF-15 / RF-16).
         - Persiste un registro histórico de uso.
         - Actualiza el campo 'ultima_actividad' con la fecha/hora actual.

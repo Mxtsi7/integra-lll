@@ -119,28 +119,30 @@ class Subscription(ModeloTenant):
 
     def registrar_uso(self, minutos: int | Decimal, fecha=None) -> "RegistroUso":
         """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
+        from django.db import transaction
         from django.utils import timezone
 
-        self.ultima_actividad = timezone.now()
-        horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-        if self.horas_uso_mes is None:
-            self.horas_uso_mes = Decimal("0.00")
-        self.horas_uso_mes += horas
+        with transaction.atomic():
+            self.ultima_actividad = timezone.now()
+            horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
+            if self.horas_uso_mes is None:
+                self.horas_uso_mes = Decimal("0.00")
+            self.horas_uso_mes += horas
 
-        if self.estado == self.Estado.FANTASMA:
-            self.estado = self.Estado.ACTIVO
+            if self.estado == self.Estado.FANTASMA:
+                self.estado = self.Estado.ACTIVO
 
-        self.save()
+            self.save()
 
-        if fecha is None:
-            fecha = timezone.now().date()
+            if fecha is None:
+                fecha = timezone.localdate()
 
-        return RegistroUso.objects.create(
-            organizacion_id=self.organizacion_id,
-            suscripcion=self,
-            fecha=fecha,
-            minutos=int(minutos),
-        )
+            return RegistroUso.objects.create(
+                organizacion_id=self.organizacion_id,
+                suscripcion=self,
+                fecha=fecha,
+                minutos=int(minutos),
+            )
 
     # ── meta ─────────────────────────────────────────────────────────
 
@@ -152,7 +154,7 @@ class Subscription(ModeloTenant):
                 name="subscription_monto_positivo",
             ),
         ]
-        ordering = ["-fecha_proximo_cobro"]
+        ordering = ["-fecha_proximo_cobro", "id"]
         verbose_name = "Suscripción"
         verbose_name_plural = "Suscripciones"
 
