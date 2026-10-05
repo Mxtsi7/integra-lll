@@ -1,6 +1,6 @@
 """Tests para endpoints de Subscription (CRUD completo y aislamiento tenant)."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 
@@ -8,7 +8,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from app.models import Subscription
+from app.models import RegistroUso, Subscription
 
 
 @pytest.fixture()
@@ -731,6 +731,30 @@ class TestSubscriptionRegistrarUso:
         sub_activa.refresh_from_db()
         assert sub_activa.horas_uso_mes == Decimal("1.50")
 
+    def test_registrar_uso_de_mes_anterior_no_acumula_horas_del_mes_actual(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """El uso retroactivo se conserva en el historial sin alterar el total mensual actual."""
+        from django.utils import timezone
+
+        hoy = timezone.localdate()
+        fecha_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 60, "fecha": fecha_mes_anterior.isoformat()},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("0.00")
+        assert RegistroUso.objects.filter(
+            suscripcion=sub_activa,
+            fecha=fecha_mes_anterior,
+            minutos=60,
+        ).exists()
+
     def test_registrar_uso_aislamiento_tenant_otra_org_devuelve_404(
         self, api_client: APIClient, sub_activa: Subscription
     ) -> None:
@@ -758,20 +782,24 @@ class TestSubscriptionRegistrarUso:
     def test_registrar_uso_soporta_ruta_api_suscripciones(
         self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
     ) -> None:
-        """POST /api/suscripciones/<id>/uso/ reactiva una suscripción fantasma."""
+        """La ruta canónica registra uso y reactiva una suscripción fantasma."""
         response = api_client.post(
             f"/api/suscripciones/{sub_fantasma.id}/uso/",
             {"minutos": 30},
             format="json",
             headers={"X-Organizacion-Id": str(org)},
         )
+
         assert response.status_code == status.HTTP_200_OK
         assert response.data["estado"] == "activo"
+        sub_fantasma.refresh_from_db()
+        assert sub_fantasma.estado == "activo"
+        assert sub_fantasma.usos.filter(minutos=30).exists()
 
     def test_registrar_uso_minutos_excede_maximo_devuelve_400(
         self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
     ) -> None:
-        """Envía minutos por encima del tope mensual (> 44640) y confirma 400 Bad Request."""
+        """Minutos por encima del máximo mensual producen un error 400."""
         response = api_client.post(
             f"/api/suscripciones/{sub_activa.id}/uso/",
             {"minutos": 44641},
@@ -781,6 +809,267 @@ class TestSubscriptionRegistrarUso:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "minutos" in response.data
 
+
+
+
+@pytest.mark.django_db
+class TestSubscriptionHistoricoUso:
+    """Pruebas del endpoint GET /api/suscripciones/<id>/uso/ (histórico de uso).
+
+    Verifica:
+    - Que devuelva todos los registros de uso de la suscripción.
+    - Que los devuelva ordenados de más reciente a más antiguo (-fecha).
+    - Que el historial devuelto corresponda SOLO a la suscripción indicada.
+    - Aislamiento multi-tenant y manejo de errores.
+    - Que no se acepten fechas futuras.
+    """
+
+    @pytest.fixture()
+    def org(self) -> uuid.UUID:
+        return uuid.uuid4()
+
+    @pytest.fixture()
+    def sub_1(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Spotify",
+            monto=Decimal("4990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 10),
+            categoria="musica",
+            estado="activo",
+        )
+
+    @pytest.fixture()
+    def sub_2(self, org: uuid.UUID) -> Subscription:
+        return Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Netflix",
+            monto=Decimal("9990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 15),
+            categoria="streaming",
+            estado="activo",
+        )
+
+    def test_historico_uso_3_registros_ordenados_mas_reciente_a_mas_antiguo(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """Crea 3 registros de uso en fechas distintas y confirma orden de más reciente a más antiguo."""
+        # Se crean intencionalmente desordenados cronológicamente
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_1,
+            fecha=date(2026, 10, 1),
+            minutos=15,
+        )
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_1,
+            fecha=date(2026, 10, 15),
+            minutos=45,
+        )
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_1,
+            fecha=date(2026, 10, 5),
+            minutos=30,
+        )
+
+        response = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert isinstance(data, list)
+        assert len(data) == 3
+
+        # Confirmar orden de más reciente a más antiguo
+        fechas = [item["fecha"] for item in data]
+        assert fechas == ["2026-10-15", "2026-10-05", "2026-10-01"]
+
+        # Confirmar estructura [{fecha, minutos}, ...]
+        assert data == [
+            {"fecha": "2026-10-15", "minutos": 45},
+            {"fecha": "2026-10-05", "minutos": 30},
+            {"fecha": "2026-10-01", "minutos": 15},
+        ]
+
+    def test_historico_devuelto_corresponde_solo_a_la_suscripcion_indicada(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription, sub_2: Subscription
+    ) -> None:
+        """Verifica que el historial devuelto corresponde solo a la suscripción indicada."""
+        # Registros para sub_1
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_1,
+            fecha=date(2026, 10, 10),
+            minutos=60,
+        )
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_1,
+            fecha=date(2026, 10, 1),
+            minutos=20,
+        )
+
+        # Registros para sub_2 (misma organización)
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_2,
+            fecha=date(2026, 10, 12),
+            minutos=120,
+        )
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_2,
+            fecha=date(2026, 10, 8),
+            minutos=90,
+        )
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_2,
+            fecha=date(2026, 10, 2),
+            minutos=30,
+        )
+
+        # Consultar historial de sub_1
+        resp_1 = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert resp_1.status_code == status.HTTP_200_OK
+        data_1 = resp_1.data
+        assert len(data_1) == 2
+        assert [r["fecha"] for r in data_1] == ["2026-10-10", "2026-10-01"]
+        assert [r["minutos"] for r in data_1] == [60, 20]
+
+        # Consultar historial de sub_2
+        resp_2 = api_client.get(
+            f"/api/suscripciones/{sub_2.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert resp_2.status_code == status.HTTP_200_OK
+        data_2 = resp_2.data
+        assert len(data_2) == 3
+        assert [r["fecha"] for r in data_2] == ["2026-10-12", "2026-10-08", "2026-10-02"]
+        assert [r["minutos"] for r in data_2] == [120, 90, 30]
+
+    def test_historico_uso_vacio_devuelve_lista_vacia(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """Suscripción sin uso devuelve lista vacía y 200 OK."""
+        response = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data == []
+
+    def test_historico_uso_aislamiento_otra_organizacion_devuelve_404(
+        self, api_client: APIClient, sub_1: Subscription
+    ) -> None:
+        """Otra organización recibe 404 si intenta consultar el historial de uso."""
+        otra_org = uuid.uuid4()
+        response = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(otra_org)},
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_historico_uso_sin_cabecera_devuelve_403(
+        self, api_client: APIClient, sub_1: Subscription
+    ) -> None:
+        """Petición sin cabecera X-Organizacion-Id responde 403 Forbidden."""
+        response = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+
+    def test_historico_uso_suscripcion_inexistente_devuelve_404(
+        self, api_client: APIClient, org: uuid.UUID
+    ) -> None:
+        """Consultar uso de un ID inexistente responde 404 Not Found."""
+        response = api_client.get(
+            f"/api/suscripciones/{uuid.uuid4()}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_post_uso_crea_registro_visible_en_get_historico(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """Un registro creado vía POST aparece posteriormente en el GET de histórico."""
+        post_resp = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 40},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert post_resp.status_code == status.HTTP_200_OK
+
+        get_resp = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert get_resp.status_code == status.HTTP_200_OK
+        assert len(get_resp.data) == 1
+        assert get_resp.data[0]["minutos"] == 40
+
+    def test_registrar_uso_fecha_futura_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """POST con fecha futura responde 400 Bad Request."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 10, "fecha": "2031-01-01"},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fecha" in response.data
+
+    def test_registrar_uso_fecha_pasada_se_acepta(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """POST con fecha pasada válida responde 200 OK y queda en el histórico."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 20, "fecha": "2026-09-01"},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        get_resp = api_client.get(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert get_resp.data[0]["fecha"] == "2026-09-01"
+        assert get_resp.data[0]["minutos"] == 20
+
+    def test_registrar_uso_de_noche_usa_fecha_local_chile(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription, monkeypatch
+    ) -> None:
+        """Simula las 22:30 hora de Chile (01:30 UTC del día siguiente) y confirma fecha local."""
+        from datetime import datetime, timezone as dt_timezone
+        from django.utils import timezone
+
+        # 01:30 UTC del 5 de octubre = 22:30 hora de Chile del 4 de octubre
+        utc_night = datetime(2026, 10, 5, 1, 30, tzinfo=dt_timezone.utc)
+        monkeypatch.setattr(timezone, "now", lambda: utc_night)
+
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert response.status_code == status.HTTP_200_OK
 
 @pytest.mark.django_db
 class TestSubscriptionPagination:
@@ -968,6 +1257,4 @@ class TestSubscriptionPagination:
         assert len(response.data["results"]) == 5
         assert response.data["next"] is None
         assert response.data["previous"] is None
-
-
 
