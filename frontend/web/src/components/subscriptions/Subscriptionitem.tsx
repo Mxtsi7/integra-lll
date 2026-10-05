@@ -1,11 +1,14 @@
-import React from "react";
+import React, { useState } from "react";
 import ListCard from "./suscard";
 import styles from "./suscard.module.css";
 import {
+  costoPorHora,
+  equivalenteMensual,
   formatearFecha,
   formatearMonto,
   type Suscripcion,
 } from "@ojoalgasto/shared";
+
 import {
   colorDe,
   etiquetaFrecuencia,
@@ -65,12 +68,23 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
   isLoading = false,
   isRemoving = false,
 }) => {
+  // Al tocar el monto mensual, alterna entre mostrar el monto y las horas
+  // de uso del mes. Va antes del return condicional de isLoading: los hooks
+  // no pueden llamarse después de un return temprano.
+  const [mostrarHoras, setMostrarHoras] = useState(false);
+
   // El esqueleto no dibuja datos, así que no necesita una suscripción.
   if (isLoading || !suscripcion) {
     return <ListCard title="" isLoading />;
   }
 
-  const { nombre, monto, moneda, frecuencia, fecha_proximo_cobro } = suscripcion;
+  const { nombre, monto, moneda, frecuencia, fecha_proximo_cobro, horas_uso_mes } = suscripcion;
+
+  // costoPorHora espera el monto en equivalente mensual: horas_uso_mes es
+  // uso *mensual*, así que sin convertir, una suscripción anual mostraría
+  // el costo por hora inflado x12.
+  const montoMensual = equivalenteMensual(monto, frecuencia);
+  const porHora = costoPorHora(montoMensual, horas_uso_mes ?? 0);
 
   return (
     <ListCard
@@ -101,17 +115,61 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           : undefined
       }
       trailing={
-        <>
-          {formatearMonto(monto, moneda)}
-          {/* El sufijo sale de la frecuencia: antes decía "/mes" siempre, así
-              que una suscripción anual mostraba su monto anual como si fuera
-              mensual. */}
-          <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginLeft: 2 }}>
-            {frecuencia === "anual" ? "/año" : "/mes"}
-          </span>
-        </>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMostrarHoras((v) => !v);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              e.preventDefault();
+              setMostrarHoras((v) => !v);
+            }
+          }}
+          style={{ cursor: "pointer" }}
+          title={mostrarHoras ? "Ver monto" : "Ver horas de uso"}
+        >
+          {mostrarHoras ? (
+            <>
+              <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginRight: 2 }}>
+                ≈
+              </span>
+              {horas_uso_mes ?? 0}
+              <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginLeft: 2 }}>
+                {" "}h/mes
+              </span>
+            </>
+          ) : (
+            <>
+              {formatearMonto(monto, moneda)}
+              {/* El sufijo sale de la frecuencia: antes decía "/mes" siempre, así
+                  que una suscripción anual mostraba su monto anual como si fuera
+                  mensual. */}
+              <span style={{ fontWeight: 500, color: "var(--list-card-muted, #8990a3)", marginLeft: 2 }}>
+                {frecuencia === "anual" ? "/año" : "/mes"}
+              </span>
+            </>
+          )}
+        </span>
       }
-      trailingSubtext={`Próximo cobro: ${formatearFecha(fecha_proximo_cobro)}`}
+      trailingSubtext={
+        mostrarHoras ? (
+          `Equivale a ${horas_uso_mes ?? 0} horas de uso al mes (aprox.)`
+        ) : (
+          <>
+            {`Próximo cobro: ${formatearFecha(fecha_proximo_cobro)}`}
+            {porHora !== null && (
+              <>
+                {" · "}
+                {formatearMonto(porHora, moneda)}/hora
+              </>
+            )}
+          </>
+        )
+      }
       onClick={onClick ? () => onClick(suscripcion) : undefined}
       actions={
         <>
