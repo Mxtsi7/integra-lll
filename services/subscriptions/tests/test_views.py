@@ -755,6 +755,23 @@ class TestSubscriptionRegistrarUso:
         )
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_registrar_uso_soporta_ruta_api_suscripciones(
+        self, api_client: APIClient, org: uuid.UUID, sub_fantasma: Subscription
+    ) -> None:
+        """La ruta canónica registra uso y reactiva una suscripción fantasma."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_fantasma.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["estado"] == "activo"
+        sub_fantasma.refresh_from_db()
+        assert sub_fantasma.estado == "activo"
+        assert sub_fantasma.usos.filter(minutos=30).exists()
+
     def test_registrar_uso_minutos_excede_maximo_devuelve_400(
         self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
     ) -> None:
