@@ -14,13 +14,57 @@ from .serializers import (
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
+    OrganizacionDetalleSerializer,  # nuevo
 )
+
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.types import OpenApiTypes
 
 
 class RegisterView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Registrar usuario",
+        description=(
+            "Crea un usuario y su organización (titular) o lo une a una "
+            "organización existente con `codigo_organizacion` (integrante). "
+            "Ruta pública."
+        ),
+        request=RegisterSerializer,
+        responses={
+            201: OpenApiResponse(
+                response=UserSerializer,
+                description="Usuario creado (sin password).",
+            ),
+            400: OpenApiResponse(description="Validación fallida (email, password, consentimiento, etc.)."),
+        },
+        examples=[
+            OpenApiExample(
+                "Registro titular (nueva organización)",
+                value={
+                    "email": "ana@ejemplo.com",
+                    "nombre": "Ana",
+                    "password": "ClaveSegura123",
+                    "acepta_datos": True,
+                },
+                request_only=True,
+            ),
+            OpenApiExample(
+                "Registro integrante (código de organización)",
+                value={
+                    "email": "pedro@ejemplo.com",
+                    "nombre": "Pedro",
+                    "password": "ClaveSegura123",
+                    "acepta_datos": True,
+                    "codigo_organizacion": "9c2140a0-0000-0000-0000-000000000001",
+                },
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -44,6 +88,52 @@ class LoginView(APIView):
 
     MENSAJE_GENERICO = "Correo o contraseña inválidos"
 
+    @extend_schema(
+        tags=["Auth"],
+        summary="Iniciar sesión",
+        description=(
+            "Autentica con email y password. Devuelve access_token, refresh_token "
+            "y datos básicos del usuario. El JWT incluye claims organizacion_id y rol "
+            "(ADR-004). Ruta pública."
+        ),
+        request=LoginSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Login correcto.",
+                examples=[
+                    OpenApiExample(
+                        "Respuesta exitosa",
+                        value={
+                            "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                            "usuario": {
+                                "id": 1,
+                                "nombre": "Ana",
+                                "correo": "ana@ejemplo.com",
+                            },
+                        },
+                    )
+                ],
+            ),
+            401: OpenApiResponse(
+                description="Credenciales inválidas (mismo mensaje si el correo no existe o la clave falla).",
+                examples=[
+                    OpenApiExample(
+                        "Error genérico",
+                        value={"detail": "Correo o contraseña inválidos"},
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Body inválido (email mal formado, campos faltantes)."),
+        },
+        examples=[
+            OpenApiExample(
+                "Credenciales de ejemplo",
+                value={"email": "demo@ojoalgasto.cl", "password": "Demo-2026-ojo"},
+                request_only=True,
+            ),
+        ],
+    )
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -61,12 +151,11 @@ class LoginView(APIView):
 
         refresh = RefreshToken.for_user(user)
 
-        
         refresh["organizacion_id"] = (
             str(user.organizacion_id) if user.organizacion_id else None
         )
         refresh["rol"] = user.rol
-    
+
         access = refresh.access_token
         access["organizacion_id"] = refresh["organizacion_id"]
         access["rol"] = user.rol
@@ -92,6 +181,22 @@ class UsuarioActualView(generics.RetrieveAPIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(
+        tags=["Usuarios"],
+        summary="Usuario actual (me)",
+        description=(
+            "Devuelve el usuario identificado por la cabecera X-Usuario-Id "
+            "(la pone el gateway tras validar el JWT). Es la ruta que consume el frontend."
+        ),
+        responses={
+            200: UsuarioActualSerializer,
+            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
+            404: OpenApiResponse(description="El usuario del token ya no existe."),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
+
     def get_object(self):
         usuario_id = self.request.headers.get("X-Usuario-Id")
         if not usuario_id:
@@ -104,6 +209,22 @@ class UserDetailView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
     authentication_classes = []
     permission_classes = []
+
+    @extend_schema(
+        tags=["Usuarios"],
+        summary="Detalle de usuario por id",
+        description=(
+            "Devuelve el usuario con el id de la URL, solo si coincide con "
+            "X-Usuario-Id (contexto del gateway). Sin password."
+        ),
+        responses={
+            200: UserSerializer,
+            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
+            404: OpenApiResponse(description="El usuario no existe, o el id pedido no es el del token."),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
         usuario_id = self.request.headers.get("X-Usuario-Id")
@@ -122,6 +243,76 @@ class OrganizacionView(APIView):
 
     authentication_classes = []
     permission_classes = []
+
+    @extend_schema(
+        tags=["Organización"],
+        summary="Detalle de la organización actual",
+        description=(
+            "Devuelve la organización del contexto (X-Organizacion-Id), "
+            "sus miembros activos y el rol del usuario que consulta (mi_rol). "
+            "Requiere las cabeceras que inyecta el gateway tras validar el JWT (ADR-004)."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="X-Usuario-Id",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="Id del usuario autenticado (inyectado por el gateway).",
+            ),
+            OpenApiParameter(
+                name="X-Organizacion-Id",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.HEADER,
+                required=True,
+                description="UUID de la organización del token (inyectado por el gateway).",
+            ),
+            OpenApiParameter(
+                name="X-Rol",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.HEADER,
+                required=False,
+                description="Rol en el JWT (informativo; la vista lee el rol real desde BD).",
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=OrganizacionDetalleSerializer,
+                description="Organización, miembros activos y mi_rol.",
+                examples=[
+                    OpenApiExample(
+                        "Ejemplo de hogar",
+                        value={
+                            "id": "9c2140a0-0000-0000-0000-000000000001",
+                            "nombre": "Hogar de Ana",
+                            "miembros": [
+                                {
+                                    "id": 1,
+                                    "nombre": "Ana",
+                                    "correo": "ana@ejemplo.com",
+                                    "rol": "titular",
+                                },
+                                {
+                                    "id": 2,
+                                    "nombre": "Pedro",
+                                    "correo": "pedro@ejemplo.com",
+                                    "rol": "integrante",
+                                },
+                            ],
+                            "mi_rol": "titular",
+                        },
+                    )
+                ],
+            ),
+            403: OpenApiResponse(
+                description=(
+                    "Falta X-Usuario-Id o X-Organizacion-Id, UUID inválido, "
+                    "o el usuario no pertenece a esa organización."
+                ),
+            ),
+            404: OpenApiResponse(description="La organización no existe."),
+        },
+    )
 
     def get(self, request):
         # Leer identidad inyectada por el gateway (ADR-004).

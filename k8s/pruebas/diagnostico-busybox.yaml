@@ -1,0 +1,33 @@
+# Pod de diagnóstico: comprueba DNS y conectividad ENTRE servicios, desde
+# dentro del cluster. Es lo que no se puede ver desde afuera, porque desde
+# internet solo existe el ingress.
+#
+#   kubectl apply -f k8s/pruebas/diagnostico-busybox.yaml
+#   kubectl exec -it diagnostico -- sh
+#   kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
+#
+# Dentro del pod:
+#   nslookup auth                      # el DNS del cluster resuelve el Service
+#   wget -qO- http://auth:8001/health/
+#   wget -qO- http://gateway:8000/health/
+#
+# Los recursos están declarados porque el namespace los exige: mínimo 25m de
+# CPU y 64Mi por contenedor, y hay un techo de 2 CPU para todo el namespace.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: diagnostico
+  labels:
+    app: diagnostico
+    app.kubernetes.io/part-of: ojoalgasto
+spec:
+  restartPolicy: Never
+  containers:
+    - name: busybox
+      image: busybox:1.36
+      # Se queda vivo una hora para poder entrar con `exec`. Pasado ese rato
+      # termina solo, para no dejar cuota ocupada si alguien se olvida.
+      command: ["sh", "-c", "sleep 3600"]
+      resources:
+        requests: { cpu: 25m, memory: 64Mi }
+        limits: { cpu: 50m, memory: 64Mi }
