@@ -6,6 +6,13 @@ interface EliminarSuscripcionDialogProps {
   nombreSuscripcion: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /** true mientras el DELETE está en vuelo: deshabilita ambos botones. */
+  isDeleting?: boolean;
+  /**
+   * Mensaje a mostrar si el DELETE falló. Va dentro del diálogo (no en la
+   * pantalla de atrás) para que el usuario lo vea sin que el overlay lo tape.
+   */
+  error?: string | null;
 }
 
 const WarningIcon: React.FC = () => (
@@ -32,6 +39,8 @@ const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
   nombreSuscripcion,
   onConfirm,
   onCancel,
+  isDeleting = false,
+  error = null,
 }) => {
   return (
     <div className={styles.card} role="alertdialog" aria-modal="true">
@@ -46,12 +55,31 @@ const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
         <strong>{nombreSuscripcion}</strong> y todo su historial de pagos.
       </p>
 
+      {error && (
+        // TODO: mover el color a una clase .errorText en
+        // EliminarSus.module.css (ver punto de limpieza del review) en vez
+        // de este estilo inline temporal.
+        <p className={styles.message} style={{ color: "#dc2626" }} role="alert">
+          {error}
+        </p>
+      )}
+
       <div className={styles.actions}>
-        <button type="button" className={styles.cancelButton} onClick={onCancel}>
+        <button
+          type="button"
+          className={styles.cancelButton}
+          onClick={onCancel}
+          disabled={isDeleting}
+        >
           Cancelar
         </button>
-        <button type="button" className={styles.deleteButton} onClick={onConfirm}>
-          Eliminar
+        <button
+          type="button"
+          className={styles.deleteButton}
+          onClick={onConfirm}
+          disabled={isDeleting}
+        >
+          {isDeleting ? "Eliminando..." : "Eliminar"}
         </button>
       </div>
     </div>
