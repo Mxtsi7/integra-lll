@@ -8,7 +8,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from app.models import Subscription
-from app.serializers import RegistrarUsoSerializer, SubscriptionSerializer
+from app.serializers import RegistrarUsoSerializer, RegistroUsoSerializer, SubscriptionSerializer
 from shared.tenant.base import TenantViewSet
 
 
@@ -42,7 +42,7 @@ class SubscriptionViewSet(TenantViewSet):
         ?estado=activo
         ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
         ?estado=activo&fecha_cobro=2026-10-01
-    - Expone POST /subscriptions/<id>/uso/ para registrar minutos de uso.
+    - Expone GET y POST /api/suscripciones/<id>/uso/ para consultar el histórico y registrar minutos de uso.
     """
 
     queryset = Subscription.objects.all()
@@ -81,22 +81,34 @@ class SubscriptionViewSet(TenantViewSet):
 
         return qs
 
-    @action(detail=True, methods=["post"], url_path="uso")
+    @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
         """
-        Registra minutos de uso para una suscripción (CU-23 / RF-15 / RF-16).
+        GET /api/suscripciones/<id>/uso/
+        Devuelve todos los registros de uso de esa suscripción ordenados por fecha
+        del más reciente al más antiguo (CU-23 / RF-04 / RF-15).
 
+        POST /api/suscripciones/<id>/uso/
+        Registra minutos de uso para una suscripción (CU-23 / RF-15 / RF-16).
+        - Persiste un registro histórico de uso.
         - Actualiza el campo 'ultima_actividad' con la fecha/hora actual.
         - Suma los minutos convertidos a horas en 'horas_uso_mes'.
         - Si la suscripción estaba en estado 'fantasma', la devuelve a 'activo' (CU-27 / RF-13).
         - No permite valores negativos ni cero en minutos (responde 400).
         """
         subscription = self.get_object()
+
+        if request.method == "GET":
+            usos = subscription.usos.all().order_by("-fecha", "-creado_en")
+            serializer = RegistroUsoSerializer(usos, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
         serializer = RegistrarUsoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         minutos = serializer.validated_data["minutos"]
-        subscription.registrar_uso(minutos)
+        fecha = serializer.validated_data.get("fecha")
+        subscription.registrar_uso(minutos, fecha=fecha)
 
         return Response(
             SubscriptionSerializer(subscription).data,
