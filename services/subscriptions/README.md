@@ -34,6 +34,30 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 
 ---
 
+## Datos de ejemplo
+
+Para facilitar la conexión con el frontend, puedes cargar cinco suscripciones
+de ejemplo (Netflix, Spotify, HBO Max, iCloud y Gimnasio) en la organización del
+usuario demo. El comando requiere el UUID de esa organización, disponible como
+claim `organizacion_id` en el token de acceso del usuario demo:
+
+```powershell
+cd services/subscriptions
+.\venv\Scripts\python.exe manage.py seed_subscriptions --organizacion-id <UUID>
+```
+
+También puedes definir `SEED_ORGANIZACION_ID` y ejecutar el comando sin
+argumentos. En Docker:
+
+```bash
+docker compose exec subscriptions python manage.py seed_subscriptions --organizacion-id <UUID>
+```
+
+El comando es idempotente por organización y nombre: crea los ejemplos que
+faltan, pero no sobrescribe suscripciones existentes.
+
+---
+
 ## Testing y Verificación de Tareas (Trello)
 
 A continuación se detalla cómo comprobar y demostrar que cada una de las tareas del Sprint 1 funciona al 100%.
