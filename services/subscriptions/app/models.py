@@ -123,19 +123,21 @@ class Subscription(ModeloTenant):
         from django.utils import timezone
 
         with transaction.atomic():
+            if fecha is None:
+                fecha = timezone.localdate()
+
             self.ultima_actividad = timezone.now()
-            horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-            if self.horas_uso_mes is None:
-                self.horas_uso_mes = Decimal("0.00")
-            self.horas_uso_mes += horas
+            fecha_actual = timezone.localdate()
+            if (fecha.year, fecha.month) == (fecha_actual.year, fecha_actual.month):
+                horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
+                if self.horas_uso_mes is None:
+                    self.horas_uso_mes = Decimal("0.00")
+                self.horas_uso_mes += horas
 
             if self.estado == self.Estado.FANTASMA:
                 self.estado = self.Estado.ACTIVO
 
             self.save()
-
-            if fecha is None:
-                fecha = timezone.localdate()
 
             return RegistroUso.objects.create(
                 organizacion_id=self.organizacion_id,

@@ -1,6 +1,6 @@
 """Tests para endpoints de Subscription (CRUD completo y aislamiento tenant)."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 
@@ -731,6 +731,30 @@ class TestSubscriptionRegistrarUso:
         sub_activa.refresh_from_db()
         assert sub_activa.horas_uso_mes == Decimal("1.50")
 
+    def test_registrar_uso_de_mes_anterior_no_acumula_horas_del_mes_actual(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """El uso retroactivo se conserva en el historial sin alterar el total mensual actual."""
+        from django.utils import timezone
+
+        hoy = timezone.localdate()
+        fecha_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 60, "fecha": fecha_mes_anterior.isoformat()},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("0.00")
+        assert RegistroUso.objects.filter(
+            suscripcion=sub_activa,
+            fecha=fecha_mes_anterior,
+            minutos=60,
+        ).exists()
+
     def test_registrar_uso_aislamiento_tenant_otra_org_devuelve_404(
         self, api_client: APIClient, sub_activa: Subscription
     ) -> None:
@@ -1233,5 +1257,4 @@ class TestSubscriptionPagination:
         assert len(response.data["results"]) == 5
         assert response.data["next"] is None
         assert response.data["previous"] is None
-
 
