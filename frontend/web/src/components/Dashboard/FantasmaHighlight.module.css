@@ -34,7 +34,7 @@
 .fila {
   display: flex;
   justify-content: space-between;
-  background: #fffbeb;
+  background: var(--oag-fantasma-bg, #fffbeb);
   border-radius: var(--oag-radius-sm);
   padding: 10px 14px;
   font-size: 13px;
@@ -50,3 +50,4 @@
   font-family: var(--oag-font-mono);
   font-size: 12px;
 }
+
