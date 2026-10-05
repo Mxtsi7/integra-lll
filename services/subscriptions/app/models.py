@@ -142,7 +142,7 @@ class Subscription(ModeloTenant):
                 name="subscription_monto_positivo",
             ),
         ]
-        ordering = ["-fecha_proximo_cobro"]
+        ordering = ["-fecha_proximo_cobro", "id"]
         verbose_name = "Suscripción"
         verbose_name_plural = "Suscripciones"
 
