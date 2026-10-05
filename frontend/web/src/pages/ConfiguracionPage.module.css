@@ -1,7 +1,17 @@
+/* Color de acción: usa --oag-accion si existe (modo oscuro), si no el navy de siempre */
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 16px;
+  align-items: start;
+}
+
+.columna {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .seccion {
@@ -9,7 +19,8 @@
   border: 1px solid var(--oag-line);
   border-radius: var(--oag-radius-lg);
   padding: 20px 22px;
-  align-self: start;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .seccionTitulo {
@@ -17,6 +28,8 @@
   font-weight: 600;
   margin: 0 0 14px;
   color: var(--oag-ink);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .lista {
@@ -50,6 +63,8 @@
   color: var(--oag-ink-soft);
 }
 
+/* ───────── Toggles ───────── */
+
 .toggle,
 .toggleActivo {
   width: 40px;
@@ -60,6 +75,7 @@
   flex-shrink: 0;
   cursor: pointer;
   padding: 0;
+  transition: background 0.15s ease;
 }
 
 .toggle {
@@ -67,7 +83,7 @@
 }
 
 .toggleActivo {
-  background: var(--oag-navy);
+  background: var(--oag-accion, var(--oag-navy));
 }
 
 .toggleBola {
@@ -85,14 +101,25 @@
   transform: translateX(18px);
 }
 
-.badgePendiente {
-  background: var(--oag-muted-bg);
-  color: var(--oag-muted-text);
+/* ───────── Badges de estado ───────── */
+
+.badgePendiente,
+.badgeConectado {
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.badgePendiente {
+  background: var(--oag-muted-bg);
+  color: var(--oag-muted-text);
+}
+
+.badgeConectado {
+  background: var(--oag-accion, var(--oag-navy));
+  color: #ffffff;
 }
 
 .notaConectores {
@@ -101,6 +128,68 @@
   color: var(--oag-ink-soft);
   line-height: 1.5;
 }
+
+/* ───────── Botones ───────── */
+
+.botonPrimario,
+.botonPeligro {
+  width: 100%;
+  margin-top: 14px;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.botonPrimario {
+  background: var(--oag-accion, var(--oag-navy));
+  color: #ffffff;
+  border: none;
+}
+
+.botonPrimario:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.botonPeligro {
+  background: transparent;
+  color: #c62828;
+  border: 1px solid #c62828;
+}
+
+.botonPeligro:hover:not(:disabled) {
+  background: rgba(198, 40, 40, 0.08);
+}
+
+.botonPrimario:disabled,
+.botonPeligro:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.accionTexto {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--oag-accion, var(--oag-navy));
+  cursor: pointer;
+}
+
+.accionTexto:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.accionTexto:disabled {
+  color: var(--oag-ink-soft);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* ───────── Selector de tema ───────── */
 
 .filaTema {
   display: flex;
@@ -122,6 +211,7 @@
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 12.5px;
+  font-family: inherit;
   cursor: pointer;
 }
 
@@ -131,7 +221,7 @@
 }
 
 .temaBotonActivo {
-  background: var(--oag-navy);
+  background: var(--oag-accion, var(--oag-navy));
   color: #ffffff;
   font-weight: 600;
 }
