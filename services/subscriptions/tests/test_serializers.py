@@ -6,8 +6,8 @@ import uuid
 
 import pytest
 
-from app.models import Subscription
-from app.serializers import RegistrarUsoSerializer, SubscriptionSerializer
+from app.models import RegistroUso, Subscription
+from app.serializers import RegistrarUsoSerializer, RegistroUsoSerializer, SubscriptionSerializer
 
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -166,3 +166,49 @@ class TestRegistrarUsoSerializer:
         assert not s.is_valid()
         assert "minutos" in s.errors
 
+    def test_fecha_futura_rechazada(self) -> None:
+        """Fechas posteriores a hoy son rechazadas con error de validacion."""
+        s = RegistrarUsoSerializer(data={"minutos": 30, "fecha": "2035-01-01"})
+        assert not s.is_valid()
+        assert "fecha" in s.errors
+
+    def test_fecha_valida_o_ausente(self) -> None:
+        """Fechas pasadas o ausencia de fecha son aceptadas."""
+        s1 = RegistrarUsoSerializer(data={"minutos": 30, "fecha": "2026-09-01"})
+        assert s1.is_valid(), s1.errors
+        assert str(s1.validated_data["fecha"]) == "2026-09-01"
+
+        s2 = RegistrarUsoSerializer(data={"minutos": 30})
+        assert s2.is_valid(), s2.errors
+        assert s2.validated_data.get("fecha") is None
+
+
+
+@pytest.mark.django_db
+class TestRegistroUsoSerializer:
+    """Pruebas para RegistroUsoSerializer."""
+
+    def test_serializa_fecha_y_minutos_correctamente(self) -> None:
+        """RegistroUso se serializa con los campos fecha y minutos."""
+        org = uuid.uuid4()
+        sub = Subscription.objects.create(
+            organizacion_id=org,
+            nombre="Spotify",
+            monto=Decimal("4990.00"),
+            moneda="CLP",
+            frecuencia="mensual",
+            fecha_proximo_cobro=date(2026, 10, 10),
+            categoria="musica",
+        )
+        registro = RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub,
+            fecha=date(2026, 10, 3),
+            minutos=45,
+        )
+
+        serializer = RegistroUsoSerializer(registro)
+        assert serializer.data == {
+            "fecha": "2026-10-03",
+            "minutos": 45,
+        }
