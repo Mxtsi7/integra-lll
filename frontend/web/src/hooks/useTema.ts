@@ -38,3 +38,4 @@ export function useTema() {
 
   return [tema, setTema] as const;
 }
+
