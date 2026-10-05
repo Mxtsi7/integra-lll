@@ -8,7 +8,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from app.models import RegistroUso, Subscription
+from app.models import Cobro, RegistroUso, Subscription
 
 
 @pytest.fixture()
@@ -157,14 +157,56 @@ class TestSubscriptionUpdateDeleteViews:
     def test_delete_subscription_success(
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
     ) -> None:
-        """DELETE /subscriptions/<id>/ elimina el recurso y responde 204."""
+        """DELETE desactiva la suscripción y conserva su histórico de cobros."""
+        cobro = Cobro.objects.create(
+            organizacion_id=org_a,
+            suscripcion=subscription_org_a,
+            monto=subscription_org_a.monto,
+            moneda=subscription_org_a.moneda,
+            fecha=date(2026, 9, 1),
+        )
         url = f"/api/suscripciones/{subscription_org_a.id}/"
         response = api_client.delete(
             url,
             headers={"X-Organizacion-Id": str(org_a)},
         )
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert not Subscription.objects.filter(id=subscription_org_a.id).exists()
+        subscription_org_a.refresh_from_db()
+        assert not subscription_org_a.activo
+        assert Cobro.objects.filter(id=cobro.id, suscripcion=subscription_org_a).exists()
+
+    def test_deleted_subscription_is_hidden_from_list_and_detail(
+        self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
+    ) -> None:
+        """Las suscripciones desactivadas no aparecen en listados ni consultas de detalle."""
+        subscription_org_a.activo = False
+        subscription_org_a.save()
+        headers = {"X-Organizacion-Id": str(org_a)}
+
+        list_response = api_client.get("/api/suscripciones/", headers=headers)
+        detail_response = api_client.get(
+            f"/api/suscripciones/{subscription_org_a.id}/",
+            headers=headers,
+        )
+
+        assert list_response.status_code == status.HTTP_200_OK
+        assert list_response.data["count"] == 0
+        assert detail_response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_patch_cannot_change_active_flag(
+        self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
+    ) -> None:
+        """La desactivación se realiza mediante DELETE, no modificando activo por PATCH."""
+        response = api_client.patch(
+            f"/api/suscripciones/{subscription_org_a.id}/",
+            {"activo": False},
+            format="json",
+            headers={"X-Organizacion-Id": str(org_a)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        subscription_org_a.refresh_from_db()
+        assert subscription_org_a.activo
 
     def test_tenant_isolation_patch_from_other_account_returns_404(
         self, api_client: APIClient, org_b: uuid.UUID, subscription_org_a: Subscription
@@ -1257,4 +1299,3 @@ class TestSubscriptionPagination:
         assert len(response.data["results"]) == 5
         assert response.data["next"] is None
         assert response.data["previous"] is None
-
