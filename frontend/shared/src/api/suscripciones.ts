@@ -65,3 +65,84 @@ export async function getSuscripciones(): Promise<Suscripcion[]> {
 
   return todas.map(desdeLaApi);
 }
+
+/**
+ * Datos que el dominio manda al crear o reemplazar una suscripcion. Es el
+ * tipo del dominio sin `id` (lo asigna el backend) y sin los campos que solo
+ * tienen sentido como respuesta de la API.
+ *
+ * `monto` va como `number`: a diferencia de la lectura, Django acepta un
+ * numero en el body de escritura para un DecimalField sin problema, asi que
+ * no hace falta traducirlo antes de mandarlo (solo se traduce lo que
+ * *llega*, no lo que se envia).
+ */
+export type SuscripcionPayload = Omit<Suscripcion, 'id'>;
+
+/** Igual que SuscripcionPayload pero parcial, para PATCH (ej. solo el estado). */
+export type SuscripcionPayloadParcial = Partial<SuscripcionPayload>;
+
+/** POST /suscripciones/ -> 201 Created. Crea una suscripcion para la organizacion. */
+export async function crearSuscripcion(
+  datos: SuscripcionPayload,
+): Promise<Suscripcion> {
+  const creada = await pedir<SuscripcionDeApi>('/suscripciones/', {
+    method: 'POST',
+    body: datos,
+  });
+  return desdeLaApi(creada);
+}
+
+/** GET /suscripciones/<id>/ -> 200 OK / 404. Detalle de una suscripcion propia. */
+export async function getSuscripcion(id: string): Promise<Suscripcion> {
+  const suscripcion = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/`);
+  return desdeLaApi(suscripcion);
+}
+
+/** PUT /suscripciones/<id>/ -> 200 OK / 404. Reemplaza por completo una suscripcion propia. */
+export async function reemplazarSuscripcion(
+  id: string,
+  datos: SuscripcionPayload,
+): Promise<Suscripcion> {
+  const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/`, {
+    method: 'PUT',
+    body: datos,
+  });
+  return desdeLaApi(actualizada);
+}
+
+/** PATCH /suscripciones/<id>/ -> 200 OK / 404. Actualiza parcialmente (ej. estado). */
+export async function actualizarSuscripcion(
+  id: string,
+  datos: SuscripcionPayloadParcial,
+): Promise<Suscripcion> {
+  const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/`, {
+    method: 'PATCH',
+    body: datos,
+  });
+  return desdeLaApi(actualizada);
+}
+
+/** DELETE /suscripciones/<id>/ -> 204 No Content / 404. Elimina una suscripcion propia. */
+export async function eliminarSuscripcion(id: string): Promise<void> {
+  await pedir<void>(`/suscripciones/${id}/`, { method: 'DELETE' });
+}
+
+/** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
+export interface UsoPayload {
+  minutos: number;
+}
+
+/**
+ * POST /suscripciones/<id>/uso/ -> 200 OK / 400 / 404.
+ * Registra minutos de uso manual (CU-23 / RF-15 / RF-16).
+ */
+export async function registrarUso(
+  id: string,
+  datos: UsoPayload,
+): Promise<Suscripcion> {
+  const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/uso/`, {
+    method: 'POST',
+    body: datos,
+  });
+  return desdeLaApi(actualizada);
+}

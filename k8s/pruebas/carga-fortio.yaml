@@ -1,0 +1,56 @@
+# Prueba de carga con Fortio, desde DENTRO del cluster.
+#
+# Le pega directo al Service, sin pasar por el ingress ni por el proxy de la
+# universidad, así que mide el servicio y no la cadena completa.
+#
+#   kubectl apply -f k8s/pruebas/carga-fortio.yaml
+#   kubectl logs -f job/carga-fortio
+#   kubectl delete -f k8s/pruebas/carga-fortio.yaml
+#
+# Para cambiar el blanco o la intensidad, editar `args` abajo:
+#   -c    conexiones en paralelo
+#   -qps  peticiones por segundo (0 = tan rápido como pueda)
+#   -t    duración
+#
+# Blancos útiles, de menos a más capas:
+#   http://gateway:8000/health/        solo el gateway, sin base de datos
+#   http://auth:8001/health/           Django + una consulta a Postgres
+#   http://subscriptions:8002/health/  ídem, otro servicio
+#
+# ⚠️ El namespace tiene un techo de 2 CPU y los nueve pods del sistema ya usan
+# 1600m. Por eso el límite de acá es 200m: deja margen. Subirlo puede hacer que
+# el Job quede en Pending, o peor, que un despliegue no pueda levantar sus pods.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: carga-fortio
+  labels:
+    app: carga-fortio
+    app.kubernetes.io/part-of: ojoalgasto
+spec:
+  # Si falla, que no reintente: un reintento silencioso gasta cuota y confunde
+  # la lectura de los resultados.
+  backoffLimit: 0
+  # Se borra solo 10 minutos después de terminar.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: carga-fortio
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: fortio
+          image: fortio/fortio:1.66.3
+          args:
+            - load
+            - -c
+            - "8"
+            - -qps
+            - "100"
+            - -t
+            - 30s
+            - http://gateway:8000/health/
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
