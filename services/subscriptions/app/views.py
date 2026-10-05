@@ -4,11 +4,27 @@ from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from app.models import Subscription
 from app.serializers import RegistrarUsoSerializer, SubscriptionSerializer
 from shared.tenant.base import TenantViewSet
+
+
+class SubscriptionPagination(PageNumberPagination):
+    """
+    Paginación estándar para suscripciones (DRF PageNumberPagination).
+
+    - page_size por defecto: 10
+    - page_size_query_param: 'page_size' para permitir parametrización opcional
+    - max_page_size: 100
+    - Respuesta estructurada con 'count', 'next', 'previous' y 'results'.
+    """
+
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 100
 
 
 class SubscriptionViewSet(TenantViewSet):
@@ -21,6 +37,7 @@ class SubscriptionViewSet(TenantViewSet):
       PATCH (partial_update) y DELETE (destroy).
     - Devuelve 403 si falta la cabecera X-Organizacion-Id.
     - Devuelve 404 si el recurso solicitado no pertenece a la organización autenticada.
+    - Paginación en GET con PageNumberPagination (page_size=10, ?page=X).
     - Acepta query params opcionales para filtrar el listado:
         ?estado=activo
         ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
@@ -30,6 +47,7 @@ class SubscriptionViewSet(TenantViewSet):
 
     queryset = Subscription.objects.all()
     serializer_class = SubscriptionSerializer
+    pagination_class = SubscriptionPagination
 
     def get_queryset(self):
         """Filtra por tenant y aplica query params opcionales de estado y fecha de cobro."""
