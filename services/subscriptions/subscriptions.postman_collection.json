@@ -331,6 +331,60 @@
 				"description": "Elimina la suscripción propia y responde 204 No Content."
 			},
 			"response": []
+		},
+		{
+			"name": "8. GET /api/suscripciones/?page=2 (Paginación: PageNumberPagination con page_size=10)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Status code es 200 OK\", function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test(\"Devuelve estructura paginada con count, next, previous y results\", function () {",
+							"    var jsonData = pm.response.json();",
+							"    pm.expect(jsonData).to.have.property(\"count\");",
+							"    pm.expect(jsonData).to.have.property(\"next\");",
+							"    pm.expect(jsonData).to.have.property(\"previous\");",
+							"    pm.expect(jsonData).to.have.property(\"results\");",
+							"    pm.expect(jsonData.results).to.be.an(\"array\");",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-Organizacion-Id",
+						"value": "{{org_id}}",
+						"description": "Contexto de organización autenticada"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/suscripciones/?page=2",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"suscripciones",
+						""
+					],
+					"query": [
+						{
+							"key": "page",
+							"value": "2"
+						}
+					]
+				},
+				"description": "Obtiene la segunda página de suscripciones con PageNumberPagination (page_size=10). Devuelve count, next y previous."
+			},
+			"response": []
 		}
 	],
 	"variable": [
