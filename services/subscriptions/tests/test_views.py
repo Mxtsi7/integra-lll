@@ -234,7 +234,9 @@ class TestSubscriptionUpdateDeleteViews:
             headers={"X-Organizacion-Id": str(org_b)},
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
-        assert Subscription.objects.filter(id=subscription_org_a.id).exists()
+
+        subscription_org_a.refresh_from_db()
+        assert subscription_org_a.activo is True
 
     def test_request_missing_organization_header_returns_403(
         self, api_client: APIClient, subscription_org_a: Subscription
