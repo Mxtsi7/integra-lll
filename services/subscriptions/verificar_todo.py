@@ -25,7 +25,12 @@ from rest_framework.test import APIClient
 from rest_framework import status
 from app.models import Subscription
 
+check_failures = 0
+
 def print_check(titulo, paso, detalle=""):
+    global check_failures
+    if not paso:
+        check_failures += 1
     simbolo = "[OK]" if paso else "[FAIL]"
     print(f"  {simbolo} {titulo}")
     if detalle:
@@ -166,9 +171,23 @@ def main():
         f"/api/suscripciones/{sub.id}/",
         headers={"X-Organizacion-Id": str(org_a)}
     )
-    existe = Subscription.objects.filter(id=sub.id).exists()
+    sub_deshabilitada = Subscription.objects.filter(id=sub.id).first()
     print_check("DELETE responde HTTP 204 No Content", resp_delete.status_code == status.HTTP_204_NO_CONTENT, f"Status: {resp_delete.status_code}")
-    print_check("Registro eliminado efectivamente de la base de datos", not existe, "Suscripción ya no existe")
+    print_check(
+        "El registro se conserva con activo=False",
+        sub_deshabilitada is not None and not sub_deshabilitada.activo,
+        f"Registro conservado: {sub_deshabilitada is not None}"
+        + (f" | activo: {sub_deshabilitada.activo}" if sub_deshabilitada is not None else ""),
+    )
+    resp_get_deleted = client.get(
+        f"/api/suscripciones/{sub.id}/",
+        headers={"X-Organizacion-Id": str(org_a)},
+    )
+    print_check(
+        "GET de la suscripción desactivada responde HTTP 404 Not Found",
+        resp_get_deleted.status_code == status.HTTP_404_NOT_FOUND,
+        f"Status: {resp_get_deleted.status_code}",
+    )
 
     print("\n9. Verificación de versiones de psycopg (Feedback Jefe)")
     servicios = ["analytics", "auth", "connectors", "notifications", "subscriptions"]
@@ -212,8 +231,12 @@ def main():
                 f"Items en página 2: {len(data_pag.get('results', []))}")
 
     print("\n" + "=" * 66)
-    print("  TODOS LOS REQUERIMIENTOS CUMPLIDOS AL 100%")
+    if check_failures:
+        print(f"  VERIFICACIÓN FALLIDA: {check_failures} comprobación(es) fallaron")
+    else:
+        print("  TODOS LOS REQUERIMIENTOS CUMPLIDOS AL 100%")
     print("=" * 66 + "\n")
+    return 1 if check_failures else 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
