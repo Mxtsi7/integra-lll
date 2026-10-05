@@ -11,6 +11,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 - **Herencia Multi-Tenant**: Hereda de `shared.tenant.base.ModeloTenant` (`id` UUID, `organizacion_id`, `creado_en`, `actualizado_en`). No posee clave foránea a `User` (cumpliendo ADR-002).
 - **Estados (RF-13)**: `prueba`, `activo`, `por_confirmar`, `cancelado`, `fantasma`.
 - **Alineación Frontend (`tipos.ts`)**: `nombre`, `monto`, `moneda` (CLP/USD), `frecuencia` (mensual/anual), `fecha_proximo_cobro`, `categoria` (RF-12), `fin_prueba`, `horas_uso_mes`.
+- **Borrado lógico**: El campo `activo` indica si la suscripción está disponible. `DELETE` la desactiva sin eliminar la fila, conservando el histórico asociado de `Cobro` y `RegistroUso`.
 
 ---
 
@@ -23,7 +24,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `GET` | `/api/suscripciones/<id>/` | Obtiene el detalle de una suscripción propia | `200 OK` / `404` |
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza parcialmente (ej. estado) | `200 OK` / `404` |
-| `DELETE` | `/api/suscripciones/<id>/` | Elimina una suscripción propia | `204 No Content` / `404` |
+| `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
@@ -101,7 +102,7 @@ Esta tarea exige habilitar las rutas `POST /subscriptions/` (crear suscripción 
 
 ### 3. Tarea: "Endpoints update y delete"
 
-Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualización parcial de campos como `estado`) y `DELETE` (eliminación física o lógica), asegurando que una organización no pueda modificar ni borrar recursos de otra cuenta (aislamiento multi-tenant estricto con `404 Not Found`).
+Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualización parcial de campos como `estado`) y `DELETE` (borrado lógico mediante el campo `activo`), asegurando que una organización no pueda modificar ni borrar recursos de otra cuenta (aislamiento multi-tenant estricto con `404 Not Found`).
 
 #### Cómo comprobarlo:
 1. **Tests unitarios específicos con pytest:**
@@ -113,7 +114,7 @@ Esta tarea exige habilitar `PUT` (actualización completa), `PATCH` (actualizaci
    - `test_patch_subscription_success`: `PATCH` actualiza a `"cancelado"` y responde `200 OK`.
    - `test_patch_subscription_supports_cancelada_normalization`: Normaliza `"cancelada"` a `"cancelado"`.
    - `test_put_subscription_success`: `PUT` actualiza todos los campos y responde `200 OK`.
-   - `test_delete_subscription_success`: `DELETE` elimina el recurso y responde `204 No Content`.
+   - `test_delete_subscription_success`: `DELETE` desactiva la suscripción, conserva el registro y responde `204 No Content`.
    - `test_tenant_isolation_patch_from_other_account_returns_404`: Otra cuenta recibe `404 Not Found`.
    - `test_tenant_isolation_delete_from_other_account_returns_404`: Otra cuenta recibe `404 Not Found`.
    - `test_cannot_reassign_organization_via_payload`: `organizacion_id` es inmutable.
@@ -317,6 +318,5 @@ Comprueba:
 cd services/subscriptions
 .\venv\Scripts\pytest.exe -v
 ```
-
 
 

@@ -96,6 +96,11 @@ class Subscription(ModeloTenant):
         verbose_name="Estado",
     )
 
+    activo = models.BooleanField(
+        default=True,
+        verbose_name="Activa",
+    )
+
     fin_prueba = models.DateField(
         null=True,
         blank=True,
