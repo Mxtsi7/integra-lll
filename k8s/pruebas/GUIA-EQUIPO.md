@@ -101,11 +101,24 @@ No resources found in student-TUUSUARIO namespace.
 Este es el paso que hay que hacer **antes** de la clase, porque si falla hay que
 pedirle algo al profe.
 
+Desde aquí todos los comandos se corren **parados en la raíz del repositorio**
+(la carpeta donde está `docker-compose.yml`), porque los archivos `.yaml` se
+nombran con la ruta `k8s/pruebas/`:
+
 ```powershell
-kubectl run prueba --rm -it --restart=Never --image=busybox:1.36 --overrides='{\"spec\":{\"containers\":[{\"name\":\"p\",\"image\":\"busybox:1.36\",\"command\":[\"wget\",\"-qO-\",\"-T\",\"8\",\"--header=Host: gateway\",\"http://gateway.student-forellana.svc.cluster.local:8000/health/\"],\"resources\":{\"requests\":{\"cpu\":\"25m\",\"memory\":\"64Mi\"},\"limits\":{\"cpu\":\"50m\",\"memory\":\"64Mi\"}}}]}}'
+cd <la carpeta donde clonaste el repo>
 ```
 
-**Si responde esto, estás listo:**
+Se levanta un pod de prueba, se le pide que llame al gateway, y se borra:
+
+```powershell
+kubectl apply -f k8s/pruebas/diagnostico-busybox.yaml
+kubectl wait --for=condition=Ready pod/diagnostico --timeout=90s
+kubectl exec diagnostico -- wget -qO- -T 8 --header="Host: gateway" http://gateway.student-forellana.svc.cluster.local:8000/health/
+kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
+```
+
+**Si el `exec` responde esto, estás listo:**
 
 ```json
 {"servicio": "gateway", "estado": "ok"}
@@ -114,10 +127,20 @@ kubectl run prueba --rm -it --restart=Never --image=busybox:1.36 --overrides='{\
 **Si se queda colgado o dice que no se puede conectar**, hay una regla de red
 entre namespaces y el profe tiene que abrirla. Avisen en el grupo apenas pase.
 
+> Antes este paso usaba `kubectl run ... --overrides='{\"spec\":...}'` en una
+> sola línea. En Windows PowerShell 5.1 eso falla con `error: Invalid JSON
+> Patch`: las comillas escapadas no llegan enteras a kubectl. Por eso ahora se
+> usa el archivo `.yaml`, que no depende de ninguna comilla.
+
 ## 5. Lanzar la prueba de carga (esto es lo de la clase)
 
+Igual que en el paso 4, parado en la raíz del repositorio. Ojo con el nombre
+del archivo: es `carga-fortio-otro-namespace.yaml`, no `carga-fortio.yaml`
+(ese es el que se usa desde el namespace del proyecto, y desde el tuyo no
+funciona).
+
 ```powershell
-kubectl apply -f carga-fortio-otro-namespace.yaml
+kubectl apply -f k8s/pruebas/carga-fortio-otro-namespace.yaml
 kubectl logs -f job/carga-desde-afuera
 ```
 
@@ -134,7 +157,7 @@ Sockets used: 758 (for perfect keepalive, would be 4)
 Al terminar, **borra el Job**:
 
 ```powershell
-kubectl delete -f carga-fortio-otro-namespace.yaml
+kubectl delete -f k8s/pruebas/carga-fortio-otro-namespace.yaml
 ```
 
 ---
@@ -201,6 +224,9 @@ cuesta la base.
 | Lo que ves | Qué pasa |
 |---|---|
 | `Code 400 : ...` | te falta la cabecera `-H "Host: gateway"` |
+| `the path "carga-fortio-otro-namespace.yaml" does not exist` | no estás en la raíz del repo, o te falta el `k8s/pruebas/` delante |
+| `error: Invalid JSON Patch` | estás usando la versión vieja del paso 4 con `--overrides`; usa la de arriba |
+| `pods "prueba" already exists` | quedó un pod de un intento anterior: `kubectl delete pod prueba` |
 | El Job queda en `Pending` | te quedaste sin cuota de CPU; baja el `limits` o borra pods viejos |
 | `couldn't get current server API group list` | se venció el login, corre `kubectl get pods` de nuevo |
 | `context deadline exceeded` | el login del navegador expiró (3 min), repítelo |
