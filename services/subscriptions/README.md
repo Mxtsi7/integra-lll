@@ -11,6 +11,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 - **Herencia Multi-Tenant**: Hereda de `shared.tenant.base.ModeloTenant` (`id` UUID, `organizacion_id`, `creado_en`, `actualizado_en`). No posee clave foránea a `User` (cumpliendo ADR-002).
 - **Estados (RF-13)**: `prueba`, `activo`, `por_confirmar`, `cancelado`, `fantasma`.
 - **Alineación Frontend (`tipos.ts`)**: `nombre`, `monto`, `moneda` (CLP/USD), `frecuencia` (mensual/anual), `fecha_proximo_cobro`, `categoria` (RF-12), `fin_prueba`, `horas_uso_mes`.
+- **Modelo de uso (RF-16 / HU-13)**: `RegistroUso` es el modelo equivalente a `Uso` en la tarjeta. Relaciona la suscripción con la fecha del registro y los minutos; `fecha` es una fecha calendario y `minutos` debe ser al menos 1. `Subscription.registrar_uso()` crea el registro y actualiza los acumulados de la suscripción.
 - **Borrado lógico**: El campo `activo` indica si la suscripción está disponible. `DELETE` la desactiva sin eliminar la fila, conservando el histórico asociado de `Cobro` y `RegistroUso`.
 
 ---
