@@ -204,3 +204,4 @@ function FilaEnlace({ etiqueta }: { etiqueta: string }) {
     </div>
   );
 }
+

@@ -16,4 +16,10 @@
 
   /* Fondo de la fila de "Suscripciones fantasma" (en claro es #fffbeb) */
   --oag-fantasma-bg: #3a3320;
+
+  /* El ámbar del tema claro queda ilegible sobre fondo oscuro:
+     medido 1.77 de contraste, WCAG AA pide 4.5. */
+  --oag-alert-bg: #3a3320;
+  --oag-alert-text: #fbbf24;
 }
+
