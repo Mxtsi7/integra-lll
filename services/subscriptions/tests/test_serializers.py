@@ -135,6 +135,7 @@ class TestSubscriptionSerializerReadOnlyFields:
         read_only = SubscriptionSerializer.Meta.read_only_fields
         assert "horas_uso_mes" in read_only
         assert "ultima_actividad" in read_only
+        assert "activo" in read_only
 
     def test_horas_uso_mes_ignored_on_create(self, valid_payload: dict) -> None:
         """Si el cliente envía horas_uso_mes en creación, se ignora."""

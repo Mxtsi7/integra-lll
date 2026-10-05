@@ -34,7 +34,7 @@ class SubscriptionViewSet(TenantViewSet):
     - Filtra automáticamente por la organización del request (X-Organizacion-Id).
     - Asigna organizacion_id en la creación.
     - Soporta GET (list, retrieve), POST (create), PUT (update),
-      PATCH (partial_update) y DELETE (destroy).
+      PATCH (partial_update) y DELETE (destroy, desactivación lógica).
     - Devuelve 403 si falta la cabecera X-Organizacion-Id.
     - Devuelve 404 si el recurso solicitado no pertenece a la organización autenticada.
     - Paginación en GET con PageNumberPagination (page_size=10, ?page=X).
@@ -50,8 +50,8 @@ class SubscriptionViewSet(TenantViewSet):
     pagination_class = SubscriptionPagination
 
     def get_queryset(self):
-        """Filtra por tenant y aplica query params opcionales de estado y fecha de cobro."""
-        qs = super().get_queryset()
+        """Filtra por tenant, suscripciones activas y parámetros de listado."""
+        qs = super().get_queryset().filter(activo=True)
 
         # Solo el listado se filtra: get_queryset() también lo usan retrieve,
         # update y destroy, y ahí un query param colgado haría desaparecer el
@@ -80,6 +80,11 @@ class SubscriptionViewSet(TenantViewSet):
             qs = qs.filter(fecha_proximo_cobro=fecha)
 
         return qs
+
+    def perform_destroy(self, instance: Subscription) -> None:
+        """Desactiva la suscripción y conserva el registro y sus cobros históricos."""
+        instance.activo = False
+        instance.save()
 
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
@@ -114,4 +119,3 @@ class SubscriptionViewSet(TenantViewSet):
             SubscriptionSerializer(subscription).data,
             status=status.HTTP_200_OK,
         )
-
