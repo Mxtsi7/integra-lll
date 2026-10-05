@@ -19,6 +19,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "actualizado_en",
             "horas_uso_mes",
             "ultima_actividad",
+            "activo",
         )
 
     # ── normalización pre-validación ────────────────────────────────
@@ -97,5 +98,4 @@ class RegistroUsoSerializer(serializers.ModelSerializer):
     class Meta:
         model = RegistroUso
         fields = ("fecha", "minutos")
-
 
