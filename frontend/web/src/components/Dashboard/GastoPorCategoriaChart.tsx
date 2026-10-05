@@ -73,7 +73,7 @@ export function GastoPorCategoriaChart({ suscripciones }: GastoPorCategoriaChart
                   fontFamily: 'var(--oag-font-mono)',
                 }}
               />
-              <Bar dataKey="monto" fill="#16213e" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="monto" fill="var(--oag-accion, var(--oag-navy))" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
