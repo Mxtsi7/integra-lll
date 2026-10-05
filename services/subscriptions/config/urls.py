@@ -10,7 +10,6 @@ from app.views import SubscriptionViewSet
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
 
-
 def salud(request):
     """
     Lo consulta el HEALTHCHECK del Dockerfile. Toca la base a propósito:
