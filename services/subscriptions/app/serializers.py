@@ -3,7 +3,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 
-from app.models import Subscription
+from app.models import RegistroUso, Subscription
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
@@ -19,6 +19,7 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "actualizado_en",
             "horas_uso_mes",
             "ultima_actividad",
+            "activo",
         )
 
     # ── normalización pre-validación ────────────────────────────────
@@ -78,5 +79,23 @@ class RegistrarUsoSerializer(serializers.Serializer):
             "required": "El campo minutos es obligatorio.",
         },
     )
+    fecha = serializers.DateField(required=False, default=None)
 
+    def validate_fecha(self, value):
+        """Rechaza fechas posteriores a hoy (hora local del servidor)."""
+        from django.utils import timezone
+
+        if value is not None and value > timezone.localdate():
+            raise serializers.ValidationError(
+                "No se puede registrar uso de una fecha futura."
+            )
+        return value
+
+
+class RegistroUsoSerializer(serializers.ModelSerializer):
+    """Serializa los registros históricos de uso de una suscripción (CU-23 / RF-04 / RF-15)."""
+
+    class Meta:
+        model = RegistroUso
+        fields = ("fecha", "minutos")
 
