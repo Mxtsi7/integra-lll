@@ -6,6 +6,7 @@ import { App } from "./App";
 import "./styles/theme.css";
 import './styles/tema-oscuro.css';
 import { iniciarTema } from './hooks/useTema';
+import { AuthProvider } from './context/AuthContext';
 
 iniciarTema();
 
@@ -18,8 +19,10 @@ configurarManejador401(() => {
 
 createRoot(document.getElementById("raiz")!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </AuthProvider>
   </StrictMode>
 );
