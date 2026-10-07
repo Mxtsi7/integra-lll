@@ -1,6 +1,21 @@
 # ADR-003 — Comunicación síncrona y asíncrona
 
-**Fecha:** 2026-08-21 · **Estado:** aceptada
+**Fecha:** 2026-08-21 · **Estado:** aceptada · **Implementación:** parcial
+
+> **Al 2026-10-07, la mitad asíncrona de esta decisión todavía no está
+> construida.** La parte síncrona (HTTP a través del gateway) sí está en
+> producción y verificada.
+>
+> RabbitMQ está desplegado pero nunca ha transportado un mensaje: 0 conexiones,
+> 0 colas, y el exchange `suscripciones` que declara el catálogo no existe.
+> Ningún servicio publica ni consume eventos todavía, y `analytics` —el
+> consumidor del ejemplo de más abajo— no está implementado.
+>
+> La decisión no cambia: la regla de cuándo usar HTTP y cuándo eventos sigue
+> siendo la correcta. Lo que falta es construirla. Se difiere al Sprint 2.
+>
+> Detalle y comandos de verificación en
+> [ESTADO-DE-LA-ARQUITECTURA.md](ESTADO-DE-LA-ARQUITECTURA.md).
 
 ## Contexto
 
