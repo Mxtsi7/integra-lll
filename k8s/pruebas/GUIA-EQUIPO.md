@@ -8,6 +8,9 @@ al namespace de nadie.
 
 **Tiempo: 15 minutos la primera vez, 1 minuto las siguientes.**
 
+> Esta guía es para Windows (PowerShell). Si usas **Linux o WSL**, sigue
+> [`GUIA-EQUIPO-LINUX.md`](GUIA-EQUIPO-LINUX.md): mismos pasos, comandos distintos.
+
 ---
 
 ## Antes de la clase, no durante
