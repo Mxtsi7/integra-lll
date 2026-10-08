@@ -35,15 +35,23 @@ type Opciones = {
 
 function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
   if (typeof data.detail === "string") return data.detail;
-  const primero = Object.values(data)[0];
-  if (Array.isArray(primero) && typeof primero[0] === "string") return primero[0];
+  const valores = Object.values(data);
+  const primero = valores.length > 0 ? valores[0] : undefined;
+  if (Array.isArray(primero) && typeof primero[0] === "string") {
+    return primero[0];
+  }
   if (typeof primero === "string") return primero;
   return "Ocurrió un error inesperado";
 }
 
-export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T> {
+export async function pedir<T>(
+  path: string,
+  opciones: Opciones = {},
+): Promise<T> {
   if (!urlBase) {
-    throw new Error("API sin configurar: llamar configurarApi({ urlBase }) al iniciar la app");
+    throw new Error(
+      "API sin configurar: llamar configurarApi({ urlBase }) al iniciar la app",
+    );
   }
 
   const headers: Record<string, string> = {
@@ -58,7 +66,8 @@ export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T
   const res = await fetch(`${urlBase}${path}`, {
     method: opciones.method ?? "GET",
     headers,
-    body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+    body:
+      opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
   });
 
   if (res.status === 401) {
@@ -69,9 +78,11 @@ export async function pedir<T>(path: string, opciones: Opciones = {}): Promise<T
   if (!res.ok) {
     let message = "Ocurrió un error inesperado";
     try {
-      message = mensajeDesdeCuerpo((await res.json()) as Record<string, unknown>);
+      message = mensajeDesdeCuerpo(
+        (await res.json()) as Record<string, unknown>,
+      );
     } catch {
-      // cuerpo no JSON
+      // el cuerpo no era JSON
     }
     throw new ErrorDeApi(message, res.status);
   }
