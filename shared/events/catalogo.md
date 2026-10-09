@@ -5,6 +5,12 @@ antes, nunca se descubre en un merge.
 
 Broker: RabbitMQ · Exchange: `suscripciones` (tipo `topic`)
 
+> **Estado al 2026-10-07: este contrato está acordado, no en uso.** El exchange
+> `suscripciones` todavía no existe en el despliegue y ningún servicio publica
+> ni consume. Lo de abajo es el contrato que regirá cuando se implemente, en el
+> Sprint 2. Ver
+> [docs/arquitectura/ESTADO-DE-LA-ARQUITECTURA.md](../../docs/arquitectura/ESTADO-DE-LA-ARQUITECTURA.md).
+
 ---
 
 ## Formato común

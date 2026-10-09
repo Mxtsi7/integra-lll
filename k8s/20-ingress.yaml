@@ -9,9 +9,54 @@
 #   · cada Ingress publica EXACTAMENTE UN hostname
 #
 # Por eso hay un solo dominio y el /api/ lo resuelve el nginx de la web hacia
+<<<<<<< HEAD
 # el gateway (ver frontend/web/nginx.conf). Además el cluster no tiene
 # cert-manager: cada dominio extra sería otro certificado que el navegador
 # rechaza. Con uno solo, el usuario acepta una advertencia y ya.
+=======
+# el gateway (ver frontend/web/nginx.conf).
+#
+# ── Sobre el certificado ───────────────────────────────────────────────────
+# El cluster NO tiene cert-manager (no existe el tipo ClusterIssuer) y no hay
+# ningún certificado del dominio disponible: `censei.cl` entrega un Sectigo de
+# *.inf.uct.cl, que no cubre este host, y `dev.censei.cl` no sirve TLS. O sea,
+# un certificado que el navegador acepte NO se puede conseguir desde acá.
+#
+# Lo que SÍ se puede, y es lo que hace este archivo:
+#
+#   1. Servir nuestro propio certificado autofirmado con el nombre correcto,
+#      en vez del de relleno de nginx ("Kubernetes Ingress Controller Fake
+#      Certificate", O=Acme Co), que además NO coincide con el hostname.
+#      Antes el navegador daba dos errores (nombre equivocado + emisor
+#      desconocido); ahora da uno solo, y el certificado dice de quién es.
+#
+#      El secret `ojoalgasto-tls` NO está en el repo: la llave privada no se
+#      versiona. Se crea una vez, a mano:
+#
+#        openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+#          -keyout tls.key -out tls.crt \
+#          -subj "/CN=ojoalgasto-forellana.dev.censei.cl/O=Ojo al Gasto - Integra III UCT" \
+#          -addext "subjectAltName=DNS:ojoalgasto-forellana.dev.censei.cl"
+#        kubectl create secret tls ojoalgasto-tls --cert=tls.crt --key=tls.key
+#
+# Sobre HSTS: ingress-nginx lo manda activado por omisión
+# (max-age=31536000, includeSubDomains) y se ve en las respuestas. NO se apaga
+# acá, a propósito. Por RFC 6797 §8.1 el navegador tiene que IGNORAR la
+# cabecera cuando llega sobre una conexión con errores de certificado, que es
+# justo nuestro caso, así que el pin nunca se fija y el aviso sigue siendo
+# salteable. Apagarla sería debilitar una cabecera de seguridad sin necesidad,
+# y el día que haya un certificado válido la queremos encendida.
+#
+# La solución de verdad es pedirle al administrador del cluster UNA de estas:
+#   · cert-manager con un ClusterIssuer (ACME) para emitir el certificado, o
+#   · un certificado de *.dev.censei.cl cargado como default-ssl-certificate
+#     del ingress controller.
+#
+# Nota: `ssl-redirect:"false"` se deja puesto, pero NO alcanza: el 301 de
+# http:// a https:// lo hace el proxy de la universidad (proxy.inf.uct.cl)
+# antes de llegar a nuestro ingress — se nota porque ese 301 viene sin
+# cabecera `Server`. Servir el sitio por HTTP plano no está en nuestras manos.
+>>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -19,12 +64,23 @@ metadata:
   labels: { app.kubernetes.io/part-of: ojoalgasto }
   annotations:
     external-dns.alpha.kubernetes.io/target: proxy.inf.uct.cl
+<<<<<<< HEAD
     # El cluster no trae cert-manager ni un certificado del dominio: nginx
     # sirve su certificado falso y el navegador lo rechaza. Sin este redirect
     # forzado, el sitio funciona por HTTP sin advertencias.
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
+=======
+    # Ver la nota de arriba: el redirect lo fuerza el proxy, no nosotros.
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ojoalgasto-forellana.dev.censei.cl
+      secretName: ojoalgasto-tls
+>>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
   rules:
     - host: ojoalgasto-forellana.dev.censei.cl
       http:

@@ -22,14 +22,17 @@ funciona el flujo completo y cómo se verificó.
 | `web/src/context/AuthContext.tsx` | `AuthProvider` + `useAuth()`. Guarda en memoria el estado de la sesión (`verificando` / `anonimo` / `autenticado`), hace el bootstrap al cargar la página, registra el manejador del 401, sincroniza pestañas y expone `iniciarSesion`, `cerrarSesion` y `verificarSesion`. |
 | `web/src/components/RutaPrivada.tsx` | `<RutaPrivada>` (guarda de las rutas privadas), `<SoloInvitados>` (login/registro solo sin sesión) y `destinoTrasLogin()` (a dónde volver después del login). |
 | `web/src/styles/RutaPrivada.css` | Pantalla con spinner "Verificando tu sesión" que se muestra mientras se valida la sesión al recargar. |
-| `shared/src/auth.test.ts` | 9 tests de `tokenExpirado()` y `haySesionValida()`. |
-| `web/src/components/RutaPrivada.test.tsx` | 13 tests de integración de las tres tareas (rutas, recarga, login, logout, pestañas). |
+| `shared/src/auth.test.ts` | 12 tests de `tokenExpirado()`, `haySesionValida()` y el desfase de reloj. |
+| `web/src/components/RutaPrivada.test.tsx` | 18 tests de integración de las tres tareas (rutas, recarga, login, logout, pestañas, respuestas tardías). |
+| `web/src/context/ToastContext.test.tsx` | 6 tests del Toast (antes el archivo estaba vacío). |
 
 ### Modificados
 
 | Archivo | Cambio |
 |---|---|
-| `shared/src/auth.ts` | Se agregan `tokenExpirado(token)` y `haySesionValida()`. Se mantuvo el CRLF del archivo. Se exportan solas por el `export * from './auth'` que ya existía en `index.ts`. |
+| `shared/src/auth.ts` | Se agregan `tokenExpirado(token)` y `haySesionValida()`, y `guardarTokens()` ahora guarda el desfase entre el reloj del PC y el del servidor (`logout()` lo borra). Se mantuvo el CRLF del archivo. Se exportan solas por el `export * from './auth'` que ya existía en `index.ts`. |
+| `shared/src/api/cliente.ts` | El interceptor 401 solo cierra sesión si el token rechazado sigue siendo el actual (ver §3.4). |
+| `shared/src/api/cliente.test.ts` | +1 test de ese caso (quedan 7). |
 | `web/src/App.tsx` | Envuelve las rutas en `<AuthProvider>` y las agrupa: `/login` y `/registro` dentro de `<SoloInvitados>`; `/dashboard`, `/home`, `/perfil`, `/configuracion` y `/suscripciones/:id` dentro de `<RutaPrivada>`. La ruta `/Home` pasa a `/home` (igual que el enlace del Sidebar). |
 | `web/src/main.tsx` | Se quita el `configurarManejador401(() => window.location.href = "/login")`: ahora lo registra el `AuthProvider` (ver §3.4). |
 | `web/src/pages/Login.tsx` | En vez de `guardarTokens()` directo llama a `iniciarSesion()` del contexto, y navega a la página que se quiso abrir antes del login (o a `/dashboard`). |
@@ -61,6 +64,10 @@ haySesionValida(ahoraMs = Date.now()): boolean   // hay access token y no está 
 - **No verifica la firma.** Eso solo lo puede hacer el gateway (es el único que conoce la clave).
   Es una comprobación barata para no mostrar pantallas que van a fallar. Si un token "parece" bueno
   pero el backend lo rechaza, el interceptor 401 de `pedir()` cierra la sesión igual.
+- **Reloj del PC desfasado.** `exp` está en hora del servidor y `Date.now()` en hora del PC. Si el
+  PC va 40 min adelantado, un token recién emitido parecería vencido y nadie podría entrar. Por eso
+  `guardarTokens()` compara el claim `iat` (cuándo lo emitió el servidor) con la hora local, guarda
+  esa diferencia y `haySesionValida()` la suma al revisar `exp`.
 - `haySesionValida()` **no borra nada** (es una pregunta, sin efectos secundarios). Limpiar los
   tokens es decisión de quien llama (el `AuthContext`).
 
@@ -87,7 +94,7 @@ type EstadoSesion =
 | `estado` | El estado de arriba. |
 | `usuario` | El `Usuario` de `/usuarios/me/` o `null`. |
 | `estaAutenticado` | `true` solo en `autenticado`. |
-| `iniciarSesion(tokens)` | Guarda los tokens y carga el usuario. Lo usa `Login.tsx`. |
+| `iniciarSesion(tokens)` | Guarda los tokens y carga el usuario. Lo usa `Login.tsx`. Si el token que llegó no es un JWT vigente, no guarda nada y lanza `TokenInvalidoError` (Login muestra "No se pudo iniciar sesión"). |
 | `cerrarSesion()` | `logout()` de shared + estado `anonimo`. |
 | `verificarSesion()` | Si el token venció con la pestaña abierta, cierra la sesión y avisa. |
 
@@ -152,12 +159,16 @@ Decisiones:
   sin los datos del perfil y el sidebar muestra los valores por defecto.
 - **Se recupera el usuario real.** El sidebar ahora muestra el nombre y el plan (`Plan Premium` /
   `Plan Gratuito`) del usuario logueado, también después de recargar. Antes eran placeholders fijos.
-- **Si se cierra la sesión mientras `/usuarios/me/` está en vuelo**, la respuesta que llega tarde no
-  "revive" la sesión.
+- **Respuestas que llegan tarde.** Cada llamada a `/usuarios/me/` lleva un número y solo la última
+  puede cambiar la sesión. Si mientras una petición viaja se cierra sesión, o entra otra cuenta, la
+  respuesta vieja se ignora: no "revive" la sesión, no pone el usuario equivocado y un 401/404 viejo
+  no borra los tokens nuevos.
 
 **Sincronización entre pestañas:** se escucha el evento `storage` del navegador (solo llega a las
 *otras* pestañas). Si en una pestaña se cierra sesión, las demás pasan a `anonimo` y van a `/login`;
-si en otra pestaña se inicia sesión, esta lo detecta y carga el usuario.
+si en otra pestaña se inicia sesión, esta lo detecta y carga el usuario; y si en otra pestaña entra
+**otra cuenta**, esta recarga el usuario para no seguir mostrando el anterior. Cambios de otras claves
+(por ejemplo el tema claro/oscuro) no hacen nada.
 
 ### 3.4 Interceptor 401 integrado al contexto
 
@@ -173,6 +184,10 @@ Eso recargaba la app completa y se perdía el aviso al usuario. Ahora lo registr
 2. El manejador muestra el toast **"Tu sesión expiró. Inicia sesión de nuevo."** (solo si había
    sesión; un anónimo no ve ese mensaje) y pasa el estado a `anonimo`.
 3. `<RutaPrivada>` redirige a `/login` sin recargar la página.
+
+Además, `pedir()` ahora solo cierra la sesión si el token que el servidor rechazó **sigue siendo el
+guardado**. Si el usuario cerró sesión y volvió a entrar mientras la petición viajaba, el 401 es del
+token viejo y no debe borrar el nuevo.
 
 Lo que **no** cambió: `login()` y `register()` siguen usando su propio `postJSON`, así que una
 contraseña incorrecta (401 del login) no dispara este flujo; sigue mostrando "Usuario o contraseña
@@ -219,19 +234,24 @@ Todo desde `frontend/`:
 
 ```bash
 npm run typecheck   # shared + web: sin errores
-npm test            # shared: 27 tests ✅ (9 nuevos) · web: 13 tests ✅ (todos nuevos)
+npm test            # shared: 34 tests ✅ · web: 24 tests ✅
 npm run build       # ✅ (solo el aviso de tamaño de chunk que ya existía)
 ```
 
 ### Tests nuevos
 
-`shared/src/auth.test.ts` (9):
+`shared/src/auth.test.ts` (12):
 - token con `exp` futuro → vigente; con `exp` pasado → vencido; que vence dentro del margen → vencido
 - algo que no es JWT (`"undefined"`, base64 inválido, vacío) → vencido
 - JWT sin `exp` → vigente
 - `haySesionValida()`: sin token, con token vigente, con token vencido (sin borrar nada), tras `logout()`
+- PC 40 min adelantado acepta un token recién emitido; PC 40 min atrasado no acepta uno vencido;
+  `logout()` borra también el desfase
 
-`web/src/components/RutaPrivada.test.tsx` (13), con la misma estructura de rutas que `App.tsx`:
+`shared/src/api/cliente.test.ts` (+1): un 401 de una petición hecha con un token viejo no borra la
+sesión nueva.
+
+`web/src/components/RutaPrivada.test.tsx` (18), con la misma estructura de rutas que `App.tsx`:
 
 | Tarea | Test |
 |---|---|
@@ -246,12 +266,22 @@ npm run build       # ✅ (solo el aviso de tamaño de chunk que ya existía)
 | 3 | Botón "Cerrar sesión" borra tokens, muestra el toast y va a `/login` |
 | 3 | Tras cerrar sesión, volver a una ruta privada no deja entrar |
 | 3 | Si otra pestaña cierra sesión, esta vuelve a `/login` |
+| 1 | El login devuelve un token inválido → error de login, no entra y no dice "sesión expiró" |
+| 2 | En otra pestaña entra otra cuenta → se muestra el usuario nuevo |
+| 2 | Cambiar otra clave de localStorage (tema) no recarga el usuario |
+| 2 | La respuesta tardía de la sesión anterior no pisa al usuario nuevo |
+| 2 | Un 401/404 tardío de la sesión anterior no cierra la sesión nueva |
+
+`web/src/context/ToastContext.test.tsx` (6): `role=alert` solo en errores, cierre automático a los
+5 s, cierre manual, máximo 4 visibles y error claro si se usa fuera del provider.
 
 Solo se simulan las llamadas de red (`getUsuarioActual`, `login`); los tokens, `logout()` y la
 validación del JWT son los reales de shared sobre el `localStorage` de jsdom.
 
 **Prueba de que los tests sirven (mutation testing):** se desactivó a propósito la redirección de
-`<RutaPrivada>` y fallaron 9 de los 13 tests. Se restauró el código y vuelven a pasar los 13.
+`<RutaPrivada>` y fallaron 9 tests. Además, se quitó una por una cada corrección de la §7 (número de
+petición, detección de cambio de cuenta, validación del token en el login, desfase de reloj y chequeo
+del token en el 401) y en cada caso falló al menos un test. Se restauró el código y pasan todos.
 
 ### Prueba manual en el navegador (`npm run dev`, backend apagado)
 
@@ -274,3 +304,21 @@ validación del JWT son los reales de shared sobre el `localStorage` de jsdom.
   mostrando la pantalla "¡Cuenta creada!" → "Ir a iniciar sesión".
 - `PerfilPage` sigue pidiendo `/usuarios/me/` por su cuenta. Podría leer `useAuth().usuario` para
   ahorrar una petición; se dejó igual para no tocar una página que no era parte de estas tareas.
+
+---
+
+## 7. Errores corregidos en la revisión
+
+Después de la primera versión se revisó el código con calma y se corrigió lo siguiente:
+
+| # | Error | Qué pasaba | Arreglo |
+|---|---|---|---|
+| 1 | Merge con `main` a medias | 9 archivos del frontend con marcadores `<<<<<<<`/`>>>>>>>` y `cliente.test.ts` con las dos versiones pegadas: no compilaba. | Conflictos del frontend resueltos: archivos de esta tarea con la versión de la rama; `cliente.ts`/`cliente.test.ts` con la de `main` (6 tests completos). |
+| 2 | Respuestas tardías de `/usuarios/me/` | Al cerrar sesión y entrar con otra cuenta mientras una petición vieja seguía en vuelo, la respuesta vieja ponía el usuario equivocado o, con 401, borraba los tokens nuevos. | Número de petición en `AuthContext`: solo la última cambia la sesión. |
+| 3 | 401 viejo en `pedir()` | El mismo problema en el interceptor de shared. | `pedir()` solo cierra sesión si el token rechazado sigue siendo el actual. |
+| 4 | Reloj del PC desfasado | Con el PC adelantado más de 30 min, cada login terminaba al instante en "Tu sesión expiró". | Se mide el desfase con `iat` al guardar los tokens y se compensa. |
+| 5 | Token inválido en el login | Se entraba igual y al cambiar de página salía "Tu sesión expiró", que confunde. | `iniciarSesion()` valida el token; si no sirve, Login muestra error y no guarda nada. |
+| 6 | Otra cuenta en otra pestaña | Esta pestaña seguía mostrando el nombre del usuario anterior. | Se recuerda el token con que se cargó el usuario; si cambia, se recarga. |
+| 7 | Ref escrita durante el render | `estadoRef.current = estado` en el cuerpo del componente va contra las reglas de React. | Estado y ref se cambian juntos en `cambiarEstado()`. |
+| 8 | `ToastContext.test.tsx` vacío | Pasaba solo gracias a `--passWithNoTests`; con `vitest run` a secas fallaba. | 6 tests reales del Toast. |
+| 9 | Tests acoplados a las claves de storage | El test escribía `localStorage.setItem("access_token", …)` a mano. | Usa `guardarTokens()`/`logout()` de shared. |

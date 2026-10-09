@@ -20,8 +20,36 @@ COPY web/package.json web/
 RUN npm ci
 
 COPY . .
+<<<<<<< HEAD
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
+=======
+# El valor por omisión es `/api`, que es el correcto para Kubernetes: el nginx
+# de la web proxea /api/ hacia el gateway, así que la URL relativa sirve para
+# cualquier host sin reconstruir.
+#
+# Va acá y no solo en desplegar.sh a propósito: en Git Bash (Windows) un
+# `--build-arg VITE_API_URL=/api` se convierte SOLO en
+# `VITE_API_URL=C:/Program Files/Git/api`, y como `C:` parece un esquema de
+# URL el navegador nunca llega a emitir la petición. Con el valor por omisión
+# acá, el build sale bien aunque el argumento venga mal desde el shell.
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=${VITE_API_URL}
+
+# Red de seguridad: una URL base inválida produce un bundle que carga perfecto
+# y falla recién al pedir datos, sin dejar rastro en los logs del servidor.
+# Solo se acepta una ruta relativa (/algo) o una URL http(s). La conversión de
+# Git Bash produce `C:/Program Files/Git/api`, que no es ninguna de las dos.
+RUN case "$VITE_API_URL" in \
+      /*)                 echo "VITE_API_URL=$VITE_API_URL" ;; \
+      http://*|https://*) echo "VITE_API_URL=$VITE_API_URL" ;; \
+      *) echo "ERROR: VITE_API_URL invalida: '$VITE_API_URL'" >&2; \
+         echo "       Se esperaba /algo o http(s)://algo." >&2; \
+         echo "       En Git Bash usa: MSYS_NO_PATHCONV=1 docker build ..." >&2; \
+         exit 1 ;; \
+    esac
+
+>>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
 RUN npm run build --workspace=web
 
 

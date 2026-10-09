@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ErrorDeApi,
   getUsuarioActual,
+  guardarTokens,
   hayTokenGuardado,
   login,
+  logout,
   type Usuario,
 } from "@ojoalgasto/shared";
 import { ToastProvider } from "../context/ToastContext";
@@ -41,9 +43,29 @@ function jwt(expEnMs: number): string {
   return `${b64({ alg: "HS256" })}.${b64({ exp: Math.floor(expEnMs / 1000) })}.firma`;
 }
 
+// Se usa guardarTokens() de shared en vez de escribir las claves de
+// localStorage a mano: así el test no depende de cómo se llaman.
 function guardarSesion(expEnMs: number) {
-  localStorage.setItem("access_token", jwt(expEnMs));
-  localStorage.setItem("refresh_token", "refresh");
+  guardarTokens({ access_token: jwt(expEnMs), refresh_token: "refresh" });
+}
+
+/** Lo que pasa en ESTA pestaña cuando otra cambia localStorage. */
+function cambioEnOtraPestana(cambio: () => void) {
+  act(() => {
+    cambio();
+    window.dispatchEvent(new StorageEvent("storage"));
+  });
+}
+
+/** Promesa que el test resuelve o rechaza cuando quiere. */
+function diferida<T>() {
+  let resolver!: (v: T) => void;
+  let rechazar!: (e: unknown) => void;
+  const promesa = new Promise<T>((res, rej) => {
+    resolver = res;
+    rechazar = rej;
+  });
+  return { promesa, resolver, rechazar };
 }
 
 function UbicacionActual() {
@@ -114,7 +136,7 @@ describe("Protección de rutas privadas", () => {
   });
 
   it("con un token que no es JWT redirige a /login", async () => {
-    localStorage.setItem("access_token", "undefined");
+    guardarTokens({ access_token: "undefined", refresh_token: "refresh" });
     montar("/perfil");
 
     await waitFor(() => expect(ubicacion()).toBe("/login"));
@@ -193,6 +215,28 @@ describe("Login y vuelta a la página pedida", () => {
     expect(await screen.findByText("contenido privado")).toBeInTheDocument();
     expect(hayTokenGuardado()).toBe(true);
   });
+
+  it("si el login devuelve un token inválido, muestra error y no entra", async () => {
+    loginMock.mockResolvedValue({
+      access_token: "no-es-un-jwt",
+      refresh_token: "refresh",
+      usuario: { id: 1, nombre: "Christopher", correo: "c@test.cl" },
+    });
+
+    montar("/login");
+    fireEvent.change(screen.getByLabelText("CORREO ELECTRÓNICO"), {
+      target: { value: "c@test.cl" },
+    });
+    fireEvent.change(screen.getByLabelText("CONTRASEÑA"), {
+      target: { value: "Clave1234!" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Iniciar sesión" }));
+
+    expect(await screen.findByText("No se pudo iniciar sesión. Intenta de nuevo.")).toBeInTheDocument();
+    expect(screen.queryByText(/sesión expiró/)).not.toBeInTheDocument();
+    expect(ubicacion()).toBe("/login");
+    expect(hayTokenGuardado()).toBe(false);
+  });
 });
 
 describe("Cierre de sesión", () => {
@@ -227,11 +271,74 @@ describe("Cierre de sesión", () => {
     montar("/dashboard");
     await screen.findByText("contenido privado");
 
-    act(() => {
-      localStorage.clear();
-      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
-    });
+    cambioEnOtraPestana(() => logout());
 
     await waitFor(() => expect(ubicacion()).toBe("/login"));
+  });
+});
+
+describe("Respuestas que llegan tarde y cambios de cuenta", () => {
+  const OTRA: Usuario = { ...USUARIO, id: "2", nombre: "Andrea", plan: "gratuito" };
+
+  it("si en otra pestaña entra otra cuenta, se muestra el usuario nuevo", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    getUsuarioActualMock.mockResolvedValueOnce(USUARIO).mockResolvedValueOnce(OTRA);
+    montar("/dashboard");
+    expect(await screen.findByText("Christopher")).toBeInTheDocument();
+
+    cambioEnOtraPestana(() => guardarSesion(Date.now() + 25 * 60_000));
+
+    expect(await screen.findByText("Andrea")).toBeInTheDocument();
+    expect(screen.queryByText("Christopher")).not.toBeInTheDocument();
+  });
+
+  it("un cambio de otra clave de localStorage (p. ej. el tema) no recarga el usuario", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    getUsuarioActualMock.mockResolvedValue(USUARIO);
+    montar("/dashboard");
+    await screen.findByText("Christopher");
+
+    cambioEnOtraPestana(() => localStorage.setItem("oag-tema", "oscuro"));
+
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("la respuesta tardía de la sesión anterior no pisa al usuario nuevo", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    const vieja = diferida<Usuario>();
+    const nueva = diferida<Usuario>();
+    getUsuarioActualMock
+      .mockReturnValueOnce(vieja.promesa)
+      .mockReturnValueOnce(nueva.promesa);
+    montar("/dashboard");
+
+    // Con /usuarios/me/ todavía pendiente, en otra pestaña se cierra sesión
+    // y entra otra cuenta.
+    cambioEnOtraPestana(() => logout());
+    cambioEnOtraPestana(() => guardarSesion(Date.now() + 30 * 60_000));
+
+    await act(async () => nueva.resolver(OTRA));
+    expect(await screen.findByText("Andrea")).toBeInTheDocument();
+
+    await act(async () => vieja.resolver(USUARIO)); // llega tarde
+    expect(screen.getByText("Andrea")).toBeInTheDocument();
+    expect(screen.queryByText("Christopher")).not.toBeInTheDocument();
+  });
+
+  it("un 401 tardío de la sesión anterior no cierra la sesión nueva", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    const vieja = diferida<Usuario>();
+    getUsuarioActualMock.mockReturnValueOnce(vieja.promesa).mockResolvedValueOnce(OTRA);
+    montar("/dashboard");
+
+    cambioEnOtraPestana(() => logout());
+    cambioEnOtraPestana(() => guardarSesion(Date.now() + 30 * 60_000));
+    expect(await screen.findByText("Andrea")).toBeInTheDocument();
+
+    await act(async () => vieja.rechazar(new ErrorDeApi("Token inválido", 404)));
+
+    expect(ubicacion()).toBe("/dashboard");
+    expect(hayTokenGuardado()).toBe(true);
+    expect(screen.getByText("Andrea")).toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   configurarTokenStorage,
   guardarTokens,
@@ -34,6 +34,10 @@ beforeEach(() => {
       delete almacen[k];
     },
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("tokenExpirado", () => {
@@ -84,6 +88,38 @@ describe("haySesionValida", () => {
     expect(haySesionValida(AHORA)).toBe(false);
     // Limpiar es decisión de quien llama (AuthContext en web).
     expect(almacen.access_token).toBeDefined();
+  });
+
+  describe("con el reloj del equipo desfasado", () => {
+    const HORA_SERVIDOR = AHORA;
+    const tokenRecien = () =>
+      jwt({ iat: enSegundos(HORA_SERVIDOR), exp: enSegundos(HORA_SERVIDOR + 30 * 60_000) });
+
+    it("un PC 40 min adelantado igual acepta un token recién emitido", () => {
+      const relojPc = HORA_SERVIDOR + 40 * 60_000;
+      vi.setSystemTime(relojPc); // guardarTokens mide el desfase con la hora local
+      guardarTokens({ access_token: tokenRecien(), refresh_token: "r" });
+
+      expect(haySesionValida(relojPc)).toBe(true);
+      // y vence cuando corresponde: 31 min después, en hora del PC
+      expect(haySesionValida(relojPc + 31 * 60_000)).toBe(false);
+    });
+
+    it("un PC 40 min atrasado no da por buena una sesión ya vencida", () => {
+      const relojPc = HORA_SERVIDOR - 40 * 60_000;
+      vi.setSystemTime(relojPc);
+      guardarTokens({ access_token: tokenRecien(), refresh_token: "r" });
+
+      expect(haySesionValida(relojPc + 29 * 60_000)).toBe(true);
+      expect(haySesionValida(relojPc + 31 * 60_000)).toBe(false);
+    });
+
+    it("logout() borra también el desfase guardado", () => {
+      vi.setSystemTime(HORA_SERVIDOR + 40 * 60_000);
+      guardarTokens({ access_token: tokenRecien(), refresh_token: "r" });
+      logout();
+      expect(Object.keys(almacen)).toEqual([]);
+    });
   });
 
   it("después de logout() ya no hay sesión", () => {
