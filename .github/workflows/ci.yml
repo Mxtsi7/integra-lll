@@ -67,6 +67,28 @@ jobs:
       - name: Pruebas
         run: pytest -v
 
+  # ── Código compartido: shared/cifrado ──────────────────────────────
+  # No pertenece a ningún servicio, así que tiene su propio trabajo. Corre
+  # con sqlite en memoria; no necesita Postgres ni variables.
+  shared:
+    name: shared · cifrado
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: shared/requirements-pruebas.txt
+
+      - name: Instalar dependencias
+        run: pip install -r shared/requirements-pruebas.txt
+
+      - name: Pruebas
+        run: pytest shared -v
+
   # ── Frontend: el workspace completo ────────────────────────────────
   frontend:
     name: frontend · typecheck, pruebas y build
