@@ -52,9 +52,7 @@ services:
       URL_CONNECTORS: http://connectors:8003
       URL_ANALYTICS: http://analytics:8004
       URL_NOTIFICATIONS: http://notifications:8005
-    # Solo los servicios que hoy arrancan. Los otros tres se agregan
-    # cuando tengan su manage.py; mientras, el gateway responde 502 por ellos.
-    depends_on: [auth, subscriptions]
+    depends_on: [auth, subscriptions, connectors, analytics, notifications]
     volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
 
   # ─── Servicios de dominio ───────────────────────────────────────
@@ -127,6 +125,7 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: connectors
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8003"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -149,6 +148,7 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: analytics
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8004"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -160,6 +160,7 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: notifications
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8005"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
