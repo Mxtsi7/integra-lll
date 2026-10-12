@@ -4,40 +4,6 @@ from django.db import transaction
 from .models import User, Organizacion
 
 
-=======
-from rest_framework.exceptions import ErrorDetail
-from django.db import transaction
-from .models import User, Organizacion
-from .validators import MENSAJE_POLITICA_CONTRASENA, validador_contrasena
-
-
-def campo_contrasena() -> serializers.CharField:
-    """Campo DRF con la política RF-01.1.
-
-    Fija ``write_only``, ``trim_whitespace=False``, ``style`` password,
-    el validador central y el mensaje único (también para campo omitido
-    o vacío). Sin parámetros: todos los flujos deben usar exactamente
-    este campo para no divergir.
-    """
-    return serializers.CharField(
-        write_only=True,
-        trim_whitespace=False,
-        style={"input_type": "password"},
-        validators=[validador_contrasena],
-        error_messages={
-            "blank": MENSAJE_POLITICA_CONTRASENA,
-            "required": MENSAJE_POLITICA_CONTRASENA,
-        },
-    )
-
-
-def _fijar_contrasena(user: User, nueva: str) -> User:
-    """Única vía de persistencia de claves: hashea y guarda solo el hash."""
-    user.set_password(nueva)
-    user.save(update_fields=["password"])
-    return user
-
->>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
 
 class MiembroSerializer(serializers.ModelSerializer):
     """Miembro activo de una organización (respuesta de GET /api/organizacion/)."""
@@ -50,13 +16,6 @@ class MiembroSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-<<<<<<< HEAD
-=======
-    # Declarado explícito (no extra_kwargs) para fijar trim_whitespace=False,
-    # style password y el validador centralizado en un solo lugar.
-    password = campo_contrasena()
-
->>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
     class Meta:
         model = User
         fields = ("id", "email", "nombre", "password")
@@ -122,115 +81,8 @@ class RegisterSerializer(UserSerializer):
             )
 
 
-<<<<<<< HEAD
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
-=======
-class PasswordResetConfirmSerializer(serializers.Serializer):
-    """Fija la nueva contraseña en un flujo de recuperación (RF-01.4).
-
-    Estado MX-30: preparado para integración futura. Hoy no existe
-    vista ni ruta de recuperación en este servicio, por lo que este
-    serializer no está cableado a ningún endpoint.
-
-    Precondiciones del futuro llamador: debe verificar ANTES de usarlo
-    la identidad del solicitante y el enlace (expiración 60 min, un solo
-    uso, TC-61), y entregar el usuario verificado como ``instance``.
-    Este serializer solo aplica la política RF-01.1 al valor recibido
-    y lo guarda hasheado; no valida tokens.
-
-    Usa el ciclo de vida estándar de DRF: ``update()`` persiste y el
-    ``save()`` heredado aporta sus precondiciones (``is_valid()`` previo
-    y sin errores). No sobrescribir ``save()`` es lo que garantiza que
-    ninguna llamada inválida llegue a ``set_password()``.
-
-    Uso::
-
-        s = PasswordResetConfirmSerializer(usuario, data={"new_password": "..."})
-        s.is_valid(raise_exception=True)
-        s.save()  # -> user.set_password(...) + save; devuelve el usuario
-    """
-
-    new_password = campo_contrasena()
-
-    def update(self, instance, validated_data):
-        return _fijar_contrasena(instance, validated_data["new_password"])
-
-
-class PasswordChangeSerializer(serializers.Serializer):
-    """Cambio de contraseña con usuario autenticado (RF-01.5, TC-64).
-
-    Estado MX-30: preparado para integración futura. Hoy no existe
-    vista ni ruta de cambio en este servicio, por lo que este serializer
-    no está cableado a ningún endpoint.
-
-    Precondición del futuro llamador: entregar el usuario autenticado
-    como ``instance``. La clave actual (``old_password``) solo se verifica
-    con ``check_password`` contra ese mismo usuario y no se le aplica la
-    política de composición; la nueva (``new_password``) sí debe cumplir
-    RF-01.1. Como validación y persistencia operan sobre ``instance``, el
-    usuario modificado es siempre el que se verificó.
-
-    ``old_password`` y ``new_password`` son obligatorios también cuando
-    ``partial=True``: un cambio sin ``old_password`` omitiría la
-    verificación de identidad (TC-65).
-
-    Usa el ciclo de vida estándar de DRF: ``update()`` persiste y el
-    ``save()`` heredado aporta sus precondiciones (``is_valid()`` previo
-    y sin errores). No sobrescribir ``save()`` es lo que garantiza que
-    ninguna llamada inválida llegue a ``set_password()``.
-
-    Uso::
-
-        s = PasswordChangeSerializer(
-            request.user,
-            data={"old_password": "...", "new_password": "Nueva12345"},
-        )
-        s.is_valid(raise_exception=True)
-        s.save()  # verifica la actual, hashea la nueva; devuelve el usuario
-    """
-
-    old_password = serializers.CharField(
-        write_only=True,
-        trim_whitespace=False,
-        style={"input_type": "password"},
-    )
-    new_password = campo_contrasena()
-
-    def validate_old_password(self, value):
-        user = self.instance
-        if user is None or not user.check_password(value):
-            raise serializers.ValidationError("La contraseña actual no es correcta.")
-        return value
-
-    def validate(self, attrs):
-        # `validate_<campo>` no se ejecuta para campos omitidos con
-        # partial=True; exigir ambos aquí impide cambiar la clave sin
-        # verificar la actual. Mismo mensaje y código que con campo omitido
-        # sin partial: nada nuevo que traducir en los clientes.
-        errores = {}
-        if "old_password" not in attrs:
-            errores["old_password"] = ErrorDetail(
-                self.fields["old_password"].error_messages["required"],
-                code="required",
-            )
-        if "new_password" not in attrs:
-            errores["new_password"] = ErrorDetail(
-                MENSAJE_POLITICA_CONTRASENA, code="required"
-            )
-        if errores:
-            raise serializers.ValidationError(errores)
-        return attrs
-
-    def update(self, instance, validated_data):
-        return _fijar_contrasena(instance, validated_data["new_password"])
-
-
-class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    # Login NO aplica la política: solo autentica. Un mensaje genérico
-    # evita revelar si falló el correo o la clave (TC-02).
->>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
     password = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate_email(self, value):
