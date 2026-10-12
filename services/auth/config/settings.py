@@ -35,6 +35,16 @@ INSTALLED_APPS = [
 
 AUTH_USER_MODEL = "app.User"
 
+<<<<<<< HEAD
+=======
+# Política RF-01.1 centralizada (MX-30): mismo validador que usan los
+# serializers (app/validators.py). Cubre createsuperuser, UserCreationForm
+# y validate_password(); los endpoints la aplican vía DRF validators.
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "app.validators.ValidadorPoliticaContrasena"},
+]
+
+>>>>>>> 5ab9f278f2c6f99f46958fc53ecf24ffdbb798f2
 # Iteraciones de PBKDF2 para las contraseñas. Por defecto, las de Django; el
 # cluster las baja en su ConfigMap porque ahí un hash tarda 15 s y el login
 # da 504 (ver app/hashers.py).
