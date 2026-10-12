@@ -88,6 +88,31 @@
   font-size: 12px;
 }
 
+/* Va debajo de la tarjeta del usuario; .usuario ya tiene margin-top:auto,
+   así que ambos quedan pegados al fondo del sidebar. */
+.cerrarSesion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: -16px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--oag-navy-soft);
+  border-radius: var(--oag-radius-sm);
+  color: var(--oag-navy-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cerrarSesion:hover,
+.cerrarSesion:focus-visible {
+  background: var(--oag-navy-soft);
+  color: #ffffff;
+}
+
 @media (max-width: 900px) {
   .sidebar {
     min-height: auto;
@@ -106,5 +131,9 @@
   .usuario {
     margin-top: 0;
     margin-left: auto;
+  }
+  .cerrarSesion {
+    width: auto;
+    margin-top: 0;
   }
 }

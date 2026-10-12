@@ -1,14 +1,18 @@
 import { useState, FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, Mail, Lock, ShieldCheck } from "lucide-react";
-import { login, guardarTokens, AuthError } from "@ojoalgasto/shared";
+import { login, AuthError } from "@ojoalgasto/shared";
 import { useToast } from "../context/ToastContext";
+import { useAuth } from "../context/AuthContext";
+import { destinoTrasLogin } from "../components/RutaPrivada";
 import { Spinner } from "../components/Spinner";
 import "../styles/Login.css";
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
+  const { iniciarSesion } = useAuth();
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,8 +26,12 @@ export default function Login() {
     setLoading(true);
     try {
       const { access_token, refresh_token } = await login({ correo, password });
-      guardarTokens({ access_token, refresh_token });
-      navigate("/dashboard");
+      // Antes se llamaba guardarTokens() directo. Ahora pasa por el
+      // AuthContext para que la app sepa al instante que hay sesión
+      // (si no, <RutaPrivada> seguiría viendo "anonimo" y devolvería al login).
+      iniciarSesion({ access_token, refresh_token });
+      // Vuelve a la página privada que se quiso abrir sin sesión, o al panel.
+      navigate(destinoTrasLogin(location), { replace: true });
     } catch (err) {
       // `err` llega como `unknown` con TS estricto — hay que angostarlo
       // antes de leer .message.

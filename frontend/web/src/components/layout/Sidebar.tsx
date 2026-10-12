@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
 import styles from './Sidebar.module.css';
 
 const ITEMS_NAV = [
@@ -14,9 +15,10 @@ const ITEMS_NAV = [
 interface SidebarProps {
   nombreUsuario: string;
   plan: string;
+  alCerrarSesion: () => void;
 }
 
-export function Sidebar({ nombreUsuario, plan }: SidebarProps) {
+export function Sidebar({ nombreUsuario, plan, alCerrarSesion }: SidebarProps) {
   return (
     <aside className={styles.sidebar}>
       <NavLink to="/home" className={styles.logo}>
@@ -49,6 +51,11 @@ export function Sidebar({ nombreUsuario, plan }: SidebarProps) {
         <p className={styles.usuarioNombre}>{nombreUsuario}</p>
         <p className={styles.usuarioPlan}>{plan}</p>
       </NavLink>
+
+      <button type="button" className={styles.cerrarSesion} onClick={alCerrarSesion}>
+        <LogOut size={16} aria-hidden="true" />
+        Cerrar sesión
+      </button>
     </aside>
   );
 }
