@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from "react";
-import { configurarManejador401, ErrorDeApi, getUsuarioActual, guardarTokens, haySesionValida, logout, obtenerAccessToken, type Usuario} from "@ojoalgasto/shared";
+import { configurarManejador401, ErrorDeApi, getUsuarioActual, guardarTokens, haySesionValida, logout, obtenerAccessToken, revocarSesion, type Usuario} from "@ojoalgasto/shared";
 import { useToast } from "./ToastContext";
 
 // Las pantallas nunca leen localStorage: preguntan acá. Los tokens siguen
@@ -26,8 +26,12 @@ type ApiAuth = {
    * si lo que llegó no es un JWT vigente (y no guarda nada).
    */
   iniciarSesion: (tokens: Tokens) => void;
-  /** Borra los tokens y deja la sesión como anónima. */
-  cerrarSesion: () => void;
+  /**
+   * Pide al backend que revoque la sesión, borra los tokens locales y deja
+   * la sesión como anónima. El logout local ocurre SIEMPRE, aunque la
+   * revocación falle; `revocada` dice si el servidor la confirmó.
+   */
+  cerrarSesion: () => Promise<{ revocada: boolean }>;
   /** Si el token venció mientras la pestaña estaba abierta, cierra la sesión. */
   verificarSesion: () => void;
 };
@@ -42,6 +46,19 @@ export class TokenInvalidoError extends Error {
 const AuthContext = createContext<ApiAuth | null>(null);
 
 const MENSAJE_SESION_EXPIRADA = "Tu sesión expiró. Inicia sesión de nuevo.";
+
+// Esperas entre reintentos de /usuarios/me/ cuando falla por algo temporal
+// (backoff exponencial). Después del último se deja de insistir hasta que
+// el navegador avise que volvió la conexión (evento `online`).
+export const ESPERAS_REINTENTO_MS = [2_000, 4_000, 8_000, 16_000, 30_000];
+
+/** Fallas en las que tiene sentido reintentar: red, timeout, sobrecarga o 5xx. */
+function esErrorTemporal(err: unknown): boolean {
+  if (err instanceof ErrorDeApi) {
+    return err.status >= 500 || err.status === 408 || err.status === 429;
+  }
+  return err instanceof TypeError; // fetch() sin red o servidor caído
+}
 
 function estadoInicial(): EstadoSesion {
   return haySesionValida() ? { tipo: "verificando" } : { tipo: "anonimo" };
@@ -77,21 +94,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const cargarUsuario = useCallback(async () => {
     const id = ++ultimaPeticion.current;
     tokenConocido.current = obtenerAccessToken();
-    try {
-      const usuario = await getUsuarioActual();
-      if (id !== ultimaPeticion.current || estadoRef.current.tipo === "anonimo") return;
-      cambiarEstado({ tipo: "autenticado", usuario });
-    } catch (err: unknown) {
-      if (id !== ultimaPeticion.current || estadoRef.current.tipo === "anonimo") return;
-      if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
-        // 401: el gateway rechazó el token. 404: el usuario del token ya no
-        // existe. En ambos casos la sesión no sirve.
-        logout();
-        cambiarEstado({ tipo: "anonimo" });
-      } else {
+    // La petición sigue contando mientras nadie haya lanzado otra (ni
+    // cerrado sesión): el mismo número sirve para cortar los reintentos.
+    const vigente = () => id === ultimaPeticion.current && estadoRef.current.tipo !== "anonimo";
+
+    for (let intento = 0; ; intento++) {
+      try {
+        const usuario = await getUsuarioActual();
+        if (vigente()) cambiarEstado({ tipo: "autenticado", usuario });
+        return;
+      } catch (err: unknown) {
+        if (!vigente()) return;
+        if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
+          // 401: el gateway rechazó el token. 404: el usuario del token ya no
+          // existe. En ambos casos la sesión no sirve.
+          logout();
+          cambiarEstado({ tipo: "anonimo" });
+          return;
+        }
         // Red caída, 500, etc.: el token sigue siendo válido, así que no
-        // echamos al usuario; solo nos quedamos sin sus datos de perfil.
-        cambiarEstado({ tipo: "autenticado", usuario: null });
+        // echamos al usuario; seguimos dentro sin sus datos de perfil…
+        const actual = estadoRef.current;
+        if (actual.tipo !== "autenticado" || actual.usuario !== null) {
+          cambiarEstado({ tipo: "autenticado", usuario: null });
+        }
+        // …y se reintenta solo, sin pedir un nuevo login (revisión CH-02).
+        // Un 403 u otro 4xx no se arregla reintentando: ahí se para.
+        if (!esErrorTemporal(err) || intento >= ESPERAS_REINTENTO_MS.length) return;
+        await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento]));
+        if (!vigente()) return;
       }
     }
   }, [cambiarEstado]);
@@ -149,6 +180,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", alCambiarStorage);
   }, [cargarUsuario, cambiarEstado, quedarAnonimo]);
 
+  // Si se agotaron los reintentos sin red, se vuelve a probar apenas el
+  // navegador avisa que hay conexión, también sin pedir login.
+  useEffect(() => {
+    function alVolverLaConexion() {
+      const actual = estadoRef.current;
+      if (actual.tipo === "autenticado" && actual.usuario === null && haySesionValida()) {
+        void cargarUsuario();
+      }
+    }
+    window.addEventListener("online", alVolverLaConexion);
+    return () => window.removeEventListener("online", alVolverLaConexion);
+  }, [cargarUsuario]);
+
+  // Al desmontar se invalida la petición en curso: corta los reintentos
+  // que estén esperando su turno.
+  useEffect(() => {
+    const peticiones = ultimaPeticion;
+    return () => {
+      peticiones.current++;
+    };
+  }, []);
+
   const iniciarSesion = useCallback(
     (tokens: Tokens) => {
       guardarTokens(tokens);
@@ -165,9 +218,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [cargarUsuario, cambiarEstado],
   );
 
-  const cerrarSesion = useCallback(() => {
+  const cerrarSesion = useCallback(async () => {
+    // Primero se revoca en el backend (necesita los tokens) y después se
+    // borran los locales. Si la revocación falla igual se cierra la sesión
+    // en este equipo: quien aprieta "Cerrar sesión" (p. ej. en un PC
+    // compartido) tiene que quedar fuera sí o sí. Quien llama avisa al
+    // usuario si `revocada` es false (revisión CH-03, depende de MX-29).
+    const revocada = await revocarSesion();
     logout();
     quedarAnonimo();
+    return { revocada };
   }, [quedarAnonimo]);
 
   const verificarSesion = useCallback(() => {

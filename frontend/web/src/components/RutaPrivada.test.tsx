@@ -10,6 +10,7 @@ import {
   hayTokenGuardado,
   login,
   logout,
+  revocarSesion,
   type Usuario,
 } from "@ojoalgasto/shared";
 import { ToastProvider } from "../context/ToastContext";
@@ -22,11 +23,12 @@ import Login from "../pages/Login";
 // del JWT son las reales de shared (usan el localStorage de jsdom).
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getUsuarioActual: vi.fn(), login: vi.fn() };
+  return { ...real, getUsuarioActual: vi.fn(), login: vi.fn(), revocarSesion: vi.fn() };
 });
 
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const loginMock = vi.mocked(login);
+const revocarSesionMock = vi.mocked(revocarSesion);
 
 const USUARIO: Usuario = {
   id: "1",
@@ -110,10 +112,13 @@ beforeEach(() => {
   localStorage.clear();
   getUsuarioActualMock.mockReset();
   loginMock.mockReset();
+  revocarSesionMock.mockReset();
+  revocarSesionMock.mockResolvedValue(true);
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("Protección de rutas privadas", () => {
@@ -340,5 +345,152 @@ describe("Respuestas que llegan tarde y cambios de cuenta", () => {
     expect(ubicacion()).toBe("/dashboard");
     expect(hayTokenGuardado()).toBe(true);
     expect(screen.getByText("Andrea")).toBeInTheDocument();
+  });
+});
+
+describe("Cierre de sesión con revocación en el backend (CH-03)", () => {
+  it("revoca en el backend ANTES de borrar los tokens locales", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    getUsuarioActualMock.mockResolvedValue(USUARIO);
+    let habiaTokensAlRevocar = false;
+    revocarSesionMock.mockImplementation(async () => {
+      habiaTokensAlRevocar = hayTokenGuardado(); // el backend necesita el refresh token
+      return true;
+    });
+    montar("/dashboard");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cerrar sesión" }));
+
+    await waitFor(() => expect(ubicacion()).toBe("/login"));
+    expect(revocarSesionMock).toHaveBeenCalledTimes(1);
+    expect(habiaTokensAlRevocar).toBe(true);
+    expect(hayTokenGuardado()).toBe(false);
+    expect(screen.getByText("Cerraste sesión.")).toBeInTheDocument();
+  });
+
+  it("si la revocación falla, igual cierra la sesión local y avisa el error", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    getUsuarioActualMock.mockResolvedValue(USUARIO);
+    revocarSesionMock.mockResolvedValue(false);
+    montar("/dashboard");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cerrar sesión" }));
+
+    await waitFor(() => expect(ubicacion()).toBe("/login"));
+    expect(hayTokenGuardado()).toBe(false);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Cerraste sesión en este equipo, pero no pudimos confirmarlo con el servidor.",
+    );
+    expect(screen.queryByText("Cerraste sesión.")).not.toBeInTheDocument();
+  });
+
+  it("mientras revoca, el botón queda deshabilitado y un doble clic no revoca dos veces", async () => {
+    guardarSesion(Date.now() + 30 * 60_000);
+    getUsuarioActualMock.mockResolvedValue(USUARIO);
+    const revocacion = diferida<boolean>();
+    revocarSesionMock.mockReturnValue(revocacion.promesa);
+    montar("/dashboard");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cerrar sesión" }));
+    const boton = screen.getByRole("button", { name: /Cerrando sesión/ });
+    expect(boton).toBeDisabled();
+    fireEvent.click(boton);
+    expect(ubicacion()).toBe("/dashboard"); // sigue dentro hasta que responda
+
+    await act(async () => revocacion.resolver(true));
+
+    await waitFor(() => expect(ubicacion()).toBe("/login"));
+    expect(revocarSesionMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Reintento de /usuarios/me/ ante errores temporales (CH-02)", () => {
+  // Con timers falsos se controla el paso del tiempo; por eso estos tests no
+  // usan waitFor/findBy (que esperan con timers) y avanzan el reloj a mano.
+  const avanzar = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    guardarSesion(Date.now() + 30 * 60_000);
+  });
+
+  it("si falla la red, reintenta solo a los 2 s y recupera el usuario sin pedir login", async () => {
+    getUsuarioActualMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(USUARIO);
+    montar("/dashboard");
+    await avanzar(0);
+
+    // Sigue dentro, aún sin los datos del usuario.
+    expect(screen.getByText("contenido privado")).toBeInTheDocument();
+    expect(screen.getByText("Usuario")).toBeInTheDocument();
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+
+    await avanzar(1_999);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+    await avanzar(1);
+
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Christopher")).toBeInTheDocument();
+    expect(ubicacion()).toBe("/dashboard");
+    expect(hayTokenGuardado()).toBe(true);
+  });
+
+  it("con 500 sigue un backoff exponencial (2 s, luego 4 s)", async () => {
+    getUsuarioActualMock
+      .mockRejectedValueOnce(new ErrorDeApi("Error interno", 500))
+      .mockRejectedValueOnce(new ErrorDeApi("Error interno", 503))
+      .mockResolvedValueOnce(USUARIO);
+    montar("/dashboard");
+    await avanzar(2_000);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(2);
+
+    await avanzar(3_999);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(2);
+    await avanzar(1);
+
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("Christopher")).toBeInTheDocument();
+  });
+
+  it("tras 5 reintentos deja de insistir y vuelve a probar cuando vuelve la conexión", async () => {
+    getUsuarioActualMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    montar("/dashboard");
+    await avanzar(2_000 + 4_000 + 8_000 + 16_000 + 30_000);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(6); // 1 intento + 5 reintentos
+
+    await avanzar(120_000);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(6);
+
+    getUsuarioActualMock.mockResolvedValue(USUARIO);
+    act(() => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await avanzar(0);
+
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(7);
+    expect(screen.getByText("Christopher")).toBeInTheDocument();
+  });
+
+  it("un 403 no se reintenta (reintentar no lo arregla), pero tampoco echa al usuario", async () => {
+    getUsuarioActualMock.mockRejectedValue(new ErrorDeApi("Sin permiso", 403));
+    montar("/dashboard");
+    await avanzar(60_000);
+
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("contenido privado")).toBeInTheDocument();
+  });
+
+  it("cerrar sesión corta los reintentos pendientes", async () => {
+    getUsuarioActualMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    montar("/dashboard");
+    await avanzar(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    await avanzar(0);
+    expect(ubicacion()).toBe("/login");
+
+    await avanzar(60_000);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
   });
 });

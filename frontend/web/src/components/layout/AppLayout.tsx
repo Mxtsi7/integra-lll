@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
@@ -39,18 +39,35 @@ export function AppLayout({
       : 'Plan Gratuito'
     : PLAN_PLACEHOLDER;
 
-  function manejarCerrarSesion() {
-    // logout() de shared borra los tokens; el contexto pasa a "anonimo".
-    // No hay endpoint de logout en el backend (los JWT no se invalidan en
-    // el servidor), así que cerrar sesión es borrar los tokens locales.
-    cerrarSesion();
-    toast.info('Cerraste sesión.');
+  // Mientras el backend revoca la sesión el botón queda deshabilitado, para
+  // que un doble clic no mande dos revocaciones.
+  const [cerrandoSesion, setCerrandoSesion] = useState(false);
+
+  async function manejarCerrarSesion() {
+    if (cerrandoSesion) return;
+    setCerrandoSesion(true);
+    // cerrarSesion() revoca en el backend y SIEMPRE borra los tokens locales.
+    // Antes solo se borraban los locales; la revisión de la PR #57 (CH-03)
+    // pidió revocar también en el servidor y avisar si eso falla.
+    const { revocada } = await cerrarSesion();
+    if (revocada) {
+      toast.info('Cerraste sesión.');
+    } else {
+      toast.error(
+        'Cerraste sesión en este equipo, pero no pudimos confirmarlo con el servidor.',
+      );
+    }
     navigate('/login', { replace: true });
   }
 
   return (
     <div className={styles.app}>
-      <Sidebar nombreUsuario={nombreUsuario} plan={plan} alCerrarSesion={manejarCerrarSesion} />
+      <Sidebar
+        nombreUsuario={nombreUsuario}
+        plan={plan}
+        alCerrarSesion={manejarCerrarSesion}
+        cerrandoSesion={cerrandoSesion}
+      />
 
       <div className={styles.columna}>
         <div className={styles.contenido}>

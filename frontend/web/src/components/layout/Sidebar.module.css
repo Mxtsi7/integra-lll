@@ -107,10 +107,15 @@
   cursor: pointer;
 }
 
-.cerrarSesion:hover,
+.cerrarSesion:hover:not(:disabled),
 .cerrarSesion:focus-visible {
   background: var(--oag-navy-soft);
   color: #ffffff;
+}
+
+.cerrarSesion:disabled {
+  cursor: progress;
+  opacity: 0.7;
 }
 
 @media (max-width: 900px) {

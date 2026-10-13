@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   configurarTokenStorage,
+  configureAuthApi,
   guardarTokens,
   haySesionValida,
   logout,
+  obtenerAccessToken,
+  revocarSesion,
   tokenExpirado,
 } from "./auth";
 
@@ -129,5 +132,78 @@ describe("haySesionValida", () => {
     });
     logout();
     expect(haySesionValida(AHORA)).toBe(false);
+  });
+});
+
+describe("revocarSesion (logout en el backend, MX-29)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    configureAuthApi({ baseUrl: "http://api.test/api" });
+    guardarTokens({ access_token: "acceso", refresh_token: "refresco" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const respuesta = (status: number) => new Response(null, { status });
+
+  it("manda el refresh token a POST /auth/logout/ con el access token en Authorization", async () => {
+    fetchMock.mockResolvedValue(respuesta(205));
+
+    expect(await revocarSesion()).toBe(true);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/api/auth/logout/");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: "refresco" });
+    expect(init.headers.Authorization).toBe("Bearer acceso");
+  });
+
+  it("no borra los tokens locales (eso lo hace logout() después)", async () => {
+    fetchMock.mockResolvedValue(respuesta(200));
+    await revocarSesion();
+    expect(obtenerAccessToken()).toBe("acceso");
+  });
+
+  it("un 401 cuenta como revocada: el token ya no valía", async () => {
+    fetchMock.mockResolvedValue(respuesta(401));
+    expect(await revocarSesion()).toBe(true);
+  });
+
+  it.each([500, 503, 404])("con %i no se pudo confirmar (devuelve false, no lanza)", async (status) => {
+    fetchMock.mockResolvedValue(respuesta(status));
+    expect(await revocarSesion()).toBe(false);
+  });
+
+  it("sin red devuelve false, no lanza", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    expect(await revocarSesion()).toBe(false);
+  });
+
+  it("si el servidor no responde, corta a los 5 s y devuelve false", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_res, rej) => {
+          init.signal?.addEventListener("abort", () =>
+            rej(new DOMException("Abortado", "AbortError")),
+          );
+        }),
+    );
+
+    const resultado = revocarSesion();
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(await resultado).toBe(false);
+  });
+
+  it("sin sesión guardada no llama al backend", async () => {
+    logout();
+    expect(await revocarSesion()).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

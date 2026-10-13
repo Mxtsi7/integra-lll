@@ -16,7 +16,7 @@ Rutas relativas a `frontend/`.
 |---|---|---|
 | 1 | [web/src/App.tsx](web/src/App.tsx) | Agrupa las rutas en privadas e invitados |
 | 1 | [web/src/components/RutaPrivada.tsx](web/src/components/RutaPrivada.tsx) | `RutaPrivada` (bloquea) y `SoloInvitados` (login/registro) |
-| 1 y 2 | [shared/src/auth.ts](shared/src/auth.ts) | `haySesionValida()`: ¿hay token y no está vencido? |
+| 1, 2 y 3 | [shared/src/auth.ts](shared/src/auth.ts) | `haySesionValida()` (¿token vigente?) y `revocarSesion()` (logout en el backend) |
 | 2 | [web/src/context/AuthContext.tsx](web/src/context/AuthContext.tsx) | Estado de la sesión, recarga, 401 y pestañas |
 | 2 | [shared/src/api/cliente.ts](shared/src/api/cliente.ts) | Un 401 de un token viejo no cierra la sesión nueva |
 | 2 | [web/src/styles/RutaPrivada.css](web/src/styles/RutaPrivada.css) | Pantalla "Verificando tu sesión" |
@@ -136,11 +136,27 @@ try {
 |---|---|
 | 200 | Entras y el sidebar muestra tu nombre y plan reales |
 | 401 / 404 | Se borra la sesión y vas a `/login` |
-| Error de red / 500 | Sigues dentro: el problema es del servidor, no de tu sesión |
+| Error de red / 5xx | Sigues dentro y **se reintenta solo** hasta recuperar tus datos |
+| 403 u otro 4xx | Sigues dentro, sin reintentar (reintentar no lo arregla) |
 
 Mientras espera la respuesta se muestra el spinner "Verificando tu sesión", así no aparece por un
 instante ni el login ni la página equivocada. El `id` / `ultimaPeticion` hace que solo cuente la última
 petición: una respuesta vieja que llega tarde se ignora.
+
+**Reintento sin pedir login (revisión CH-02).** Si `/usuarios/me/` falla por algo temporal (sin red,
+timeout, 5xx), `cargarUsuario()` vuelve a intentar con esperas crecientes:
+
+```tsx
+export const ESPERAS_REINTENTO_MS = [2_000, 4_000, 8_000, 16_000, 30_000];
+
+// dentro del catch de cargarUsuario():
+if (!esErrorTemporal(err) || intento >= ESPERAS_REINTENTO_MS.length) return;
+await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento]));
+if (!vigente()) return;   // si cerraste sesión o hubo otra petición, se corta
+```
+
+Tras 5 reintentos (≈1 min) deja de insistir, y vuelve a probar apenas el navegador avisa que hay
+conexión (evento `online`). Nunca te pide volver a iniciar sesión por esto.
 
 **Token vencido mientras usas la app (401).** Antes `main.tsx` hacía
 `window.location.href = "/login"`, que recargaba toda la app. Ahora lo maneja el contexto:
@@ -171,26 +187,55 @@ también salen, y si en otra pestaña entra otra cuenta, esta recarga el usuario
 
 El botón está en `Sidebar.tsx`, así que aparece en todas las páginas privadas:
 
-```tsx
-<button type="button" className={styles.cerrarSesion} onClick={alCerrarSesion}>
-  <LogOut size={16} aria-hidden="true" />
-  Cerrar sesión
-</button>
-```
-
-`AppLayout.tsx` le pasa la función que hace el trabajo:
+Mientras el backend responde, el botón se deshabilita y dice "Cerrando sesión…" (un doble clic no
+manda dos revocaciones). `AppLayout.tsx` le pasa la función que hace el trabajo:
 
 ```tsx
-function manejarCerrarSesion() {
-  cerrarSesion();                          // borra los tokens y pasa a "anonimo"
-  toast.info('Cerraste sesión.');
-  navigate('/login', { replace: true });   // "atrás" no vuelve al panel
+async function manejarCerrarSesion() {
+  if (cerrandoSesion) return;
+  setCerrandoSesion(true);
+  const { revocada } = await cerrarSesion();   // revoca en el backend y borra los tokens
+  if (revocada) {
+    toast.info('Cerraste sesión.');
+  } else {
+    toast.error('Cerraste sesión en este equipo, pero no pudimos confirmarlo con el servidor.');
+  }
+  navigate('/login', { replace: true });       // "atrás" no vuelve al panel
 }
 ```
 
-El backend no tiene endpoint de logout, así que cerrar sesión es borrar los tokens locales con
-`logout()` de `shared/src/auth.ts`. Después de eso, escribir `/dashboard` a mano o recargar te devuelve
-a `/login`, y las otras pestañas también se cierran.
+**Revocación en el backend (revisión CH-03).** Borrar los tokens locales no invalida el refresh token
+en el servidor (dura 7 días). Por eso `cerrarSesion()` primero llama a `revocarSesion()` de
+`shared/src/auth.ts` y recién después borra los tokens:
+
+```ts
+// shared/src/auth.ts — POST /api/auth/logout/  { refresh_token }
+const res = await fetch(`${apiUrl}${endpoints.logout}`, {
+  method: "POST",
+  headers,                                       // Authorization: Bearer <access>
+  body: JSON.stringify({ refresh_token: refresh }),
+  signal: controlador.signal,                    // se corta a los 5 s
+});
+return res.ok || res.status === 401;             // 401: el token ya no valía
+```
+
+| Respuesta del backend | Resultado |
+|---|---|
+| 2xx o 401 | Sesión revocada → toast "Cerraste sesión." |
+| Sin red, timeout (5 s), 5xx, 404 | Igual se cierra la sesión en este equipo, y se avisa con un error que el servidor no lo confirmó |
+
+La sesión local se cierra **siempre**: quien aprieta "Cerrar sesión" (por ejemplo en un PC compartido)
+tiene que quedar fuera aunque el servidor falle. `revocarSesion()` usa `fetch` directo y no `pedir()`,
+para que un 401 no muestre "Tu sesión expiró".
+
+> **Depende de MX-29 (Maximiliano).** El endpoint `POST /api/auth/logout/` todavía no existe en el
+> backend (el gateway ya enruta `/api/auth/*` a auth). Hasta que MX-29 entre, cada logout mostrará el
+> aviso de "no pudimos confirmarlo". Contrato propuesto: recibe `{ "refresh_token": "…" }`, lo agrega a
+> la blacklist de SimpleJWT y responde 205/200; si el backend usa otra ruta se cambia con
+> `configureAuthApi({ endpoints: { logout: "…" } })` en `main.tsx`.
+
+Después de cerrar sesión, escribir `/dashboard` a mano o recargar te devuelve a `/login`, y las otras
+pestañas también se cierran.
 
 ---
 
@@ -212,12 +257,12 @@ Si el servidor devolviera un token inválido, `iniciarSesion()` lanza un error y
 
 ## Tests
 
-**shared:** 34 ✅ · **web:** 24 ✅
+**shared:** 43 ✅ · **web:** 32 ✅
 
 | Archivo | Tests | Qué cubre |
 |---|---|---|
-| `web/src/components/RutaPrivada.test.tsx` | 18 | Las 3 tareas: redirecciones, recarga, login, logout, pestañas, respuestas tardías |
-| `shared/src/auth.test.ts` | 12 | Token vigente / vencido / inválido y desfase de reloj |
+| `web/src/components/RutaPrivada.test.tsx` | 26 | Las 3 tareas: redirecciones, recarga, reintentos de `/usuarios/me/`, login, logout con revocación, pestañas, respuestas tardías |
+| `shared/src/auth.test.ts` | 21 | Token vigente / vencido / inválido, desfase de reloj y `revocarSesion()` (2xx, 401, 5xx, 404, sin red, timeout) |
 | `shared/src/api/cliente.test.ts` | 7 | Interceptor 401 (+1: un token viejo no borra la sesión nueva) |
 | `web/src/context/ToastContext.test.tsx` | 6 | Avisos (antes el archivo estaba vacío) |
 
@@ -235,7 +280,9 @@ recargar → sigue con sesión y muestra tu nombre; "Cerrar sesión" → `/login
 
 ## Pendientes
 
+- **MX-29:** coordinar con Maximiliano el endpoint `POST /api/auth/logout/` (ver Tarea 3). Con eso la
+  tarea CH-03 queda completa sin cambios en el frontend.
 - **Refresh token:** aún no se usa; al vencer el access token (30 min) se cierra la sesión.
 - **Móvil:** `haySesionValida()` ya está en `shared`; falta integrar la navegación y SecureStore.
-- **Fuera de esta PR:** el merge `2a390ee` en `main` deshizo las PRs #53–#55 y volvió a subir
-  `estudiantes-maximiliano.saez.kubeconfig`; se arregla con una PR propia sobre `main`.
+- **Fuera de esta PR:** el merge `2a390ee` en `main` deshizo las PRs #53–#55 (el `kubeconfig` ya se
+  borró en `91e3030`); restaurarlas corresponde a una PR propia sobre `main`.

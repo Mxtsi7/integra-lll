@@ -10,6 +10,10 @@ let apiUrl = "http://localhost:8000/api";
 let endpoints = {
   login: "/auth/login/",
   register: "/auth/register/",
+  // Revocación de la sesión en el backend (MX-29). Contrato acordado:
+  // POST { refresh_token } → 2xx si quedó revocado. Configurable con
+  // configureAuthApi({ endpoints: { logout } }) si el backend usa otra ruta.
+  logout: "/auth/logout/",
 };
 
 export function configureAuthApi(config: {
@@ -217,4 +221,49 @@ export function tokenExpirado(token: string, ahoraMs: number = Date.now()): bool
 export function haySesionValida(ahoraMs: number = Date.now()): boolean {
   const token = obtenerAccessToken();
   return token !== null && !tokenExpirado(token, ahoraMs + desfaseReloj());
+}
+
+// ── Revocación de la sesión en el backend ─────────────────────────────
+// Borrar los tokens locales no invalida el refresh token: sigue sirviendo
+// en el servidor hasta que vence (7 días). Por eso, al cerrar sesión, se
+// le pide al backend que lo revoque.
+
+// Cerrar sesión no puede quedar colgado si el servidor no responde.
+const TIEMPO_MAX_REVOCACION_MS = 5_000;
+
+/**
+ * Pide al backend que revoque la sesión actual. NO borra los tokens
+ * locales (eso lo hace logout() después) y nunca lanza: el logout local
+ * tiene que ocurrir igual aunque esto falle.
+ *
+ * Devuelve true si el servidor confirmó la revocación (2xx) o si el token
+ * ya no valía (401: no hay sesión que revocar). Devuelve false si no se
+ * pudo confirmar: sin red, timeout, 5xx o un endpoint que aún no existe (404).
+ *
+ * Usa fetch directo y no pedir() a propósito: un 401 acá no debe disparar
+ * el aviso de "Tu sesión expiró".
+ */
+export async function revocarSesion(): Promise<boolean> {
+  const refresh = obtenerRefreshToken();
+  if (!refresh) return true; // no hay sesión guardada que revocar
+
+  const access = obtenerAccessToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (access) headers.Authorization = `Bearer ${access}`;
+
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAX_REVOCACION_MS);
+  try {
+    const res = await fetch(`${apiUrl}${endpoints.logout}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ refresh_token: refresh }),
+      signal: controlador.signal,
+    });
+    return res.ok || res.status === 401;
+  } catch {
+    return false; // sin red, CORS o timeout (AbortError)
+  } finally {
+    clearTimeout(temporizador);
+  }
 }
