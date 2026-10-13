@@ -85,16 +85,3 @@ usaron Rust, la respuesta ya está escrita y fechada.
 4. **Plazos internos 3 días antes del real**
 5. **Las limitaciones se declaran.** Nombrar un sesgo metodológico suma;
    esconderlo, resta
-
----
-
-## Qué está construido y qué no
-
-Los ADR describen lo que se **decidió**. Lo que está efectivamente **desplegado**
-vive en un documento aparte, medido contra el entorno real y con los comandos
-para volver a comprobarlo:
-
-- [`arquitectura/ESTADO-DE-LA-ARQUITECTURA.md`](arquitectura/ESTADO-DE-LA-ARQUITECTURA.md)
-
-Se actualiza en el mismo cambio que mueve la realidad. Si quedó desfasado, está
-roto.

@@ -10,9 +10,6 @@
 credentials.json
 token.json
 service-account*.json
-*.kubeconfig
-kubeconfig
-.kube/
 
 # ─── Python / Django ──────────────────────────────────────────
 __pycache__/
