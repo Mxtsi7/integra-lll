@@ -24,12 +24,7 @@ if [ "${SOLO_APLICAR:-0}" != "1" ]; then
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/auth          -t "$IMAGEN_AUTH" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/subscriptions -t "$IMAGEN_SUBSCRIPTIONS" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=gateway                -t "$IMAGEN_GATEWAY" .
-  # MSYS_NO_PATHCONV=1 es obligatorio en Git Bash (Windows): sin eso convierte
-  # el `/api` en `C:/Program Files/Git/api` y el frontend queda pidiéndole los
-  # datos al PC del usuario. En Linux y WSL la variable se ignora.
-  # El Dockerfile además trae `/api` por omisión y rechaza valores inválidos.
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
-    docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
+  docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
 
   echo "── publicando ──"
   for i in "$IMAGEN_AUTH" "$IMAGEN_SUBSCRIPTIONS" "$IMAGEN_GATEWAY" "$IMAGEN_WEB"; do

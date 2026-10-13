@@ -1,17 +1,6 @@
 # ADR-001 — Arquitectura de microservicios
 
-**Fecha:** 2026-08-21 · **Estado:** aceptada · **Implementación:** parcial
-
-> **Al 2026-10-07 hay tres servicios de los declarados que todavía no existen:**
-> `connectors`, `analytics` y `notifications`. No tienen Deployment ni Service,
-> y sus nombres no resuelven dentro del clúster.
->
-> Sí están corriendo y verificados `gateway`, `auth`, `subscriptions` y `web`,
-> más `postgres` y `redis` como infraestructura.
->
-> La separación en servicios no se pone en duda: los que faltan se difieren al
-> Sprint 2. Detalle y comandos de verificación en
-> [ESTADO-DE-LA-ARQUITECTURA.md](ESTADO-DE-LA-ARQUITECTURA.md).
+**Fecha:** 2026-08-21 · **Estado:** aceptada
 
 ## Contexto
 
