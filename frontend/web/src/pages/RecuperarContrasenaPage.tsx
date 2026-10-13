@@ -15,8 +15,13 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sin handler real (CH-06) la funcionalidad no está disponible: no se simula éxito.
+  const isAvailable = Boolean(onSolicitarRecuperacion);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!onSolicitarRecuperacion) return;
+
     if (!email) {
       setError('Por favor, ingresa tu correo electrónico.');
       return;
@@ -26,12 +31,7 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
     setIsLoading(true);
 
     try {
-      if (onSolicitarRecuperacion) {
-        await onSolicitarRecuperacion(email);
-      } else {
-        // Simulación por defecto hasta integración en CH-06
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+      await onSolicitarRecuperacion(email);
       setIsSubmitted(true);
     } catch (err: any) {
       setError(err?.message || 'Ocurrió un error al procesar la solicitud.');
@@ -62,6 +62,12 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
 
               {error && <div className={styles.error}>{error}</div>}
 
+              {!isAvailable && (
+                <div className={styles.error}>
+                  Esta funcionalidad aún no está disponible.
+                </div>
+              )}
+
               <form onSubmit={handleSubmit}>
                 <div className={styles.field}>
                   <label htmlFor="email">CORREO ELECTRÓNICO</label>
@@ -82,7 +88,7 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
                   </div>
                 </div>
 
-                <button type="submit" className={styles.submit} disabled={isLoading}>
+                <button type="submit" className={styles.submit} disabled={isLoading || !isAvailable}>
                   {isLoading ? 'Enviando...' : 'Enviar instrucciones'}
                 </button>
               </form>

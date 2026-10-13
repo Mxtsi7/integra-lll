@@ -9,6 +9,15 @@ export interface RestablecerContrasenaProps {
 
 type StepState = 'form' | 'success' | 'expired' | 'invalid';
 
+// Validación visual según RF-01.1: mínimo 8 caracteres, al menos una letra y un número.
+// La validación definitiva se mantiene en el backend (CH-07).
+const validarPassword = (value: string): string | null => {
+  if (value.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
+  if (!/\p{L}/u.test(value)) return 'La contraseña debe incluir al menos una letra.';
+  if (!/\d/.test(value)) return 'La contraseña debe incluir al menos un número.';
+  return null;
+};
+
 export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = ({
   onSubmitNewPassword
 }) => {
@@ -21,6 +30,9 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Sin handler real (CH-07) la funcionalidad no está disponible: no se simula éxito.
+  const isAvailable = Boolean(onSubmitNewPassword);
+
   useEffect(() => {
     // Validación inicial de UX: Si no hay token en la URL, se marca como inválido
     if (!token) {
@@ -30,8 +42,11 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres.');
+    if (!onSubmitNewPassword || !token) return;
+
+    const passwordError = validarPassword(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (password !== confirmPassword) {
@@ -43,12 +58,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
     setIsLoading(true);
 
     try {
-      if (onSubmitNewPassword && token) {
-        await onSubmitNewPassword(password, token);
-      } else {
-        // Simulación de respuesta hasta la integración con CH-07
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
+      await onSubmitNewPassword(password, token);
       setStatus('success');
     } catch (err: any) {
       // Manejo de estados de error de token según contrato
@@ -86,6 +96,12 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
 
               {error && <div className={styles.error}>{error}</div>}
 
+              {!isAvailable && (
+                <div className={styles.error}>
+                  Esta funcionalidad aún no está disponible.
+                </div>
+              )}
+
               <form onSubmit={handleSubmit}>
                 <div className={styles.field}>
                   <label htmlFor="password">NUEVA CONTRASEÑA</label>
@@ -100,6 +116,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
                       required
                     />
                   </div>
+                  <small>Mínimo 8 caracteres, con al menos una letra y un número.</small>
                 </div>
 
                 <div className={styles.field}>
@@ -117,7 +134,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
                   </div>
                 </div>
 
-                <button type="submit" className={styles.submit} disabled={isLoading}>
+                <button type="submit" className={styles.submit} disabled={isLoading || !isAvailable}>
                   {isLoading ? 'Guardando...' : 'Cambiar contraseña'}
                 </button>
               </form>
