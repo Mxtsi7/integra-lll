@@ -12,7 +12,10 @@ Uso típico en un modelo::
     class CuentaConectada(ModeloTenant):
         access_token = CampoCifrado(null=True, blank=True)
 
-y en el serializer, para que el token entre pero nunca salga::
+En el serializer no hay que hacer nada: importar este paquete registra
+``CampoCifrado`` en el mapeo de ``ModelSerializer``, así que el token entra
+pero nunca sale, incluso con ``fields = "__all__"``. Declararlo sirve solo
+para afinarlo::
 
     from shared.cifrado import CampoSecretoSerializer
 

@@ -36,9 +36,13 @@ class CuentaConectada(ModeloTenant):
 Se lee y escribe como un texto normal: `cuenta.access_token = "ya29..."`,
 `cuenta.save()`, `cuenta.access_token` devuelve el texto plano.
 
-**Serializer**: los campos cifrados se declaran **siempre explícitos**. Un
-`ModelSerializer` con `fields = "__all__"` devolvería el token descifrado,
-porque para Django ya es texto.
+**Serializer**: protegido por omisión. `CampoCifrado` está registrado en
+`ModelSerializer.serializer_field_mapping`, así que incluso un
+`fields = "__all__"` escrito sin pensar construye un campo `write_only`: el
+secreto entra, nunca sale. No hay que acordarse de nada.
+
+Declararlo explícitamente sigue sirviendo, para ponerle `required`,
+`allow_null` y demás:
 
 ```python
 from shared.cifrado import CampoSecretoSerializer

@@ -10,13 +10,15 @@ serializer" de FE-01 y RN-SEG-001.
         access_token = CampoSecretoSerializer(required=False)
         refresh_token = CampoSecretoSerializer(required=False)
 
-Ojo: un ``ModelSerializer`` con ``fields = "__all__"`` sobre un modelo con
-``CampoCifrado`` **sí devolvería el texto plano**, porque Django ya lo
-descifró. Los campos cifrados se declaran siempre explícitos con este
-serializer, o se dejan fuera de ``fields``.
+Declararlo es opcional: al final de este módulo, ``CampoCifrado`` queda
+registrado en el mapeo de ``ModelSerializer``, así que un
+``fields = "__all__"`` construye este campo por sí solo. Declararlo sirve
+para ponerle ``required``, ``allow_null`` y demás.
 """
 
 from rest_framework import serializers
+
+from .campos import CampoCifrado
 
 
 class CampoSecretoSerializer(serializers.CharField):
@@ -30,3 +32,18 @@ class CampoSecretoSerializer(serializers.CharField):
         # DRF no llama a esto en un campo write_only. Si alguien lo fuerza, que
         # salte acá y no en una respuesta HTTP con el token adentro.
         raise AssertionError("CampoSecretoSerializer nunca se representa en una respuesta")
+
+
+# ── Seguro por omisión ───────────────────────────────────────────────
+# Sin esta línea, un ``ModelSerializer`` con ``fields = "__all__"`` sobre un
+# modelo con ``CampoCifrado`` construye un ``CharField`` común y devuelve el
+# secreto YA DESCIFRADO en la respuesta: Django lo descifró al leerlo de la
+# base, y DRF no tiene forma de saber que era un secreto.
+#
+# ``serializer_field_mapping`` es el diccionario con que ``ModelSerializer``
+# decide qué campo usar para cada campo del modelo. Registrando el nuestro,
+# la protección deja de depender de que alguien se acuerde de declararlo.
+#
+# Se ejecuta al importar ``shared.cifrado``, que es lo que hace cualquiera que
+# use ``CampoCifrado`` en un modelo.
+serializers.ModelSerializer.serializer_field_mapping[CampoCifrado] = CampoSecretoSerializer

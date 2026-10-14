@@ -122,7 +122,8 @@ Las excepciones se lanzan con `from None` para no arrastrar la interna de
 | Descifrar al leer | `campos.py:85-99` | `from_db_value()`; `except` → `log.warning(... self.name)` → `return SECRETO_ILEGIBLE`; si no, `TextoDescifrado(texto, ...)` |
 | `dumpdata` no exporta el texto plano | `campos.py:106` | `value_to_string()` → `"***"` |
 | El token entra pero no sale | `shared/cifrado/serializers.py:22-24` | `class CampoSecretoSerializer(CharField)`, `kwargs["write_only"] = True` |
-| Si alguien lo fuerza, salta acá y no en una respuesta | `serializers.py:29-32` | `to_representation()` → `raise AssertionError` |
+| Si alguien lo fuerza, salta acá y no en una respuesta | `serializers.py` | `to_representation()` → `raise AssertionError` |
+| Protegido aunque nadie declare nada | final de `serializers.py` | `ModelSerializer.serializer_field_mapping[CampoCifrado] = CampoSecretoSerializer`: un `fields = "__all__"` construye el campo `write_only` solo |
 | La rotación | `shared/cifrado/rotacion.py:23-57` | `rotar_claves(queryset, campos)`: `iterator(chunk_size)`, salta `SecretoIlegible`, junta los campos con `cifrado_con_clave_actual == False`, `objeto.save(update_fields=pendientes)`; devuelve `{"revisadas", "rotadas", "ilegibles"}` |
 | La variable en local | `.env.example:48` | `CLAVES_CIFRADO=` con la instrucción para generarla |
 | La variable en el cluster (secret nuevo) | `k8s/desplegar.sh:69` | `--from-literal=CLAVES_CIFRADO="$(openssl rand -base64 32 \| tr '+/' '-_')"` |
@@ -158,7 +159,7 @@ Qué prueba cada archivo, y qué criterio de la tarjeta cubre:
 |---|---|---|
 | `test_cifrador.py:19-123` | 13: ida y vuelta, el cifrado no contiene el texto y cambia cada vez, otra clave falla **sin filtrar nada** (`test_con_otra_clave_no_se_descifra_y_el_error_no_filtra_nada`), dato alterado, texto plano guardado sin cifrar, la primera cifra y todas descifran, sin claves, clave mal formada sin mostrarla, lectura del entorno, caché, solo texto, clave válida, `redactar` | "falla sin filtrar el secreto" |
 | `test_campo.py:29-145` | 10: **la columna no contiene el token** (`test_la_base_no_contiene_el_token_legible`), vuelve el texto plano, `NULL`, no se puede buscar, **una fila con clave perdida no rompe a las demás** y el log no incluye el valor, un ilegible no se sobrescribe, con la vieja en la lista se lee y se marca, cada guardado re-cifra, `dumpdata`, `SecretoIlegible` | "la BD no contiene tokens legibles", "sin inutilizar otras cuentas" |
-| `test_serializer.py:25-64` | 6: entra pero no sale, `write_only` no se puede apagar, no recorta espacios, representar a la fuerza falla, `ModelSerializer` crea y responde sin el token, y el caso **descuidado** con `fields="__all__"` que sí lo expone (documenta el riesgo) | "nunca en respuestas" |
+| `test_serializer.py` | 8: entra pero no sale, `write_only` no se puede apagar, no recorta espacios, representar a la fuerza falla, `ModelSerializer` crea y responde sin el token, **un `fields="__all__"` descuidado tampoco lo expone**, ese mismo descuidado igual deja escribir, y el registro en el mapeo está puesto | "nunca en respuestas" |
 | `test_rotacion.py:18-58` | 3: re-cifra solo lo viejo, dos veces no cambia nada, cuenta las ilegibles y no las pisa | "estrategia de rotación" |
 
 Resultado del 09-10-2026 en Docker:

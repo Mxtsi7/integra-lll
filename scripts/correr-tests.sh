@@ -9,7 +9,7 @@
 #   Si acá sale verde, el PR sale verde.
 #
 # ¿CÓMO SE USA?
-#     ./scripts/correr-tests.sh                 # todo: auth, subscriptions, gateway, frontend
+#     ./scripts/correr-tests.sh                 # todo: auth, subscriptions, gateway, shared, frontend
 #     ./scripts/correr-tests.sh auth            # solo un servicio
 #     ./scripts/correr-tests.sh backend         # los tres servicios Django
 #     ./scripts/correr-tests.sh frontend        # typecheck + vitest
@@ -75,14 +75,14 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     k8s|--k8s|kubernetes|cluster) K8S=1 ;;
     -h|--help|--ayuda|ayuda) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    todo|all) SUITES+=(auth subscriptions gateway frontend) ;;
-    backend)  SUITES+=(auth subscriptions gateway) ;;
-    auth|subscriptions|gateway|frontend) SUITES+=("$1") ;;
-    *) mal "no sé qué es '$1'. Opciones: auth subscriptions gateway frontend backend todo k8s --build"; exit 2 ;;
+    todo|all) SUITES+=(auth subscriptions gateway shared frontend) ;;
+    backend)  SUITES+=(auth subscriptions gateway shared) ;;
+    auth|subscriptions|gateway|shared|frontend) SUITES+=("$1") ;;
+    *) mal "no sé qué es '$1'. Opciones: auth subscriptions gateway shared frontend backend todo k8s --build"; exit 2 ;;
   esac
   shift
 done
-[ ${#SUITES[@]} -gt 0 ] || SUITES=(auth subscriptions gateway frontend)
+[ ${#SUITES[@]} -gt 0 ] || SUITES=(auth subscriptions gateway shared frontend)
 
 # Carpeta y nombre de esquema de cada servicio Django
 dir_de() { case "$1" in gateway) echo gateway ;; *) echo "services/$1" ;; esac; }
@@ -108,10 +108,15 @@ resumen_pytest() {  # $1 = log
 }
 
 # ── Docker / Postgres ───────────────────────────────────────────────────────
+# `shared` corre con sqlite en memoria, igual que en el CI: no necesita
+# Postgres ni cluster. Se excluye junto con `frontend` para no levantar
+# Docker por gusto cuando se pide solo esa suite.
+sin_base() { [ "$1" = frontend ] || [ "$1" = shared ]; }
+
 NECESITA_DOCKER=0
-for s in "${SUITES[@]}"; do [ "$s" != frontend ] && [ "$K8S" = 0 ] && NECESITA_DOCKER=1; done
+for s in "${SUITES[@]}"; do sin_base "$s" || { [ "$K8S" = 0 ] && NECESITA_DOCKER=1; }; done
 NECESITA_K8S=0
-for s in "${SUITES[@]}"; do [ "$s" != frontend ] && [ "$K8S" = 1 ] && NECESITA_K8S=1; done
+for s in "${SUITES[@]}"; do sin_base "$s" || { [ "$K8S" = 1 ] && NECESITA_K8S=1; }; done
 
 apagar_postgres() {
   [ "$NECESITA_DOCKER" = 1 ] && docker rm -f "$PG" >/dev/null 2>&1 || true
@@ -281,10 +286,58 @@ correr_frontend() {
   fi
 }
 
+correr_shared() {
+  # El código de shared/ no pertenece a ningún servicio: corre con el python
+  # de tu PC y sqlite en memoria, igual que el trabajo `shared · cifrado`
+  # del CI. No necesita Docker ni Postgres.
+  local t0 log py p f
+  t0=$(date +%s); log="$LOGS/shared.log"
+  titulo "shared  (código compartido: cifrado)"
+
+  # Se elige el primer python que TENGA las dependencias, no el primero que
+  # exista: en Windows suele haber un `python3` del sistema sin nada instalado
+  # conviviendo con el `python` de un entorno virtual que sí las tiene.
+  local primero=""
+  py=""
+  for candidato in python python3 py; do
+    command -v "$candidato" >/dev/null 2>&1 || continue
+    [ -n "$primero" ] || primero="$candidato"
+    if "$candidato" -c "import pytest, django, rest_framework, cryptography" >/dev/null 2>&1; then
+      py="$candidato"; break
+    fi
+  done
+
+  if [ -z "$primero" ]; then
+    mal "no encuentro python. Instala Python 3.12+ y vuelve a correr."
+    registrar shared error 0 0 "sin python" 0; return 1
+  fi
+  if [ -z "$py" ]; then
+    mal "faltan dependencias de pruebas. Instálalas con:"
+    nota "$primero -m pip install -r shared/requirements-pruebas.txt"
+    registrar shared error 0 0 "faltan dependencias" 0; return 1
+  fi
+
+  cd "$RAIZ" || return 1
+  : > "$log"
+  nota "pytest shared"
+  "$py" -m pytest shared "${PYTEST_ARGS[@]}" 2>&1 | tee -a "$log" \
+    | sed 's/\x1b\[[0-9;]*m//g' | grep -E 'PASSED|FAILED|ERROR|passed|failed|error'
+  read -r p f <<<"$(resumen_pytest "$log")"
+  echo
+  if [ "$f" -eq 0 ] && [ "$p" -gt 0 ]; then
+    ok "shared: $p pruebas pasaron en $(segs $t0) s"
+    registrar shared ok "$p" 0 "sqlite en memoria" "$(segs $t0)"
+  else
+    mal "shared: $f fallaron. Log: $log"
+    registrar shared fallo "$p" "$f" "sqlite en memoria" "$(segs $t0)"
+  fi
+}
+
 # ── Correr ──────────────────────────────────────────────────────────────────
 T_INICIO=$(date +%s)
 for s in "${SUITES[@]}"; do
   if [ "$s" = frontend ]; then correr_frontend
+  elif [ "$s" = shared ]; then correr_shared
   elif [ "$K8S" = 1 ]; then correr_servicio_k8s "$s"
   else correr_servicio "$s"; fi
 done

@@ -3,7 +3,7 @@
 import pytest
 from rest_framework import serializers
 
-from shared.cifrado import CampoSecretoSerializer
+from shared.cifrado import CampoCifrado, CampoSecretoSerializer
 from shared.cifrado.tests.app_prueba.models import CuentaDePrueba
 
 SECRETO = "ya29.token-de-prueba"
@@ -61,13 +61,44 @@ def test_model_serializer_crea_con_el_token_y_responde_sin_el(claves):
 
 
 @pytest.mark.django_db
-def test_un_model_serializer_con_todos_los_campos_si_expone_el_token(claves):
-    """Documenta el riesgo: por eso los campos cifrados se declaran explícitos."""
+def test_un_model_serializer_con_todos_los_campos_no_expone_el_token(claves):
+    """Lo importante: no hace falta declarar nada. Un ``fields = "__all__"``
+    escrito sin pensar tampoco devuelve el secreto, porque ``CampoCifrado``
+    está registrado en el mapeo de ``ModelSerializer``."""
 
     class Descuidado(serializers.ModelSerializer):
         class Meta:
             model = CuentaDePrueba
             fields = "__all__"
 
-    cuenta = CuentaDePrueba.objects.create(nombre="x", token=SECRETO)
-    assert Descuidado(CuentaDePrueba.objects.get(pk=cuenta.pk)).data["token"] == SECRETO
+    cuenta = CuentaDePrueba.objects.create(
+        nombre="x", token=SECRETO, otro_secreto=SECRETO
+    )
+    respuesta = Descuidado(CuentaDePrueba.objects.get(pk=cuenta.pk)).data
+
+    assert "token" not in respuesta
+    assert "otro_secreto" not in respuesta
+    assert SECRETO not in str(respuesta)
+    assert set(respuesta) == {"id", "nombre"}
+
+
+def test_el_campo_cifrado_esta_registrado_en_el_mapeo():
+    """Si alguien borra el registro del final de serializers.py, esto lo caza."""
+    mapeo = serializers.ModelSerializer.serializer_field_mapping
+    assert mapeo.get(CampoCifrado) is CampoSecretoSerializer
+
+
+@pytest.mark.django_db
+def test_un_model_serializer_con_todos_los_campos_igual_deja_escribir(claves):
+    """El campo sigue siendo de escritura: el secreto entra, solo no sale."""
+
+    class Descuidado(serializers.ModelSerializer):
+        class Meta:
+            model = CuentaDePrueba
+            fields = "__all__"
+
+    serializer = Descuidado(data={"nombre": "gmail", "token": SECRETO})
+    assert serializer.is_valid(), serializer.errors
+    cuenta = serializer.save()
+
+    assert CuentaDePrueba.objects.get(pk=cuenta.pk).token == SECRETO
