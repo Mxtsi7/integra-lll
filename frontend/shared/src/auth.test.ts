@@ -137,12 +137,14 @@ describe("haySesionValida", () => {
 
 describe("revocarSesion (logout en el backend, MX-29)", () => {
   const fetchMock = vi.fn();
+  let acceso: string;
 
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     configureAuthApi({ baseUrl: "http://api.test/api" });
-    guardarTokens({ access_token: "acceso", refresh_token: "refresco" });
+    acceso = jwt({ exp: enSegundos(Date.now() + 30 * 60_000) });
+    guardarTokens({ access_token: acceso, refresh_token: "refresco" });
   });
 
   afterEach(() => {
@@ -160,21 +162,32 @@ describe("revocarSesion (logout en el backend, MX-29)", () => {
     expect(url).toBe("http://api.test/api/auth/logout/");
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ refresh_token: "refresco" });
-    expect(init.headers.Authorization).toBe("Bearer acceso");
+    expect(init.headers.Authorization).toBe(`Bearer ${acceso}`);
+  });
+
+  it("con el access token vencido no lo manda en Authorization (solo el refresh en el body)", async () => {
+    guardarTokens({
+      access_token: jwt({ exp: enSegundos(Date.now() - 60_000) }),
+      refresh_token: "refresco",
+    });
+    fetchMock.mockResolvedValue(respuesta(205));
+
+    expect(await revocarSesion()).toBe(true);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers).not.toHaveProperty("Authorization");
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: "refresco" });
   });
 
   it("no borra los tokens locales (eso lo hace logout() después)", async () => {
     fetchMock.mockResolvedValue(respuesta(200));
     await revocarSesion();
-    expect(obtenerAccessToken()).toBe("acceso");
+    expect(obtenerAccessToken()).toBe(acceso);
   });
 
-  it("un 401 cuenta como revocada: el token ya no valía", async () => {
-    fetchMock.mockResolvedValue(respuesta(401));
-    expect(await revocarSesion()).toBe(true);
-  });
-
-  it.each([500, 503, 404])("con %i no se pudo confirmar (devuelve false, no lanza)", async (status) => {
+  // Un 401 no garantiza que el refresh token se haya revocado (revisión de
+  // la PR #57): cuenta como no confirmada, igual que cualquier no-2xx.
+  it.each([401, 403, 500, 503, 404])("con %i la revocación queda no confirmada (false, no lanza)", async (status) => {
     fetchMock.mockResolvedValue(respuesta(status));
     expect(await revocarSesion()).toBe(false);
   });

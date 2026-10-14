@@ -212,17 +212,21 @@ en el servidor (dura 7 días). Por eso `cerrarSesion()` primero llama a `revocar
 // shared/src/auth.ts — POST /api/auth/logout/  { refresh_token }
 const res = await fetch(`${apiUrl}${endpoints.logout}`, {
   method: "POST",
-  headers,                                       // Authorization: Bearer <access>
+  headers,                                       // Authorization solo si el access sigue vigente
   body: JSON.stringify({ refresh_token: refresh }),
   signal: controlador.signal,                    // se corta a los 5 s
 });
-return res.ok || res.status === 401;             // 401: el token ya no valía
+return res.ok;                                   // solo un 2xx confirma la revocación
 ```
 
 | Respuesta del backend | Resultado |
 |---|---|
-| 2xx o 401 | Sesión revocada → toast "Cerraste sesión." |
-| Sin red, timeout (5 s), 5xx, 404 | Igual se cierra la sesión en este equipo, y se avisa con un error que el servidor no lo confirmó |
+| 2xx | Sesión revocada → toast "Cerraste sesión." |
+| 401, 403, 404, 5xx, sin red o timeout (5 s) | Igual se cierra la sesión en este equipo, y se avisa con un error que el servidor no lo confirmó |
+
+Un 401 **no** cuenta como revocada: no garantiza que el refresh token haya quedado invalidado (lo pudo
+provocar, por ejemplo, un access token vencido). Por lo mismo, el access token solo se manda en
+`Authorization` si sigue vigente; la sesión a revocar la identifica el `refresh_token` del body.
 
 La sesión local se cierra **siempre**: quien aprieta "Cerrar sesión" (por ejemplo en un PC compartido)
 tiene que quedar fuera aunque el servidor falle. `revocarSesion()` usa `fetch` directo y no `pedir()`,
@@ -231,7 +235,9 @@ para que un 401 no muestre "Tu sesión expiró".
 > **Depende de MX-29 (Maximiliano).** El endpoint `POST /api/auth/logout/` todavía no existe en el
 > backend (el gateway ya enruta `/api/auth/*` a auth). Hasta que MX-29 entre, cada logout mostrará el
 > aviso de "no pudimos confirmarlo". Contrato propuesto: recibe `{ "refresh_token": "…" }`, lo agrega a
-> la blacklist de SimpleJWT y responde 205/200; si el backend usa otra ruta se cambia con
+> la blacklist de SimpleJWT y responde 205/200. Debe identificar la sesión por ese refresh token y **no
+> exigir un access token vigente** (si no, pasados 30 min ya no se podría revocar). Si el backend usa
+> otra ruta se cambia con
 > `configureAuthApi({ endpoints: { logout: "…" } })` en `main.tsx`.
 
 Después de cerrar sesión, escribir `/dashboard` a mano o recargar te devuelve a `/login`, y las otras
@@ -262,7 +268,7 @@ Si el servidor devolviera un token inválido, `iniciarSesion()` lanza un error y
 | Archivo | Tests | Qué cubre |
 |---|---|---|
 | `web/src/components/RutaPrivada.test.tsx` | 26 | Las 3 tareas: redirecciones, recarga, reintentos de `/usuarios/me/`, login, logout con revocación, pestañas, respuestas tardías |
-| `shared/src/auth.test.ts` | 21 | Token vigente / vencido / inválido, desfase de reloj y `revocarSesion()` (2xx, 401, 5xx, 404, sin red, timeout) |
+| `shared/src/auth.test.ts` | 21 | Token vigente / vencido / inválido, desfase de reloj y `revocarSesion()` (solo 2xx confirma; 401/403/404/5xx, sin red y timeout no) |
 | `shared/src/api/cliente.test.ts` | 7 | Interceptor 401 (+1: un token viejo no borra la sesión nueva) |
 | `web/src/context/ToastContext.test.tsx` | 6 | Avisos (antes el archivo estaba vacío) |
 

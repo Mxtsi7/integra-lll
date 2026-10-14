@@ -236,9 +236,12 @@ const TIEMPO_MAX_REVOCACION_MS = 5_000;
  * locales (eso lo hace logout() después) y nunca lanza: el logout local
  * tiene que ocurrir igual aunque esto falle.
  *
- * Devuelve true si el servidor confirmó la revocación (2xx) o si el token
- * ya no valía (401: no hay sesión que revocar). Devuelve false si no se
- * pudo confirmar: sin red, timeout, 5xx o un endpoint que aún no existe (404).
+ * Devuelve true SOLO si el servidor confirmó la revocación (2xx). Cualquier
+ * otra cosa es "no confirmada" (false): sin red, timeout, 5xx, un endpoint
+ * que aún no existe (404) y también 401/403. Antes un 401 contaba como
+ * revocada, pero un 401 no garantiza que el refresh token haya quedado
+ * invalidado (p. ej. lo pudo provocar un access token vencido), así que se
+ * trata como no confirmada mientras el contrato de MX-29 no diga lo contrario.
  *
  * Usa fetch directo y no pedir() a propósito: un 401 acá no debe disparar
  * el aviso de "Tu sesión expiró".
@@ -249,7 +252,11 @@ export async function revocarSesion(): Promise<boolean> {
 
   const access = obtenerAccessToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (access) headers.Authorization = `Bearer ${access}`;
+  // Solo se manda el access token si sigue vigente: un JWT vencido en el
+  // header hace que DRF responda 401 aunque el endpoint no exija login, y
+  // eso dejaría la revocación como "no confirmada" sin motivo. La sesión a
+  // revocar la identifica el refresh token del body.
+  if (access && haySesionValida()) headers.Authorization = `Bearer ${access}`;
 
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAX_REVOCACION_MS);
@@ -260,7 +267,7 @@ export async function revocarSesion(): Promise<boolean> {
       body: JSON.stringify({ refresh_token: refresh }),
       signal: controlador.signal,
     });
-    return res.ok || res.status === 401;
+    return res.ok;
   } catch {
     return false; // sin red, CORS o timeout (AbortError)
   } finally {
