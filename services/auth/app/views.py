@@ -8,9 +8,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
 from .models import Organizacion, User
+from .recuperacion import solicitar_recuperacion
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
+    SolicitudRecuperacionSerializer,
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
@@ -170,6 +172,61 @@ class LoginView(APIView):
                     "correo": user.email,
                 },
             },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SolicitudRecuperacionView(APIView):
+    """POST /api/auth/password-reset/ — pública (RUTAS_PUBLICAS del gateway).
+
+    Responde siempre igual, exista o no el correo, para no permitir
+    enumerar cuentas.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    MENSAJE_NEUTRO = (
+        "Si el correo está registrado, recibirás un enlace para "
+        "restablecer tu contraseña."
+    )
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Solicitar recuperación de contraseña",
+        description=(
+            "Envía un enlace de un solo uso, válido por 60 minutos. La respuesta "
+            "es idéntica exista o no el correo (anti-enumeración). Ruta pública."
+        ),
+        request=SolicitudRecuperacionSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Solicitud recibida (respuesta neutra).",
+                examples=[
+                    OpenApiExample(
+                        "Respuesta neutra",
+                        value={"detail": MENSAJE_NEUTRO},
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Email ausente o mal formado."),
+        },
+        examples=[
+            OpenApiExample(
+                "Solicitud",
+                value={"email": "ana@ejemplo.com"},
+                request_only=True,
+            ),
+        ],
+    )
+    def post(self, request):
+        serializer = SolicitudRecuperacionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        solicitar_recuperacion(serializer.validated_data["email"])
+
+        return Response(
+            {"detail": self.MENSAJE_NEUTRO},
             status=status.HTTP_200_OK,
         )
 

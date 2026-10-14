@@ -104,6 +104,17 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 JWT_SECRET = env("JWT_SECRET")
 JWT_ALGORITMO = env("JWT_ALGORITMO", default="HS256")
 
+# ─── Recuperación de contraseña ───────────────────────────────
+RECUPERACION_MINUTOS = 60
+PASSWORD_RESET_TIMEOUT = RECUPERACION_MINUTOS * 60
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-responder@ojoalgasto.cl")
+# Consola por defecto (simulación). OJO: imprime el cuerpo del correo, con el
+# enlace, en stdout; en un entorno con logs centralizados usar un backend real.
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+)
+
 SIMPLE_JWT = {
     "SIGNING_KEY": JWT_SECRET,
     "ALGORITHM": JWT_ALGORITMO,
