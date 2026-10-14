@@ -1,11 +1,13 @@
 import React from "react";
 import ListCard from "./suscard";
 import styles from "./suscard.module.css";
-import {
+import {costoPorHora,
+  equivalenteMensual,
   formatearFecha,
   formatearMonto,
   type Suscripcion,
 } from "@ojoalgasto/shared";
+
 import {
   colorDe,
   etiquetaFrecuencia,
@@ -70,7 +72,13 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
     return <ListCard title="" isLoading />;
   }
 
-  const { nombre, monto, moneda, frecuencia, fecha_proximo_cobro } = suscripcion;
+  const { nombre, monto, moneda, frecuencia, fecha_proximo_cobro, horas_uso_mes } = suscripcion;
+
+  // costoPorHora espera el monto en equivalente mensual: horas_uso_mes es
+  // uso *mensual*, así que sin convertir, una suscripción anual mostraría
+  // el costo por hora inflado x12.
+  const montoMensual = equivalenteMensual(monto, frecuencia);
+  const porHora = costoPorHora(montoMensual, horas_uso_mes ?? 0);
 
   return (
     <ListCard
@@ -111,7 +119,17 @@ const SubscriptionItem: React.FC<SubscriptionItemProps> = ({
           </span>
         </>
       }
-      trailingSubtext={`Próximo cobro: ${formatearFecha(fecha_proximo_cobro)}`}
+      trailingSubtext={
+        <>
+          {`Próximo cobro: ${formatearFecha(fecha_proximo_cobro)}`}
+          {porHora !== null && (
+            <>
+              {" · "}
+              {formatearMonto(porHora, moneda)}/hora
+            </>
+          )}
+        </>
+      }
       onClick={onClick ? () => onClick(suscripcion) : undefined}
       actions={
         <>
