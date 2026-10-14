@@ -1,4 +1,6 @@
 import { NavLink } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
+import { Spinner } from '../Spinner';
 import styles from './Sidebar.module.css';
 
 const ITEMS_NAV = [
@@ -14,9 +16,17 @@ const ITEMS_NAV = [
 interface SidebarProps {
   nombreUsuario: string;
   plan: string;
+  alCerrarSesion: () => void;
+  /** true mientras el backend revoca la sesión. */
+  cerrandoSesion?: boolean;
 }
 
-export function Sidebar({ nombreUsuario, plan }: SidebarProps) {
+export function Sidebar({
+  nombreUsuario,
+  plan,
+  alCerrarSesion,
+  cerrandoSesion = false,
+}: SidebarProps) {
   return (
     <aside className={styles.sidebar}>
       <NavLink to="/home" className={styles.logo}>
@@ -49,6 +59,25 @@ export function Sidebar({ nombreUsuario, plan }: SidebarProps) {
         <p className={styles.usuarioNombre}>{nombreUsuario}</p>
         <p className={styles.usuarioPlan}>{plan}</p>
       </NavLink>
+
+      <button
+        type="button"
+        className={styles.cerrarSesion}
+        onClick={alCerrarSesion}
+        disabled={cerrandoSesion}
+      >
+        {cerrandoSesion ? (
+          <>
+            <Spinner size={14} decorativo />
+            Cerrando sesión…
+          </>
+        ) : (
+          <>
+            <LogOut size={16} aria-hidden="true" />
+            Cerrar sesión
+          </>
+        )}
+      </button>
     </aside>
   );
 }
