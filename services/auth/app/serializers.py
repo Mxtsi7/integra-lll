@@ -89,6 +89,15 @@ class LoginSerializer(serializers.Serializer):
         return User.objects.normalize_email(value)
 
 
+class SolicitudRecuperacionSerializer(serializers.Serializer):
+    """Body de POST /api/auth/password-reset/."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value: str) -> str:
+        return User.objects.normalize_email(value)
+
+
 class UsuarioActualSerializer(serializers.ModelSerializer):
     """Lo que /api/usuarios/me/ le entrega a la web.
 
