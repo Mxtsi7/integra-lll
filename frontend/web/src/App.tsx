@@ -6,7 +6,8 @@ import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
-
+import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
+import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
@@ -26,6 +27,12 @@ export function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/registro" element={<Register />} />
           </Route>
+
+          {/* Rutas de recuperación AN-14. Quedan públicas (fuera de ambas
+              guardas): el enlace de restablecer llega por correo y tiene que
+              funcionar aunque haya una sesión abierta en este navegador. */}
+          <Route path="/recuperar-contrasena" element={<RecuperarContrasenaPage />} />
+          <Route path="/restablecer-contrasena" element={<RestablecerContrasenaPage />} />
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>
