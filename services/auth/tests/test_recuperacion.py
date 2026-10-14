@@ -1,5 +1,5 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 
@@ -48,6 +48,16 @@ class TestRespuestaNeutra:
         assert resp.status_code == 200
         assert mailoutbox == []
 
+    def test_usuario_sin_clave_utilizable_no_recibe_correo(self, usuario, mailoutbox):
+        usuario.set_unusable_password()
+        usuario.save()
+        resp = APIClient().post(URL, {"email": usuario.email}, format="json")
+        desconocido = APIClient().post(URL, {"email": "nadie@test.com"}, format="json")
+
+        assert resp.status_code == desconocido.status_code == 200
+        assert resp.data == desconocido.data
+        assert mailoutbox == []
+
     def test_fallo_del_envio_no_cambia_la_respuesta(self, usuario):
         with patch("app.recuperacion.send_mail", side_effect=OSError("smtp caído")):
             resp = APIClient().post(URL, {"email": "ana@test.com"}, format="json")
@@ -75,6 +85,19 @@ class TestToken:
         assert token not in caplog.text
         assert token.split(".")[1] not in caplog.text
 
+    def test_backend_configurado_no_imprime_el_correo(self, usuario, settings, capsys):
+        from config import settings as configuracion
+
+        # pytest-django sustituye el backend por locmem: comprobar también el
+        # configurado por la aplicación, sin conectar a un servidor SMTP real.
+        settings.EMAIL_BACKEND = configuracion.EMAIL_BACKEND
+        with patch("django.core.mail.backends.smtp.EmailBackend.send_messages", return_value=1):
+            resp = APIClient().post(URL, {"email": usuario.email}, format="json")
+
+        assert resp.status_code == 200
+        salida = capsys.readouterr()
+        assert "token=" not in salida.out + salida.err
+
     def test_es_de_un_solo_uso(self, usuario):
         token = generar_token_compuesto(usuario)
         usuario.set_password("OtraClave456")
@@ -82,11 +105,22 @@ class TestToken:
         assert usuario_desde_token(token) is None
 
     def test_caduca_a_los_60_minutos(self, usuario):
-        token = generar_token_compuesto(usuario)
-        ahora = generador_token._now()
-        with patch.object(generador_token, "_now", return_value=ahora + timedelta(minutes=59)):
+        ahora = datetime(2026, 10, 14, 12, 0, 0)
+        with patch.object(generador_token, "_now", return_value=ahora):
+            token = generar_token_compuesto(usuario)
+        with patch.object(generador_token, "_now", return_value=ahora + timedelta(seconds=3599)):
             assert usuario_desde_token(token) == usuario
+        with patch.object(generador_token, "_now", return_value=ahora + timedelta(minutes=60)):
+            assert usuario_desde_token(token) is None
         with patch.object(generador_token, "_now", return_value=ahora + timedelta(minutes=61)):
+            assert usuario_desde_token(token) is None
+
+    def test_el_limite_no_se_amplia_con_password_reset_timeout(self, usuario, settings):
+        settings.PASSWORD_RESET_TIMEOUT = 7200
+        ahora = datetime(2026, 10, 14, 12, 0, 0)
+        with patch.object(generador_token, "_now", return_value=ahora):
+            token = generar_token_compuesto(usuario)
+        with patch.object(generador_token, "_now", return_value=ahora + timedelta(minutes=60)):
             assert usuario_desde_token(token) is None
 
     @pytest.mark.parametrize("token", ["", "basura", "MQ.basura", "xx.1-abc"])

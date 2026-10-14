@@ -109,11 +109,17 @@ RECUPERACION_MINUTOS = 60
 PASSWORD_RESET_TIMEOUT = RECUPERACION_MINUTOS * 60
 FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-responder@ojoalgasto.cl")
-# Consola por defecto (simulación). OJO: imprime el cuerpo del correo, con el
-# enlace, en stdout; en un entorno con logs centralizados usar un backend real.
+# SMTP evita escribir el enlace y su token en los logs del contenedor.
 EMAIL_BACKEND = env(
-    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+    "EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend"
 )
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=5)
 
 SIMPLE_JWT = {
     "SIGNING_KEY": JWT_SECRET,

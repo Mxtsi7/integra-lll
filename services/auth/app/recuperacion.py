@@ -29,7 +29,7 @@ class TokenRecuperacion(PasswordResetTokenGenerator):
     """Token firmado con SECRET_KEY, de un solo uso y con caducidad fija.
 
     El hash incluye el hash de la contraseña y `last_login`, así que cambiar
-    la clave (o iniciar sesión) invalida el token sin guardarlo en BD.
+    la clave o actualizar `last_login` invalida el token sin guardarlo en BD.
     """
 
     key_salt = "app.recuperacion.TokenRecuperacion"
@@ -44,7 +44,7 @@ class TokenRecuperacion(PasswordResetTokenGenerator):
         except ValueError:
             return False
         edad = self._num_seconds(self._now()) - ts
-        return edad <= settings.RECUPERACION_MINUTOS * 60
+        return 0 <= edad < settings.RECUPERACION_MINUTOS * 60
 
 
 generador_token = TokenRecuperacion()
@@ -64,6 +64,8 @@ def usuario_desde_token(token_compuesto: str) -> User | None:
         pk = force_str(urlsafe_base64_decode(uid_b64))
         user = User.objects.get(pk=pk, is_active=True)
     except (ValueError, User.DoesNotExist):
+        return None
+    if not user.has_usable_password():
         return None
     return user if generador_token.check_token(user, token) else None
 
@@ -98,7 +100,7 @@ def solicitar_recuperacion(email: str) -> None:
     Nunca lanza: la vista responde lo mismo en todos los casos.
     """
     user = User.objects.filter(email__iexact=email, is_active=True).first()
-    if user is None:
+    if user is None or not user.has_usable_password():
         return
     try:
         enviar_correo_recuperacion(user)
