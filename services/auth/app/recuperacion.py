@@ -4,6 +4,7 @@ El token nunca se escribe en logs: solo viaja dentro del correo.
 """
 
 import logging
+from hashlib import sha256
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -11,13 +12,14 @@ from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import send_mail
 from django.db import transaction
 from django.utils.encoding import force_bytes, force_str
+from django.utils.crypto import constant_time_compare
 from django.utils.http import (
     base36_to_int,
     urlsafe_base64_decode,
     urlsafe_base64_encode,
 )
 
-from .models import User
+from .models import TokenRecuperacionUsado, User
 from shared.sesiones import registrar_credenciales
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,27 @@ logger = logging.getLogger(__name__)
 # Separa el uid del token dentro del único parámetro `token` que lee la web
 # (RestablecerContrasenaPage). Ni base64 url-safe ni el token usan el punto.
 SEPARADOR = "."
+
+
+class ErrorTokenRecuperacion(Exception):
+    ERRORES = {
+        "token_invalido": (400, "El enlace no es válido. Solicita uno nuevo."),
+        "token_expirado": (410, "El enlace venció. Solicita uno nuevo."),
+        "token_usado": (410, "El enlace ya fue utilizado. Solicita uno nuevo."),
+    }
+
+    def __init__(self, codigo):
+        self.codigo = codigo
+        self.estado_http, self.detalle = self.ERRORES[codigo]
+        super().__init__(self.detalle)
+
+    @property
+    def respuesta(self):
+        return {
+            "code": self.codigo,
+            "detail": self.detalle,
+            "solicitar_nuevo_enlace": "/api/auth/password-reset/",
+        }
 
 
 class TokenRecuperacion(PasswordResetTokenGenerator):
@@ -37,16 +60,28 @@ class TokenRecuperacion(PasswordResetTokenGenerator):
     key_salt = "app.recuperacion.TokenRecuperacion"
 
     def check_token(self, user: User | None, token: str | None) -> bool:
-        if not super().check_token(user, token):
-            return False
-        # Doble control: aunque alguien suba PASSWORD_RESET_TIMEOUT, el token
-        # de recuperación no vive más de RECUPERACION_MINUTOS.
+        return self.motivo_invalidez(user, token) is None
+
+    def motivo_invalidez(self, user, token):
+        # Verificar la firma ANTES de clasificar la edad. Un timestamp
+        # alterado no permite descubrir nada del usuario ni fingir caducidad.
+        if not user or not token:
+            return "token_invalido"
         try:
-            ts = base36_to_int(token.split("-")[0])
+            ts_b36, _ = token.split("-")
+            ts = base36_to_int(ts_b36)
         except ValueError:
-            return False
+            return "token_invalido"
+        if not any(
+            constant_time_compare(self._make_token_with_timestamp(user, ts, secret), token)
+            for secret in [self.secret, *self.secret_fallbacks]
+        ):
+            return "token_invalido"
         edad = self._num_seconds(self._now()) - ts
-        return 0 <= edad < settings.RECUPERACION_MINUTOS * 60
+        if edad < 0:
+            return "token_invalido"
+        limite = min(settings.PASSWORD_RESET_TIMEOUT, settings.RECUPERACION_MINUTOS * 60)
+        return "token_expirado" if edad >= limite else None
 
 
 generador_token = TokenRecuperacion()
@@ -59,34 +94,53 @@ def generar_token_compuesto(user: User) -> str:
 
 def usuario_desde_token(token_compuesto: str, *, bloquear=False) -> User | None:
     """Devuelve el usuario si el token es válido y vigente; si no, None."""
+    try:
+        return validar_token_recuperacion(token_compuesto, bloquear=bloquear)
+    except ErrorTokenRecuperacion:
+        return None
+
+
+def validar_token_recuperacion(token_compuesto: str, *, bloquear=False) -> User:
+    if not isinstance(token_compuesto, str) or not token_compuesto.isascii() or len(token_compuesto) > 512:
+        raise ErrorTokenRecuperacion("token_invalido")
     uid_b64, _, token = token_compuesto.partition(SEPARADOR)
     if not uid_b64 or not token:
-        return None
+        raise ErrorTokenRecuperacion("token_invalido")
     try:
         pk = force_str(urlsafe_base64_decode(uid_b64))
         if not pk.isascii() or not pk.isdigit() or len(pk) > 19 or not 0 < int(pk) <= 2**63 - 1:
-            return None
+            raise ValueError
+        if uid_b64 != urlsafe_base64_encode(force_bytes(str(int(pk)))):
+            raise ValueError
         usuarios = User.objects.select_for_update() if bloquear else User.objects
         user = usuarios.get(pk=pk, is_active=True)
     except (ValueError, User.DoesNotExist):
-        return None
+        raise ErrorTokenRecuperacion("token_invalido") from None
     if not user.has_usable_password():
-        return None
-    return user if generador_token.check_token(user, token) else None
+        raise ErrorTokenRecuperacion("token_invalido")
+    if TokenRecuperacionUsado.objects.filter(huella=huella_token(token_compuesto)).exists():
+        raise ErrorTokenRecuperacion("token_usado")
+    motivo = generador_token.motivo_invalidez(user, token)
+    if motivo:
+        raise ErrorTokenRecuperacion(motivo)
+    return user
+
+
+def huella_token(token_compuesto):
+    return sha256(token_compuesto.encode("ascii")).hexdigest()
 
 
 @transaction.atomic
 def confirmar_recuperacion(token_compuesto: str, password: str) -> bool:
     # El segundo intento espera el bloqueo y valida contra el hash ya cambiado.
-    user = usuario_desde_token(token_compuesto, bloquear=True)
-    if user is None:
-        return False
+    user = validar_token_recuperacion(token_compuesto, bloquear=True)
     user.set_password(password)
     # Revocar ANTES de persistir: si Redis falla, atomic revierte el cambio.
     # Si falla el commit, solo se cierran sesiones; el próximo login restaura
     # la versión de la contraseña que realmente quedó guardada.
     registrar_credenciales(user)
     user.save(update_fields=["password"])
+    TokenRecuperacionUsado.objects.create(huella=huella_token(token_compuesto))
     return True
 
 

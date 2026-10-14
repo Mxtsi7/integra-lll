@@ -10,20 +10,22 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
 from .models import Organizacion, User
-from .recuperacion import confirmar_recuperacion, solicitar_recuperacion
+from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
 from shared.sesiones import registrar_credenciales
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
     SolicitudRecuperacionSerializer,
     ConfirmacionRecuperacionSerializer,
+    ErrorRecuperacionSerializer,
+    ErrorPasswordRecuperacionSerializer,
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
     OrganizacionDetalleSerializer,  # nuevo
 )
 
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, PolymorphicProxySerializer, extend_schema
 from drf_spectacular.types import OpenApiTypes
 
 
@@ -263,26 +265,45 @@ class ConfirmacionRecuperacionView(APIView):
         request=ConfirmacionRecuperacionSerializer,
         responses={
             200: OpenApiResponse(description="Contraseña restablecida. Inicia sesión nuevamente."),
-            400: OpenApiResponse(description="Contraseña inválida o enlace inválido, vencido o usado."),
+            400: OpenApiResponse(
+                response=PolymorphicProxySerializer(
+                    component_name="ErrorConfirmacionRecuperacion",
+                    serializers=[ErrorRecuperacionSerializer, ErrorPasswordRecuperacionSerializer],
+                    resource_type_field_name=None,
+                ),
+                description="Token inválido: code=token_invalido. Contraseña inválida: errores por campo password.",
+                examples=[OpenApiExample(
+                    "Enlace inválido", value=ErrorTokenRecuperacion("token_invalido").respuesta,
+                )],
+            ),
+            410: OpenApiResponse(
+                response=ErrorRecuperacionSerializer,
+                description="Enlace vencido (token_expirado) o consumido (token_usado). Solicitar otro enlace mediante POST.",
+                examples=[
+                    OpenApiExample("Enlace vencido", value=ErrorTokenRecuperacion("token_expirado").respuesta),
+                    OpenApiExample("Enlace utilizado", value=ErrorTokenRecuperacion("token_usado").respuesta),
+                ],
+            ),
             503: OpenApiResponse(description="No se pudo revocar sesiones; contraseña sin cambios."),
         },
     )
     def post(self, request):
         serializer = ConfirmacionRecuperacionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            if "token" in serializer.errors:
+                error = ErrorTokenRecuperacion("token_invalido")
+                return Response(error.respuesta, status=error.estado_http)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         try:
-            confirmado = confirmar_recuperacion(
+            confirmar_recuperacion(
                 serializer.validated_data["token"], serializer.validated_data["password"],
             )
+        except ErrorTokenRecuperacion as error:
+            return Response(error.respuesta, status=error.estado_http)
         except (RedisError, OSError):
             return Response(
                 {"detail": "No se pudo restablecer la contraseña. Inténtalo nuevamente."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        if not confirmado:
-            return Response(
-                {"detail": "El enlace es inválido o expiró. Solicita uno nuevo."},
-                status=status.HTTP_400_BAD_REQUEST,
             )
         return Response({"detail": "Contraseña restablecida. Inicia sesión nuevamente."})
 

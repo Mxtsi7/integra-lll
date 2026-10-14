@@ -110,6 +110,16 @@ class ConfirmacionRecuperacionSerializer(serializers.Serializer):
     )
 
 
+class ErrorRecuperacionSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=["token_invalido", "token_expirado", "token_usado"])
+    detail = serializers.CharField()
+    solicitar_nuevo_enlace = serializers.CharField()
+
+
+class ErrorPasswordRecuperacionSerializer(serializers.Serializer):
+    password = serializers.ListField(child=serializers.CharField())
+
+
 class UsuarioActualSerializer(serializers.ModelSerializer):
     """Lo que /api/usuarios/me/ le entrega a la web.
 

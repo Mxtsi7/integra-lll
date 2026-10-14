@@ -10,7 +10,7 @@ gateway valida en cada petición (ADR-004).
 | `POST` | `/api/auth/register/` | Sí | usuario creado, sin password (`201`) |
 | `POST` | `/api/auth/login/` | Sí | `access_token`, `refresh_token`, `usuario` (`200`) / `401` si no calza |
 | `POST` | `/api/auth/password-reset/` | Sí | respuesta neutra (`200`) / correo inválido (`400`) |
-| `POST` | `/api/auth/password-reset/confirm/` | Sí | contraseña actualizada (`200`) / validación o enlace inválido (`400`) / sesiones no disponibles (`503`) |
+| `POST` | `/api/auth/password-reset/confirm/` | Sí | contraseña actualizada (`200`) / validación o enlace inválido (`400`) / enlace vencido o usado (`410`) / sesiones no disponibles (`503`) |
 | `GET` | `/api/usuarios/<id>/` | No, exige `Authorization: Bearer` | usuario, sin password (`200`) / `404` |
 
 `/api/auth/` es pública (`RUTAS_PUBLICAS` en el gateway); `/api/usuarios/` no.
@@ -76,9 +76,8 @@ correo, sin modificarlo, y `password` con la nueva contraseña:
 Reutiliza la política RF-01.1 del registro: mínimo 8 caracteres, una letra
 y un número. Se conservan los espacios de la contraseña. Responde `200`
 con `{"detail": "Contraseña restablecida. Inicia sesión nuevamente."}`;
-no entrega JWT ni inicia sesión automáticamente. Los errores de campos
-usan las claves `token`/`password`. Un enlace inválido, expirado o usado
-responde `400` con `{"detail": "El enlace es inválido o expiró. Solicita uno nuevo."}`.
+no entrega JWT ni inicia sesión automáticamente. Los errores de contraseña usan la clave `password`. Los errores de token
+se describen en el contrato MX-04 siguiente.
 
 El bloqueo `select_for_update()` dentro de `transaction.atomic()` hace que
 la segunda petición valide el token contra el hash ya actualizado: solo
@@ -106,4 +105,45 @@ Pruebas (PostgreSQL real para el caso de peticiones simultáneas):
 ```bash
 docker compose run --rm auth pytest tests/test_recuperacion.py tests/test_confirmacion_recuperacion.py -v
 docker compose run --rm gateway pytest -v
+```
+
+### Errores de recuperación (MX-04)
+
+El cliente debe usar HTTP y `code` para decidir qué pantalla mostrar:
+
+| HTTP | `code` | Causa |
+|---|---|---|
+| 400 | `token_invalido` | Token ausente, malformado, firma alterada, usuario no disponible o enlace invalidado por otro cambio de contraseña. |
+| 410 | `token_expirado` | Firma correcta, pero se cumplieron los 60 minutos de vigencia. |
+| 410 | `token_usado` | Este mismo enlace ya completó un restablecimiento. Tiene precedencia sobre la caducidad posterior. |
+
+Todos esos errores entregan el mismo formato, sin identidad, token,
+contraseña, marcas de tiempo ni detalles internos:
+
+```json
+{
+  "code": "token_expirado",
+  "detail": "El enlace venció. Solicita uno nuevo.",
+  "solicitar_nuevo_enlace": "/api/auth/password-reset/"
+}
+```
+
+Web/móvil pueden ofrecer «Solicitar otro enlace» y enviar el correo del
+formulario mediante **POST** a `solicitar_nuevo_enlace`; esa ruta conserva
+la respuesta neutra de MX-02. Los errores de contraseña devuelven `400`
+con `{"password": ["mensaje de validación"]}` y no consumen el enlace.
+
+Primero se verifica la firma; alterar el timestamp de un enlace no lo
+convierte en un error de caducidad. El registro `TokenRecuperacionUsado`
+guarda únicamente SHA-256 del token y la fecha de uso, sin token original
+ni datos del usuario. Se crea en la misma transacción que modifica el
+hash: un fallo no consume el enlace. Los tokens emitidos antes de MX-04
+siguen funcionando; los que se consumieron antes de esta migración no
+tienen huella registrada y se rechazan como `token_invalido`.
+
+Aplicar `python manage.py migrate` antes de servir tráfico con esta versión
+(migración `0005_token_recuperacion_usado`). Comprobar el contrato con:
+
+```bash
+docker compose run --rm auth pytest tests/test_errores_recuperacion.py tests/test_confirmacion_recuperacion.py -v
 ```

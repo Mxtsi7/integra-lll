@@ -55,7 +55,7 @@ def test_enlace_del_correo_cambia_hash_y_solo_la_nueva_clave_autentica(usuario, 
 def test_no_reutiliza_ni_otro_enlace_previo(usuario):
     token = generar_token_compuesto(usuario)
     assert confirmar(token).status_code == 200
-    assert confirmar(token, "SegundaClave123").status_code == 400
+    assert confirmar(token, "SegundaClave123").status_code == 410
     usuario.refresh_from_db()
     assert usuario.check_password(NUEVA)
 
@@ -98,7 +98,7 @@ def test_caducidad_exacta_y_usuario_inactivo(usuario):
     with patch.object(generador_token, "_now", return_value=ahora):
         token = generar_token_compuesto(usuario)
     with patch.object(generador_token, "_now", return_value=ahora + timedelta(minutes=60)):
-        assert confirmar(token).status_code == 400
+        assert confirmar(token).status_code == 410
     usuario.is_active = False
     usuario.save()
     assert confirmar(generar_token_compuesto(usuario)).status_code == 400
@@ -169,7 +169,7 @@ def test_dos_peticiones_simultaneas_solo_consumen_una_vez(usuario):
             close_old_connections()
     with ThreadPoolExecutor(max_workers=2) as pool:
         resultados = list(pool.map(enviar, [NUEVA, "OtraClave456"]))
-    assert sorted(estado for _, estado in resultados) == [200, 400]
+    assert sorted(estado for _, estado in resultados) == [200, 410]
     usuario.refresh_from_db()
     ganadora = next(password for password, estado in resultados if estado == 200)
     assert usuario.check_password(ganadora)
