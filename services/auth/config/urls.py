@@ -5,6 +5,7 @@ from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from app.views import (
+    ConfirmacionRecuperacionView,
     LoginView,
     OrganizacionView,
     RegisterView,
@@ -35,6 +36,11 @@ urlpatterns = [
         "api/auth/password-reset/",
         SolicitudRecuperacionView.as_view(),
         name="password-reset",
+    ),
+    path(
+        "api/auth/password-reset/confirm/",
+        ConfirmacionRecuperacionView.as_view(),
+        name="password-reset-confirm",
     ),
     path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
     path("api/organizacion/", OrganizacionView.as_view(), name="organizacion"),

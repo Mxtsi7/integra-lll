@@ -1,4 +1,6 @@
 from django.contrib.auth import authenticate
+from django.db import transaction
+from redis.exceptions import RedisError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied
@@ -8,11 +10,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
 from .models import Organizacion, User
-from .recuperacion import solicitar_recuperacion
+from .recuperacion import confirmar_recuperacion, solicitar_recuperacion
+from shared.sesiones import registrar_credenciales
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
     SolicitudRecuperacionSerializer,
+    ConfirmacionRecuperacionSerializer,
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
@@ -140,18 +144,31 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = authenticate(
-            request,
-            email=serializer.validated_data["email"],
-            password=serializer.validated_data["password"],
-        )
-        if user is None:
-            return Response(
-                {"detail": self.MENSAJE_GENERICO},
-                status=status.HTTP_401_UNAUTHORIZED,
+        # Bloquear antes de authenticate: Django puede actualizar un hash
+        # antiguo al comprobar la contraseña. No debe pisar un reset paralelo.
+        with transaction.atomic():
+            bloqueado = User.objects.select_for_update().filter(
+                email__iexact=serializer.validated_data["email"],
+            ).first()
+            user = authenticate(
+                request,
+                email=serializer.validated_data["email"],
+                password=serializer.validated_data["password"],
             )
-
-        refresh = RefreshToken.for_user(user)
+            if user is None or bloqueado is None or user.pk != bloqueado.pk:
+                return Response(
+                    {"detail": self.MENSAJE_GENERICO},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            try:
+                version = registrar_credenciales(user)
+            except (RedisError, OSError):
+                return Response(
+                    {"detail": "No se pudo iniciar sesión. Inténtalo nuevamente."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            refresh = RefreshToken.for_user(user)
+            refresh["session_version"] = version
 
         refresh["organizacion_id"] = (
             str(user.organizacion_id) if user.organizacion_id else None
@@ -229,6 +246,45 @@ class SolicitudRecuperacionView(APIView):
             {"detail": self.MENSAJE_NEUTRO},
             status=status.HTTP_200_OK,
         )
+
+
+class ConfirmacionRecuperacionView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Confirmar recuperación de contraseña",
+        description=(
+            "Recibe el token compuesto del enlace y password. Aplica RF-01.1, "
+            "consume el enlace de forma atómica y revoca las sesiones anteriores. "
+            "No inicia sesión automáticamente."
+        ),
+        request=ConfirmacionRecuperacionSerializer,
+        responses={
+            200: OpenApiResponse(description="Contraseña restablecida. Inicia sesión nuevamente."),
+            400: OpenApiResponse(description="Contraseña inválida o enlace inválido, vencido o usado."),
+            503: OpenApiResponse(description="No se pudo revocar sesiones; contraseña sin cambios."),
+        },
+    )
+    def post(self, request):
+        serializer = ConfirmacionRecuperacionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            confirmado = confirmar_recuperacion(
+                serializer.validated_data["token"], serializer.validated_data["password"],
+            )
+        except (RedisError, OSError):
+            return Response(
+                {"detail": "No se pudo restablecer la contraseña. Inténtalo nuevamente."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        if not confirmado:
+            return Response(
+                {"detail": "El enlace es inválido o expiró. Solicita uno nuevo."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({"detail": "Contraseña restablecida. Inicia sesión nuevamente."})
 
 
 class UsuarioActualView(generics.RetrieveAPIView):
@@ -421,4 +477,5 @@ class OrganizacionView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 

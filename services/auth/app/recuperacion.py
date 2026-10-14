@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import (
     base36_to_int,
@@ -17,6 +18,7 @@ from django.utils.http import (
 )
 
 from .models import User
+from shared.sesiones import registrar_credenciales
 
 logger = logging.getLogger(__name__)
 
@@ -55,19 +57,37 @@ def generar_token_compuesto(user: User) -> str:
     return f"{uid}{SEPARADOR}{generador_token.make_token(user)}"
 
 
-def usuario_desde_token(token_compuesto: str) -> User | None:
+def usuario_desde_token(token_compuesto: str, *, bloquear=False) -> User | None:
     """Devuelve el usuario si el token es válido y vigente; si no, None."""
     uid_b64, _, token = token_compuesto.partition(SEPARADOR)
     if not uid_b64 or not token:
         return None
     try:
         pk = force_str(urlsafe_base64_decode(uid_b64))
-        user = User.objects.get(pk=pk, is_active=True)
+        if not pk.isascii() or not pk.isdigit() or len(pk) > 19 or not 0 < int(pk) <= 2**63 - 1:
+            return None
+        usuarios = User.objects.select_for_update() if bloquear else User.objects
+        user = usuarios.get(pk=pk, is_active=True)
     except (ValueError, User.DoesNotExist):
         return None
     if not user.has_usable_password():
         return None
     return user if generador_token.check_token(user, token) else None
+
+
+@transaction.atomic
+def confirmar_recuperacion(token_compuesto: str, password: str) -> bool:
+    # El segundo intento espera el bloqueo y valida contra el hash ya cambiado.
+    user = usuario_desde_token(token_compuesto, bloquear=True)
+    if user is None:
+        return False
+    user.set_password(password)
+    # Revocar ANTES de persistir: si Redis falla, atomic revierte el cambio.
+    # Si falla el commit, solo se cierran sesiones; el próximo login restaura
+    # la versión de la contraseña que realmente quedó guardada.
+    registrar_credenciales(user)
+    user.save(update_fields=["password"])
+    return True
 
 
 def construir_enlace(token_compuesto: str) -> str:
@@ -107,3 +127,4 @@ def solicitar_recuperacion(email: str) -> None:
     except Exception:
         # Sin exc_info: el traceback podría arrastrar el cuerpo del correo.
         logger.error("Falló el envío del correo de recuperación (usuario id=%s)", user.pk)
+

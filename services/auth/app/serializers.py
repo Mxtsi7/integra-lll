@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from django.db import transaction
 from .models import User, Organizacion
+from .passwords import validar_password
 
 
 
@@ -16,6 +17,10 @@ class MiembroSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, validators=[validar_password],
+    )
+
     class Meta:
         model = User
         fields = ("id", "email", "nombre", "password")
@@ -98,6 +103,13 @@ class SolicitudRecuperacionSerializer(serializers.Serializer):
         return User.objects.normalize_email(value)
 
 
+class ConfirmacionRecuperacionSerializer(serializers.Serializer):
+    token = serializers.CharField(write_only=True, max_length=512)
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, validators=[validar_password],
+    )
+
+
 class UsuarioActualSerializer(serializers.ModelSerializer):
     """Lo que /api/usuarios/me/ le entrega a la web.
 
@@ -142,3 +154,4 @@ class OrganizacionDetalleSerializer(serializers.Serializer):
 
 
 #:v
+

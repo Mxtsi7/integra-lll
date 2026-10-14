@@ -127,3 +127,15 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_MINUTOS_ACCESO", default=30)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_DIAS_REFRESCO", default=7)),
 }
+
+
+# Estado compartido de sesiones. Nunca usar caché local en despliegues.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "sesiones": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("SESSION_REDIS_URL", default="redis://redis:6379/2"),
+        "KEY_PREFIX": "ojoalgasto:sesiones",
+        "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+    },
+}

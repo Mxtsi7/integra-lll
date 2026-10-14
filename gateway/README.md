@@ -126,3 +126,15 @@ print(jwt.encode({'sub': 'demo', 'organizacion_id': 'org', 'rol': 'titular',
 ```
 
 y `curl -H "Authorization: Bearer <token>" http://localhost:8000/api/suscripciones/`.
+
+
+### Revocación al recuperar contraseña (MX-03)
+
+Auth y gateway comparten `SESSION_REDIS_URL` (por defecto `redis://redis:6379/2`).
+El gateway exige JWT de tipo `access` y compara `session_version` con el
+estado vigente por usuario en Redis en cada petición privada. Tras el reset,
+las versiones anteriores reciben 401; otros usuarios conservan sus sesiones.
+Los tokens sin versión también exigen nuevo login. Si Redis falla responde
+503 sin reenviar; una clave ausente exige login y nunca autoriza un JWT.
+El endpoint público `/api/auth/password-reset/confirm/` sigue llegando a Auth
+sin requerir sesión. No se consulta la BD de Auth desde el gateway.
