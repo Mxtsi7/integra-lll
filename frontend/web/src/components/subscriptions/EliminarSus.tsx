@@ -1,4 +1,5 @@
 import React from "react";
+import { Boton } from "../ui/Boton";
 import styles from "./EliminarSus.module.css";
 
 interface EliminarSuscripcionDialogProps {
@@ -8,32 +9,13 @@ interface EliminarSuscripcionDialogProps {
   onCancel: () => void;
   /** true mientras el DELETE está en vuelo: deshabilita ambos botones. */
   isDeleting?: boolean;
-  /**
-   * Mensaje a mostrar si el DELETE falló. Va dentro del diálogo (no en la
-   * pantalla de atrás) para que el usuario lo vea sin que el overlay lo tape.
-   */
+  /** Mensaje a mostrar si el DELETE falló. Va dentro del diálogo para que se vea. */
   error?: string | null;
 }
 
-const WarningIcon: React.FC = () => (
-  <svg className={styles.warningIcon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path
-      d="M12 4.5 2.7 20h18.6L12 4.5Z"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-    <path d="M12 10v4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    <circle cx="12" cy="17.3" r="1" fill="currentColor" />
-  </svg>
-);
-
 /**
- * EliminarSuscripcionDialog
- *
- * Tarjeta de confirmación (sin overlay propio) para una acción destructiva.
- * El componente que la use debe envolverla en su propio fondo/overlay
- * (por ejemplo, reutilizando `formOverlay` de Homepage.module.css).
+ * Cuerpo de la confirmación de eliminar. Se muestra dentro de <Modal
+ * tipo="alerta">, que pone el título y evita el cierre accidental.
  */
 const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
   nombreSuscripcion,
@@ -43,44 +25,24 @@ const EliminarSuscripcionDialog: React.FC<EliminarSuscripcionDialogProps> = ({
   error = null,
 }) => {
   return (
-    <div className={styles.card} role="alertdialog" aria-modal="true">
-      <div className={styles.iconCircle}>
-        <WarningIcon />
-      </div>
-
-      <h2 className={styles.title}>¿Eliminar suscripción?</h2>
-
-      <p className={styles.message}>
-        Esta acción no se puede deshacer. Se eliminará el registro de{" "}
-        <strong>{nombreSuscripcion}</strong> y todo su historial de pagos.
+    <div className={styles.cuerpo}>
+      <p className={styles.mensaje}>
+        Se borra <strong>{nombreSuscripcion}</strong> con su historial de uso. No se puede deshacer.
       </p>
 
       {error && (
-        // TODO: mover el color a una clase .errorText en
-        // EliminarSus.module.css (ver punto de limpieza del review) en vez
-        // de este estilo inline temporal.
-        <p className={styles.message} style={{ color: "#dc2626" }} role="alert">
+        <p className={styles.error} role="alert">
           {error}
         </p>
       )}
 
-      <div className={styles.actions}>
-        <button
-          type="button"
-          className={styles.cancelButton}
-          onClick={onCancel}
-          disabled={isDeleting}
-        >
+      <div className={styles.acciones}>
+        <Boton variante="secundario" onClick={onCancel} disabled={isDeleting}>
           Cancelar
-        </button>
-        <button
-          type="button"
-          className={styles.deleteButton}
-          onClick={onConfirm}
-          disabled={isDeleting}
-        >
-          {isDeleting ? "Eliminando..." : "Eliminar"}
-        </button>
+        </Boton>
+        <Boton variante="peligro" onClick={onConfirm} cargando={isDeleting}>
+          {isDeleting ? "Eliminando…" : "Eliminar"}
+        </Boton>
       </div>
     </div>
   );

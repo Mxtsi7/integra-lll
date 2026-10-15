@@ -208,10 +208,10 @@ describe("Login y vuelta a la página pedida", () => {
     montar("/perfil");
     await waitFor(() => expect(ubicacion()).toBe("/login"));
 
-    fireEvent.change(screen.getByLabelText("CORREO ELECTRÓNICO"), {
+    fireEvent.change(screen.getByLabelText("Correo electrónico"), {
       target: { value: "c@test.cl" },
     });
-    fireEvent.change(screen.getByLabelText("CONTRASEÑA"), {
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
       target: { value: "Clave1234!" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Iniciar sesión" }));
@@ -229,10 +229,10 @@ describe("Login y vuelta a la página pedida", () => {
     });
 
     montar("/login");
-    fireEvent.change(screen.getByLabelText("CORREO ELECTRÓNICO"), {
+    fireEvent.change(screen.getByLabelText("Correo electrónico"), {
       target: { value: "c@test.cl" },
     });
-    fireEvent.change(screen.getByLabelText("CONTRASEÑA"), {
+    fireEvent.change(screen.getByLabelText("Contraseña"), {
       target: { value: "Clave1234!" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Iniciar sesión" }));

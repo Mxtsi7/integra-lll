@@ -1,94 +1,129 @@
 .volver {
-  display: inline-block;
-  color: var(--oag-navy);
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--tinta-2);
+  text-decoration: none;
+  border-radius: var(--radio-s);
+}
+
+.volver:hover {
+  color: var(--acento);
 }
 
 .mensaje {
   padding: 48px 24px;
   text-align: center;
-  color: var(--oag-ink-soft);
-  font-size: 14px;
+  color: var(--tinta-2);
+  font-size: 14.5px;
 }
 
 .tarjeta {
-  background: var(--oag-surface);
-  border: 1px solid var(--oag-line);
-  border-radius: var(--oag-radius-lg);
-  padding: 24px;
-  max-width: 640px;
+  padding: 24px 26px 26px;
+  background: linear-gradient(150deg, var(--tinte, var(--vidrio)), var(--vidrio) 70%);
 }
 
 .encabezado {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .icono {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--oag-radius-md);
-  background: var(--oag-navy);
-  color: #ffffff;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
-  font-family: var(--oag-font-mono);
+  width: 60px;
+  height: 60px;
   flex-shrink: 0;
+  border-radius: 18px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
 }
 
-.nombre {
-  margin: 0 0 6px;
-  font-family: var(--oag-font-mono);
-  font-size: 20px;
-  color: var(--oag-ink);
+.encabezadoTexto {
+  flex: 1;
+  min-width: 0;
 }
 
-.badgeEstado {
-  background: var(--oag-muted-bg);
-  color: var(--oag-muted-text);
-  font-size: 11px;
+.monto {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.periodo {
+  margin-left: 4px;
+  font-size: 15px;
   font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 6px;
+  color: var(--tinta-2);
+  letter-spacing: 0;
+}
+
+.equivalente {
+  margin-top: 6px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+}
+
+.estado {
+  align-self: flex-start;
+}
+
+.avisoFantasma {
+  margin-top: 20px;
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 0 24px;
+  margin: 20px 0 0;
 }
 
 .dato {
-  border-top: 1px solid var(--oag-line);
-  padding-top: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--vidrio-borde);
 }
 
 .datoEtiqueta {
-  margin: 0 0 4px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--oag-ink-soft);
-  font-family: var(--oag-font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--tinta-2);
 }
 
 .datoValor {
-  margin: 0;
-  font-size: 14px;
-  color: var(--oag-ink);
-  text-transform: capitalize;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.datoNota {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--acento);
 }
 
 @media (max-width: 560px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .tarjeta {
+    padding: 20px 18px;
   }
 }

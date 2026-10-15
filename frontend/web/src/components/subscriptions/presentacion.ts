@@ -2,53 +2,61 @@
  * Lo visual de una suscripción, derivado del dato del dominio.
  *
  * `Suscripcion` (de shared) es lo que devuelve la API y con lo que trabajan
- * los cálculos. La inicial, el color y la alerta NO son datos: son decisiones
- * de cómo dibujar, así que se calculan acá en vez de viajar por la red.
+ * los cálculos. El icono, el color, la alerta y las etiquetas NO son datos:
+ * son decisiones de cómo dibujar, así que se calculan acá en vez de viajar
+ * por la red.
  */
 
 import type { Suscripcion } from '@ojoalgasto/shared';
+import {
+  Bot,
+  Briefcase,
+  Cloud,
+  Gamepad2,
+  GraduationCap,
+  HeartPulse,
+  Music,
+  Newspaper,
+  Package,
+  Tv,
+} from 'lucide-react';
 import { diasHasta } from '../../utils/fechas';
+import type { TonoInsignia } from '../ui/Insignia';
 
-/** "Netflix" -> "N". Para el círculo de la tarjeta. */
+/** "Netflix" -> "N". */
 export function inicialDe(nombre: string): string {
   return (nombre.trim()[0] ?? '?').toUpperCase();
 }
 
-const PALETA = [
-  '#e50914',
-  '#1db954',
-  '#f5a623',
-  '#6c3ce9',
-  '#0070d1',
-  '#da1f26',
-  '#7d2ae8',
-];
-
 /**
- * Color estable a partir del nombre: Netflix siempre sale del mismo color,
- * en esta pantalla y en la que venga. Antes salía de un `Math.random()`, así
- * que cambiaba entre recargas y entre pantallas.
+ * Cada categoría tiene un icono y una familia de color. El color no dice
+ * si algo está bien o mal: eso lo dice el estado. Solo ayuda a reconocer
+ * la categoría de un vistazo, como los dispositivos de una casa.
  */
-export function colorDe(nombre: string): string {
-  // Hash de 32 bits (el clásico djb2/Java). Truncar con un módulo dentro del
-  // bucle agrupaba los nombres en pocos colores; así se reparten mejor.
-  let hash = 0;
-  for (let i = 0; i < nombre.length; i += 1) {
-    hash = (hash << 5) - hash + nombre.charCodeAt(i);
-    hash |= 0;
-  }
-  return PALETA[Math.abs(hash) % PALETA.length];
-}
+export const CATEGORIA_VISUAL: Record<
+  Suscripcion['categoria'],
+  { etiqueta: string; Icono: typeof Tv; color: string; suave: string }
+> = {
+  streaming: { etiqueta: 'Streaming', Icono: Tv, color: 'var(--morado)', suave: 'var(--morado-suave)' },
+  musica: { etiqueta: 'Música', Icono: Music, color: 'var(--verde)', suave: 'var(--verde-suave)' },
+  productividad: { etiqueta: 'Productividad', Icono: Briefcase, color: 'var(--azul)', suave: 'var(--azul-suave)' },
+  nube: { etiqueta: 'Nube', Icono: Cloud, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
+  juegos: { etiqueta: 'Juegos', Icono: Gamepad2, color: 'var(--acento)', suave: 'var(--acento-suave)' },
+  educacion: { etiqueta: 'Educación', Icono: GraduationCap, color: 'var(--azul)', suave: 'var(--azul-suave)' },
+  salud: { etiqueta: 'Salud', Icono: HeartPulse, color: 'var(--verde)', suave: 'var(--verde-suave)' },
+  noticias: { etiqueta: 'Noticias', Icono: Newspaper, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
+  ia: { etiqueta: 'IA', Icono: Bot, color: 'var(--morado)', suave: 'var(--morado-suave)' },
+  otro: { etiqueta: 'Otro', Icono: Package, color: 'var(--tinta-2)', suave: 'var(--vidrio-2)' },
+};
 
 /** Días de anticipación con los que se avisa. RN-NOT-004 usa 48 h. */
 const DIAS_DE_AVISO = 2;
 
 /**
- * Si la tarjeta muestra el triángulo de alerta.
+ * Si la tarjeta muestra la alerta de cobro cercano.
  *
  * Dos motivos: una prueba gratis que se termina (RN-NOT-004) o un cobro que
- * viene en los próximos días. Antes era un `hasAlert` escrito a mano en el
- * JSON de ejemplo, así que no reaccionaba a nada.
+ * viene en los próximos días.
  */
 export function tieneAlerta(s: Suscripcion): boolean {
   if (s.estado === 'cancelado') return false;
@@ -72,27 +80,33 @@ export function etiquetaFrecuencia(frecuencia: Suscripcion['frecuencia']): strin
   return ETIQUETA_FRECUENCIA[frecuencia];
 }
 
-const ETIQUETA_CATEGORIA: Record<Suscripcion['categoria'], string> = {
-  streaming: 'Streaming',
-  musica: 'Música',
-  productividad: 'Productividad',
-  nube: 'Nube',
-  juegos: 'Juegos',
-  educacion: 'Educación',
-  salud: 'Salud',
-  noticias: 'Noticias',
-  ia: 'IA',
-  otro: 'Otro',
-};
+/** 'mensual' -> '/mes', para pegar al monto. */
+export function sufijoFrecuencia(frecuencia: Suscripcion['frecuencia']): string {
+  return frecuencia === 'anual' ? '/año' : '/mes';
+}
 
-/** Las 10 categorías del dominio, listas para poblar un `<select>`. */
-export const CATEGORIAS: { valor: Suscripcion['categoria']; etiqueta: string }[] =
-  (Object.keys(ETIQUETA_CATEGORIA) as Suscripcion['categoria'][]).map((valor) => ({
-    valor,
-    etiqueta: ETIQUETA_CATEGORIA[valor],
-  }));
+/** Las 10 categorías del dominio, listas para poblar un `<select>` o pestañas. */
+export const CATEGORIAS: { valor: Suscripcion['categoria']; etiqueta: string }[] = (
+  Object.keys(CATEGORIA_VISUAL) as Suscripcion['categoria'][]
+).map((valor) => ({ valor, etiqueta: CATEGORIA_VISUAL[valor].etiqueta }));
 
 /** 'streaming' -> 'Streaming'. */
 export function etiquetaCategoria(categoria: Suscripcion['categoria']): string {
-  return ETIQUETA_CATEGORIA[categoria];
+  return CATEGORIA_VISUAL[categoria].etiqueta;
+}
+
+/** Cómo se llama cada estado delante del usuario, y de qué color es su insignia. */
+export const ESTADOS: Record<Suscripcion['estado'], { etiqueta: string; tono: TonoInsignia }> = {
+  activo: { etiqueta: 'Activa', tono: 'verde' },
+  prueba: { etiqueta: 'Prueba gratis', tono: 'turquesa' },
+  por_confirmar: { etiqueta: 'Por confirmar', tono: 'neutro' },
+  fantasma: { etiqueta: 'Sin uso', tono: 'coral' },
+  cancelado: { etiqueta: 'Cancelada', tono: 'neutro' },
+};
+
+/** "Hoy", "Mañana", "En 5 días". */
+export function cuandoEnDias(dias: number): string {
+  if (dias === 0) return 'Hoy';
+  if (dias === 1) return 'Mañana';
+  return `En ${dias} días`;
 }

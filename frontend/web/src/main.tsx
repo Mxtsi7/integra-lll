@@ -4,7 +4,6 @@ import { BrowserRouter } from "react-router-dom";
 import { configurarApi, configureAuthApi } from "@ojoalgasto/shared";
 import { App } from "./App";
 import "./styles/theme.css";
-import './styles/tema-oscuro.css';
 import { iniciarTema } from './hooks/useTema';
 
 iniciarTema();
