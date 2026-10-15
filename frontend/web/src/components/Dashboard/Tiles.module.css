@@ -452,11 +452,39 @@
   height: 100%;
 }
 
+/* Cada línea se dibuja desde la suscripción hacia el ojo. Con pathLength=100
+   el trazo mide 100 unidades, así que un desfase de 100 la esconde entera. */
 .hubLinea {
-  stroke: rgba(255, 255, 255, 0.22);
+  stroke: rgba(255, 255, 255, 0.28);
   stroke-width: 1;
-  stroke-dasharray: 2 3;
-  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: dibujarLinea 600ms cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+@keyframes dibujarLinea {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.hubCentro {
+  animation: aparecerNodo 500ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.hubNodo {
+  animation: aparecerNodo 500ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes aparecerNodo {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .hubCentro {
