@@ -1,0 +1,70 @@
+import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { Zap } from 'lucide-react';
+import { CATEGORIA_VISUAL } from '../subscriptions/presentacion';
+import styles from './Tiles.module.css';
+
+interface TileCategoriasProps {
+  suscripciones: Suscripcion[];
+}
+
+/**
+ * Cuánto se va en cada categoría, como el gráfico de consumo eléctrico:
+ * barras verticales con la más alta en naranjo y su valor encima.
+ */
+export function TileCategorias({ suscripciones }: TileCategoriasProps) {
+  // Solo las que efectivamente pesan en el gasto mensual: mismo criterio
+  // que gastoProyectado() en shared/calculos.ts (activo + fantasma).
+  const relevantes = suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma');
+
+  const porCategoria = new Map<Suscripcion['categoria'], number>();
+  for (const s of relevantes) {
+    porCategoria.set(s.categoria, (porCategoria.get(s.categoria) ?? 0) + equivalenteMensual(s.monto, s.frecuencia));
+  }
+
+  const datos = Array.from(porCategoria.entries())
+    .map(([categoria, monto]) => ({ categoria, monto: Math.round(monto) }))
+    .sort((a, b) => b.monto - a.monto)
+    .slice(0, 6);
+
+  const maximo = datos[0]?.monto ?? 0;
+  const total = datos.reduce((suma, d) => suma + d.monto, 0);
+
+  return (
+    <section className={`tile ${styles.tile}`} aria-label="Gasto por categoría">
+      <div className={styles.cabecera}>
+        <span className={styles.icono} style={{ color: 'var(--acento)' }}>
+          <Zap size={19} aria-hidden="true" />
+        </span>
+        <div className={styles.titulos}>
+          <h2 className={styles.titulo}>Gasto por categoría</h2>
+        </div>
+        <span className={styles.pill}>Este mes</span>
+      </div>
+
+      <div className={styles.categoriasTotal}>
+        <span className={styles.categoriasCifra}>{formatearMonto(total)}</span>
+        <span className={styles.categoriasSufijo}>
+          en {porCategoria.size} {porCategoria.size === 1 ? 'categoría' : 'categorías'}
+        </span>
+      </div>
+
+      {datos.length === 0 ? (
+        <p className={styles.vacio}>Todavía no hay suscripciones activas para comparar.</p>
+      ) : (
+        <div className={styles.categoriasGrafico} role="img" aria-label={datos.map((d) => `${CATEGORIA_VISUAL[d.categoria].etiqueta} ${formatearMonto(d.monto)}`).join(', ')}>
+          {datos.map((d, i) => (
+            <div key={d.categoria} className={styles.categoriasColumna}>
+              <span
+                className={`${styles.categoriasBarra} ${i === 0 ? styles.categoriasBarraTop : ''}`}
+                style={{ height: `${maximo > 0 ? Math.max(6, (d.monto / maximo) * 100) : 0}%` }}
+              >
+                {i === 0 && <span className={styles.categoriasBurbuja}>{formatearMonto(d.monto)}</span>}
+              </span>
+              <span className={styles.categoriasEje}>{CATEGORIA_VISUAL[d.categoria].etiqueta}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}

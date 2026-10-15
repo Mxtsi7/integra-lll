@@ -1,34 +1,74 @@
-.paneles {
+.grilla {
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 20px;
+  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.columnaIzquierda,
+.columnaDerecha {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.filaInferior {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 18px;
   align-items: start;
 }
 
 .mensaje {
   padding: 48px 24px;
   text-align: center;
-  color: var(--oag-ink-soft);
-  font-size: 14px;
+  color: var(--tinta-2);
+  font-size: 14.5px;
 }
 
-.botonExportar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--oag-navy);
-  color: #ffffff;
-  border: none;
-  border-radius: var(--oag-radius-md);
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
+.esqueleto {
+  border-radius: var(--radio-l);
+  background: linear-gradient(90deg, var(--vidrio) 25%, var(--vidrio-2) 50%, var(--vidrio) 75%);
+  background-size: 400% 100%;
+  animation: brillo 1.4s ease infinite;
+}
+
+.esqueletoChico {
+  height: 230px;
+}
+
+.esqueletoGrande {
+  height: 470px;
+}
+
+@keyframes brillo {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (max-width: 1180px) {
+  .filaInferior {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .filaInferior > :last-child {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 900px) {
-  .paneles {
+  .grilla {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .filaInferior {
     grid-template-columns: 1fr;
   }
 }

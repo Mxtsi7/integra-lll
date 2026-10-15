@@ -2,30 +2,33 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { BarraLateral } from './BarraLateral';
+import { BarraSuperior } from './BarraSuperior';
 import { Footer } from './Footer';
-import { Header } from './Header';
-import { Sidebar } from './Sidebar';
 import styles from './AppLayout.module.css';
 
 interface AppLayoutProps {
   headerTitulo: string;
-  headerSubtitulo: string;
-  headerEtiquetaFecha?: string;
+  headerSubtitulo?: string;
+  /** Botones a la derecha del título: la acción principal de la página. */
   headerAccionDerecha?: ReactNode;
+  /** Cuántas cosas piden atención, para la campana. */
+  avisos?: number;
+  /** Contenido más angosto, para páginas de lectura (detalle, próximamente). */
+  angosto?: boolean;
   children: ReactNode;
 }
 
 // Se muestran mientras /usuarios/me/ no respondió (o si falló por red).
-// Antes eran los únicos valores: ahora el nombre y el plan salen del
-// AuthContext, que los recupera también al recargar la página.
 const NOMBRE_USUARIO_PLACEHOLDER = 'Usuario';
 const PLAN_PLACEHOLDER = 'Plan Gratuito';
 
 export function AppLayout({
   headerTitulo,
   headerSubtitulo,
-  headerEtiquetaFecha,
   headerAccionDerecha,
+  avisos,
+  angosto = false,
   children,
 }: AppLayoutProps) {
   const { usuario, cerrarSesion } = useAuth();
@@ -47,8 +50,6 @@ export function AppLayout({
     if (cerrandoSesion) return;
     setCerrandoSesion(true);
     // cerrarSesion() revoca en el backend y SIEMPRE borra los tokens locales.
-    // Antes solo se borraban los locales; la revisión de la PR #57 (CH-03)
-    // pidió revocar también en el servidor y avisar si eso falla.
     const { revocada } = await cerrarSesion();
     if (revocada) {
       toast.info('Cerraste sesión.');
@@ -62,23 +63,28 @@ export function AppLayout({
 
   return (
     <div className={styles.app}>
-      <Sidebar
-        nombreUsuario={nombreUsuario}
-        plan={plan}
-        alCerrarSesion={manejarCerrarSesion}
-        cerrandoSesion={cerrandoSesion}
-      />
+      <BarraLateral />
 
       <div className={styles.columna}>
-        <div className={styles.contenido}>
-          <Header
-            titulo={headerTitulo}
-            subtitulo={headerSubtitulo}
-            etiquetaFecha={headerEtiquetaFecha}
-            accionDerecha={headerAccionDerecha}
-          />
+        <BarraSuperior
+          nombreUsuario={nombreUsuario}
+          plan={plan}
+          avisos={avisos}
+          alCerrarSesion={manejarCerrarSesion}
+          cerrandoSesion={cerrandoSesion}
+        />
+
+        <main className={`${styles.contenido} ${angosto ? styles.angosto : ''}`}>
+          <header className={styles.encabezado}>
+            <div className={styles.titulos}>
+              <h1 className={styles.titulo}>{headerTitulo}</h1>
+              {headerSubtitulo && <p className={styles.subtitulo}>{headerSubtitulo}</p>}
+            </div>
+            {headerAccionDerecha && <div className={styles.acciones}>{headerAccionDerecha}</div>}
+          </header>
           {children}
-        </div>
+        </main>
+
         <Footer />
       </div>
     </div>

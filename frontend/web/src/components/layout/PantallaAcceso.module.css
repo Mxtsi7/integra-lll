@@ -1,0 +1,77 @@
+.pantalla {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+}
+
+.columna {
+  width: 100%;
+  max-width: 440px;
+}
+
+.marca {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 26px;
+}
+
+.tarjeta {
+  padding: 32px 30px 28px;
+}
+
+.titulo {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.descripcion {
+  margin: 6px 0 24px;
+  font-size: 14.5px;
+  color: var(--tinta-2);
+}
+
+.pie {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vidrio-borde);
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+.pie a {
+  font-weight: 700;
+  color: var(--acento);
+  text-decoration: none;
+}
+
+.pie a:hover {
+  text-decoration: underline;
+}
+
+.nota {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 20px;
+  font-size: 12.5px;
+  color: var(--tinta-3);
+}
+
+@media (max-width: 480px) {
+  .pantalla {
+    padding: 24px 16px;
+  }
+
+  .tarjeta {
+    padding: 26px 20px 22px;
+  }
+
+  .titulo {
+    font-size: 23px;
+  }
+}
