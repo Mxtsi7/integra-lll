@@ -104,9 +104,38 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 JWT_SECRET = env("JWT_SECRET")
 JWT_ALGORITMO = env("JWT_ALGORITMO", default="HS256")
 
+# ─── Recuperación de contraseña ───────────────────────────────
+RECUPERACION_MINUTOS = 60
+PASSWORD_RESET_TIMEOUT = RECUPERACION_MINUTOS * 60
+FRONTEND_URL = env("FRONTEND_URL", default="http://localhost:5173")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-responder@ojoalgasto.cl")
+# SMTP evita escribir el enlace y su token en los logs del contenedor.
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=5)
+
 SIMPLE_JWT = {
     "SIGNING_KEY": JWT_SECRET,
     "ALGORITHM": JWT_ALGORITMO,
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_MINUTOS_ACCESO", default=30)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_DIAS_REFRESCO", default=7)),
+}
+
+
+# Estado compartido de sesiones. Nunca usar caché local en despliegues.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "sesiones": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("SESSION_REDIS_URL", default="redis://redis:6379/2"),
+        "KEY_PREFIX": "ojoalgasto:sesiones",
+        "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+    },
 }

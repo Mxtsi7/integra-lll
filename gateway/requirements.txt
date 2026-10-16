@@ -12,3 +12,6 @@ pytest-django==4.9.0
 # Sin psycopg a proposito: el gateway NO tiene base de datos.
 # Valida la firma del JWT y reenvia la peticion al servicio que corresponde.
 # En config/settings.py va DATABASES = {} (Django 5 lo admite).
+
+
+redis==5.2.1
