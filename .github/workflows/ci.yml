@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        servicio: [auth, subscriptions, gateway]
+        servicio: [auth, subscriptions, gateway, connectors]
 
     services:
       postgres:
