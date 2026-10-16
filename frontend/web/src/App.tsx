@@ -9,6 +9,7 @@ import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
+import { RecomendacionesPage } from './pages/RecomendacionesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
@@ -48,7 +49,7 @@ export function App() {
             {/* Secciones del menú que todavía no tienen backend. Antes caían
                 al comodín y devolvían al Panel en silencio. */}
             <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
-            <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
+            <Route path="/recomendaciones" element={<RecomendacionesPage />} />
             <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
             <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
           </Route>
