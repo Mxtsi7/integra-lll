@@ -5,6 +5,12 @@
 .env
 .env.*
 !.env.example
+# Acceso al cluster: cada uno lo baja del panel del curso, no del repo.
+# Uno de Maxi estuvo 5 días en main (02 al 07-10-2026) con el repo público.
+*.kubeconfig
+kubeconfig
+kubeconfig.*
+.kube/
 *.pem
 *.key
 credentials.json
