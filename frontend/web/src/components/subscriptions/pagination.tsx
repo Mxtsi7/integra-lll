@@ -1,4 +1,5 @@
 import React from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import styles from "./pagination.module.css";
 
 export interface PaginationProps {
@@ -18,7 +19,7 @@ export interface PaginationProps {
 const buildPageList = (
   totalPages: number,
   currentPage: number,
-  siblingCount: number
+  siblingCount: number,
 ): (number | "ellipsis")[] => {
   const pages: (number | "ellipsis")[] = [];
   const start = Math.max(2, currentPage - siblingCount);
@@ -34,12 +35,9 @@ const buildPageList = (
 };
 
 /**
- * Pagination
- *
- * Control de paginación genérico y reutilizable: calcula el total de
- * páginas a partir de `totalItems` / `pageSize` y expone `onPageChange`.
- * No conoce nada del dominio (suscripciones, transacciones, etc.), por lo
- * que puede reutilizarse en cualquier listado paginado de la app.
+ * Control de paginación genérico: calcula el total de páginas a partir de
+ * `totalItems` / `pageSize` y expone `onPageChange`. No conoce nada del
+ * dominio, así que sirve para cualquier listado.
  */
 const Pagination: React.FC<PaginationProps> = ({
   currentPage,
@@ -64,12 +62,9 @@ const Pagination: React.FC<PaginationProps> = ({
   const lastItem = Math.min(currentPage * pageSize, totalItems);
 
   return (
-    <nav
-      className={`${styles.pagination} ${className}`}
-      aria-label="Paginación de suscripciones"
-    >
+    <nav className={`${styles.pagination} ${className}`} aria-label="Paginación de suscripciones">
       <span className={styles.range}>
-        {firstItem}–{lastItem} de {totalItems}
+        {firstItem} a {lastItem} de {totalItems}
       </span>
 
       <div className={styles.controls}>
@@ -80,7 +75,7 @@ const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === 1}
           aria-label="Página anterior"
         >
-          ‹
+          <ChevronLeft size={16} aria-hidden="true" />
         </button>
 
         {pages.map((page, idx) =>
@@ -92,15 +87,13 @@ const Pagination: React.FC<PaginationProps> = ({
             <button
               key={page}
               type="button"
-              className={`${styles.pageButton} ${
-                page === currentPage ? styles.pageButtonActive : ""
-              }`}
+              className={`${styles.pageButton} ${page === currentPage ? styles.pageButtonActive : ""}`}
               aria-current={page === currentPage ? "page" : undefined}
               onClick={() => goTo(page)}
             >
               {page}
             </button>
-          )
+          ),
         )}
 
         <button
@@ -110,7 +103,7 @@ const Pagination: React.FC<PaginationProps> = ({
           disabled={currentPage === totalPages}
           aria-label="Página siguiente"
         >
-          ›
+          <ChevronRight size={16} aria-hidden="true" />
         </button>
       </div>
     </nav>
