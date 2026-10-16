@@ -1,0 +1,239 @@
+.tarjeta {
+  position: relative;
+  list-style: none;
+  min-width: 0;
+  background: linear-gradient(150deg, var(--tinte, var(--vidrio)), var(--vidrio) 70%);
+  transition: transform var(--rapido), border-color var(--rapido);
+}
+
+.tarjeta:hover {
+  border-color: var(--vidrio-borde-fuerte);
+  transform: translateY(-2px);
+}
+
+.fantasma {
+  border-color: rgba(255, 107, 107, 0.35);
+}
+
+.cuerpo {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-height: 196px;
+  padding: 18px 18px 16px;
+  margin: 0;
+  border: none;
+  border-radius: var(--radio-l);
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+
+.cuerpo:focus-visible {
+  outline-offset: -3px;
+}
+
+.arriba {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
+}
+
+.estado {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.interruptor {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  border-radius: 999px;
+  background: var(--vidrio-borde-fuerte);
+}
+
+.interruptor::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.interruptorEncendido {
+  background: var(--verde);
+}
+
+.interruptorEncendido::after {
+  left: auto;
+  right: 3px;
+}
+
+.interruptorCoral {
+  background: var(--coral);
+}
+
+.nombre {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.categoria {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.abajo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.monto {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.periodo {
+  margin-left: 3px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tinta-2);
+  letter-spacing: 0;
+}
+
+.detalle {
+  font-size: 12px;
+  color: var(--tinta-2);
+}
+
+.detalleAlerta {
+  color: var(--acento);
+  font-weight: 700;
+}
+
+.acciones {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 4px;
+}
+
+.accion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: 10px;
+  background: var(--vidrio-2);
+  color: var(--tinta-2);
+  transition: color var(--rapido), border-color var(--rapido);
+}
+
+.accion:hover {
+  color: var(--tinta);
+  border-color: var(--vidrio-borde-fuerte);
+}
+
+.accionPeligro:hover {
+  color: var(--coral);
+  border-color: var(--coral);
+}
+
+/* ---- Esqueleto ---- */
+
+.cargando {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 196px;
+  padding: 18px;
+}
+
+.esqueleto {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--vidrio) 25%, var(--vidrio-2) 50%, var(--vidrio) 75%);
+  background-size: 400% 100%;
+  animation: brillo 1.4s ease infinite;
+}
+
+.esqueletoIcono {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  margin-bottom: 6px;
+}
+
+.esqueletoTitulo {
+  width: 60%;
+  height: 16px;
+}
+
+.esqueletoLinea {
+  width: 35%;
+  height: 12px;
+}
+
+.esqueletoMonto {
+  width: 45%;
+  height: 22px;
+  margin-top: auto;
+}
+
+@keyframes brillo {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* ---- Salida al eliminar ---- */
+
+.saliendo {
+  animation: salir 280ms ease forwards;
+  pointer-events: none;
+}
+
+@keyframes salir {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
