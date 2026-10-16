@@ -108,6 +108,32 @@
   list-style: none;
 }
 
+/* Las tarjetas entran en cascada, de la primera a la última de la página. */
+.grilla > * {
+  animation: entrarTarjeta 460ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.grilla > :nth-child(1) { animation-delay: 0ms; }
+.grilla > :nth-child(2) { animation-delay: 50ms; }
+.grilla > :nth-child(3) { animation-delay: 100ms; }
+.grilla > :nth-child(4) { animation-delay: 150ms; }
+.grilla > :nth-child(5) { animation-delay: 200ms; }
+.grilla > :nth-child(6) { animation-delay: 250ms; }
+.grilla > :nth-child(7) { animation-delay: 300ms; }
+.grilla > :nth-child(8) { animation-delay: 350ms; }
+.grilla > :nth-child(9) { animation-delay: 400ms; }
+
+@keyframes entrarTarjeta {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .sinResultados {
   padding: 48px 20px;
   text-align: center;

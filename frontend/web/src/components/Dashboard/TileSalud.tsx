@@ -1,5 +1,6 @@
 import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Ghost, Leaf, Timer } from 'lucide-react';
+import { useConteo } from '../../hooks/useConteo';
 import { Anillo } from './Medidores';
 import styles from './Tiles.module.css';
 
@@ -32,6 +33,8 @@ export function TileSalud({ suscripciones }: TileSaludProps) {
   const fuga = total > 0 ? sinUso / total : 0;
   const sano = fuga <= 0.1;
   const color = sano ? 'var(--verde)' : 'var(--coral)';
+  // El número sube al mismo ritmo que se llena el anillo.
+  const enUsoMostrado = Math.round(useConteo(enUso, 900));
 
   // Barras decorativas: cuántas de cada 12 son fantasma, para que se vea la proporción.
   const barrasCoral = total > 0 ? Math.round(fuga * 12) : 0;
@@ -54,7 +57,7 @@ export function TileSalud({ suscripciones }: TileSaludProps) {
       <div className={styles.saludCuerpo}>
         <Anillo porcentaje={enUso} color={color} tamano={132} etiqueta={`${enUso} % del gasto en uso`}>
           <span className={styles.saludCifra}>
-            {enUso}
+            {enUsoMostrado}
             <span className={styles.saludCifraSufijo}>%</span>
           </span>
           <span className={styles.saludEtiqueta}>en uso</span>

@@ -1,4 +1,18 @@
 from django.db.models.signals import pre_migrate
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def sesiones_en_memoria(settings):
+    # Doble compartido entre hilos; producción usa Redis, nunca LocMem.
+    settings.CACHES = {
+        **settings.CACHES,
+        "sesiones": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    }
+    from django.core.cache import caches
+    caches["sesiones"].clear()
+    yield
+    caches["sesiones"].clear()
 
 
 def crear_esquema_del_servicio(sender, using, **kwargs):
@@ -15,3 +29,4 @@ pre_migrate.connect(
     crear_esquema_del_servicio,
     dispatch_uid="crear-esquema-del-servicio",
 )
+

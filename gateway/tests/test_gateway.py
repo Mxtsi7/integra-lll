@@ -12,6 +12,7 @@ import jwt
 import pytest
 import requests
 from django.conf import settings
+from django.core.cache import caches
 from django.test import Client
 
 from app import proxy
@@ -51,8 +52,13 @@ def token(**claims):
         "organizacion_id": "9c2140",
         "rol": "titular",
         "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5),
+        "token_type": "access",
+        "session_version": "a" * 64,
     }
     base.update(claims)
+    usuario_id = base.get("sub") or base.get("user_id")
+    if usuario_id:
+        caches["sesiones"].set(f"usuario:{usuario_id}", "a" * 64, timeout=None)
     return jwt.encode(base, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITMO)
 
 
@@ -209,3 +215,40 @@ def test_toda_respuesta_lleva_correlation_id_y_lo_respeta_si_viene(upstream):
 
     r = cliente.get("/api/suscripciones/")           # incluso un 401
     assert len(r["X-Correlation-ID"]) == 32
+
+
+def test_reset_revoca_el_access_anterior_sin_afectar_otro_usuario(upstream):
+    anterior = token()
+    otro = token(sub="otro-usuario")
+    caches["sesiones"].set("usuario:7f3a1b", "b" * 64, timeout=None)
+    assert cliente.get("/api/suscripciones/", **con_token(anterior)).status_code == 401
+    assert upstream.llamadas == []
+    assert cliente.get("/api/suscripciones/", **con_token(otro)).status_code == 200
+
+
+@pytest.mark.parametrize("claims", [{"session_version": None}, {"token_type": "refresh"}])
+def test_no_acepta_jwt_legacy_ni_refresh_como_access(upstream, claims):
+    assert cliente.get("/api/suscripciones/", **con_token(token(**claims))).status_code == 401
+    assert upstream.llamadas == []
+
+
+def test_perder_el_estado_no_reactiva_tokens(upstream):
+    anterior = token()
+    caches["sesiones"].clear()
+    assert cliente.get("/api/suscripciones/", **con_token(anterior)).status_code == 401
+
+
+def test_redis_caido_no_autoriza_ni_reenvia(upstream, monkeypatch):
+    from redis.exceptions import ConnectionError
+    def fallar(*args):
+        raise ConnectionError("no disponible")
+    monkeypatch.setattr("app.identidad.sesion_vigente", fallar)
+    assert cliente.get("/api/suscripciones/", **con_token(token())).status_code == 503
+    assert upstream.llamadas == []
+
+
+def test_confirmacion_de_reset_es_publica(upstream):
+    respuesta = cliente.post("/api/auth/password-reset/confirm/", data={}, content_type="application/json")
+    assert respuesta.status_code == 200
+    assert "X-Usuario-Id" not in upstream.llamadas[-1]["headers"]
+
