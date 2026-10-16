@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from django.db import transaction
 from .models import User, Organizacion
+from .passwords import validar_password
 
 
 
@@ -16,6 +17,10 @@ class MiembroSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, validators=[validar_password],
+    )
+
     class Meta:
         model = User
         fields = ("id", "email", "nombre", "password")
@@ -89,6 +94,32 @@ class LoginSerializer(serializers.Serializer):
         return User.objects.normalize_email(value)
 
 
+class SolicitudRecuperacionSerializer(serializers.Serializer):
+    """Body de POST /api/auth/password-reset/."""
+
+    email = serializers.EmailField()
+
+    def validate_email(self, value: str) -> str:
+        return User.objects.normalize_email(value)
+
+
+class ConfirmacionRecuperacionSerializer(serializers.Serializer):
+    token = serializers.CharField(write_only=True, max_length=512)
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, validators=[validar_password],
+    )
+
+
+class ErrorRecuperacionSerializer(serializers.Serializer):
+    code = serializers.ChoiceField(choices=["token_invalido", "token_expirado", "token_usado"])
+    detail = serializers.CharField()
+    solicitar_nuevo_enlace = serializers.CharField()
+
+
+class ErrorPasswordRecuperacionSerializer(serializers.Serializer):
+    password = serializers.ListField(child=serializers.CharField())
+
+
 class UsuarioActualSerializer(serializers.ModelSerializer):
     """Lo que /api/usuarios/me/ le entrega a la web.
 
@@ -133,3 +164,4 @@ class OrganizacionDetalleSerializer(serializers.Serializer):
 
 
 #:v
+
