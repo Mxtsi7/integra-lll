@@ -1,4 +1,7 @@
 import React from "react";
+import { Plus } from "lucide-react";
+import { OjoMarca } from "../layout/Marca";
+import { Boton } from "../ui/Boton";
 import styles from "./EmptyState.module.css";
 
 interface EmptyStateProps {
@@ -7,30 +10,13 @@ interface EmptyStateProps {
   /** Texto del botón de acción. Si no se pasa (o falta onAction), no se muestra botón. */
   actionLabel?: string;
   onAction?: () => void;
-  /** Ícono dentro del círculo. Por defecto, un triángulo de advertencia. */
   icon?: React.ReactNode;
   className?: string;
 }
 
-const DefaultIcon: React.FC = () => (
-  <svg className={styles.icon} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path
-      d="M12 4.5 2.7 20h18.6L12 4.5Z"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinejoin="round"
-    />
-    <path d="M12 10v4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    <circle cx="12" cy="17.3" r="0.9" fill="currentColor" />
-  </svg>
-);
-
 /**
- * EmptyState
- *
- * Tarjeta de "no hay datos": ícono + título + descripción + botón de acción.
- * Genérica a propósito, para reutilizarla en otras páginas (calendario de
- * pagos, informes, cuentas conectadas...) cambiando solo los textos.
+ * Pantalla de "todavía no hay nada". Es una invitación a actuar, no un
+ * error: dice qué pasa cuando agregas la primera.
  */
 const EmptyState: React.FC<EmptyStateProps> = ({
   title,
@@ -41,17 +27,14 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   className = "",
 }) => {
   return (
-    <section className={`${styles.card} ${className}`}>
-      <div className={styles.iconCircle}>{icon ?? <DefaultIcon />}</div>
-
-      <h2 className={styles.title}>{title}</h2>
-
-      {description && <p className={styles.description}>{description}</p>}
-
+    <section className={`${styles.tarjeta} ${className}`}>
+      <div className={styles.icono}>{icon ?? <OjoMarca tamano={56} />}</div>
+      <h2 className={styles.titulo}>{title}</h2>
+      {description && <p className={styles.descripcion}>{description}</p>}
       {actionLabel && onAction && (
-        <button type="button" className={styles.actionButton} onClick={onAction}>
+        <Boton onClick={onAction} icono={<Plus size={16} aria-hidden="true" />}>
           {actionLabel}
-        </button>
+        </Boton>
       )}
     </section>
   );

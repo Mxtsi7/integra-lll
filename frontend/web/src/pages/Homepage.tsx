@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import SubscriptionItem from "../components/subscriptions/Subscriptionitem";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Plus } from "lucide-react";
+import TarjetaSuscripcion from "../components/subscriptions/TarjetaSuscripcion";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
 import Pagination from "../components/subscriptions/pagination";
 import EmptyState from "../components/subscriptions/EmptyState";
@@ -8,10 +10,14 @@ import EditarSuscripcionForm, {
   type EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
+import { Modal } from "../components/ui/Modal";
+import { Boton } from "../components/ui/Boton";
+import { contarAvisos } from "./DashboardPage";
 import {
   actualizarSuscripcion,
   crearSuscripcion,
   eliminarSuscripcion,
+  equivalenteMensual,
   ErrorDeApi,
   formatearMonto,
   gastoProyectado,
@@ -22,7 +28,18 @@ import {
 import styles from "./Homepage.module.css";
 import { AppLayout } from "../components/layout/AppLayout";
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 9;
+
+type Filtro = "todas" | Suscripcion["estado"];
+
+const FILTROS: { valor: Filtro; etiqueta: string }[] = [
+  { valor: "todas", etiqueta: "Todas" },
+  { valor: "activo", etiqueta: "Activas" },
+  { valor: "fantasma", etiqueta: "Sin uso" },
+  { valor: "prueba", etiqueta: "Pruebas" },
+  { valor: "por_confirmar", etiqueta: "Por confirmar" },
+  { valor: "cancelado", etiqueta: "Canceladas" },
+];
 
 /** Saca un mensaje legible de cualquier error que puedan tirar las llamadas a la API. */
 function mensajeDeError(e: unknown, fallback: string): string {
@@ -30,12 +47,25 @@ function mensajeDeError(e: unknown, fallback: string): string {
   return fallback;
 }
 
+/** "Netflíx" y "netflix" se encuentran igual. */
+function normalizar(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
 export const Homepage: React.FC = () => {
+  const navigate = useNavigate();
+  const [parametros] = useSearchParams();
+  const busqueda = parametros.get("q") ?? "";
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [filtro, setFiltro] = useState<Filtro>("todas");
 
   // error propio de cada acción (no pisa el error de carga de la lista)
   const [addError, setAddError] = useState<string | null>(null);
@@ -75,25 +105,48 @@ export const Homepage: React.FC = () => {
     };
   }, []);
 
+  // Al cambiar la búsqueda se vuelve a la primera página.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [busqueda]);
+
+  const filtradas = useMemo(() => {
+    const q = normalizar(busqueda.trim());
+    return suscripciones.filter(
+      (s) => (filtro === "todas" || s.estado === filtro) && (q === "" || normalizar(s.nombre).includes(q)),
+    );
+  }, [suscripciones, filtro, busqueda]);
+
   const paginadas = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return suscripciones.slice(start, start + PAGE_SIZE);
-  }, [suscripciones, currentPage]);
+    return filtradas.slice(start, start + PAGE_SIZE);
+  }, [filtradas, currentPage]);
 
-  // si al eliminar (o filtrar) la página actual queda fuera de rango —ej.
-  // estabas en la página 2 y solo quedaba 1 item ahí—, vuelve a la última
-  // página válida en vez de dejar la lista vacía sin forma de navegar atrás.
+  // si al eliminar (o filtrar) la página actual queda fuera de rango, vuelve
+  // a la última página válida en vez de dejar la lista vacía.
   useEffect(() => {
     if (isLoading) return;
-    const totalPages = Math.max(1, Math.ceil(suscripciones.length / PAGE_SIZE));
+    const totalPages = Math.max(1, Math.ceil(filtradas.length / PAGE_SIZE));
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
-  }, [suscripciones, currentPage, isLoading]);
+  }, [filtradas, currentPage, isLoading]);
+
+  const conteoPorFiltro = useMemo(() => {
+    const conteo: Record<Filtro, number> = {
+      todas: suscripciones.length,
+      activo: 0,
+      fantasma: 0,
+      prueba: 0,
+      por_confirmar: 0,
+      cancelado: 0,
+    };
+    for (const s of suscripciones) conteo[s.estado] += 1;
+    return conteo;
+  }, [suscripciones]);
 
   const handleClick = (s: Suscripcion) => {
-    // TODO: navegar a /suscripciones/:id, que ya existe como ruta.
-    console.log("Suscripción seleccionada:", s.nombre);
+    navigate(`/suscripciones/${s.id}`);
   };
 
   const handleAdd = async (nueva: Omit<Suscripcion, "id">): Promise<boolean> => {
@@ -101,15 +154,9 @@ export const Homepage: React.FC = () => {
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
-      // Se calcula currentPage con el próximo array (next.length), no con
-      // `suscripciones.length` capturado en el closure: así no depende de
-      // que este handler corra sin ningún await de por medio entre ambas
-      // líneas.
-      setSuscripciones((prev) => {
-        const next = [...prev, creada];
-        setCurrentPage(Math.ceil(next.length / PAGE_SIZE));
-        return next;
-      });
+      setSuscripciones((prev) => [...prev, creada]);
+      setFiltro("todas");
+      setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
       setIsAdding(false);
       return true;
     } catch (e) {
@@ -123,10 +170,8 @@ export const Homepage: React.FC = () => {
   const handleEditSubmit = async (data: EditarSuscripcionFormData) => {
     setEditError(null);
 
-    // Misma validación que ya hace NuevaSuscripcionForm antes de llamar a
-    // onAdd: sin esto, un monto vacío o no numérico manda `null` en el PATCH
-    // y el backend responde 400 con un mensaje genérico ("Este campo no
-    // puede ser nulo."), sin indicar cuál es el campo problemático.
+    // Sin esto, un monto vacío o no numérico manda `null` en el PATCH y el
+    // backend responde 400 con un mensaje genérico.
     const monto = parseFloat(data.monto.replace(",", "."));
     if (!data.nombre.trim() || Number.isNaN(monto)) {
       setEditError("Revisa el nombre y el monto: no pueden quedar vacíos.");
@@ -142,9 +187,7 @@ export const Homepage: React.FC = () => {
         frecuencia: data.frecuencia,
         categoria: data.categoria,
       });
-      setSuscripciones((prev) =>
-        prev.map((s) => (s.id === data.id ? actualizada : s))
-      );
+      setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
       setEditando(null);
     } catch (e) {
       setEditError(mensajeDeError(e, "No pudimos guardar los cambios. Intenta de nuevo."));
@@ -153,7 +196,7 @@ export const Homepage: React.FC = () => {
     }
   };
 
-  // debe coincidir con la duración de la animación en suscard.module.css
+  // debe coincidir con la duración de la animación en TarjetaSuscripcion.module.css
   const FADE_OUT_MS = 280;
 
   const handleConfirmDelete = async () => {
@@ -180,160 +223,163 @@ export const Homepage: React.FC = () => {
     }
   };
 
+  const cerrarAgregar = useCallback(() => {
+    setAddError(null);
+    setIsAdding(false);
+  }, []);
+  const cerrarEditar = useCallback(() => {
+    setEditError(null);
+    setEditando(null);
+  }, []);
+  const cerrarEliminar = useCallback(() => {
+    setDeleteError(null);
+    setEliminando(null);
+  }, []);
+
   const isEmpty = !isLoading && !error && suscripciones.length === 0;
+  const totalMensual = gastoProyectado(suscripciones);
+  const fantasmasMensual = suscripciones
+    .filter((s) => s.estado === "fantasma")
+    .reduce((suma, s) => suma + equivalenteMensual(s.monto, s.frecuencia), 0);
+
+  const botonAgregar = !isEmpty ? (
+    <Boton
+      icono={<Plus size={16} aria-hidden="true" />}
+      onClick={() => {
+        setAddError(null);
+        setIsAdding(true);
+      }}
+    >
+      Agregar suscripción
+    </Boton>
+  ) : undefined;
 
   return (
     <AppLayout
       headerTitulo="Inicio"
-      headerSubtitulo=" Aquí tienes el estado de tus finanzas y cobros hoy."
-      headerEtiquetaFecha="Octubre, 2026"
+      headerSubtitulo="Tus suscripciones, una por una."
+      headerAccionDerecha={botonAgregar}
+      avisos={isLoading ? undefined : contarAvisos(suscripciones)}
     >
-      <div className={styles.dashboardPage}>
-        {error ? (
-          <p className={styles.summaryLabel}>{error}</p>
-        ) : isEmpty ? (
-          <EmptyState
-            className={styles.emptyState}
-            title="No tienes suscripciones registradas"
-            description="Agrega suscripciones para controlar tus gastos recurrentes, recibir alertas de cobro y obtener recomendaciones personalizadas de ahorro."
-            actionLabel="Agregar suscripción"
-            onAction={() => {
-              setAddError(null);
-              setIsAdding(true);
-            }}
+      {error ? (
+        <p className={styles.mensaje}>{error}</p>
+      ) : isEmpty ? (
+        <EmptyState
+          title="Todavía no registras suscripciones"
+          description="Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar."
+          actionLabel="Agregar suscripción"
+          onAction={() => {
+            setAddError(null);
+            setIsAdding(true);
+          }}
+        />
+      ) : (
+        <>
+          <section className={`tile ${styles.resumen}`} aria-label="Resumen">
+            <div className={styles.dato}>
+              <p className={styles.datoEtiqueta}>Al mes</p>
+              <p className={styles.datoValor}>{isLoading ? "···" : formatearMonto(totalMensual)}</p>
+            </div>
+            <div className={styles.dato}>
+              <p className={styles.datoEtiqueta}>Suscripciones</p>
+              <p className={styles.datoValor}>{isLoading ? "··" : suscripciones.length}</p>
+            </div>
+            <div className={`${styles.dato} ${fantasmasMensual > 0 ? styles.datoCoral : ""}`}>
+              <p className={styles.datoEtiqueta}>Pagas sin usar</p>
+              <p className={styles.datoValor}>{isLoading ? "···" : formatearMonto(fantasmasMensual)}</p>
+            </div>
+          </section>
+
+          <div className={styles.filtros} role="group" aria-label="Filtrar por estado">
+            {FILTROS.filter((f) => f.valor === "todas" || conteoPorFiltro[f.valor] > 0).map((f) => (
+              <button
+                key={f.valor}
+                type="button"
+                className={filtro === f.valor ? `${styles.filtro} ${styles.filtroActivo}` : styles.filtro}
+                aria-pressed={filtro === f.valor}
+                onClick={() => {
+                  setFiltro(f.valor);
+                  setCurrentPage(1);
+                }}
+              >
+                {f.etiqueta}
+                <span className={styles.filtroConteo}>{conteoPorFiltro[f.valor]}</span>
+              </button>
+            ))}
+            {busqueda && (
+              <span className={styles.busquedaActiva}>
+                Buscando «{busqueda}»
+              </span>
+            )}
+          </div>
+
+          <ul className={styles.grilla}>
+            {isLoading
+              ? Array.from({ length: 6 }).map((_, i) => <TarjetaSuscripcion key={`placeholder-${i}`} isLoading />)
+              : paginadas.map((s) => (
+                  <TarjetaSuscripcion
+                    key={s.id}
+                    suscripcion={s}
+                    onClick={handleClick}
+                    onEdit={(s) => {
+                      setEditError(null);
+                      setEditando(s);
+                    }}
+                    onDelete={(s) => {
+                      setDeleteError(null);
+                      setEliminando(s);
+                    }}
+                    isRemoving={s.id === removingId}
+                  />
+                ))}
+          </ul>
+
+          {!isLoading && filtradas.length === 0 && (
+            <p className={styles.sinResultados}>
+              {busqueda ? `Nada se llama «${busqueda}».` : "No hay suscripciones en este estado por ahora."}
+            </p>
+          )}
+
+          {!isLoading && (
+            <Pagination
+              currentPage={currentPage}
+              totalItems={filtradas.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setCurrentPage}
+            />
+          )}
+        </>
+      )}
+
+      {isAdding && (
+        <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={cerrarAgregar}>
+          <AddSubscriptionForm onAdd={handleAdd} onCancel={cerrarAgregar} isSaving={isSavingAdd} error={addError} />
+        </Modal>
+      )}
+
+      {editando && (
+        <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={cerrarEditar}>
+          <EditarSuscripcionForm
+            suscripcion={aFormulario(editando)}
+            onSubmit={handleEditSubmit}
+            onCancel={cerrarEditar}
+            isSaving={isSavingEdit}
+            error={editError}
           />
-        ) : (
-          <>
-            <section className={styles.summaryCard}>
-              <span className={styles.summaryLabel}>Total mensual</span>
-              <p className={styles.summaryValue}>
-                {isLoading ? "···" : formatearMonto(gastoProyectado(suscripciones))}{" "}
-                <span className={styles.summaryPeriod}>/mes</span>
-              </p>
-            </section>
+        </Modal>
+      )}
 
-            <section className={styles.listSection}>
-              <div className={styles.listHeader}>
-                <h2 className={styles.listTitle}>Tus suscripciones</h2>
-                <button
-                  type="button"
-                  className={styles.addButton}
-                  onClick={() => {
-                    setAddError(null);
-                    setIsAdding((v) => !v);
-                  }}
-                >
-                  {isAdding ? "Cerrar" : "+ Agregar suscripción"}
-                </button>
-              </div>
-
-              <ul className={styles.list}>
-                {isLoading
-                  ? Array.from({ length: PAGE_SIZE }).map((_, i) => (
-                      <SubscriptionItem key={`placeholder-${i}`} isLoading />
-                    ))
-                  : paginadas.map((s) => (
-                      <SubscriptionItem
-                        key={s.id}
-                        suscripcion={s}
-                        onClick={handleClick}
-                        onEdit={(s) => {
-                          setEditError(null);
-                          setEditando(s);
-                        }}
-                        onDelete={(s) => {
-                          setDeleteError(null);
-                          setEliminando(s);
-                        }}
-                        isRemoving={s.id === removingId}
-                      />
-                    ))}
-              </ul>
-
-              {!isLoading && (
-                <Pagination
-                  currentPage={currentPage}
-                  totalItems={suscripciones.length}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={setCurrentPage}
-                />
-              )}
-            </section>
-          </>
-        )}
-
-        {/* Overlay de nueva suscripción (fuera de la lista para que también
-            funcione desde el estado vacío) */}
-        {isAdding && (
-          <div
-            className={styles.formOverlay}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setAddError(null);
-                setIsAdding(false);
-              }
-            }}
-          >
-            {addError && <p className={styles.summaryLabel}>{addError}</p>}
-            <AddSubscriptionForm
-              onAdd={handleAdd}
-              onCancel={() => {
-                setAddError(null);
-                setIsAdding(false);
-              }}
-              isSaving={isSavingAdd}
-            />
-          </div>
-        )}
-
-        {/* Overlay del formulario de edición */}
-        {editando && (
-          <div
-            className={styles.formOverlay}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setEditError(null);
-                setEditando(null);
-              }
-            }}
-          >
-            {editError && <p className={styles.summaryLabel}>{editError}</p>}
-            <EditarSuscripcionForm
-              suscripcion={aFormulario(editando)}
-              onSubmit={handleEditSubmit}
-              onCancel={() => {
-                setEditError(null);
-                setEditando(null);
-              }}
-              isSaving={isSavingEdit}
-            />
-          </div>
-        )}
-
-        {/* Overlay del diálogo de confirmación de eliminar */}
-        {eliminando && (
-          <div
-            className={styles.formOverlay}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                setDeleteError(null);
-                setEliminando(null);
-              }
-            }}
-          >
-            <EliminarSuscripcionDialog
-              nombreSuscripcion={eliminando.nombre}
-              onConfirm={handleConfirmDelete}
-              onCancel={() => {
-                setDeleteError(null);
-                setEliminando(null);
-              }}
-              isDeleting={isDeleting}
-              error={deleteError}
-            />
-          </div>
-        )}
-      </div>
+      {eliminando && (
+        <Modal titulo="¿Eliminar suscripción?" alCerrar={cerrarEliminar} tipo="alerta">
+          <EliminarSuscripcionDialog
+            nombreSuscripcion={eliminando.nombre}
+            onConfirm={handleConfirmDelete}
+            onCancel={cerrarEliminar}
+            isDeleting={isDeleting}
+            error={deleteError}
+          />
+        </Modal>
+      )}
     </AppLayout>
   );
 };

@@ -1,0 +1,122 @@
+.seccion {
+  padding: 20px 22px 22px;
+  min-width: 0;
+}
+
+.tinteAcento {
+  background: linear-gradient(145deg, var(--acento-suave), var(--vidrio) 70%);
+}
+
+.tinteVerde {
+  background: linear-gradient(145deg, var(--verde-suave), var(--vidrio) 70%);
+}
+
+.tinteTurquesa {
+  background: linear-gradient(145deg, var(--turquesa-suave), var(--vidrio) 70%);
+}
+
+.tinteMorado {
+  background: linear-gradient(145deg, var(--morado-suave), var(--vidrio) 70%);
+}
+
+.tinteAzul {
+  background: linear-gradient(145deg, var(--azul-suave), var(--vidrio) 70%);
+}
+
+.tinteCoral {
+  background: linear-gradient(145deg, var(--coral-suave), var(--vidrio) 70%);
+}
+
+.cabecera {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
+  color: var(--tinta);
+}
+
+.tinteAcento .icono {
+  color: var(--acento);
+}
+
+.tinteVerde .icono {
+  color: var(--verde);
+}
+
+.tinteTurquesa .icono {
+  color: var(--turquesa);
+}
+
+.tinteMorado .icono {
+  color: var(--morado);
+}
+
+.tinteAzul .icono {
+  color: var(--azul);
+}
+
+.tinteCoral .icono {
+  color: var(--coral);
+}
+
+.titulos {
+  flex: 1;
+  min-width: 0;
+}
+
+.titulo {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.descripcion {
+  margin-top: 1px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.fila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.fila:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.fila:last-child {
+  padding-bottom: 0;
+}
+
+.filaTexto {
+  min-width: 0;
+}
+
+.filaEtiqueta {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+.filaDetalle {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}

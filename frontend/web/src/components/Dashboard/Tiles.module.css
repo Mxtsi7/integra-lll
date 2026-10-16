@@ -1,0 +1,849 @@
+/* Estilos compartidos por los tiles del Panel. Cada tile es un .tile de
+   theme.css con su tinte; acá va lo que tienen en común y lo propio de cada uno. */
+
+.tile {
+  position: relative;
+  padding: 20px 22px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tinteVerde {
+  background: linear-gradient(150deg, var(--verde-suave), var(--vidrio) 65%);
+}
+
+.tinteAcento {
+  background: linear-gradient(150deg, var(--acento-suave), var(--vidrio) 65%);
+}
+
+.tinteCoral {
+  background: linear-gradient(150deg, var(--coral-suave), var(--vidrio) 65%);
+}
+
+.tinteTurquesa {
+  background: linear-gradient(150deg, var(--turquesa-suave), var(--vidrio) 65%);
+}
+
+.tinteMorado {
+  background: linear-gradient(150deg, var(--morado-suave), var(--vidrio) 65%);
+}
+
+.cabecera {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.icono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
+}
+
+.titulos {
+  flex: 1;
+  min-width: 0;
+}
+
+.titulo {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.subtitulo {
+  margin-top: 1px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tinta-2);
+  white-space: nowrap;
+}
+
+.vacio {
+  padding: 18px 0 6px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+}
+
+/* ---- Resumen (la tarjeta del clima) ---- */
+
+.resumenFila {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.resumenLugar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.resumenCuerpo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 20px;
+}
+
+.resumenOrbe {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffd6b3, var(--acento) 55%, #c4581c);
+  box-shadow: 0 0 40px 6px rgba(255, 138, 61, 0.35);
+}
+
+.resumenOrbe::after {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  background: #1a0d05;
+  box-shadow: inset 0 0 0 4px #fff2e6;
+}
+
+.resumenCifra {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font-size: clamp(30px, 2.6vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+.resumenCifraSufijo {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tinta-2);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.resumenDescripcion {
+  margin-top: 6px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+}
+
+.resumenDatos {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.resumenDato {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resumenDatoIcono {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--tinta-2);
+}
+
+.resumenDatoTexto {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.resumenDatoEtiqueta {
+  font-size: 11px;
+  color: var(--tinta-3);
+}
+
+.resumenDatoValor {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resumenDatoCoral .resumenDatoValor {
+  color: var(--coral);
+}
+
+/* ---- Salud del gasto (calidad del aire) ---- */
+
+.saludCuerpo {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.saludCifra {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.saludCifraSufijo {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--tinta-2);
+}
+
+.saludEtiqueta {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tinta-2);
+}
+
+.saludLado {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.saludDato {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.saludDatoIcono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--vidrio-2);
+}
+
+.saludDatoTexto {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.saludDatoEtiqueta {
+  font-size: 11.5px;
+  color: var(--tinta-3);
+}
+
+.saludDatoValor {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.saludBarras {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  margin-top: 2px;
+}
+
+.saludBarra {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--verde);
+  opacity: 0.85;
+}
+
+.saludBarraCoral {
+  background: var(--coral);
+}
+
+.saludVeredicto {
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--verde);
+}
+
+.saludVeredictoCoral {
+  color: var(--coral);
+}
+
+/* ---- Próximo cobro (temperatura) ---- */
+
+.proximoCuerpo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.proximoCuando {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.proximoFecha {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--tinta-2);
+}
+
+.proximoServicio {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.proximoNav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--vidrio-borde-fuerte);
+  border-radius: 50%;
+  background: var(--vidrio-2);
+  color: var(--tinta);
+}
+
+.proximoNav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.proximoServicioTexto {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.proximoServicioTexto:hover .proximoNombre {
+  color: var(--acento);
+}
+
+.proximoNombre {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proximoMonto {
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.proximoPosicion {
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--tinta-3);
+}
+
+/* ---- Hub (la foto de la casa) ---- */
+
+.hub {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hubPestanas {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.hubPestanas::-webkit-scrollbar {
+  display: none;
+}
+
+.hubPestana {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tinta-2);
+  white-space: nowrap;
+  transition: background-color var(--rapido), color var(--rapido);
+}
+
+.hubPestana:hover {
+  color: var(--tinta);
+  background: var(--vidrio);
+}
+
+.hubPestanaActiva,
+.hubPestanaActiva:hover {
+  background: linear-gradient(135deg, var(--acento-hover), var(--acento));
+  color: var(--acento-tinta);
+  box-shadow: 0 8px 20px -8px var(--acento);
+}
+
+.hubEscena {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(420px 260px at 50% 48%, rgba(255, 138, 61, 0.22), transparent 70%),
+    radial-gradient(300px 220px at 12% 90%, rgba(46, 211, 196, 0.2), transparent 70%),
+    radial-gradient(300px 220px at 90% 10%, rgba(155, 123, 255, 0.22), transparent 70%),
+    linear-gradient(180deg, #121a2e, #0b101d);
+  border: 1px solid var(--vidrio-borde);
+}
+
+:root[data-tema='claro'] .hubEscena {
+  background:
+    radial-gradient(420px 260px at 50% 48%, rgba(255, 138, 61, 0.35), transparent 70%),
+    radial-gradient(300px 220px at 12% 90%, rgba(46, 211, 196, 0.3), transparent 70%),
+    radial-gradient(300px 220px at 90% 10%, rgba(155, 123, 255, 0.3), transparent 70%),
+    linear-gradient(180deg, #1b2440, #0f1528);
+}
+
+.hubLineas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Cada línea se dibuja desde la suscripción hacia el ojo. Con pathLength=100
+   el trazo mide 100 unidades, así que un desfase de 100 la esconde entera. */
+.hubLinea {
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: dibujarLinea 600ms cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+@keyframes dibujarLinea {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.hubCentro {
+  animation: aparecerNodo 500ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+.hubNodo {
+  animation: aparecerNodo 500ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes aparecerNodo {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.hubCentro {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.hubOjo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 60px 10px rgba(255, 138, 61, 0.25);
+}
+
+.hubCentroTexto {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+}
+
+.hubNodo {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 112px;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.hubNodoIcono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+  transition: transform var(--rapido), background-color var(--rapido);
+}
+
+.hubNodo:hover .hubNodoIcono {
+  transform: scale(1.06);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.hubNodoFantasma .hubNodoIcono {
+  border-color: var(--coral);
+  box-shadow: 0 0 24px -4px var(--coral);
+}
+
+.hubNodoNombre {
+  max-width: 100%;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.hubNodoMonto {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+.hubVacio {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 14px;
+}
+
+.hubPie {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hubEstado {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--vidrio-2);
+  border: 1px solid var(--vidrio-borde);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.hubPunto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--verde);
+  box-shadow: 0 0 10px var(--verde);
+}
+
+.hubPuntoCoral {
+  background: var(--coral);
+  box-shadow: 0 0 10px var(--coral);
+}
+
+.hubAcciones {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- Gasto por categoría (consumo eléctrico) ---- */
+
+.categoriasTotal {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 14px;
+}
+
+.categoriasCifra {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.categoriasSufijo {
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.categoriasGrafico {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 160px;
+  padding-top: 26px;
+}
+
+.categoriasColumna {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 8px;
+}
+
+.categoriasBarra {
+  position: relative;
+  width: 100%;
+  max-width: 34px;
+  border-radius: 8px 8px 4px 4px;
+  background: var(--turquesa);
+  opacity: 0.8;
+  animation: subirBarra 700ms cubic-bezier(0.2, 0, 0, 1);
+  transform-origin: bottom;
+}
+
+.categoriasBarraTop {
+  background: linear-gradient(180deg, var(--acento-hover), var(--acento));
+  opacity: 1;
+  box-shadow: 0 0 24px -4px var(--acento);
+}
+
+.categoriasBurbuja {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--acento);
+  color: var(--acento-tinta);
+  font-size: 11.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.categoriasEje {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--tinta-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+@keyframes subirBarra {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+/* ---- Sin uso y pruebas (luces y aire acondicionado) ---- */
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fila {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--vidrio);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--rapido);
+}
+
+.fila:hover {
+  background: var(--vidrio-2);
+}
+
+.filaIcono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--vidrio-2);
+}
+
+.filaTexto {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+}
+
+.filaNombre {
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filaDetalle {
+  display: block;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--tinta-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filaMonto {
+  margin-right: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+.filaMontoCoral {
+  color: var(--coral);
+}
+
+.interruptor {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--vidrio-borde-fuerte);
+}
+
+.interruptor::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.interruptorEncendido {
+  background: var(--acento);
+}
+
+.interruptorEncendido::after {
+  left: auto;
+  right: 3px;
+}
+
+.interruptorVerde {
+  background: var(--verde);
+}
+
+@media (max-width: 640px) {
+  .hubEscena {
+    min-height: 440px;
+  }
+
+  .hubNodo {
+    width: 104px;
+  }
+
+  .hubCentroEtiqueta {
+    display: none;
+  }
+
+  .hubCentroTexto {
+    font-size: 11px;
+  }
+
+  .categoriasGrafico {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 560px) {
+  .resumenDatos {
+    grid-template-columns: 1fr 1fr;
+  }
+}

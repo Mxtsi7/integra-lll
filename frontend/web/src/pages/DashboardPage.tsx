@@ -1,10 +1,13 @@
-import { conteoPorEstado, gastoProyectado, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
+import { getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
 import { useEffect, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
-import { FantasmaHighlight } from '../components/Dashboard/FantasmaHighlight';
-import { GastoPorCategoriaChart } from '../components/Dashboard/GastoPorCategoriaChart';
-import { ProximosCobrosWidget } from '../components/Dashboard/ProximosCobrosWidget';
-import { SummaryCards } from '../components/Dashboard/SummaryCards';
+import { TileCategorias } from '../components/Dashboard/TileCategorias';
+import { TileHub } from '../components/Dashboard/TileHub';
+import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
+import { TileProximo } from '../components/Dashboard/TileProximo';
+import { TileResumen } from '../components/Dashboard/TileResumen';
+import { TileSalud } from '../components/Dashboard/TileSalud';
+import { useAuth } from '../context/AuthContext';
 import { diasHasta } from '../utils/fechas';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
 import styles from './DashboardPage.module.css';
@@ -14,7 +17,17 @@ type EstadoCarga =
   | { tipo: 'error'; mensaje: string }
   | { tipo: 'listo'; suscripciones: Suscripcion[] };
 
+/** Cuántas cosas piden atención: cobros de la semana y suscripciones sin uso. */
+export function contarAvisos(suscripciones: Suscripcion[]): number {
+  return suscripciones.filter(
+    (s) =>
+      s.estado === 'fantasma' ||
+      (s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7),
+  ).length;
+}
+
 export function DashboardPage() {
+  const { usuario } = useAuth();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
 
   useEffect(() => {
@@ -38,57 +51,57 @@ export function DashboardPage() {
     };
   }, []);
 
-  const botonExportar =
-    estado.tipo === 'listo' ? (
-      <button
-        type="button"
-        className={styles.botonExportar}
-        onClick={() => descargarSuscripcionesCsv(estado.suscripciones)}
-      >
-        ⭳ Exportar CSV
-      </button>
-    ) : undefined;
+  const nombreHogar = usuario ? `Hogar de ${usuario.nombre}` : 'Tu hogar';
 
   return (
     <AppLayout
       headerTitulo="Panel"
-      headerSubtitulo="Resumen de tu gasto en suscripciones."
-      headerEtiquetaFecha="Octubre, 2026"
-      headerAccionDerecha={botonExportar}
+      headerSubtitulo="Cuánto gastas, en qué, y qué viene."
+      avisos={estado.tipo === 'listo' ? contarAvisos(estado.suscripciones) : undefined}
     >
-      {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tu panel…</p>}
+      {estado.tipo === 'cargando' && <EsqueletoPanel />}
       {estado.tipo === 'error' && <p className={styles.mensaje}>{estado.mensaje}</p>}
       {estado.tipo === 'listo' && (
-        <>
-          <FantasmaHighlight suscripciones={estado.suscripciones} />
-
-          <SummaryCards
-            gastoProyectadoMes={gastoProyectado(estado.suscripciones)}
-            totalProximos7Dias={calcularTotalProximos7Dias(estado.suscripciones)}
-            cantidadProximos7Dias={calcularCantidadProximos7Dias(estado.suscripciones)}
-            cantidadFantasma={conteoPorEstado(estado.suscripciones).fantasma}
-          />
-
-          <div className={styles.paneles}>
-            <GastoPorCategoriaChart suscripciones={estado.suscripciones} />
-            <ProximosCobrosWidget suscripciones={estado.suscripciones} />
+        <div className={styles.grilla}>
+          <div className={styles.columnaIzquierda}>
+            <TileResumen suscripciones={estado.suscripciones} nombreHogar={nombreHogar} />
+            <TileSalud suscripciones={estado.suscripciones} />
+            <TileProximo suscripciones={estado.suscripciones} />
           </div>
-        </>
+
+          <div className={styles.columnaDerecha}>
+            <TileHub
+              suscripciones={estado.suscripciones}
+              alExportar={() => descargarSuscripcionesCsv(estado.suscripciones)}
+            />
+            <div className={styles.filaInferior}>
+              <TileFantasmas suscripciones={estado.suscripciones} />
+              <TilePruebas suscripciones={estado.suscripciones} />
+              <TileCategorias suscripciones={estado.suscripciones} />
+            </div>
+          </div>
+        </div>
       )}
     </AppLayout>
   );
 }
 
-function proximosDentroDe7Dias(suscripciones: Suscripcion[]): Suscripcion[] {
-  return suscripciones.filter(
-    (s) => s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7,
+function EsqueletoPanel() {
+  return (
+    <div className={styles.grilla} aria-busy="true" aria-label="Cargando tu panel">
+      <div className={styles.columnaIzquierda}>
+        <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+        <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+        <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+      </div>
+      <div className={styles.columnaDerecha}>
+        <div className={`${styles.esqueleto} ${styles.esqueletoGrande}`} />
+        <div className={styles.filaInferior}>
+          <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+          <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+          <div className={`${styles.esqueleto} ${styles.esqueletoChico}`} />
+        </div>
+      </div>
+    </div>
   );
-}
-
-function calcularTotalProximos7Dias(suscripciones: Suscripcion[]): number {
-  return proximosDentroDe7Dias(suscripciones).reduce((total, s) => total + s.monto, 0);
-}
-
-function calcularCantidadProximos7Dias(suscripciones: Suscripcion[]): number {
-  return proximosDentroDe7Dias(suscripciones).length;
 }

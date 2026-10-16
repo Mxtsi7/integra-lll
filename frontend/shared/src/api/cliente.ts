@@ -70,7 +70,11 @@ export async function pedir<T>(
       opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
   });
 
-  if (res.status === 401) {
+  // Solo se cierra la sesión si el token rechazado sigue siendo el actual.
+  // Si mientras la petición viajaba el usuario cerró sesión y volvió a
+  // entrar, el 401 corresponde al token VIEJO: borrar los tokens nuevos
+  // echaría a alguien que acaba de iniciar sesión bien.
+  if (res.status === 401 && obtenerAccessToken() === token) {
     logout();
     manejadorNoAutorizado?.();
   }

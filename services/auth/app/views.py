@@ -1,4 +1,6 @@
 from django.contrib.auth import authenticate
+from django.db import transaction
+from redis.exceptions import RedisError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.exceptions import PermissionDenied
@@ -8,16 +10,22 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
 from .models import Organizacion, User
+from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
+from shared.sesiones import registrar_credenciales
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
+    SolicitudRecuperacionSerializer,
+    ConfirmacionRecuperacionSerializer,
+    ErrorRecuperacionSerializer,
+    ErrorPasswordRecuperacionSerializer,
     UserSerializer,
     UsuarioActualSerializer,
     MiembroSerializer,
     OrganizacionDetalleSerializer,  # nuevo
 )
 
-from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, PolymorphicProxySerializer, extend_schema
 from drf_spectacular.types import OpenApiTypes
 
 
@@ -138,18 +146,31 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        user = authenticate(
-            request,
-            email=serializer.validated_data["email"],
-            password=serializer.validated_data["password"],
-        )
-        if user is None:
-            return Response(
-                {"detail": self.MENSAJE_GENERICO},
-                status=status.HTTP_401_UNAUTHORIZED,
+        # Bloquear antes de authenticate: Django puede actualizar un hash
+        # antiguo al comprobar la contraseña. No debe pisar un reset paralelo.
+        with transaction.atomic():
+            bloqueado = User.objects.select_for_update().filter(
+                email__iexact=serializer.validated_data["email"],
+            ).first()
+            user = authenticate(
+                request,
+                email=serializer.validated_data["email"],
+                password=serializer.validated_data["password"],
             )
-
-        refresh = RefreshToken.for_user(user)
+            if user is None or bloqueado is None or user.pk != bloqueado.pk:
+                return Response(
+                    {"detail": self.MENSAJE_GENERICO},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            try:
+                version = registrar_credenciales(user)
+            except (RedisError, OSError):
+                return Response(
+                    {"detail": "No se pudo iniciar sesión. Inténtalo nuevamente."},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            refresh = RefreshToken.for_user(user)
+            refresh["session_version"] = version
 
         refresh["organizacion_id"] = (
             str(user.organizacion_id) if user.organizacion_id else None
@@ -172,6 +193,119 @@ class LoginView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class SolicitudRecuperacionView(APIView):
+    """POST /api/auth/password-reset/ — pública (RUTAS_PUBLICAS del gateway).
+
+    Responde siempre igual, exista o no el correo, para no permitir
+    enumerar cuentas.
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    MENSAJE_NEUTRO = (
+        "Si el correo está registrado, recibirás un enlace para "
+        "restablecer tu contraseña."
+    )
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Solicitar recuperación de contraseña",
+        description=(
+            "Envía un enlace de un solo uso, válido por 60 minutos. La respuesta "
+            "es idéntica exista o no el correo (anti-enumeración). Ruta pública."
+        ),
+        request=SolicitudRecuperacionSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Solicitud recibida (respuesta neutra).",
+                examples=[
+                    OpenApiExample(
+                        "Respuesta neutra",
+                        value={"detail": MENSAJE_NEUTRO},
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Email ausente o mal formado."),
+        },
+        examples=[
+            OpenApiExample(
+                "Solicitud",
+                value={"email": "ana@ejemplo.com"},
+                request_only=True,
+            ),
+        ],
+    )
+    def post(self, request):
+        serializer = SolicitudRecuperacionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        solicitar_recuperacion(serializer.validated_data["email"])
+
+        return Response(
+            {"detail": self.MENSAJE_NEUTRO},
+            status=status.HTTP_200_OK,
+        )
+
+
+class ConfirmacionRecuperacionView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        tags=["Auth"],
+        summary="Confirmar recuperación de contraseña",
+        description=(
+            "Recibe el token compuesto del enlace y password. Aplica RF-01.1, "
+            "consume el enlace de forma atómica y revoca las sesiones anteriores. "
+            "No inicia sesión automáticamente."
+        ),
+        request=ConfirmacionRecuperacionSerializer,
+        responses={
+            200: OpenApiResponse(description="Contraseña restablecida. Inicia sesión nuevamente."),
+            400: OpenApiResponse(
+                response=PolymorphicProxySerializer(
+                    component_name="ErrorConfirmacionRecuperacion",
+                    serializers=[ErrorRecuperacionSerializer, ErrorPasswordRecuperacionSerializer],
+                    resource_type_field_name=None,
+                ),
+                description="Token inválido: code=token_invalido. Contraseña inválida: errores por campo password.",
+                examples=[OpenApiExample(
+                    "Enlace inválido", value=ErrorTokenRecuperacion("token_invalido").respuesta,
+                )],
+            ),
+            410: OpenApiResponse(
+                response=ErrorRecuperacionSerializer,
+                description="Enlace vencido (token_expirado) o consumido (token_usado). Solicitar otro enlace mediante POST.",
+                examples=[
+                    OpenApiExample("Enlace vencido", value=ErrorTokenRecuperacion("token_expirado").respuesta),
+                    OpenApiExample("Enlace utilizado", value=ErrorTokenRecuperacion("token_usado").respuesta),
+                ],
+            ),
+            503: OpenApiResponse(description="No se pudo revocar sesiones; contraseña sin cambios."),
+        },
+    )
+    def post(self, request):
+        serializer = ConfirmacionRecuperacionSerializer(data=request.data)
+        if not serializer.is_valid():
+            if "token" in serializer.errors:
+                error = ErrorTokenRecuperacion("token_invalido")
+                return Response(error.respuesta, status=error.estado_http)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            confirmar_recuperacion(
+                serializer.validated_data["token"], serializer.validated_data["password"],
+            )
+        except ErrorTokenRecuperacion as error:
+            return Response(error.respuesta, status=error.estado_http)
+        except (RedisError, OSError):
+            return Response(
+                {"detail": "No se pudo restablecer la contraseña. Inténtalo nuevamente."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"detail": "Contraseña restablecida. Inicia sesión nuevamente."})
 
 
 class UsuarioActualView(generics.RetrieveAPIView):
@@ -364,4 +498,5 @@ class OrganizacionView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
 

@@ -1,0 +1,8 @@
+# Solo para correr las pruebas de shared/ (CI y local). Los servicios ya
+# traen Django y DRF en su propio requirements.txt; cryptography lo agrega
+# cada servicio que use shared.cifrado (hoy: connectors).
+Django==5.1.5
+djangorestframework==3.15.2
+cryptography==44.0.0
+pytest==8.3.4
+pytest-django==4.9.0
