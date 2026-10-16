@@ -89,6 +89,14 @@ done
 echo "── esperando a que todo quede arriba ──"
 kubectl rollout status statefulset/postgres --timeout=300s
 for d in redis rabbitmq auth subscriptions subscriptions-worker subscriptions-beat gateway web; do
+  # Un deployment en 0 réplicas está así a propósito (RabbitMQ hasta el
+  # Sprint 2). `rollout status` se quedaría esperando 300s y saldría con
+  # error, tumbando el script entero por algo que no es una falla.
+  deseadas="$(kubectl get "deployment/$d" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+  if [ "${deseadas:-0}" = "0" ]; then
+    echo "   $d: 0 réplicas por diseño, se omite"
+    continue
+  fi
   kubectl rollout status "deployment/$d" --timeout=300s
 done
 

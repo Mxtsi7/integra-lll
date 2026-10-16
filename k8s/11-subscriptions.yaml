@@ -38,8 +38,8 @@ spec:
           env:
             - { name: ESQUEMA_BD, value: subscriptions }
           resources:
-            requests: { cpu: 50m, memory: 160Mi }
-            limits: { cpu: 250m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 160Mi }
+            limits:   { cpu: 250m, memory: 320Mi }
       containers:
         - name: subscriptions
           image: IMAGEN_SUBSCRIPTIONS
@@ -66,8 +66,8 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
           resources:
-            requests: { cpu: 50m, memory: 160Mi }
-            limits: { cpu: 250m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 160Mi }
+            limits:   { cpu: 250m, memory: 320Mi }
 ---
 # El Temporizador del RF-13: beat programa, worker ejecuta. Misma imagen que
 # subscriptions, distinto comando. No corren migraciones: de eso ya se encargó
@@ -105,8 +105,8 @@ spec:
           # más que cualquier timeout razonable con el CPU acotado del ramo.
           # Que está vivo se ve en sus logs: ejecuta el latido cada 60 s.
           resources:
-            requests: { cpu: 50m, memory: 160Mi }
-            limits: { cpu: 200m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 112Mi }
+            limits:   { cpu: 200m, memory: 224Mi }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -137,5 +137,5 @@ spec:
           env:
             - { name: ESQUEMA_BD, value: subscriptions }
           resources:
-            requests: { cpu: 25m, memory: 96Mi }
-            limits: { cpu: 100m, memory: 256Mi }
+            requests: { cpu: 25m,  memory: 80Mi }
+            limits:   { cpu: 100m, memory: 160Mi }

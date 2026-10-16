@@ -40,8 +40,8 @@ spec:
           env:
             - { name: ESQUEMA_BD, value: auth }
           resources:
-            requests: { cpu: 50m, memory: 160Mi }
-            limits: { cpu: 250m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 128Mi }
+            limits:   { cpu: 250m, memory: 256Mi }
       containers:
         - name: auth
           image: IMAGEN_AUTH
@@ -72,5 +72,5 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
           resources:
-            requests: { cpu: 50m, memory: 160Mi }
-            limits: { cpu: 250m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 128Mi }
+            limits:   { cpu: 250m, memory: 256Mi }

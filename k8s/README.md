@@ -13,7 +13,7 @@ El sistema completo corriendo en el cluster del ramo:
 |---|---|---|
 | `postgres` | StatefulSet + PVC 2Gi | Un esquema por servicio, creado al primer arranque (ADR-002) |
 | `redis` | Deployment | Broker de Celery |
-| `rabbitmq` | Deployment | Bus de eventos del ADR-003; todavía nadie publica en él |
+| `rabbitmq` | Deployment **en 0 réplicas** | Bus de eventos del ADR-003; nadie publica todavía, y no cabe en la cuota. Sprint 2 |
 | `auth` | Deployment | Migra y siembra en un initContainer, después gunicorn |
 | `subscriptions` | Deployment | Ídem |
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
@@ -22,6 +22,42 @@ El sistema completo corriendo en el cluster del ramo:
 
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
+
+## El presupuesto de memoria
+
+El namespace tiene una `ResourceQuota` (`student-provisioner-quota`) que no se
+puede subir. Lo que aprieta es la memoria, no la CPU:
+
+| Recurso | Tope | En uso con todo arriba | Holgura |
+|---|---|---|---|
+| `limits.memory` | 2G (1907Mi) | 1632Mi | 14% |
+| `requests.memory` | 1G (953Mi) | 768Mi | 19% |
+| `limits.cpu` | 2 | 1450m | 28% |
+| `requests.cpu` | 1 | 325m | 68% |
+| `pods` | 12 | 8 | 33% |
+
+**Una `ResourceQuota` no mata los pods que ya están corriendo**, solo bloquea
+los nuevos. Por eso un despliegue puede venir funcionando meses y reventar
+recién al siguiente `rollout`, cuando los pods nuevos sí tienen que pasar por
+ella. Si ves `exceeded quota` en `kubectl get events`, es esto.
+
+Los límites salen de medir, no de inventar. Para medir el uso real:
+
+```bash
+# kubectl top no está permitido para nuestro usuario (RBAC), así que se lee
+# del cgroup. El MSYS_NO_PATHCONV es obligatorio en Git Bash: sin él, la
+# ruta /sys/... se convierte en C:/Program Files/Git/sys/... y falla.
+export MSYS_NO_PATHCONV=1
+for p in $(kubectl get pods -o jsonpath='{.items[*].metadata.name}'); do
+  usado=$(kubectl exec "$p" -- cat /sys/fs/cgroup/memory.current)
+  echo "$p -> $(( usado / 1048576 )) Mi"
+done
+```
+
+Medición del 2026-10-15: `web` 7Mi, `redis` 17Mi, `postgres` 71Mi,
+`subscriptions-beat` 71Mi, `gateway` 83Mi, `subscriptions` 128Mi. Los límites
+dejan entre 2x y 9x sobre eso. `gateway` y `subscriptions` van holgados a
+propósito: son los que reciben la prueba de estrés.
 
 ## Desplegar
 
