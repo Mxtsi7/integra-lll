@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
-import { configurarApi } from '@ojoalgasto/shared';
-   configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL });
+/*import { configurarApi } from '@ojoalgasto/shared';
+   configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL });*/
 export default function App() {
   return (
     <View style={styles.container}>
