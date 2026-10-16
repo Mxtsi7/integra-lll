@@ -1,5 +1,6 @@
 import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Zap } from 'lucide-react';
+import { useConteo } from '../../hooks/useConteo';
 import { CATEGORIA_VISUAL } from '../subscriptions/presentacion';
 import styles from './Tiles.module.css';
 
@@ -28,6 +29,7 @@ export function TileCategorias({ suscripciones }: TileCategoriasProps) {
 
   const maximo = datos[0]?.monto ?? 0;
   const total = datos.reduce((suma, d) => suma + d.monto, 0);
+  const totalMostrado = Math.round(useConteo(total, 900));
 
   return (
     <section className={`tile ${styles.tile}`} aria-label="Gasto por categoría">
@@ -42,7 +44,7 @@ export function TileCategorias({ suscripciones }: TileCategoriasProps) {
       </div>
 
       <div className={styles.categoriasTotal}>
-        <span className={styles.categoriasCifra}>{formatearMonto(total)}</span>
+        <span className={styles.categoriasCifra}>{formatearMonto(totalMostrado)}</span>
         <span className={styles.categoriasSufijo}>
           en {porCategoria.size} {porCategoria.size === 1 ? 'categoría' : 'categorías'}
         </span>

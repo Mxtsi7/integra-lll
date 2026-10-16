@@ -99,15 +99,21 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
       </div>
 
       <div className={styles.hubEscena}>
-        <svg className={styles.hubLineas} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+        <svg className={styles.hubLineas} aria-hidden="true">
           {visibles.map((s, i) => (
+            // Cada línea nace en su suscripción y se dibuja hacia el ojo, una
+            // tras otra. Las coordenadas van en porcentaje para que el trazo
+            // no se deforme con el tamaño del escenario. `key` incluye la
+            // pestaña para que al cambiarla se vuelvan a dibujar.
             <line
-              key={s.id}
+              key={`${pestana}-${s.id}`}
               className={styles.hubLinea}
-              x1={CENTRO[0]}
-              y1={CENTRO[1]}
-              x2={lugares[i][0]}
-              y2={lugares[i][1]}
+              style={{ animationDelay: `${260 + i * 90}ms` }}
+              pathLength={100}
+              x1={`${lugares[i][0]}%`}
+              y1={`${lugares[i][1]}%`}
+              x2={`${CENTRO[0]}%`}
+              y2={`${CENTRO[1]}%`}
             />
           ))}
         </svg>
@@ -130,10 +136,10 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
           const { Icono, color } = CATEGORIA_VISUAL[s.categoria];
           return (
             <Link
-              key={s.id}
+              key={`${pestana}-${s.id}`}
               to={`/suscripciones/${s.id}`}
               className={`${styles.hubNodo} ${s.estado === 'fantasma' ? styles.hubNodoFantasma : ''}`}
-              style={{ left: `${lugares[i][0]}%`, top: `${lugares[i][1]}%` }}
+              style={{ left: `${lugares[i][0]}%`, top: `${lugares[i][1]}%`, animationDelay: `${120 + i * 90}ms` }}
               title={s.estado === 'fantasma' ? `${s.nombre}: sin uso` : s.nombre}
             >
               <span className={styles.hubNodoIcono} style={{ color }}>

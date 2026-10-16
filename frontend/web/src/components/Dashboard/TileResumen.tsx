@@ -1,6 +1,7 @@
 import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { CalendarClock, Ghost, Home, Layers } from 'lucide-react';
 import { diasHasta } from '../../utils/fechas';
+import { useConteo } from '../../hooks/useConteo';
 import styles from './Tiles.module.css';
 
 interface TileResumenProps {
@@ -41,6 +42,8 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
   const semana = suscripciones
     .filter((s) => s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7)
     .reduce((suma, s) => suma + s.monto, 0);
+  // La cifra cuenta desde cero al abrir: es la primera cosa que se mira.
+  const totalMostrado = useConteo(total, 1100);
 
   return (
     <section className={`tile ${styles.tile}`} aria-label="Resumen del mes">
@@ -56,7 +59,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
         <span className={styles.resumenOrbe} aria-hidden="true" />
         <div>
           <p className={styles.resumenCifra}>
-            {formatearMonto(total)}
+            {formatearMonto(Math.round(totalMostrado))}
             <span className={styles.resumenCifraSufijo}>al mes</span>
           </p>
           <p className={styles.resumenDescripcion}>
