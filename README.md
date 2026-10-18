@@ -158,7 +158,7 @@ services/<servicio>/
 └─ tests/
 ```
 
-### Prerrequisito — Crear bases ejecutables de Connectors, Analytics y Notifications
+### [CÓDIGO] VI-27 · Prerrequisito — Crear bases ejecutables de Connectors, Analytics y Notifications
 
 #### Flujo de ejecución y pruebas
 

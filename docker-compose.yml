@@ -154,6 +154,19 @@ services:
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  analytics-worker:
+    build: ./services/analytics
+    command: ["python", "manage.py", "consumir_solapamientos"]
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ESQUEMA_BD: analytics
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+    volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
+
   notifications:
     build: ./services/notifications
     ports: ["8005:8005"]

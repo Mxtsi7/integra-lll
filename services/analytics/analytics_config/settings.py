@@ -78,6 +78,8 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
 }
 
+RABBITMQ_URL = env("RABBITMQ_URL", default="")
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
