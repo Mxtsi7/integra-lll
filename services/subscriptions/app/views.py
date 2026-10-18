@@ -191,12 +191,13 @@ class SubscriptionViewSet(TenantViewSet):
         del más reciente al más antiguo (CU-23 / RF-04 / RF-15).
 
         POST /api/suscripciones/<id>/uso/
-        Registra minutos de uso para una suscripción (CU-23 / RF-15 / RF-16).
-        - Persiste un registro histórico de uso.
-        - Actualiza el campo 'ultima_actividad' con la fecha/hora actual.
-        - Suma los minutos convertidos a horas en 'horas_uso_mes'.
+        Registra minutos de uso para una suscripción (CU-23 / RF-04 / RF-15 / RF-16).
+        - Persiste un registro histórico de uso; ``fecha`` es opcional y no puede
+          ser futura.
+        - Actualiza ``ultima_actividad`` con la fecha/hora de registro.
+        - Recalcula ``horas_uso_mes`` desde los registros del mes local actual.
         - Si la suscripción estaba en estado 'fantasma', la devuelve a 'activo' (CU-27 / RF-13).
-        - No permite valores negativos ni cero en minutos (responde 400).
+        - Rechaza minutos no positivos, fuera del máximo o fechas inválidas (400).
         """
         subscription = self.get_object()
 

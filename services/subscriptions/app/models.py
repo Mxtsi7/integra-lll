@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
-from django.db.models import Max
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from shared.tenant.base import ModeloBase, ModeloTenant
@@ -317,7 +317,7 @@ class Subscription(ModeloTenant):
         actor_id=None,
         actor_rol: str = "sistema",
     ) -> "RegistroUso":
-        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
+        """Persiste el uso y mantiene actualizados sus campos derivados."""
         with transaction.atomic():
             suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
             if not suscripcion.activo:
@@ -325,16 +325,12 @@ class Subscription(ModeloTenant):
                     "Una suscripción desactivada no admite registros de uso."
                 )
 
+            ahora = timezone.now()
+            fecha_actual = timezone.localdate(ahora)
             if fecha is None:
-                fecha = timezone.localdate()
+                fecha = fecha_actual
 
-            suscripcion.ultima_actividad = timezone.now()
-            fecha_actual = timezone.localdate()
-            if (fecha.year, fecha.month) == (fecha_actual.year, fecha_actual.month):
-                horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-                if suscripcion.horas_uso_mes is None:
-                    suscripcion.horas_uso_mes = Decimal("0.00")
-                suscripcion.horas_uso_mes += horas
+            suscripcion.ultima_actividad = ahora
 
             if suscripcion.estado == self.Estado.FANTASMA:
                 suscripcion.transicionar(
@@ -343,6 +339,33 @@ class Subscription(ModeloTenant):
                     actor_rol=actor_rol,
                 )
 
+            registro = RegistroUso.objects.create(
+                organizacion_id=suscripcion.organizacion_id,
+                suscripcion=suscripcion,
+                fecha=fecha,
+                minutos=int(minutos),
+            )
+            primer_dia_mes = fecha_actual.replace(day=1)
+            if fecha_actual.month == 12:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    year=fecha_actual.year + 1,
+                    month=1,
+                )
+            else:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    month=fecha_actual.month + 1,
+                )
+            total_minutos_mes = (
+                RegistroUso.objects.filter(
+                    suscripcion=suscripcion,
+                    fecha__gte=primer_dia_mes,
+                    fecha__lt=primer_dia_mes_siguiente,
+                ).aggregate(total=Sum("minutos"))["total"]
+                or 0
+            )
+            suscripcion.horas_uso_mes = (
+                Decimal(total_minutos_mes) / Decimal("60")
+            ).quantize(Decimal("0.01"))
             suscripcion.save(
                 update_fields=("ultima_actividad", "horas_uso_mes", "actualizado_en")
             )
@@ -352,12 +375,7 @@ class Subscription(ModeloTenant):
             self.horas_uso_mes = suscripcion.horas_uso_mes
             self.actualizado_en = suscripcion.actualizado_en
 
-            return RegistroUso.objects.create(
-                organizacion_id=suscripcion.organizacion_id,
-                suscripcion=suscripcion,
-                fecha=fecha,
-                minutos=int(minutos),
-            )
+            return registro
 
     # ── meta ─────────────────────────────────────────────────────────
 

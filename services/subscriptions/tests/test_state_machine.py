@@ -1,11 +1,14 @@
 """Pruebas de transiciones autorizadas, umbrales y auditoría de RF-03."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from decimal import Decimal
+from threading import Barrier
 import uuid
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from app.models import Cobro, Subscription, TransicionEstado
@@ -203,6 +206,33 @@ def test_registro_de_uso_no_sobrescribe_estado_cambiado_tras_cargar_instancia() 
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.POR_CONFIRMAR
     assert suscripcion.horas_uso_mes == Decimal("0.50")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_registros_de_uso_concurrentes_conservan_el_agregado_mensual() -> None:
+    if not connection.features.has_select_for_update:
+        pytest.skip("La base de datos no soporta bloqueos de fila.")
+
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    inicio = Barrier(2)
+
+    def registrar_en_paralelo() -> None:
+        close_old_connections()
+        try:
+            instancia = Subscription.objects.get(pk=suscripcion.pk)
+            inicio.wait(timeout=5)
+            instancia.registrar_uso(30)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        tareas = [executor.submit(registrar_en_paralelo) for _ in range(2)]
+        for tarea in tareas:
+            tarea.result(timeout=15)
+
+    suscripcion.refresh_from_db()
+    assert suscripcion.usos.count() == 2
+    assert suscripcion.horas_uso_mes == Decimal("1.00")
 
 
 @pytest.mark.django_db
