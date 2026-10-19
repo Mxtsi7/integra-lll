@@ -62,7 +62,12 @@ TEMPLATES = [
 
 ESQUEMA_BD = env("ESQUEMA_BD", default=SERVICE_NAME)
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+# `-c search_path=` es sintaxis de Postgres: pasárselo a sqlite revienta con
+# "Connection() got an unexpected keyword argument 'options'". Las pruebas
+# locales caen a sqlite en memoria cuando no hay Postgres (ver conftest.py),
+# así que la guarda tiene que estar. Igual que en subscriptions.
+if "sqlite" not in DATABASES["default"]["ENGINE"]:
+    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

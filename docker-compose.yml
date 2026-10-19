@@ -52,7 +52,7 @@ services:
       URL_CONNECTORS: http://connectors:8003
       URL_ANALYTICS: http://analytics:8004
       URL_NOTIFICATIONS: http://notifications:8005
-    depends_on: [auth, subscriptions, connectors, analytics, notifications]
+    depends_on: [auth, subscriptions, connectors, analytics, notifications, redis]
     volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
 
   # ─── Servicios de dominio ───────────────────────────────────────
@@ -68,6 +68,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   subscriptions:
@@ -200,3 +201,4 @@ services:
 
 volumes:
   datos_postgres:
+

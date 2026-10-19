@@ -5,6 +5,12 @@
 .env
 .env.*
 !.env.example
+# Acceso al cluster: cada uno lo baja del panel del curso, no del repo.
+# Uno de Maxi estuvo 5 días en main (02 al 07-10-2026) con el repo público.
+*.kubeconfig
+kubeconfig
+kubeconfig.*
+.kube/
 *.pem
 *.key
 credentials.json
@@ -22,8 +28,10 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
-db.sqlite3
-db.sqlite3-journal
+# Cualquier base local, no solo la que crea `runserver`: un
+# `makemigrations` con DATABASE_URL apuntando a sqlite deja su archivo.
+*.sqlite3
+*.sqlite3-journal
 /backend/media/
 /backend/staticfiles/
 celerybeat-schedule*

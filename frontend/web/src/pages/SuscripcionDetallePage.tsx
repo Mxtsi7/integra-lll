@@ -1,16 +1,25 @@
-import { costoPorHora, formatearFecha, formatearMonto, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
-import { useEffect, useState } from 'react';
+import {
+  costoPorHora,
+  equivalenteMensual,
+  formatearFecha,
+  formatearMonto,
+  getSuscripciones,
+  type Suscripcion,
+} from '@ojoalgasto/shared';
+import { ArrowLeft } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
+import { Insignia } from '../components/ui/Insignia';
+import {
+  CATEGORIA_VISUAL,
+  cuandoEnDias,
+  ESTADOS,
+  etiquetaFrecuencia,
+  sufijoFrecuencia,
+} from '../components/subscriptions/presentacion';
+import { diasHasta } from '../utils/fechas';
 import styles from './SuscripcionDetallePage.module.css';
-
-const ETIQUETAS_ESTADO: Record<Suscripcion['estado'], string> = {
-  prueba: 'En prueba gratuita',
-  activo: 'Activa',
-  por_confirmar: 'Por confirmar',
-  cancelado: 'Cancelada',
-  fantasma: 'Fantasma (sin uso)',
-};
 
 type EstadoCarga =
   | { tipo: 'cargando' }
@@ -46,9 +55,14 @@ export function SuscripcionDetallePage() {
   }, [id]);
 
   return (
-    <AppLayout headerTitulo="Detalle de suscripción" headerSubtitulo="Toda la información de este servicio.">
-      <Link to="/dashboard" className={styles.volver}>
-        ← Volver al panel
+    <AppLayout
+      headerTitulo={estado.tipo === 'listo' ? estado.suscripcion.nombre : 'Suscripción'}
+      headerSubtitulo={estado.tipo === 'listo' ? CATEGORIA_VISUAL[estado.suscripcion.categoria].etiqueta : undefined}
+      angosto
+    >
+      <Link to="/home" className={styles.volver}>
+        <ArrowLeft size={15} aria-hidden="true" />
+        Volver a Inicio
       </Link>
 
       {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando…</p>}
@@ -62,40 +76,66 @@ export function SuscripcionDetallePage() {
 }
 
 function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
-  const porHora = costoPorHora(suscripcion.monto, suscripcion.horas_uso_mes ?? 0);
+  const montoMensual = equivalenteMensual(suscripcion.monto, suscripcion.frecuencia);
+  const porHora = costoPorHora(montoMensual, suscripcion.horas_uso_mes ?? 0);
+  const info = ESTADOS[suscripcion.estado];
+  const { Icono, color, suave } = CATEGORIA_VISUAL[suscripcion.categoria];
+  const dias = diasHasta(suscripcion.fecha_proximo_cobro);
 
   return (
-    <div className={styles.tarjeta}>
+    <div className={`tile ${styles.tarjeta}`} style={{ '--tinte': suave } as React.CSSProperties}>
       <div className={styles.encabezado}>
-        <span className={styles.icono} aria-hidden="true">
-          {suscripcion.nombre.charAt(0).toUpperCase()}
+        <span className={styles.icono} style={{ color }}>
+          <Icono size={28} aria-hidden="true" />
         </span>
-        <div>
-          <h2 className={styles.nombre}>{suscripcion.nombre}</h2>
-          <span className={styles.badgeEstado}>{ETIQUETAS_ESTADO[suscripcion.estado]}</span>
+        <div className={styles.encabezadoTexto}>
+          <p className={styles.monto}>
+            {formatearMonto(suscripcion.monto, suscripcion.moneda)}
+            <span className={styles.periodo}>{sufijoFrecuencia(suscripcion.frecuencia)}</span>
+          </p>
+          {suscripcion.frecuencia === 'anual' && (
+            <p className={styles.equivalente}>
+              Equivale a {formatearMonto(montoMensual, suscripcion.moneda)} al mes
+            </p>
+          )}
         </div>
+        <Insignia tono={info.tono} className={styles.estado}>
+          {info.etiqueta}
+        </Insignia>
       </div>
 
-      <div className={styles.grid}>
-        <Dato etiqueta="Monto" valor={`${formatearMonto(suscripcion.monto, suscripcion.moneda)} / ${suscripcion.frecuencia === 'mensual' ? 'mes' : 'año'}`} />
-        <Dato etiqueta="Categoría" valor={suscripcion.categoria} />
-        <Dato etiqueta="Próximo cobro" valor={formatearFecha(suscripcion.fecha_proximo_cobro)} />
-        <Dato
-          etiqueta="Costo por hora de uso"
-          valor={porHora !== null ? formatearMonto(porHora, suscripcion.moneda) : 'Sin uso registrado este mes'}
-        />
-        {suscripcion.fin_prueba && <Dato etiqueta="Fin de la prueba gratis" valor={formatearFecha(suscripcion.fin_prueba)} />}
-        <Dato etiqueta="Horas de uso este mes" valor={suscripcion.horas_uso_mes ? `${suscripcion.horas_uso_mes} h` : 'Sin registrar'} />
-      </div>
+      {suscripcion.estado === 'fantasma' && (
+        <p className={styles.avisoFantasma}>
+          Lleva más de 45 días sin uso registrado y sigue cobrando. Si no la vas a usar, cancelarla
+          te ahorra {formatearMonto(montoMensual, suscripcion.moneda)} al mes.
+        </p>
+      )}
+
+      <dl className={styles.grid}>
+        <Dato etiqueta="Próximo cobro">
+          {formatearFecha(suscripcion.fecha_proximo_cobro)}
+          {dias >= 0 && dias <= 7 && <span className={styles.datoNota}>{cuandoEnDias(dias).toLowerCase()}</span>}
+        </Dato>
+        <Dato etiqueta="Se cobra">{etiquetaFrecuencia(suscripcion.frecuencia)}</Dato>
+        <Dato etiqueta="Horas de uso este mes">
+          {suscripcion.horas_uso_mes ? `${suscripcion.horas_uso_mes} h` : 'Sin registrar'}
+        </Dato>
+        <Dato etiqueta="Costo por hora de uso">
+          {porHora !== null ? formatearMonto(porHora, suscripcion.moneda) : 'Sin uso este mes'}
+        </Dato>
+        {suscripcion.fin_prueba && (
+          <Dato etiqueta="Termina la prueba gratis">{formatearFecha(suscripcion.fin_prueba)}</Dato>
+        )}
+      </dl>
     </div>
   );
 }
 
-function Dato({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+function Dato({ etiqueta, children }: { etiqueta: string; children: ReactNode }) {
   return (
     <div className={styles.dato}>
-      <p className={styles.datoEtiqueta}>{etiqueta}</p>
-      <p className={styles.datoValor}>{valor}</p>
+      <dt className={styles.datoEtiqueta}>{etiqueta}</dt>
+      <dd className={styles.datoValor}>{children}</dd>
     </div>
   );
 }

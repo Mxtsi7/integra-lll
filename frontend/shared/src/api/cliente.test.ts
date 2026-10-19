@@ -91,6 +91,20 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
       expect(manejador401).toHaveBeenCalledTimes(1);
     });
 
+    it("un 401 de una petición hecha con un token viejo no borra la sesión nueva", async () => {
+      guardarTokens({ access_token: "viejo", refresh_token: "viejo" });
+      fetchMock.mockImplementation(async () => {
+        // Mientras la petición viaja, el usuario vuelve a iniciar sesión.
+        guardarTokens({ access_token: "nuevo", refresh_token: "nuevo" });
+        return respuesta(401, { detail: "Token vencido" });
+      });
+
+      await expect(pedir("/suscripciones/")).rejects.toMatchObject({ status: 401 });
+
+      expect(obtenerAccessToken()).toBe("nuevo");
+      expect(manejador401).not.toHaveBeenCalled();
+    });
+
     it("con un 500 no toca la sesión ni dispara el manejador", async () => {
       guardarTokens({ access_token: "valido", refresh_token: "valido" });
       fetchMock.mockResolvedValue(respuesta(500, { detail: "Error interno" }));

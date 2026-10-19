@@ -97,3 +97,15 @@ LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
 USE_TZ = True
+
+
+# Estado compartido de sesiones. Nunca usar caché local en despliegues.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "sesiones": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("SESSION_REDIS_URL", default="redis://redis:6379/2"),
+        "KEY_PREFIX": "ojoalgasto:sesiones",
+        "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+    },
+}

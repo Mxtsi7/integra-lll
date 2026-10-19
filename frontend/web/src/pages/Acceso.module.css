@@ -1,0 +1,101 @@
+/* Lo común a los formularios de acceso: login, registro, recuperación. */
+
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.enlaceDerecha {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -6px;
+  font-size: 13px;
+}
+
+.enlaceDerecha a {
+  color: var(--acento);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.enlaceDerecha a:hover {
+  text-decoration: underline;
+}
+
+.terminos {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+  cursor: pointer;
+}
+
+.terminos input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--acento);
+  flex-shrink: 0;
+}
+
+.terminos a {
+  color: var(--acento);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.terminos a:hover {
+  text-decoration: underline;
+}
+
+.aviso {
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+  background: var(--acento-suave);
+  color: var(--acento);
+  font-size: 13.5px;
+}
+
+.error {
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13.5px;
+}
+
+/* Estado de resultado: cuenta creada, correo enviado, enlace vencido… */
+
+.resultado {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.resultadoIcono {
+  display: inline-flex;
+  padding: 12px;
+  margin-bottom: 4px;
+  border-radius: 16px;
+  background: var(--verde-suave);
+  color: var(--verde);
+}
+
+.resultadoIconoAlerta {
+  background: var(--coral-suave);
+  color: var(--coral);
+}
+
+.resultadoTexto {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--tinta-2);
+  margin-bottom: 10px;
+}
+
+.resultadoTexto strong {
+  color: var(--tinta);
+}
