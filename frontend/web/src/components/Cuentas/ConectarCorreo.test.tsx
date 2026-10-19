@@ -1,7 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConectarCorreo } from './ConectarCorreo';
 
+afterEach(cleanup);
 const URL_GOOGLE = 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x';
 
 describe('ConectarCorreo', () => {
