@@ -4,7 +4,7 @@ import { User, Mail, Lock } from "lucide-react";
 import { register, AuthError } from "@ojoalgasto/shared";
 import { useToast } from "../context/ToastContext";
 import { PantallaAcceso } from "../components/layout/PantallaAcceso";
-import { CampoTexto } from "../components/ui/Campo";
+import { CampoContrasena, CampoTexto } from "../components/ui/Campo";
 import { Boton } from "../components/ui/Boton";
 import RegisterSuccess from "./registersuccess";
 import styles from "./Acceso.module.css";
@@ -95,10 +95,10 @@ export default function Register() {
           required
         />
 
-        <CampoTexto
+        {/* CH-05: cada campo de contraseña tiene su propio botón de ver/ocultar. */}
+        <CampoContrasena
           id="password"
           etiqueta="Contraseña"
-          type="password"
           autoComplete="new-password"
           placeholder="Mínimo 8 caracteres"
           ayuda="Al menos 8 caracteres, con una letra y un número."
@@ -108,10 +108,9 @@ export default function Register() {
           required
         />
 
-        <CampoTexto
+        <CampoContrasena
           id="confirm"
           etiqueta="Repite la contraseña"
-          type="password"
           autoComplete="new-password"
           placeholder="La misma de arriba"
           icono={<Lock size={16} />}
