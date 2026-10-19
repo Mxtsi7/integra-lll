@@ -6,6 +6,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
 from app.views import SubscriptionViewSet
+from app.eliminacion import LimpiezaSubscriptionsView
 
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
@@ -27,6 +28,7 @@ def salud(request):
 
 
 urlpatterns = [
+    path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaSubscriptionsView.as_view()),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),

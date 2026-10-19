@@ -88,6 +88,10 @@ class CuentaConectada(ModeloTenant):
         verbose_name="Vencimiento del token de acceso",
     )
 
+    # Solo el adaptador del proveedor confirma esta fecha después de revocar
+    # externamente. No se expone como campo editable del serializer público.
+    revocado_en = models.DateTimeField(null=True, blank=True)
+
     # ── sincronización ───────────────────────────────────────────────
 
     ultima_sincronizacion = models.DateTimeField(

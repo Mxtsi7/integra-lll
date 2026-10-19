@@ -140,3 +140,16 @@ class IntentoGoogle(models.Model):
 
     class Meta:
         db_table = "intento_google"
+
+
+class EliminacionOrganizacion(models.Model):
+    """Outbox durable sin claves foráneas a usuarios eliminados ni secretos."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organizacion_id = models.UUIDField(unique=True)
+    pendientes = models.JSONField(default=list)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    completado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "eliminacion_organizacion"
