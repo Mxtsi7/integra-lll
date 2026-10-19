@@ -130,6 +130,27 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
+  /**
+   * Día del uso, ISO (YYYY-MM-DD). Opcional: sin fecha el backend usa hoy.
+   * No puede ser futura (RegistrarUsoSerializer.validate_fecha).
+   */
+  fecha?: string;
+}
+
+/** Un registro del historial de uso (RegistroUsoSerializer). */
+export interface RegistroUso {
+  /** ISO (YYYY-MM-DD). */
+  fecha: string;
+  minutos: number;
+}
+
+/**
+ * GET /suscripciones/<id>/uso/ -> 200 OK / 404 (CH-15).
+ * Historial de uso de UNA suscripción, del más reciente al más antiguo (así
+ * lo ordena el backend). No está paginado.
+ */
+export async function getUsos(id: string): Promise<RegistroUso[]> {
+  return pedir<RegistroUso[]>(`/suscripciones/${id}/uso/`);
 }
 
 /**

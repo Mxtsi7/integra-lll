@@ -1,6 +1,7 @@
 export type * from './tipos';
 export * from './calculos';
 export * from './formato';
+export * from './validacionesSuscripcion';
 export { configurarApi, configurarManejador401, ErrorDeApi, type Paginado} from './api/cliente';
 export {
   getSuscripciones,
@@ -11,6 +12,8 @@ export {
   actualizarSuscripcion,
   eliminarSuscripcion,
   registrarUso,
+  getUsos,
+  type RegistroUso,
   type SuscripcionPayload,
   type SuscripcionPayloadParcial,
   type UsoPayload,

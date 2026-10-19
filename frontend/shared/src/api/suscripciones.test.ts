@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { configurarApi } from "./cliente";
-import { getSuscripciones } from "./suscripciones";
+import { configurarApi, ErrorDeApi } from "./cliente";
+import { crearSuscripcion, getSuscripciones, getUsos, registrarUso } from "./suscripciones";
 import { gastoProyectado } from "../calculos";
 
 beforeEach(() => {
@@ -168,5 +168,84 @@ describe("getSuscripciones y la paginacion", () => {
     await getSuscripciones();
 
     expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("uso de una suscripción (CH-14 / CH-15)", () => {
+  const json = (status: number, cuerpo: unknown) =>
+    vi.fn().mockResolvedValue({ ok: status < 400, status, json: async () => cuerpo });
+
+  it("getUsos pide el historial de ESA suscripción y lo devuelve en el orden del backend", async () => {
+    const historial = [
+      { fecha: "2026-10-18", minutos: 45 },
+      { fecha: "2026-10-12", minutos: 30 },
+    ];
+    const fetchFalso = json(200, historial);
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const usos = await getUsos("abc-123");
+
+    expect(fetchFalso.mock.calls[0][0]).toBe("http://api.test/api/suscripciones/abc-123/uso/");
+    expect(usos).toEqual(historial);
+  });
+
+  it("registrarUso manda minutos y fecha, y devuelve la suscripción actualizada", async () => {
+    const fetchFalso = json(200, { ...RESPUESTA_REAL.results[0], horas_uso_mes: 0.75 });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const actualizada = await registrarUso("abc-123", { minutos: 45, fecha: "2026-10-18" });
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, { method: string; body: string }];
+    expect(url).toBe("http://api.test/api/suscripciones/abc-123/uso/");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ minutos: 45, fecha: "2026-10-18" });
+    expect(actualizada.horas_uso_mes).toBe(0.75);
+    expect(actualizada.monto).toBe(5990);
+  });
+});
+
+describe("ErrorDeApi conserva los errores por campo (CH-09)", () => {
+  it("un 400 de validación trae todos los campos, no solo el primero", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          monto: ["El monto debe ser mayor a 0."],
+          fecha_proximo_cobro: ["Fecha con formato erróneo. Use uno de los siguientes formatos en su lugar: YYYY-MM-DD."],
+        }),
+      }),
+    );
+
+    const error = (await crearSuscripcion({
+      nombre: "X",
+      monto: 0,
+      moneda: "CLP",
+      frecuencia: "mensual",
+      fecha_proximo_cobro: "x",
+      categoria: "otro",
+      estado: "activo",
+    }).catch((e: unknown) => e)) as ErrorDeApi;
+
+    expect(error).toBeInstanceOf(ErrorDeApi);
+    expect(error.message).toBe("El monto debe ser mayor a 0.");
+    expect(error.campos).toEqual({
+      monto: ["El monto debe ser mayor a 0."],
+      fecha_proximo_cobro: ["Fecha con formato erróneo. Use uno de los siguientes formatos en su lugar: YYYY-MM-DD."],
+    });
+  });
+
+  it("un error sin campos (detail) no inventa campos", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "No encontrado." }) }),
+    );
+
+    const error = (await getUsos("no-existe").catch((e: unknown) => e)) as ErrorDeApi;
+
+    expect(error.status).toBe(404);
+    expect(error.message).toBe("No encontrado.");
+    expect(error.campos).toBeUndefined();
   });
 });
