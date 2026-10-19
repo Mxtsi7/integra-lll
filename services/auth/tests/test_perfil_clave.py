@@ -79,5 +79,5 @@ def test_organizacion_ajena_y_usuario_inactivo_no_permiten_cambiar(usuario):
     assert cambiar(usuario).status_code == 404
 
 
-def test_sin_contexto_no_permite_cambio():
+def test_sin_contexto_no_permite_cambio(db):
     assert APIClient().patch("/api/usuarios/me/", {"nombre": "Otro"}).status_code == 403
