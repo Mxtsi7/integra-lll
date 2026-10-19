@@ -1,0 +1,9 @@
+/* Pantalla mientras se valida la sesión al recargar. Ocupa todo el alto
+   para que no se vea un salto cuando aparece la página real. */
+.ruta-verificando {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--acento);
+}

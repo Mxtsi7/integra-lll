@@ -1,0 +1,41 @@
+.insignia {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.neutro {
+  background: var(--vidrio-2);
+  color: var(--tinta-2);
+}
+
+.verde {
+  background: var(--verde-suave);
+  color: var(--verde);
+}
+
+.acento {
+  background: var(--acento-suave);
+  color: var(--acento);
+}
+
+.coral {
+  background: var(--coral-suave);
+  color: var(--coral);
+}
+
+.turquesa {
+  background: var(--turquesa-suave);
+  color: var(--turquesa);
+}
+
+.morado {
+  background: var(--morado-suave);
+  color: var(--morado);
+}

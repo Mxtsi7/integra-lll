@@ -1,6 +1,9 @@
-import type { ReactNode } from 'react';
 import { useState } from 'react';
+import { Bell, Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { Boton } from '../components/ui/Boton';
+import { Insignia } from '../components/ui/Insignia';
+import { Fila, Seccion } from '../components/ui/Seccion';
 import { useTema } from '../hooks/useTema';
 import styles from './ConfiguracionPage.module.css';
 
@@ -18,104 +21,115 @@ export function ConfiguracionPage() {
   const [tema, setTema] = useTema();
 
   return (
-    <AppLayout
-      headerTitulo="Configuración"
-      headerSubtitulo="Gestiona tus notificaciones, apariencia y privacidad."
-    >
+    <AppLayout headerTitulo="Ajustes" headerSubtitulo="Avisos, apariencia y tus datos.">
       <div className={styles.grid}>
-        {/* ───────── Columna izquierda ───────── */}
         <div className={styles.columna}>
-          <Seccion titulo="Notificaciones">
-            <FilaToggle
-              etiqueta="Aviso antes de cada cobro"
-              descripcion="3 días antes (mensual), 7 días y 24 h antes (anual)"
+          <Seccion
+            titulo="Avisos"
+            descripcion="Te avisamos por correo antes de que pase."
+            icono={<Bell size={19} aria-hidden="true" />}
+            tinte="acento"
+          >
+            <FilaInterruptor
+              etiqueta="Antes de cada cobro"
+              descripcion="3 días antes si es mensual; 7 días y 24 horas antes si es anual."
               activo={avisoCobros}
               onChange={setAvisoCobros}
             />
-            <FilaToggle
-              etiqueta="Aviso fin de prueba gratis"
-              descripcion="48 horas y 24 horas antes del vencimiento"
+            <FilaInterruptor
+              etiqueta="Cuando termina una prueba gratis"
+              descripcion="48 y 24 horas antes de que empiece a cobrar."
               activo={avisoPruebaGratis}
               onChange={setAvisoPruebaGratis}
             />
-            <FilaToggle
-              etiqueta="Alza de tarifa / doble cobro"
-              descripcion="Cuando el sistema detecta una anomalía"
+            <FilaInterruptor
+              etiqueta="Alza de precio o cobro doble"
+              descripcion="Cuando un cobro no calza con lo esperado."
               activo={avisoAnomalias}
               onChange={setAvisoAnomalias}
             />
-            <FilaToggle
-              etiqueta="Consejos de ahorro (budget)"
-              descripcion="Sugerencias para reducir tus gastos recurrentes"
+            <FilaInterruptor
+              etiqueta="Consejos para gastar menos"
+              descripcion="Sugerencias según lo que usas y lo que no."
               activo={consejosAhorro}
               onChange={setConsejosAhorro}
             />
           </Seccion>
 
-          <Seccion titulo="Apariencia">
-            <div className={styles.filaTema}>
-              <span className={styles.filaEtiqueta}>Tema</span>
+          <Seccion titulo="Apariencia" icono={<Palette size={19} aria-hidden="true" />} tinte="morado">
+            <Fila etiqueta="Tema" detalle="Se guarda en este navegador.">
               <div className={styles.selectorTema} role="group" aria-label="Tema de la aplicación">
                 <button
                   type="button"
-                  aria-pressed={tema === 'claro'}
-                  className={tema === 'claro' ? styles.temaBotonActivo : styles.temaBoton}
-                  onClick={() => setTema('claro')}
+                  aria-pressed={tema === 'oscuro'}
+                  className={tema === 'oscuro' ? `${styles.temaBoton} ${styles.temaBotonActivo}` : styles.temaBoton}
+                  onClick={() => setTema('oscuro')}
                 >
-                  Claro
+                  <Moon size={15} aria-hidden="true" />
+                  Oscuro
                 </button>
                 <button
                   type="button"
-                  aria-pressed={tema === 'oscuro'}
-                  className={tema === 'oscuro' ? styles.temaBotonActivo : styles.temaBoton}
-                  onClick={() => setTema('oscuro')}
+                  aria-pressed={tema === 'claro'}
+                  className={tema === 'claro' ? `${styles.temaBoton} ${styles.temaBotonActivo}` : styles.temaBoton}
+                  onClick={() => setTema('claro')}
                 >
-                  Oscuro
+                  <Sun size={15} aria-hidden="true" />
+                  Claro
                 </button>
               </div>
-            </div>
+            </Fila>
           </Seccion>
         </div>
 
-        {/* ───────── Columna derecha ───────── */}
         <div className={styles.columna}>
-          <Seccion titulo="Cuentas conectadas">
-            <FilaEstado etiqueta="Correo electrónico" estado="pendiente" textoEstado="No conectado" />
-            <FilaEstado etiqueta="Cuenta bancaria" estado="pendiente" textoEstado="No disponible" />
-            <p className={styles.notaConectores}>
-              La conexión de cuentas todavía no está disponible — el servicio de conectores está en
-              desarrollo.
-            </p>
-            {/* TODO: habilitar cuando el servicio de conectores esté listo */}
-            <button type="button" className={styles.botonPrimario} disabled title="Próximamente">
-              Conectar cuenta
-            </button>
-          </Seccion>
-
-          <Seccion titulo="Privacidad y datos">
-            {/* TODO: habilitar cuando existan los endpoints correspondientes */}
-            <FilaAccion etiqueta="Exportar mis datos" accion="Descargar" />
-            <FilaAccion etiqueta="Historial de accesos" accion="Ver" />
-            {/* TODO: habilitar y pedir confirmación cuando exista el endpoint de eliminación */}
-            <button type="button" className={styles.botonPeligro} disabled title="Próximamente">
-              Eliminar cuenta · Próximamente
-            </button>
-          </Seccion>
-
-          <Seccion titulo="Plan y facturación">
-            <div className={styles.fila}>
-              <span className={styles.filaEtiqueta}>Plan gratuito</span>
-              <span className={styles.filaDescripcion}>Meses consecutivos sin costo</span>
+          <Seccion
+            titulo="Cuentas conectadas"
+            descripcion="Cuando esté lista, los cobros nuevos se registran solos desde tu correo."
+            icono={<Link2 size={19} aria-hidden="true" />}
+            tinte="turquesa"
+          >
+            <Fila etiqueta="Correo electrónico">
+              <Insignia>No conectado</Insignia>
+            </Fila>
+            <Fila etiqueta="Cuenta bancaria">
+              <Insignia>No disponible</Insignia>
+            </Fila>
+            <div className={styles.pieSeccion}>
+              {/* TODO: habilitar cuando el servicio de conectores esté listo */}
+              <Boton variante="secundario" disabled title="Próximamente">
+                Conectar correo
+              </Boton>
             </div>
-            {/* TODO: habilitar cuando exista el flujo de pago */}
-            <button type="button" className={styles.botonPrimario} disabled title="Próximamente">
-              Mejorar a premium
-            </button>
           </Seccion>
 
-          <Seccion titulo="Ayuda">
-            <FilaEnlace etiqueta="Centro de ayuda" />
-            <FilaEnlace etiqueta="Contactar soporte" />
+          <Seccion titulo="Tus datos" icono={<Database size={19} aria-hidden="true" />} tinte="azul">
+            {/* TODO: habilitar cuando existan los endpoints correspondientes */}
+            <Fila etiqueta="Exportar mis datos">
+              <Boton variante="sutil" tamano="s" disabled title="Próximamente">
+                Descargar
+              </Boton>
+            </Fila>
+            <Fila etiqueta="Historial de accesos">
+              <Boton variante="sutil" tamano="s" disabled title="Próximamente">
+                Ver
+              </Boton>
+            </Fila>
+            <Fila etiqueta="Eliminar cuenta" detalle="Borra tu cuenta y tus suscripciones.">
+              <Boton variante="sutil" tamano="s" className={styles.peligro} disabled title="Próximamente">
+                Eliminar
+              </Boton>
+            </Fila>
+          </Seccion>
+
+          <Seccion titulo="Plan" icono={<Wallet size={19} aria-hidden="true" />} tinte="verde">
+            <Fila etiqueta="Plan Gratuito" detalle="Alertas de cobro y de prueba gratis incluidas." />
+            <div className={styles.pieSeccion}>
+              {/* TODO: habilitar cuando exista el flujo de pago */}
+              <Boton variante="secundario" disabled title="Próximamente">
+                Mejorar a Premium
+              </Boton>
+            </div>
           </Seccion>
         </div>
       </div>
@@ -123,18 +137,7 @@ export function ConfiguracionPage() {
   );
 }
 
-/* ───────── Componentes auxiliares ───────── */
-
-function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
-  return (
-    <section className={styles.seccion}>
-      <h2 className={styles.seccionTitulo}>{titulo}</h2>
-      <div className={styles.lista}>{children}</div>
-    </section>
-  );
-}
-
-function FilaToggle({
+function FilaInterruptor({
   etiqueta,
   descripcion,
   activo,
@@ -146,62 +149,17 @@ function FilaToggle({
   onChange: (valor: boolean) => void;
 }) {
   return (
-    <div className={styles.fila}>
-      <div>
-        <p className={styles.filaEtiqueta}>{etiqueta}</p>
-        <p className={styles.filaDescripcion}>{descripcion}</p>
-      </div>
+    <Fila etiqueta={etiqueta} detalle={descripcion}>
       <button
         type="button"
         role="switch"
         aria-checked={activo}
         aria-label={etiqueta}
-        className={activo ? styles.toggleActivo : styles.toggle}
+        className={activo ? `${styles.interruptor} ${styles.interruptorActivo}` : styles.interruptor}
         onClick={() => onChange(!activo)}
       >
-        <span className={styles.toggleBola} />
+        <span className={styles.interruptorBola} />
       </button>
-    </div>
+    </Fila>
   );
 }
-
-function FilaEstado({
-  etiqueta,
-  estado,
-  textoEstado,
-}: {
-  etiqueta: string;
-  estado: 'conectado' | 'pendiente';
-  textoEstado: string;
-}) {
-  return (
-    <div className={styles.fila}>
-      <span className={styles.filaEtiqueta}>{etiqueta}</span>
-      <span className={estado === 'conectado' ? styles.badgeConectado : styles.badgePendiente}>
-        {textoEstado}
-      </span>
-    </div>
-  );
-}
-
-// Acción deshabilitada hasta que exista el endpoint correspondiente.
-function FilaAccion({ etiqueta, accion }: { etiqueta: string; accion: string }) {
-  return (
-    <div className={styles.fila}>
-      <span className={styles.filaEtiqueta}>{etiqueta}</span>
-      <button type="button" className={styles.accionTexto} disabled title="Próximamente">
-        {accion}
-      </button>
-    </div>
-  );
-}
-
-function FilaEnlace({ etiqueta }: { etiqueta: string }) {
-  return (
-    <div className={styles.fila}>
-      <span className={styles.filaEtiqueta}>{etiqueta}</span>
-      <span className={styles.flecha}>›</span>
-    </div>
-  );
-}
-
