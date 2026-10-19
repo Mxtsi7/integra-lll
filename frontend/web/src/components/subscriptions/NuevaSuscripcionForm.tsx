@@ -48,6 +48,11 @@ interface NuevaSuscripcionFormProps {
    * arriba, con el error general.
    */
   erroresCampos?: Record<string, string[]> | null;
+  /**
+   * Avisa si el formulario tiene cambios sin guardar respecto del estado
+   * vacío (CH-16). Lo usa Homepage para preguntar antes de cerrar.
+   */
+  onCambiosSinGuardar?: (hayCambios: boolean) => void;
 }
 
 const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
@@ -86,6 +91,10 @@ const CAMPO_DESDE_API: Record<string, CampoSuscripcion> = {
   fin_prueba: "finPrueba",
 };
 
+function mismosDatos(a: NuevaSuscripcionFormData, b: NuevaSuscripcionFormData): boolean {
+  return (Object.keys(a) as (keyof NuevaSuscripcionFormData)[]).every((k) => a[k] === b[k]);
+}
+
 function enfocarPrimerError(errores: ErroresSuscripcion) {
   const campo = ORDEN_CAMPOS.find((c) => errores[c]);
   if (campo) document.getElementById(ID_CAMPO[campo])?.focus();
@@ -99,8 +108,16 @@ export function NuevaSuscripcionForm({
   isSaving = false,
   error = null,
   erroresCampos = null,
+  onCambiosSinGuardar,
 }: NuevaSuscripcionFormProps) {
   const [formData, setFormData] = useState<NuevaSuscripcionFormData>(EMPTY_FORM(monedas, frecuencias));
+
+  // CH-16: hay cambios si algo difiere del formulario vacío. Volver a dejar
+  // un campo como estaba cuenta como "sin cambios".
+  const hayCambios = !mismosDatos(formData, EMPTY_FORM(monedas, frecuencias));
+  useEffect(() => {
+    onCambiosSinGuardar?.(hayCambios);
+  }, [hayCambios, onCambiosSinGuardar]);
   // CH-09: antes había un solo mensaje para todo ("Revisa el nombre y el
   // monto…"). Ahora cada error va junto a su campo.
   const [errores, setErrores] = useState<ErroresSuscripcion>({});

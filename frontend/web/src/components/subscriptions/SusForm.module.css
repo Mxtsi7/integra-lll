@@ -49,6 +49,29 @@
   flex-shrink: 0;
 }
 
+/* Aviso de cambios sin guardar (CH-16), arriba del formulario. */
+.avisoSinGuardar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--tinta);
+}
+
+.avisoTexto {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.avisoAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .acciones {
   display: flex;
   justify-content: flex-end;

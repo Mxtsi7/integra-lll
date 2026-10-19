@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import TarjetaSuscripcion from "../components/subscriptions/TarjetaSuscripcion";
@@ -10,6 +10,8 @@ import EditarSuscripcionForm, {
   type EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
+import AvisoCambiosSinGuardar from "../components/subscriptions/AvisoCambiosSinGuardar";
+import { useAvisoAlSalir } from "../hooks/useAvisoAlSalir";
 import { Modal } from "../components/ui/Modal";
 import { Boton } from "../components/ui/Boton";
 import { contarAvisos } from "./DashboardPage";
@@ -88,6 +90,18 @@ export const Homepage: React.FC = () => {
   // id de la suscripción que está haciendo fade-out ahora mismo
   const [removingId, setRemovingId] = useState<string | null>(null);
 
+  // CH-16: si el formulario abierto (crear o editar; nunca hay dos a la vez)
+  // tiene cambios sin guardar. Es una ref y no estado a propósito: el Modal
+  // re-enfoca su primer campo cada vez que cambia su `alCerrar`, y si este
+  // dependiera de un estado, la primera tecla movería el cursor.
+  const hayCambiosSinGuardar = useRef(false);
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
+  const marcarCambios = useCallback((hayCambios: boolean) => {
+    hayCambiosSinGuardar.current = hayCambios;
+  }, []);
+  // Cerrar o recargar la pestaña con cambios pide confirmación al navegador.
+  useAvisoAlSalir(hayCambiosSinGuardar);
+
   useEffect(() => {
     let cancelado = false;
 
@@ -161,6 +175,8 @@ export const Homepage: React.FC = () => {
       setSuscripciones((prev) => [...prev, creada]);
       setFiltro("todas");
       setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
+      // Guardado: ya no hay nada que perder.
+      hayCambiosSinGuardar.current = false;
       setIsAdding(false);
       return true;
     } catch (e) {
@@ -196,6 +212,7 @@ export const Homepage: React.FC = () => {
         categoria: data.categoria,
       });
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
+      hayCambiosSinGuardar.current = false;
       setEditando(null);
     } catch (e) {
       setEditError(mensajeDeError(e, "No pudimos guardar los cambios. Intenta de nuevo."));
@@ -234,12 +251,26 @@ export const Homepage: React.FC = () => {
   const cerrarAgregar = useCallback(() => {
     setAddError(null);
     setAddErroresCampos(null);
+    hayCambiosSinGuardar.current = false;
+    setConfirmandoDescarte(false);
     setIsAdding(false);
   }, []);
   const cerrarEditar = useCallback(() => {
     setEditError(null);
+    hayCambiosSinGuardar.current = false;
+    setConfirmandoDescarte(false);
     setEditando(null);
   }, []);
+  // Cancelar, la X, Escape o el fondo pasan por acá: con cambios sin guardar
+  // se pregunta antes; con el formulario limpio se cierra sin aviso.
+  const intentarCerrarAgregar = useCallback(() => {
+    if (hayCambiosSinGuardar.current) setConfirmandoDescarte(true);
+    else cerrarAgregar();
+  }, [cerrarAgregar]);
+  const intentarCerrarEditar = useCallback(() => {
+    if (hayCambiosSinGuardar.current) setConfirmandoDescarte(true);
+    else cerrarEditar();
+  }, [cerrarEditar]);
   const cerrarEliminar = useCallback(() => {
     setDeleteError(null);
     setEliminando(null);
@@ -361,10 +392,17 @@ export const Homepage: React.FC = () => {
       )}
 
       {isAdding && (
-        <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={cerrarAgregar}>
+        <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={intentarCerrarAgregar}>
+          {confirmandoDescarte && (
+            <AvisoCambiosSinGuardar
+              onSeguirEditando={() => setConfirmandoDescarte(false)}
+              onDescartar={cerrarAgregar}
+            />
+          )}
           <AddSubscriptionForm
             onAdd={handleAdd}
-            onCancel={cerrarAgregar}
+            onCancel={intentarCerrarAgregar}
+            onCambiosSinGuardar={marcarCambios}
             isSaving={isSavingAdd}
             error={addError}
             erroresCampos={addErroresCampos}
@@ -373,11 +411,18 @@ export const Homepage: React.FC = () => {
       )}
 
       {editando && (
-        <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={cerrarEditar}>
+        <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={intentarCerrarEditar}>
+          {confirmandoDescarte && (
+            <AvisoCambiosSinGuardar
+              onSeguirEditando={() => setConfirmandoDescarte(false)}
+              onDescartar={cerrarEditar}
+            />
+          )}
           <EditarSuscripcionForm
             suscripcion={aFormulario(editando)}
             onSubmit={handleEditSubmit}
-            onCancel={cerrarEditar}
+            onCancel={intentarCerrarEditar}
+            onCambiosSinGuardar={marcarCambios}
             isSaving={isSavingEdit}
             error={editError}
           />

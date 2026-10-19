@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { Frecuencia, Moneda, Suscripcion } from "@ojoalgasto/shared";
 import { CampoSelect, CampoTexto } from "../ui/Campo";
 import { Boton } from "../ui/Boton";
@@ -24,6 +24,11 @@ interface EditarSuscripcionFormProps {
   isSaving?: boolean;
   /** Mensaje si el guardado falló. Se muestra dentro del formulario. */
   error?: string | null;
+  /**
+   * Avisa si hay cambios sin guardar respecto de los datos con que se abrió
+   * (CH-16). Lo usa Homepage para preguntar antes de cerrar.
+   */
+  onCambiosSinGuardar?: (hayCambios: boolean) => void;
 }
 
 const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
@@ -59,8 +64,17 @@ export function EditarSuscripcionForm({
   frecuencias = DEFAULT_FRECUENCIAS,
   isSaving = false,
   error = null,
+  onCambiosSinGuardar,
 }: EditarSuscripcionFormProps) {
   const [formData, setFormData] = useState<EditarSuscripcionFormData>(suscripcion);
+  // Los datos con que se abrió: contra ellos se comparan los cambios (CH-16).
+  const [inicial] = useState<EditarSuscripcionFormData>(suscripcion);
+  const hayCambios = (Object.keys(inicial) as (keyof EditarSuscripcionFormData)[]).some(
+    (k) => formData[k] !== inicial[k],
+  );
+  useEffect(() => {
+    onCambiosSinGuardar?.(hayCambios);
+  }, [hayCambios, onCambiosSinGuardar]);
 
   const handleChange = (field: keyof EditarSuscripcionFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }) as EditarSuscripcionFormData);
