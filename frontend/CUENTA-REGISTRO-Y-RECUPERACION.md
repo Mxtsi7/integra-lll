@@ -1,109 +1,257 @@
 # Registro y recuperación de contraseña (web)
 
-**Rama:** `Christopher/registro_web` · Tarjetas **CH-04, CH-05, CH-06 y CH-07** (Christopher Solís)
+**Rama:** `Christopher/registro_web` · **Responsable:** Christopher Solís
 
-Un commit por tarjeta, más uno de base común en `shared`.
-
-| Tarjeta | Qué hace | Archivos principales |
+| # | Tarea | Estado |
 |---|---|---|
-| CH-04 Validaciones del registro | Política común de contraseña, correo, nombre y consentimiento; errores por campo y del servidor | `shared/src/validaciones.ts`, `web/src/pages/register.tsx` |
-| CH-05 Ver/ocultar contraseña | Botón accesible por campo en Login y Registro | `web/src/components/ui/Campo.tsx` (`CampoContrasena`) |
-| CH-06 Solicitar recuperación | Conecta la pantalla de AN-14 con `POST /api/auth/password-reset/` | `web/src/pages/RecuperarContrasenaPage.tsx`, `App.tsx` |
-| CH-07 Restablecer contraseña | Conecta con `POST /api/auth/password-reset/confirm/`; vencido, inválido y usado | `web/src/pages/RestablecerContrasenaPage.tsx`, `App.tsx` |
+| CH-04 | Alinear validaciones de registro web con la política del backend | ✅ |
+| CH-05 | Mostrar u ocultar contraseña en Login y Registro | ✅ |
+| CH-06 | Solicitar recuperación de contraseña desde web | ✅ |
+| CH-07 | Restablecer contraseña y resolver enlace inválido en web | ✅ |
 
-Dependencias usadas (ya en `main`): MX-02 y MX-04 (`services/auth/app/recuperacion.py`), MX-30
-(`services/auth/app/passwords.py`) y AN-14 (pantallas de Andrea).
+Dependencias que ya estaban en `main` y se usaron: **MX-02** y **MX-04** (endpoints de recuperación,
+`services/auth/app/recuperacion.py`), **MX-30** (política de contraseña, `services/auth/app/passwords.py`)
+y **AN-14** (pantallas de recuperación de Andrea).
+
+## Dónde está cada tarea
+
+Rutas relativas a `frontend/`.
+
+| Tarea | Archivo | Qué hace |
+|---|---|---|
+| CH-04 | [shared/src/validaciones.ts](shared/src/validaciones.ts) | Reglas de contraseña, correo, nombre y consentimiento (iguales al backend) |
+| CH-04 | [web/src/pages/register.tsx](web/src/pages/register.tsx) | Valida antes de enviar y muestra los errores bajo cada campo |
+| CH-04, 06, 07 | [shared/src/auth.ts](shared/src/auth.ts) | `AuthError` con errores por campo y `code`; llamadas de recuperación |
+| CH-05 | [web/src/components/ui/Campo.tsx](web/src/components/ui/Campo.tsx) | `CampoContrasena`: campo con botón de ver/ocultar |
+| CH-05 | [web/src/pages/Login.tsx](web/src/pages/Login.tsx) | Usa `CampoContrasena` |
+| CH-06 | [web/src/pages/RecuperarContrasenaPage.tsx](web/src/pages/RecuperarContrasenaPage.tsx) | Formulario de correo con confirmación neutra |
+| CH-07 | [web/src/pages/RestablecerContrasenaPage.tsx](web/src/pages/RestablecerContrasenaPage.tsx) | Nueva contraseña; enlace vencido, inválido o usado |
+| CH-06, 07 | [web/src/App.tsx](web/src/App.tsx) | Conecta las dos pantallas con el backend |
+| CH-07 | [web/src/context/AuthContext.tsx](web/src/context/AuthContext.tsx) | `cerrarSesionLocal()` |
 
 ---
 
-## Contrato (para quien lo reciba)
+## CH-04 — Validaciones del registro
 
-### `shared` — `@ojoalgasto/shared`
+**Antes:** el registro solo revisaba que las contraseñas coincidieran y que se aceptaran los términos.
+Del backend mostraba un solo error en un toast (`AuthError` guardaba solo el primer mensaje).
+
+**La regla de contraseña es una copia fiel del backend** (`shared/src/validaciones.ts`):
 
 ```ts
-validarPassword(password: string): string | null       // misma regla que validar_password (MX-30)
-validarCorreo(correo: string): string | null
-validarRegistro(datos: DatosRegistro): ErroresRegistro  // {} = se puede enviar
-erroresRegistroDesdeServidor(campos): { porCampo, general }
+const LETRA = /\p{L}/u;    // = Python str.isalpha()
+const DIGITO = /\p{Nd}/u;  // dígitos de cualquier alfabeto, como str.isdigit()
 
-solicitarRecuperacion(correo: string): Promise<{ detail: string }>   // MX-02
-restablecerContrasena(token: string, password: string): Promise<void> // MX-04
+export function validarPassword(password: string): string | null {
+  // Python cuenta caracteres; .length de JS cuenta un emoji como 2.
+  if ([...password].length < LARGO_MINIMO_PASSWORD) return MENSAJE_POLITICA_PASSWORD;
+  if (!LETRA.test(password) || !DIGITO.test(password)) return MENSAJE_POLITICA_PASSWORD;
+  return null;
+}
+```
 
+- Mínimo 8 caracteres, una letra y un número, igual que `validar_password` (MX-30).
+- No recorta espacios (el backend tampoco) y el mensaje es el mismo texto que devuelve el backend.
+
+**En `register.tsx`**, si algo no cumple no se envía nada:
+
+```tsx
+const locales = validarRegistro({ nombre, correo, password, confirmacion: confirm, aceptaDatos: accepted });
+setErrores(locales);
+if (Object.keys(locales).length > 0) {
+  enfocarPrimerError(locales);   // el foco va al primer campo con error
+  return;                        // NO se envía el registro
+}
+```
+
+**El backend sigue siendo la validación definitiva.** Si responde con errores, se reparten por campo y
+lo que no es de ningún campo sale en un toast, así no se pierde ningún mensaje:
+
+```tsx
+const { porCampo, general } = err.campos
+  ? erroresRegistroDesdeServidor(err.campos)   // email → correo, acepta_datos → aceptaDatos…
+  : { porCampo: {}, general: [err.message] };
+setErrores(porCampo);
+if (general.length > 0) toast.error(general.join(" "));
+```
+
+Cada error se muestra bajo su campo con `aria-invalid`, y al corregir un campo se borra su error. El
+formulario usa `noValidate` para mostrar nuestros mensajes y no los globos del navegador.
+
+---
+
+## CH-05 — Mostrar u ocultar contraseña
+
+Un solo componente reutilizable en `Campo.tsx`, que se apoya en el `CampoTexto` existente:
+
+```tsx
+export function CampoContrasena({ id, disabled, ...resto }: CampoContrasenaProps) {
+  const [visible, setVisible] = useState(false);            // empieza siempre oculta
+  // …
+  return (
+    <CampoTexto
+      {...resto}
+      type={visible ? 'text' : 'password'}                  // solo cambia el type: el valor se conserva
+      accesorio={
+        <button
+          type="button"                                     // nunca envía el formulario
+          aria-label="Mostrar contraseña"
+          aria-pressed={visible}                            // el estado, para lectores de pantalla
+          aria-controls={idControl}
+          onMouseDown={(e) => e.preventDefault()}           // el foco se queda en el campo
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+        </button>
+      }
+    />
+  );
+}
+```
+
+- Es un `<button>` nativo, así que funciona con teclado (Tab + Enter o Espacio).
+- El nombre accesible no cambia; el estado lo da `aria-pressed`, que es el patrón de botón de alternancia
+  de WAI-ARIA.
+- Login lo usa en la contraseña; Registro en contraseña y confirmación, cada una con su propio botón.
+
+---
+
+## CH-06 — Solicitar recuperación de contraseña
+
+La pantalla de Andrea (AN-14) existía pero **no estaba conectada** ("Esta función todavía no está
+disponible"). En `App.tsx` se le pasa el handler real:
+
+```tsx
+async function pedirEnlaceRecuperacion(email: string): Promise<void> {
+  await solicitarRecuperacion(email);   // POST /api/auth/password-reset/
+}
+// …
+<RecuperarContrasenaPage onSolicitarRecuperacion={pedirEnlaceRecuperacion} />
+```
+
+Cambios en la pantalla:
+
+```tsx
+if (!onSolicitarRecuperacion || isLoading) return;   // se envía una sola vez
+const errorCorreo = validarCorreo(email);            // misma validación que el registro
+// …
+} catch (err: unknown) {
+  setError(mensajeDeError(err));   // el formulario queda habilitado (finally) para reintentar
+}
+```
+
+- **Confirmación neutra:** el backend responde igual exista o no la cuenta (anti-enumeración), y la
+  pantalla también dice lo mismo para cualquier correo: *"Si hay una cuenta con ana@…, te enviamos un
+  enlace…"*. Antes decía "Enviamos las instrucciones a…", que afirmaba un envío.
+- **Errores en español:** sin red → *"No pudimos conectar con el servidor…"* (antes salía
+  "Failed to fetch"); un 400 muestra el mensaje del backend.
+- Mientras espera muestra "Enviando…" con el botón deshabilitado.
+
+---
+
+## CH-07 — Restablecer contraseña
+
+También estaba sin conectar. En `App.tsx`:
+
+```tsx
+function cambiarContrasena(password: string, token: string): Promise<void> {
+  return restablecerContrasena(token, password);   // POST /api/auth/password-reset/confirm/
+}
+```
+
+**Antes** la pantalla adivinaba el error por el status (401 = vencido) o buscando la palabra "vencido"
+en el mensaje, y no existía el caso "ya utilizado". **Ahora** usa el `code` que manda el backend (MX-04):
+
+```tsx
+const ESTADO_POR_CODIGO: Record<CodigoErrorEnlace, EstadoEnlace> = {
+  token_expirado: 'vencido',
+  token_invalido: 'invalido',
+  token_usado: 'usado',      // estado nuevo: "Enlace ya utilizado"
+};
+```
+
+| Respuesta del backend | Pantalla |
+|---|---|
+| 200 | Va al **Login** con el aviso "Contraseña actualizada. Inicia sesión con tu contraseña nueva." |
+| 410 `token_expirado` | "Enlace vencido" + pedir uno nuevo |
+| 410 `token_usado` | "Enlace ya utilizado" + pedir uno nuevo |
+| 400 `token_invalido` o sin token en la URL | "Enlace inválido" + ir a recuperación |
+| 400 con error de `password` | Error bajo el campo, se puede corregir |
+| 503 o sin red | Aviso y reintento |
+
+**Al terminar bien:**
+
+```tsx
+await onSubmitNewPassword(password, token);
+cerrarSesionLocal();                     // el backend revocó todas las sesiones
+toast.exito(MENSAJE_EXITO);
+navigate('/login', { replace: true });
+```
+
+El backend revoca todas las sesiones al cambiar la clave. Si en ese navegador había una abierta, ya no
+sirve; por eso se borra con `cerrarSesionLocal()` (nuevo en `AuthContext`), que no llama al backend.
+Sin esto, `/login` te habría mandado al panel con una sesión muerta. **Ningún error toca la sesión:** un
+enlace malo no le cierra la sesión a nadie, y todas las pantallas de error tienen salida.
+
+La contraseña nueva usa la misma regla que el registro (`validarPassword`) y el campo `CampoContrasena`.
+
+---
+
+## Contrato
+
+```ts
+// @ojoalgasto/shared
+validarPassword(password): string | null
+validarCorreo(correo): string | null
+validarRegistro(datos): ErroresRegistro                 // {} = se puede enviar
+solicitarRecuperacion(correo): Promise<{ detail: string }>
+restablecerContrasena(token, password): Promise<void>
 class AuthError { status; codigo?: string; campos?: Record<string, string[]> }
 ```
 
-| Llamada | Backend responde | En la web |
+`CampoContrasena` recibe las mismas props que `CampoTexto`, salvo `type`.
+
+## Tests
+
+**shared:** 84 ✅ · **web:** 79 ✅
+
+| Archivo | Tests | Qué cubre |
 |---|---|---|
-| `solicitarRecuperacion` | 200 siempre igual (exista o no el correo) | Confirmación neutra |
-| | 400 correo mal formado | Mensaje del backend, se puede reintentar |
-| `restablecerContrasena` | 200 | Borra la sesión local y va al Login con toast |
-| | 400 `code=token_invalido` | "Enlace inválido" |
-| | 410 `code=token_expirado` / `token_usado` | "Enlace vencido" / "Enlace ya utilizado" |
-| | 400 `password: [...]` | Error bajo el campo |
-| | 503 o sin red | Aviso y reintento |
+| `shared/src/validaciones.test.ts` | 34 | Política de contraseña (17 casos límite verificados contra el backend), correo, registro, errores del servidor |
+| `shared/src/auth.test.ts` | +5 | Errores por campo y `code` en `AuthError`; llamadas de recuperación |
+| `web/src/components/ui/Campo.test.tsx` | 7 | CH-05: oculta al inicio, conserva valor, no envía, foco, teclado |
+| `web/src/pages/register.test.tsx` | 14 | CH-04: no envía inválidos, errores por campo, errores del servidor, doble envío |
+| `web/src/pages/RecuperarContrasenaPage.test.tsx` | 8 | CH-06: confirmación neutra, una sola vez, errores y reintento |
+| `web/src/pages/RestablecerContrasenaPage.test.tsx` | 14 | CH-07: éxito al Login, vencido / inválido / usado, sesión intacta en errores |
 
-### `CampoContrasena` (web)
+**Casos límite UI = API (CH-04):** se pasaron 17 contraseñas por el `validar_password` real de Python y
+por `validarPassword()`, y dieron lo mismo en las 17. Por ejemplo, `contraseña٣` (dígito árabe) y
+`😀😀😀a1` (5 caracteres) fallaban con el validador anterior de la pantalla, y ahora coinciden.
 
-```tsx
-<CampoContrasena
-  id="password"
-  etiqueta="Contraseña"
-  autoComplete="new-password"
-  value={password}
-  onChange={(e) => setPassword(e.target.value)}
-  error={errores.password}
-/>
+Además, en cada arreglo se quitó el cambio a propósito y se comprobó que fallara al menos un test.
+
+## Cómo probarlo
+
+```bash
+npm ci && npm run typecheck && npm test && npm run build
 ```
 
-Mismas props que `CampoTexto` salvo `type`. Empieza oculta; el botón es `type="button"` (no envía),
-no le quita el foco al campo, se llama "Mostrar contraseña" y usa `aria-pressed` para el estado.
+Manual (`npm run dev`):
+- `/registro` vacío → "Crear cuenta" → errores bajo cada campo y el foco en "Nombre".
+- El ojo en la contraseña → la muestra sin enviar el formulario.
+- `/recuperar-contrasena` → correo → "Si hay una cuenta con…".
+- `/restablecer-contrasena` sin token → "Enlace inválido".
 
----
+## Diferencias con el texto de las tarjetas
 
-## Evidencia
+- **CH-04:** el backend acepta dígitos decorativos (`²`, `①`) y la UI no; es el único caso distinto, y ahí
+  decide el backend.
+- **CH-05:** el teclado se prueba verificando que es un `<button>` nativo enfocable (no se agregó
+  `user-event` para no tocar el lockfile). El componente también se reutiliza en Restablecer.
+- **CH-06:** el texto de confirmación de AN-14 pasó a ser neutro.
+- **CH-07:** la pantalla de éxito de AN-14 se reemplazó por ir al Login con un aviso, como pide el criterio.
 
-Desde `frontend/`: `npm ci && npm run typecheck && npm test && npm run build` → shared **84** ✅ ·
-web **79** ✅ · build ✅.
+## Pendiente
 
-**Casos límite UI = API (CH-04).** Se pasaron 17 contraseñas por el `validar_password` real de Python y
-por `validarPassword()`; dieron el mismo resultado en los 17. Están fijados en
-`shared/src/validaciones.test.ts`. Algunos:
-
-| Contraseña | Backend | UI | Por qué importa |
-|---|---|---|---|
-| `abcd1234` | ✅ | ✅ | exactamente 8 |
-| `   abc1 ` | ✅ | ✅ | los espacios cuentan |
-| `contraseña٣` | ✅ | ✅ | dígito árabe: el validador anterior (`/\d/`) lo rechazaba |
-| `😀😀😀a1` | ❌ | ❌ | 5 caracteres: el validador anterior (`.length`) lo aceptaba |
-
-**Criterios de aceptación → tests**
-
-| Criterio | Test |
-|---|---|
-| CH-04 No se envía registro inválido | `register.test.tsx` › "con el formulario vacío no envía…", casos de contraseña |
-| CH-04 No se pierde el error del servidor | `register.test.tsx` › errores del servidor (por campo, general, 500, sin red) |
-| CH-05 Alternar conserva el valor y no envía | `Campo.test.tsx`, `register.test.tsx` › ver/ocultar |
-| CH-05 Nombre accesible y teclado | `Campo.test.tsx` › "tiene nombre accesible…" |
-| CH-06 Misma confirmación con y sin cuenta | `RecuperarContrasenaPage.test.tsx` › "…muestran la misma confirmación" |
-| CH-06 Carga y error no bloquean | `RecuperarContrasenaPage.test.tsx` › "Enviando…", sin red + reintento |
-| CH-07 Enlace válido termina en Login con confirmación | `RestablecerContrasenaPage.test.tsx` › enlace válido |
-| CH-07 Enlace inválido no altera sesión ni deja sin salida | `RestablecerContrasenaPage.test.tsx` › enlace que no sirve |
-
-Cada arreglo se verificó quitándolo a propósito: en todos los casos falló al menos un test.
-
-**Pendiente de las tarjetas:** la revisión por otra persona. Andrea debería validar los cambios en sus
-pantallas de AN-14 y Maxi el uso de los endpoints de MX-02/MX-04.
-
----
-
-## Diferencias con el texto original
-
-- **CH-04:** el backend también acepta dígitos "decorativos" (`²`, `①`) por `isdigit()`; la UI pide un
-  dígito común. Es el único caso donde difieren, y si pasara, el backend sigue siendo el que decide.
-- **CH-05:** el teclado se verifica comprobando que es un `<button>` nativo y enfocable (el navegador lo
-  activa con Enter/Espacio); no se agregó `user-event` para no tocar el lockfile. `CampoContrasena`
-  también se reutiliza en Restablecer contraseña.
-- **CH-06:** el texto de confirmación de AN-14 ("Enviamos las instrucciones a…") pasó a uno neutro, porque
-  afirmaba un envío que el backend no confirma.
-- **CH-07:** la pantalla de éxito de AN-14 se reemplazó por la redirección al Login con un toast, como pide
-  el criterio. Se agregó el estado "Enlace ya utilizado", que no existía.
+- **Revisión por otra persona** (lo piden las cuatro tarjetas): Andrea, por los cambios en sus pantallas
+  de AN-14, y Maxi, por el uso de los endpoints de MX-02 y MX-04.
