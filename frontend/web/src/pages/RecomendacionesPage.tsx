@@ -5,7 +5,7 @@ import { useRecomendaciones } from '../hooks/useRecomendaciones';
 import styles from './RecomendacionesPage.module.css';
 
 export function RecomendacionesPage() {
-  const { estado, quitar } = useRecomendaciones();
+  const { estado, recargar } = useRecomendaciones();
   const navigate = useNavigate();
 
   return (
@@ -18,21 +18,19 @@ export function RecomendacionesPage() {
           </p>
         </header>
 
-        {/* Estado de carga */}
         {estado.tipo === 'cargando' && (
-          <div className={styles.estadoCarga}>
-            Cargando recomendaciones...
-          </div>
+          <div className={styles.estadoCarga}>Cargando recomendaciones...</div>
         )}
 
-        {/* Estado de error / Indisponibilidad */}
         {estado.tipo === 'error' && (
           <div className={styles.estadoError}>
-            <p>{estado.mensaje || 'El servicio de recomendaciones no está disponible actualmente.'}</p>
+            <p>{estado.mensaje}</p>
+            <button type="button" className={styles.botonDescartar} onClick={recargar}>
+              Reintentar
+            </button>
           </div>
         )}
 
-        {/* Estado listo */}
         {estado.tipo === 'listo' && (
           <>
             {estado.items.length === 0 ? (
@@ -41,46 +39,43 @@ export function RecomendacionesPage() {
               </div>
             ) : (
               <div className={styles.lista}>
-                {estado.items.map((item) => (
-                  <div
-                    key={item.id}
-                    className={styles.tarjeta}
-                    onClick={() => navigate(`/recomendaciones/${item.suscripcion_id || item.id}`)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <div className={styles.tarjetaContenido}>
-                      <h3 className={styles.nombreSuscripcion}>
-                        {item.nombre || item.titulo || 'Suscripción'}
-                      </h3>
+                {estado.items.map((item) => {
+                  // Solo se navega al detalle existente /suscripciones/:id y únicamente
+                  // si la recomendación trae suscripcion_id (el id de la recomendación NO es el de la suscripción).
+                  const destino = item.suscripcion_id ? `/suscripciones/${item.suscripcion_id}` : null;
+                  return (
+                    <div
+                      key={item.id}
+                      className={styles.tarjeta}
+                      onClick={destino ? () => navigate(destino) : undefined}
+                      style={{ cursor: destino ? 'pointer' : 'default' }}
+                    >
+                      <div className={styles.tarjetaContenido}>
+                        <h3 className={styles.nombreSuscripcion}>
+                          {item.nombre || item.titulo || 'Suscripción'}
+                        </h3>
+                        {item.motivo && <p className={styles.motivo}>{item.motivo}</p>}
+                        {item.ahorro_estimado !== undefined && (
+                          <span className={styles.ahorroBadge}>
+                            Ahorro estimado: ${item.ahorro_estimado}
+                          </span>
+                        )}
+                      </div>
 
-                      {item.motivo && (
-                        <p className={styles.motivo}>{item.motivo}</p>
-                      )}
-                      {item.ahorro_estimado !== undefined && (
-                        <span className={styles.ahorroBadge}>
-                          Ahorro estimado: ${item.ahorro_estimado}
-                        </span>
+                      {destino && (
+                        <div className={styles.acciones} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className={styles.botonDescartar}
+                            onClick={() => navigate(destino)}
+                          >
+                            Ver suscripción
+                          </button>
+                        </div>
                       )}
                     </div>
-
-                    <div className={styles.acciones} onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className={styles.botonDescartar}
-                        onClick={() => navigate(`/recomendaciones/${item.suscripcion_id || item.id}`)}
-                      >
-                        Ver detalle
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.botonDescartar}
-                        onClick={() => quitar(item.id)}
-                      >
-                        Descartar
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
