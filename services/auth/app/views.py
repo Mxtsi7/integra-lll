@@ -13,6 +13,8 @@ from .models import Organizacion, User
 from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
 from shared.sesiones import registrar_credenciales
 from .sesiones import emitir_tokens
+from .contexto import usuario_del_contexto
+from .perfil import CambioPerfilSerializer
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
@@ -322,10 +324,18 @@ class UsuarioActualView(generics.RetrieveAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_object(self):
-        usuario_id = self.request.headers.get("X-Usuario-Id")
-        if not usuario_id:
-            raise PermissionDenied("Falta el contexto de usuario")
-        return get_object_or_404(User, pk=usuario_id)
+        return usuario_del_contexto(self.request)
+
+    @extend_schema(tags=["Usuarios"], request=CambioPerfilSerializer,
+                   responses={200: UsuarioActualSerializer, 400: None, 403: None, 404: None})
+    def patch(self, request):
+        datos = CambioPerfilSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        with transaction.atomic():
+            usuario = usuario_del_contexto(request, bloquear=True)
+            usuario.nombre = datos.validated_data["nombre"]
+            usuario.save(update_fields=["nombre"])
+        return Response(UsuarioActualSerializer(usuario).data)
 
 
 class UserDetailView(generics.RetrieveAPIView):
