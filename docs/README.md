@@ -10,6 +10,11 @@ propio módulo** — nadie documenta bien código que no escribió.
 ### `flujos/`
 
 - [Verificación y cambio de correo (MX-28)](flujos/maximiliano-saez/28-verificacion-correo.md).
+- [Perfil y contraseña (MX-05/MX-06)](flujos/maximiliano-saez/05-06-perfil-clave.md).
+- [Sesiones y refresh (MX-29/MX-10)](flujos/maximiliano-saez/29-10-sesiones.md).
+- [Eliminación de cuenta (MX-07)](flujos/maximiliano-saez/07-eliminar-cuenta.md).
+- [Google Login](../services/auth/GOOGLE-LOGIN.md).
+- [Registro y aislamiento por gateway (MX-12/MX-13)](flujos/maximiliano-saez/12-13-registro-aislamiento.md).
 
 ### `investigacion/`
 

@@ -362,10 +362,8 @@ class UserDetailView(generics.RetrieveAPIView):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        usuario_id = self.request.headers.get("X-Usuario-Id")
-        if not usuario_id:
-            raise PermissionDenied("Falta el contexto de usuario")
-        return User.objects.filter(pk=usuario_id)
+        usuario = usuario_del_contexto(self.request)
+        return User.objects.filter(pk=usuario.pk)
 
 
 
