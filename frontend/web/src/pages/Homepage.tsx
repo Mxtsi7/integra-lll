@@ -69,6 +69,9 @@ export const Homepage: React.FC = () => {
 
   // error propio de cada acción (no pisa el error de carga de la lista)
   const [addError, setAddError] = useState<string | null>(null);
+  // Errores por campo del backend al crear (CH-09): el formulario los
+  // muestra junto a cada campo en vez de un solo mensaje.
+  const [addErroresCampos, setAddErroresCampos] = useState<Record<string, string[]> | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -151,6 +154,7 @@ export const Homepage: React.FC = () => {
 
   const handleAdd = async (nueva: Omit<Suscripcion, "id">): Promise<boolean> => {
     setAddError(null);
+    setAddErroresCampos(null);
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
@@ -160,7 +164,11 @@ export const Homepage: React.FC = () => {
       setIsAdding(false);
       return true;
     } catch (e) {
-      setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+      if (e instanceof ErrorDeApi && e.campos) {
+        setAddErroresCampos(e.campos);
+      } else {
+        setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+      }
       return false;
     } finally {
       setIsSavingAdd(false);
@@ -225,6 +233,7 @@ export const Homepage: React.FC = () => {
 
   const cerrarAgregar = useCallback(() => {
     setAddError(null);
+    setAddErroresCampos(null);
     setIsAdding(false);
   }, []);
   const cerrarEditar = useCallback(() => {
@@ -353,7 +362,13 @@ export const Homepage: React.FC = () => {
 
       {isAdding && (
         <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={cerrarAgregar}>
-          <AddSubscriptionForm onAdd={handleAdd} onCancel={cerrarAgregar} isSaving={isSavingAdd} error={addError} />
+          <AddSubscriptionForm
+            onAdd={handleAdd}
+            onCancel={cerrarAgregar}
+            isSaving={isSavingAdd}
+            error={addError}
+            erroresCampos={addErroresCampos}
+          />
         </Modal>
       )}
 

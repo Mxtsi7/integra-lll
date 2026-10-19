@@ -31,6 +31,24 @@
   font-size: 13.5px;
 }
 
+/* "Está en período de prueba gratis" (CH-09). */
+.casilla {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+  cursor: pointer;
+}
+
+.casilla input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--acento);
+  flex-shrink: 0;
+}
+
 .acciones {
   display: flex;
   justify-content: flex-end;
@@ -48,7 +66,25 @@
     max-width: none;
   }
 
-  .acciones {
+  /* "Está en período de prueba gratis" (CH-09). */
+.casilla {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+  cursor: pointer;
+}
+
+.casilla input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--acento);
+  flex-shrink: 0;
+}
+
+.acciones {
     flex-direction: column-reverse;
   }
 }
