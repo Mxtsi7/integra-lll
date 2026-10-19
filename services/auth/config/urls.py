@@ -3,6 +3,7 @@ from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+from app.google_login import GoogleLoginView, GoogleNonceView
 
 from app.views import (
     ConfirmacionRecuperacionView,
@@ -40,6 +41,8 @@ urlpatterns = [
     path("api/auth/change-password/", CambioClaveView.as_view(), name="change-password"),
     path("api/auth/email-verification/request/", SolicitudVerificacionView.as_view(), name="email-verification-request"),
     path("api/auth/email-verification/confirm/", ConfirmacionVerificacionView.as_view(), name="email-verification-confirm"),
+    path("api/auth/google/nonce/", GoogleNonceView.as_view(), name="google-nonce"),
+    path("api/auth/google/", GoogleLoginView.as_view(), name="google-login"),
     path(
         "api/auth/password-reset/",
         SolicitudRecuperacionView.as_view(),
