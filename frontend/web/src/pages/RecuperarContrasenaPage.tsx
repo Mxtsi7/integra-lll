@@ -1,14 +1,34 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, MailCheck } from 'lucide-react';
+import { AuthError, validarCorreo } from '@ojoalgasto/shared';
 import { PantallaAcceso } from '../components/layout/PantallaAcceso';
 import { CampoTexto } from '../components/ui/Campo';
 import { Boton } from '../components/ui/Boton';
 import styles from './Acceso.module.css';
 
 export interface RecuperarContrasenaProps {
-  /** Callback para conectar con el backend (CH-06) */
+  /**
+   * Pide el enlace de recuperación al backend (CH-06). App.tsx lo conecta a
+   * solicitarRecuperacion() de shared → POST /api/auth/password-reset/.
+   * Debe lanzar si la solicitud no se pudo hacer (sin red, 400, 5xx).
+   */
   onSolicitarRecuperacion?: (email: string) => Promise<void>;
+}
+
+// CH-06: el backend responde igual exista o no la cuenta (anti-enumeración).
+// La pantalla tampoco puede distinguir: el mensaje es neutro y el mismo
+// para todos los correos.
+function mensajeDeError(err: unknown): string {
+  if (err instanceof TypeError) {
+    // fetch() sin red, servidor caído o CORS.
+    return 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+  }
+  if (err instanceof AuthError) {
+    // 400: correo mal formado según el backend; se muestra su mensaje.
+    return err.campos?.email?.[0] ?? err.message;
+  }
+  return 'No pudimos procesar la solicitud. Intenta de nuevo.';
 }
 
 export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
@@ -24,10 +44,13 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!onSolicitarRecuperacion) return;
+    // Enviar una sola vez: un doble clic o Enter repetido no manda dos correos.
+    if (!onSolicitarRecuperacion || isLoading) return;
 
-    if (!email) {
-      setError('Ingresa tu correo electrónico.');
+    // Misma validación de correo que el registro (shared/validaciones.ts).
+    const errorCorreo = validarCorreo(email);
+    if (errorCorreo) {
+      setError(errorCorreo);
       return;
     }
 
@@ -35,10 +58,11 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
     setIsLoading(true);
 
     try {
-      await onSolicitarRecuperacion(email);
+      await onSolicitarRecuperacion(email.trim());
       setIsSubmitted(true);
-    } catch (err: any) {
-      setError(err?.message || 'No pudimos procesar la solicitud. Intenta de nuevo.');
+    } catch (err: unknown) {
+      // El formulario vuelve a quedar habilitado (finally) para reintentar.
+      setError(mensajeDeError(err));
     } finally {
       setIsLoading(false);
     }
@@ -57,9 +81,10 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
           <span className={styles.resultadoIcono}>
             <MailCheck size={26} aria-hidden="true" />
           </span>
-          <p className={styles.resultadoTexto}>
-            Enviamos las instrucciones a <strong>{email}</strong>. Si no llega en unos minutos,
-            revisa la carpeta de spam.
+          {/* Neutro a propósito: no confirma si la cuenta existe. */}
+          <p className={styles.resultadoTexto} role="status">
+            Si hay una cuenta con <strong>{email.trim()}</strong>, te enviamos un enlace para crear
+            una contraseña nueva. Vence en 60 minutos. Si no llega, revisa la carpeta de spam.
           </p>
           <Boton variante="secundario" onClick={() => setIsSubmitted(false)}>
             Usar otro correo
@@ -76,7 +101,11 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
       pie={pie}
     >
       <form className={styles.formulario} onSubmit={handleSubmit} noValidate>
-        {error && <p className={styles.error}>{error}</p>}
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
         {!isAvailable && (
           <p className={styles.aviso}>Esta función todavía no está disponible.</p>
         )}
@@ -85,6 +114,7 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
           id="email"
           etiqueta="Correo electrónico"
           type="email"
+          autoComplete="email"
           placeholder="tu@correo.cl"
           icono={<Mail size={16} />}
           value={email}
