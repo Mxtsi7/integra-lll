@@ -12,6 +12,7 @@ import uuid
 from .models import Organizacion, User
 from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
 from shared.sesiones import registrar_credenciales
+from .sesiones import emitir_tokens
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
@@ -164,27 +165,16 @@ class LoginView(APIView):
                 )
             try:
                 version = registrar_credenciales(user)
+                tokens = emitir_tokens(user, version=version)
             except (RedisError, OSError):
+                transaction.set_rollback(True)
                 return Response(
                     {"detail": "No se pudo iniciar sesión. Inténtalo nuevamente."},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
-            refresh = RefreshToken.for_user(user)
-            refresh["session_version"] = version
-
-        refresh["organizacion_id"] = (
-            str(user.organizacion_id) if user.organizacion_id else None
-        )
-        refresh["rol"] = user.rol
-
-        access = refresh.access_token
-        access["organizacion_id"] = refresh["organizacion_id"]
-        access["rol"] = user.rol
-
         return Response(
             {
-                "access_token": str(access),
-                "refresh_token": str(refresh),
+                **tokens,
                 "usuario": {
                     "id": user.id,
                     "nombre": user.nombre,

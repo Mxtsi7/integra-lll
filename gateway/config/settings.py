@@ -87,7 +87,11 @@ RUTAS = {
 }
 
 # Las únicas rutas que no exigen token: registrarse, entrar, refrescar.
-RUTAS_PUBLICAS = ("/api/auth/",)
+RUTAS_PUBLICAS = (
+    "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
+    "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
+    "/api/auth/email-verification/confirm/",
+)
 
 # Cuánto se espera a un servicio antes de responder 504.
 TIEMPO_ESPERA_SEGUNDOS = 10

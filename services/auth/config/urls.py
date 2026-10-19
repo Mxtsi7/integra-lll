@@ -13,6 +13,7 @@ from app.views import (
     UserDetailView,
     UsuarioActualView,
 )
+from app.sesiones import LogoutView, RefreshView
 
 
 def salud(request):
@@ -32,6 +33,8 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/auth/register/", RegisterView.as_view(), name="register"),
     path("api/auth/login/", LoginView.as_view(), name="login"),
+    path("api/auth/logout/", LogoutView.as_view(), name="logout"),
+    path("api/auth/refresh/", RefreshView.as_view(), name="refresh"),
     path(
         "api/auth/password-reset/",
         SolicitudRecuperacionView.as_view(),
