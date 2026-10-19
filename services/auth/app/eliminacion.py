@@ -15,9 +15,22 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from shared.eliminacion import cabeceras_eliminacion
-from .models import EliminacionOrganizacion, Organizacion, User
+from .models import ConsentimientoDisociado, EliminacionOrganizacion, Organizacion, User
 
 SERVICIOS = {"subscriptions": 8002, "connectors": 8003, "analytics": 8004, "notifications": 8005}
+
+
+def conservar_consentimientos(usuarios):
+    eliminado_en = timezone.now()
+    try:
+        retener_hasta = eliminado_en.replace(year=eliminado_en.year + 6)
+    except ValueError:  # 29 de febrero: el sexto año puede no ser bisiesto.
+        retener_hasta = eliminado_en.replace(year=eliminado_en.year + 6, day=28)
+    ConsentimientoDisociado.objects.bulk_create([
+        ConsentimientoDisociado(
+            consentimiento_en=fecha, eliminado_en=eliminado_en, retener_hasta=retener_hasta,
+        ) for fecha in usuarios.exclude(consentimiento_en__isnull=True).values_list("consentimiento_en", flat=True)
+    ])
 
 
 class EliminarCuentaSerializer(serializers.Serializer):
@@ -72,6 +85,7 @@ class EliminarCuentaMixin:
                     operacion = EliminacionOrganizacion.objects.create(
                         organizacion_id=organizacion_id, pendientes=list(SERVICIOS),
                     )
+                conservar_consentimientos(afectados)
                 afectados.delete()
         except (RedisError, OSError):
             return Response({"detail": "No se pudieron revocar las sesiones."}, status=503)

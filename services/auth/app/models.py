@@ -153,3 +153,15 @@ class EliminacionOrganizacion(models.Model):
 
     class Meta:
         db_table = "eliminacion_organizacion"
+
+
+class ConsentimientoDisociado(models.Model):
+    """Evidencia mínima de consentimiento, sin vínculo a una persona o tenant."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    consentimiento_en = models.DateTimeField()
+    eliminado_en = models.DateTimeField()
+    retener_hasta = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "consentimiento_disociado"

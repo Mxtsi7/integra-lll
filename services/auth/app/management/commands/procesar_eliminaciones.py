@@ -2,9 +2,10 @@ import time
 
 from django.db import close_old_connections
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from app.eliminacion import procesar_eliminacion
-from app.models import EliminacionOrganizacion
+from app.models import ConsentimientoDisociado, EliminacionOrganizacion
 
 
 class Command(BaseCommand):
@@ -15,6 +16,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         while True:
+            ConsentimientoDisociado.objects.filter(retener_hasta__lte=timezone.now()).delete()
             for pk in EliminacionOrganizacion.objects.filter(completado_en__isnull=True).values_list("pk", flat=True):
                 completa = procesar_eliminacion(pk)
                 self.stdout.write(f"{pk}: {'completada' if completa else 'pendiente'}")

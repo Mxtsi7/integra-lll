@@ -27,6 +27,20 @@ con código también adquiere ese bloqueo y rechaza organizaciones en eliminaci�
 La lista de afectados siempre deriva de la organización del usuario autenticado;
 no se acepta un identificador de usuario u organización en el cuerpo.
 
+RF-01.7 conserva de forma disociada la fecha de consentimiento existente durante
+seis años calendario desde la eliminación. `ConsentimientoDisociado` guarda
+únicamente un UUID aleatorio, `consentimiento_en`, `eliminado_en` y `retener_hasta`;
+no tiene FK ni identificador de usuario/organización, correo, nombre o hash de
+identidad. Solo se copian fechas no nulas de los usuarios afectados en la misma
+transacción del borrado. Si falla la operación, tampoco queda una copia parcial.
+No se expone mediante API, serializer, admin ni exportación. La versión/texto del
+consentimiento no existe en los datos previos y permanece desconocida; no se
+reconstruye ni se inventa. Aplicar `0010_retencion_consentimiento`.
+
+El worker de eliminaciones purga estos registros al alcanzar `retener_hasta`,
+incluidas las pasadas manuales sin operaciones pendientes. Para eliminaciones
+del 29 de febrero, la retención vence el 28 de febrero del sexto año.
+
 ## Coordinación y reintentos
 
 `auth.eliminacion_organizacion` guarda UUID de operación, UUID de organización,
