@@ -3,6 +3,7 @@ import uuid
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import BaseUserManager, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 
 from shared.tenant.base import ModeloBase
 
@@ -56,6 +57,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     nombre = models.CharField(max_length=150)
     consentimiento_en = models.DateTimeField(null=True, blank=True)
+    correo_verificado_en = models.DateTimeField(null=True, blank=True)
 
     organizacion = models.ForeignKey(
         Organizacion,
@@ -78,6 +80,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["nombre"]
+
+    class Meta:
+        constraints = [models.UniqueConstraint(Lower("email"), name="usuario_email_unico_sin_mayusculas")]
 
     def __str__(self) -> str:
         return self.email
@@ -102,3 +107,17 @@ class Sesion(models.Model):
 
     class Meta:
         db_table = "sesion"
+
+
+class SolicitudVerificacionCorreo(ModeloBase):
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="verificaciones_correo")
+    huella = models.CharField(max_length=64, unique=True)
+    correo = models.EmailField()
+    correo_anterior = models.EmailField()
+    credenciales = models.CharField(max_length=64)
+    vence_en = models.DateTimeField()
+    consumido_en = models.DateTimeField(null=True, blank=True)
+    invalidado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta(ModeloBase.Meta):
+        db_table = "solicitud_verificacion_correo"

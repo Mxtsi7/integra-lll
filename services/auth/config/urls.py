@@ -15,6 +15,7 @@ from app.views import (
 )
 from app.sesiones import LogoutView, RefreshView
 from app.perfil import CambioClaveView
+from app.verificacion_correo_api import ConfirmacionVerificacionView, SolicitudVerificacionView
 
 
 def salud(request):
@@ -37,6 +38,8 @@ urlpatterns = [
     path("api/auth/logout/", LogoutView.as_view(), name="logout"),
     path("api/auth/refresh/", RefreshView.as_view(), name="refresh"),
     path("api/auth/change-password/", CambioClaveView.as_view(), name="change-password"),
+    path("api/auth/email-verification/request/", SolicitudVerificacionView.as_view(), name="email-verification-request"),
+    path("api/auth/email-verification/confirm/", ConfirmacionVerificacionView.as_view(), name="email-verification-confirm"),
     path(
         "api/auth/password-reset/",
         SolicitudRecuperacionView.as_view(),
