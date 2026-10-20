@@ -22,9 +22,9 @@ from datetime import datetime, timezone
 import pika
 from django.conf import settings
 
-registro = logging.getLogger(__name__)
+from events.topologia import EXCHANGE, declarar
 
-EXCHANGE = "suscripciones"
+registro = logging.getLogger(__name__)
 
 _conexion = None
 _canal = None
@@ -54,10 +54,9 @@ def _canal_vivo():
         return _canal
     _conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     _canal = _conexion.channel()
-    # durable=True: el exchange sobrevive a un reinicio del broker. Lo declaran
-    # publicador y consumidor por igual; declarar un exchange que ya existe con
-    # los mismos parámetros no hace nada.
-    _canal.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
+    # La topología completa, no solo el exchange: si la cola no está enlazada
+    # al publicar, el mensaje se descarta en silencio. Ver events/topologia.py.
+    declarar(_canal)
     return _canal
 
 

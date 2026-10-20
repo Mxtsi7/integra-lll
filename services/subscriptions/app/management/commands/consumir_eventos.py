@@ -26,14 +26,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 
-from events.publicador import EXCHANGE
+from events.topologia import COLA_RESUMEN, EXCHANGE, declarar
 from events.trabajo import recalcular_resumen
-
-COLA = "subscriptions.resumen"
-
-# Qué eventos nos interesan. El exchange es topic, así que esto son patrones
-# de routing key. Hoy solo uno; los demás del catálogo se agregan acá.
-PATRONES = ("suscripcion.creada",)
 
 
 class Command(BaseCommand):
@@ -49,12 +43,8 @@ class Command(BaseCommand):
     def handle(self, *args, **opciones):
         conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
         canal = conexion.channel()
-        canal.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
-        # durable: la cola sobrevive al reinicio del broker, así que los
-        # eventos publicados mientras el consumidor estaba caído siguen ahí.
-        canal.queue_declare(queue=COLA, durable=True)
-        for patron in PATRONES:
-            canal.queue_bind(exchange=EXCHANGE, queue=COLA, routing_key=patron)
+        # La misma topología que declara el publicador (events/topologia.py).
+        declarar(canal)
         canal.basic_qos(prefetch_count=1)
 
         def apagar(*_):
@@ -92,7 +82,7 @@ class Command(BaseCommand):
             if opciones["uno"]:
                 canal_.stop_consuming()
 
-        canal.basic_consume(queue=COLA, on_message_callback=al_recibir)
-        self.stdout.write(f"escuchando {COLA} en {EXCHANGE}")
+        canal.basic_consume(queue=COLA_RESUMEN, on_message_callback=al_recibir)
+        self.stdout.write(f"escuchando {COLA_RESUMEN} en {EXCHANGE}")
         canal.start_consuming()
         conexion.close()

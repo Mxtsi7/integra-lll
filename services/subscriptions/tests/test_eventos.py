@@ -15,7 +15,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from app.models import ResumenOrganizacion, Subscription
-from events import despacho, publicador
+from events import despacho, publicador, topologia
 from events.trabajo import recalcular_resumen
 
 
@@ -186,3 +186,57 @@ class TestInterruptor:
         otro = ResumenOrganizacion.objects.get(organizacion_id=asincrona)
         assert uno.total_mensual == otro.total_mensual
         assert uno.cantidad_activas == otro.cantidad_activas
+
+
+# ── la topología ─────────────────────────────────────────────────────
+
+class CanalFalso:
+    """Anota lo que le piden, para ver qué se declara y en qué orden."""
+
+    def __init__(self):
+        self.llamadas = []
+
+    def exchange_declare(self, **kw):
+        self.llamadas.append(("exchange", kw))
+
+    def queue_declare(self, **kw):
+        self.llamadas.append(("cola", kw))
+
+    def queue_bind(self, **kw):
+        self.llamadas.append(("enlace", kw))
+
+
+class TestTopologia:
+    """Regresión de un bug encontrado probando contra un RabbitMQ real.
+
+    Un exchange topic descarta en silencio los mensajes que no tienen cola
+    enlazada. Si el publicador solo declaraba el exchange, todo lo publicado
+    antes de que arrancara el consumidor se perdía: sin error y sin rastro.
+    Por eso la cola y el enlace los declaran los dos lados.
+    """
+
+    def test_declara_exchange_cola_y_enlace(self):
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        assert [tipo for tipo, _ in canal.llamadas] == ["exchange", "cola", "enlace"]
+
+    def test_la_cola_y_el_exchange_son_durables(self):
+        """Sin durable, un reinicio del broker se lleva los eventos pendientes."""
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        for _, kw in canal.llamadas[:2]:
+            assert kw["durable"] is True
+
+    def test_el_enlace_cubre_el_evento_que_publicamos(self):
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        claves = {kw["routing_key"] for tipo, kw in canal.llamadas if tipo == "enlace"}
+        assert despacho.EVENTO_SUSCRIPCION_CREADA in claves
+
+    def test_el_publicador_declara_la_topologia_completa(self):
+        """Si alguien vuelve a dejar solo el exchange, esto falla."""
+        import inspect
+
+        fuente = inspect.getsource(publicador._canal_vivo)
+        assert "declarar(" in fuente
+        assert "exchange_declare" not in fuente
