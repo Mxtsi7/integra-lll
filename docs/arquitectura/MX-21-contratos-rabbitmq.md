@@ -92,7 +92,9 @@ Rechazos: tenant ausente/vacío, correlación inválida, versión desconocida, a
 La ejecución AMQP además comprueba confirms, routing, ack, DLQ y reentrega posterior al commit sin repetir efecto,
 reabriendo SQLite entre entregas; es una simulación del ack perdido, no un apagado forzado del proceso.
 El workflow [MX-21](../../.github/workflows/mx21.yml) ejecuta la prueba completa con broker real en cada PR de estos archivos.
-La evidencia de ejecución y su resultado se enlazan en el PR; un fallo del broker hace fallar la prueba, sin fallback a mocks.
+[Ejecución AMQP exitosa](https://github.com/Mxtsi7/integra-lll/actions/runs/39513555713/job/118940164463)
+del commit `013a076ff2099f40a7582e1b59f6e1dd392ae2a5`: 4 contratos, 5 efectos, 1 duplicado, 7 rechazos;
+reentrega deduplicada, DLQ verificada y colas vacías al finalizar. Un fallo del broker hace fallar la prueba, sin fallback a mocks.
 
 ## Recepción y cierre
 
