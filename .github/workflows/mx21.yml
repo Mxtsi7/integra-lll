@@ -1,0 +1,24 @@
+name: MX-21 · contrato e intercambio RabbitMQ
+on:
+  pull_request:
+    paths: ['shared/events/**', 'scripts/mx21/**', '.github/workflows/mx21.yml', 'docs/arquitectura/MX-21*']
+  workflow_dispatch:
+jobs:
+  intercambio:
+    runs-on: ubuntu-latest
+    services:
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r scripts/mx21/requirements.txt
+      - run: python scripts/mx21/intercambio.py
+        env:
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
