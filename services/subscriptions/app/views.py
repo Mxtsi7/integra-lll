@@ -116,22 +116,29 @@ class SubscriptionViewSet(TenantViewSet):
     def perform_update(self, serializer) -> None:
         """Solo admite cambiar estado por eventos autorizados; mantiene PATCH de baja."""
         estado_solicitado = serializer.validated_data.pop("estado", None)
-        suscripcion = serializer.instance
-        if (
-            estado_solicitado is not None
-            and estado_solicitado != suscripcion.estado
-            and estado_solicitado != Subscription.Estado.CANCELADO
-        ):
-            raise ValidationError(
-                {
-                    "estado": (
-                        "No se puede modificar el estado directamente. "
-                        "Use el endpoint de transiciones."
-                    )
-                }
-            )
 
         with transaction.atomic():
+            suscripcion = (
+                type(serializer.instance)
+                .objects.select_for_update()
+                .get(pk=serializer.instance.pk)
+            )
+            serializer.instance = suscripcion
+
+            if (
+                estado_solicitado is not None
+                and estado_solicitado != suscripcion.estado
+                and estado_solicitado != Subscription.Estado.CANCELADO
+            ):
+                raise ValidationError(
+                    {
+                        "estado": (
+                            "No se puede modificar el estado directamente. "
+                            "Use el endpoint de transiciones."
+                        )
+                    }
+                )
+
             serializer.save()
             if (
                 estado_solicitado == Subscription.Estado.CANCELADO

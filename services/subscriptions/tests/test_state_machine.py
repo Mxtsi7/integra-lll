@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from app.models import Cobro, Subscription, TransicionEstado
+from app.serializers import SubscriptionSerializer
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -203,6 +204,27 @@ def test_registro_de_uso_no_sobrescribe_estado_cambiado_tras_cargar_instancia() 
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.POR_CONFIRMAR
     assert suscripcion.horas_uso_mes == Decimal("0.50")
+
+
+@pytest.mark.django_db
+def test_serializer_patch_no_revert_e_transicion_concurrente() -> None:
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    serializador = SubscriptionSerializer(instance=suscripcion)
+
+    suscripcion.transicionar(
+        Subscription.EventoEstado.CANCELACION_USUARIO,
+        actor_id=uuid.uuid4(),
+        actor_rol="titular",
+    )
+    suscripcion.refresh_from_db()
+
+    datos = {"nombre": "Netflix Premium"}
+    actualizados = serializador.update(suscripcion, datos)
+
+    assert actualizados.nombre == "Netflix Premium"
+    assert actualizados.estado == Subscription.Estado.CANCELADO
+    assert actualizados.transiciones_estado.count() == 1
+    assert actualizados.transiciones_estado.first().evento == Subscription.EventoEstado.CANCELACION_USUARIO
 
 
 @pytest.mark.django_db
