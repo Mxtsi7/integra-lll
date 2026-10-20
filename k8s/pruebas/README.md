@@ -116,3 +116,65 @@ despliegue levante los suyos.
 El cluster es compartido con el resto del curso. Conviene avisar, y no dejar
 una prueba corriendo sola: el `Job` termina y se borra a los 10 minutos, pero
 el pod de diagnóstico hay que borrarlo a mano.
+
+
+## Demostrar el autoescalado
+
+El HPA agrega réplicas cuando el promedio de CPU por pod pasa los 120m
+(`k8s/30-autoescalado.yaml`). Para verlo reaccionar en vivo hacen falta dos
+terminales.
+
+En la primera, mirando el HPA:
+
+```bash
+kubectl get hpa -w
+```
+
+En la segunda, la carga:
+
+```bash
+kubectl apply -f k8s/pruebas/carga-fortio.yaml
+```
+
+En la primera terminal, `REPLICAS` debería pasar de 1 a 2 y a 3 en menos de
+un minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
+ventana para que no entre en vaivén.
+
+Si la columna `TARGETS` dice `<unknown>` en vez de un número, el HPA no está
+recibiendo métricas y no va a escalar nunca. Eso es metrics-server, no el
+manifiesto.
+
+**El techo no es arbitrario.** `gateway` llega a 3 y `subscriptions` a 2
+porque la cuota permite 12 pods y la base son 9. Pedir más réplicas no daría
+más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.
+
+## Comparar con cola y sin cola
+
+```bash
+./k8s/pruebas/comparar-cola.sh
+```
+
+Crear una suscripción dispara trabajo derivado: recalcular el resumen de gasto
+de la organización. El script corre la misma carga dos veces, cambiando solo
+`EVENTOS_ASINCRONOS`:
+
+| Bandera | Quién hace el trabajo | Quién espera |
+|---|---|---|
+| `0` | el propio POST | el usuario |
+| `1` | el consumidor, detrás de RabbitMQ | nadie |
+
+El trabajo es idéntico en los dos casos — hay una prueba que lo verifica
+(`test_los_dos_modos_terminan_en_el_mismo_estado`). Lo único que cambia es
+quién lo espera.
+
+Cada corrida usa una organización nueva y siembra la misma cantidad de filas,
+porque el recálculo cuesta más mientras más suscripciones hay: compartir
+organización haría que la segunda corrida partiera con lo que creó la primera.
+
+Ajustables por variable de entorno: `DURACION`, `CONEXIONES`, `QPS`,
+`SEMILLA`.
+
+**Lo que no mide:** el gateway. Le pega directo al Service de `subscriptions`.
+El gateway es un proxy síncrono y una cola no puede amortiguarlo sin romper la
+semántica — es lo que dice el ADR-003: si el usuario está esperando el dato,
+va por HTTP.
