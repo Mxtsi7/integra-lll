@@ -3,7 +3,7 @@ from redis.exceptions import RedisError
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from shared.sesiones import registrar_credenciales
 from .contexto import usuario_del_contexto
@@ -34,7 +34,9 @@ class CambioClaveView(APIView):
     authentication_classes = permission_classes = []
 
     @extend_schema(tags=["Auth"], request=CambioClaveSerializer,
-                   responses={200: None, 400: None, 403: None, 404: None, 503: None})
+                   responses={200: inline_serializer("CambioClaveConfirmado", fields={
+                       "detail": serializers.CharField(),
+                   }), 400: None, 403: None, 404: None, 503: None})
     def post(self, request):
         datos = CambioClaveSerializer(data=request.data)
         datos.is_valid(raise_exception=True)

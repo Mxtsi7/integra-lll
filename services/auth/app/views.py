@@ -311,13 +311,18 @@ class UsuarioActualView(generics.RetrieveAPIView):
         tags=["Usuarios"],
         summary="Usuario actual (me)",
         description=(
-            "Devuelve el usuario identificado por la cabecera X-Usuario-Id "
-            "(la pone el gateway tras validar el JWT). Es la ruta que consume el frontend."
+            "Devuelve el usuario activo identificado por X-Usuario-Id y valida "
+            "X-Organizacion-Id contra su pertenencia vigente. El gateway inyecta "
+            "ambas cabeceras tras validar el JWT. Una organización desactualizada "
+            "devuelve 403; el cliente debe descartar la sesión y volver a iniciar sesión."
         ),
         responses={
             200: UsuarioActualSerializer,
-            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
-            404: OpenApiResponse(description="El usuario del token ya no existe."),
+            403: OpenApiResponse(description=(
+                "Contexto de usuario ausente/inválido o la organización de la sesión "
+                "no coincide con la pertenencia vigente."
+            )),
+            404: OpenApiResponse(description="El usuario del token no existe o está inactivo."),
         },
     )
     def get(self, request, *args, **kwargs):
