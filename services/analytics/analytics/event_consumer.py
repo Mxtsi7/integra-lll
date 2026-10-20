@@ -2,7 +2,6 @@
 
 import json
 import logging
-from datetime import date
 
 import pika
 
@@ -18,15 +17,10 @@ def procesar_mensaje(
     channel,
     delivery_tag: int,
     body: bytes,
-    *,
-    fecha_referencia: date | None = None,
 ) -> None:
     try:
         evento = json.loads(body)
-        salidas = procesar_evento_solapamiento(
-            evento,
-            fecha_referencia=fecha_referencia,
-        )
+        salidas = procesar_evento_solapamiento(evento)
     except (ValueError, TypeError) as exc:
         log.warning("Se rechaza evento de solapamiento inválido: %s", exc)
         channel.basic_nack(delivery_tag=delivery_tag, requeue=False)

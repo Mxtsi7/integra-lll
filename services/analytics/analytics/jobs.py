@@ -280,11 +280,7 @@ def generar_recomendaciones_consolidacion(
     return recomendaciones
 
 
-def procesar_evento_solapamiento(
-    evento: Mapping,
-    *,
-    fecha_referencia: date | None = None,
-) -> list[dict]:
+def procesar_evento_solapamiento(evento: Mapping) -> list[dict]:
     """Consume un evento v2 de solapamiento y construye eventos de salida."""
     if not isinstance(evento, Mapping):
         raise ValueError("El evento debe ser un objeto.")
@@ -313,6 +309,7 @@ def procesar_evento_solapamiento(
         raise ValueError("evento.ocurrido_en debe ser una fecha ISO-8601.") from exc
     if fecha_evento.utcoffset() is None:
         raise ValueError("evento.ocurrido_en debe incluir zona horaria.")
+    fecha_snapshot = timezone.localtime(fecha_evento).date()
 
     datos = evento.get("datos")
     if not isinstance(datos, Mapping):
@@ -355,7 +352,7 @@ def procesar_evento_solapamiento(
         organizacion_id=organizacion_id,
         suscripciones=suscripciones,
         solapamientos=[solapamiento],
-        fecha_referencia=fecha_referencia,
+        fecha_referencia=fecha_snapshot,
     )
 
     eventos_generados = []

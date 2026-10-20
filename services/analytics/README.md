@@ -20,8 +20,10 @@ Cada suscripción del snapshot incluye `id`, `organizacion_id`, `nombre`,
 `categoria`, `estado`, `activa`, `moneda`, `monto`, `frecuencia`
 (`mensual` o `anual`), `uso_observado_desde` y `ultimo_uso` (fecha o `null`).
 Un registro de otro tenant, un snapshot que no coincide con los IDs o evidencia
-sin enlace produce un error explícito. Un evento v1 no es suficiente para
-generar recomendaciones.
+sin enlace produce un error explícito. La evaluación del uso se ancla a la fecha
+de `ocurrido_en`, convertida a la zona horaria del servicio; reentregar el mismo
+snapshot en otra fecha no amplía artificialmente su período de observación. Un
+evento v1 no es suficiente para generar recomendaciones.
 
 ## Regla de recomendación
 
@@ -39,8 +41,6 @@ afirma equivalencia entre los proveedores.
 ## Ejemplo de evento (datos de prueba)
 
 ```python
-from datetime import date
-
 from analytics.jobs import procesar_evento_solapamiento
 
 evento = {
@@ -90,10 +90,7 @@ evento = {
     },
 }
 
-eventos_recomendacion = procesar_evento_solapamiento(
-    evento,
-    fecha_referencia=date(2026, 10, 17),
-)
+eventos_recomendacion = procesar_evento_solapamiento(evento)
 ```
 
 El evento de salida conserva el `correlation_id` y `organizacion_id`, lleva un

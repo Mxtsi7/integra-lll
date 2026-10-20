@@ -1,4 +1,6 @@
+import json
 from datetime import date
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -317,7 +319,6 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
     def test_event_v2_generates_correlated_recommendation_event(self):
         resultado = procesar_evento_solapamiento(
             evento_solapamiento(),
-            fecha_referencia=HOY,
         )
 
         self.assertEqual(len(resultado), 1)
@@ -339,7 +340,6 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
 
         repetido = procesar_evento_solapamiento(
             evento_solapamiento(),
-            fecha_referencia=HOY,
         )
         self.assertEqual(generado["id"], repetido[0]["id"])
 
@@ -347,7 +347,6 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         with self.assertRaisesMessage(ValueError, "versión 2"):
             procesar_evento_solapamiento(
                 evento_solapamiento(version=1),
-                fecha_referencia=HOY,
             )
 
     def test_event_requires_verified_snapshot_to_match_subscription_ids(self):
@@ -355,31 +354,28 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         evento["datos"]["suscripciones"].pop()
 
         with self.assertRaisesMessage(ValueError, "coincidir exactamente"):
-            procesar_evento_solapamiento(evento, fecha_referencia=HOY)
+            procesar_evento_solapamiento(evento)
 
     def test_event_requires_explicit_linked_overlap_evidence(self):
         evento = evento_solapamiento()
         evento["datos"]["evidencia_url"] = None
 
         with self.assertRaisesMessage(ValueError, "evidencia_url es obligatorio"):
-            procesar_evento_solapamiento(evento, fecha_referencia=HOY)
+            procesar_evento_solapamiento(evento)
 
     def test_event_requires_uuid_correlation_id(self):
         evento = evento_solapamiento()
         evento["correlation_id"] = "no-uuid"
 
         with self.assertRaisesMessage(ValueError, "correlation_id"):
-            procesar_evento_solapamiento(evento, fecha_referencia=HOY)
+            procesar_evento_solapamiento(evento)
 
     def test_rabbit_message_publishes_results_before_acknowledging_input(self):
-        import json
-
         canal = CanalFalso()
         procesar_mensaje(
             canal,
             17,
             json.dumps(evento_solapamiento()).encode("utf-8"),
-            fecha_referencia=HOY,
         )
 
         self.assertEqual(canal.confirmados, [17])
@@ -395,8 +391,40 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
 
     def test_invalid_rabbit_message_is_dead_lettered(self):
         canal = CanalFalso()
-        procesar_mensaje(canal, 18, b"not-json", fecha_referencia=HOY)
+        procesar_mensaje(canal, 18, b"not-json")
 
         self.assertEqual(canal.confirmados, [])
         self.assertEqual(canal.rechazados, [(18, False)])
         self.assertEqual(canal.publicados, [])
+
+    def test_replayed_event_uses_snapshot_date_not_delivery_date(self):
+        evento = evento_solapamiento()
+        candidata = evento["datos"]["suscripciones"][0]
+        alternativa = evento["datos"]["suscripciones"][1]
+        candidata["ultimo_uso"] = None
+        candidata["uso_observado_desde"] = "2026-09-15"
+        alternativa["ultimo_uso"] = "2026-10-16"
+
+        with patch(
+            "analytics.jobs.timezone.localdate",
+            side_effect=[date(2026, 10, 17), date(2026, 11, 1)],
+        ):
+            primera_entrega = CanalFalso()
+            procesar_mensaje(
+                primera_entrega,
+                19,
+                json.dumps(evento).encode("utf-8"),
+            )
+            replay_tardio = CanalFalso()
+            procesar_mensaje(
+                replay_tardio,
+                20,
+                json.dumps(evento).encode("utf-8"),
+            )
+
+        self.assertEqual(primera_entrega.confirmados, [19])
+        self.assertEqual(replay_tardio.confirmados, [20])
+        self.assertEqual(primera_entrega.publicados, [])
+        self.assertEqual(replay_tardio.publicados, [])
+        self.assertEqual(primera_entrega.rechazados, [])
+        self.assertEqual(replay_tardio.rechazados, [])

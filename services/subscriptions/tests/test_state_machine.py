@@ -1,9 +1,10 @@
 """Pruebas de transiciones autorizadas, umbrales y auditoría de RF-03."""
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from threading import Barrier
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -12,6 +13,8 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from app.models import Cobro, Subscription, TransicionEstado
+from app.serializers import SubscriptionSerializer
+from app.views import SubscriptionViewSet
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -42,6 +45,13 @@ def crear_suscripcion(estado: str) -> Subscription:
     )
     suscripcion.refresh_from_db()
     return suscripcion
+
+
+def _inicio_del_dia_local(fecha: date) -> datetime:
+    return timezone.make_aware(
+        datetime.combine(fecha, time.min),
+        timezone.get_current_timezone(),
+    )
 
 
 def preparar_ventana_gracia(suscripcion: Subscription) -> None:
@@ -148,7 +158,7 @@ def test_fin_prueba_no_puede_transicionar_antes_de_la_fecha() -> None:
 @pytest.mark.django_db
 def test_sin_cobros_requiere_60_dias_completos() -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
-    fecha_creacion = timezone.now() - timedelta(days=59)
+    fecha_creacion = _inicio_del_dia_local(timezone.localdate() - timedelta(days=59))
     Subscription.objects.filter(pk=suscripcion.pk).update(creado_en=fecha_creacion)
     suscripcion.refresh_from_db()
 
@@ -156,7 +166,7 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
         suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
 
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=60)
+        creado_en=_inicio_del_dia_local(timezone.localdate() - timedelta(days=60))
     )
     suscripcion.refresh_from_db()
     suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
@@ -169,7 +179,9 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
 def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int) -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=dias_sin_uso)
+        creado_en=_inicio_del_dia_local(
+            timezone.localdate() - timedelta(days=dias_sin_uso)
+        )
     )
     suscripcion.refresh_from_db()
 
@@ -181,6 +193,42 @@ def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int) -> None:
         suscripcion.transicionar(Subscription.EventoEstado.SIN_USO_45_DIAS)
         suscripcion.refresh_from_db()
         assert suscripcion.estado == Subscription.Estado.FANTASMA
+
+
+@pytest.mark.django_db
+def test_patch_obsoleto_conserva_transicion_y_campos_de_uso_concurrentes() -> None:
+    original = crear_suscripcion(Subscription.Estado.ACTIVO)
+    instancia_obsoleta = Subscription.objects.get(pk=original.pk)
+    serializer = SubscriptionSerializer(
+        instance=instancia_obsoleta,
+        data={"nombre": "Servicio actualizado"},
+        partial=True,
+    )
+    assert serializer.is_valid()
+
+    instancia_uso = Subscription.objects.get(pk=original.pk)
+    instancia_uso.registrar_uso(60)
+    instancia_transicion = Subscription.objects.get(pk=original.pk)
+    instancia_transicion.transicionar(
+        Subscription.EventoEstado.CANCELACION_USUARIO,
+        actor_id=uuid.uuid4(),
+        actor_rol="titular",
+    )
+
+    view = SubscriptionViewSet()
+    view.request = SimpleNamespace(rol=None, usuario_id=None)
+    view.perform_update(serializer)
+
+    actualizada = Subscription.objects.get(pk=original.pk)
+    assert actualizada.nombre == "Servicio actualizado"
+    assert actualizada.estado == Subscription.Estado.CANCELADO
+    assert actualizada.horas_uso_mes == Decimal("1.00")
+    assert actualizada.ultima_actividad is not None
+    assert actualizada.transiciones_estado.count() == 1
+    assert (
+        actualizada.transiciones_estado.get().evento
+        == Subscription.EventoEstado.CANCELACION_USUARIO
+    )
 
 
 @pytest.mark.django_db
