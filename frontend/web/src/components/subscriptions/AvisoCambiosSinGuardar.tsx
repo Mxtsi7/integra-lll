@@ -23,7 +23,10 @@ export function AvisoCambiosSinGuardar({ onSeguirEditando, onDescartar }: AvisoC
   const focoAnterior = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    focoAnterior.current = document.activeElement as HTMLElement | null;
+    // Solo la primera vez: en desarrollo (StrictMode) React corre este
+    // efecto dos veces, y en la segunda el foco ya está en "Seguir editando";
+    // si se volviera a guardar, al elegirlo el foco se perdería.
+    if (!focoAnterior.current) focoAnterior.current = document.activeElement as HTMLElement | null;
     contenedor.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, []);
 

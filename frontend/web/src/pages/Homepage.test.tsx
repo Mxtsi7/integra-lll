@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -37,14 +38,18 @@ const SPOTIFY: Suscripcion = {
 };
 
 async function montar() {
+  // Con StrictMode, como main.tsx: React ejecuta los efectos dos veces en
+  // desarrollo, y así se detectan efectos que no lo soportan.
   render(
-    <MemoryRouter>
-      <ToastProvider>
-        <AuthProvider>
-          <Homepage />
-        </AuthProvider>
-      </ToastProvider>
-    </MemoryRouter>,
+    <StrictMode>
+      <MemoryRouter>
+        <ToastProvider>
+          <AuthProvider>
+            <Homepage />
+          </AuthProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </StrictMode>,
   );
   await act(async () => {}); // carga inicial de la lista
 }
