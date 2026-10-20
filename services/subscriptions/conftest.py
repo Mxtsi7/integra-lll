@@ -8,6 +8,17 @@ import pytest
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
 
+@pytest.fixture(autouse=True)
+def catalogos_de_referencia(request):
+    # Los tests transaccionales vacían las tablas al terminar; restaurar los
+    # datos de referencia sin depender del orden de ejecución de las suites.
+    if request.node.get_closest_marker("django_db") or "db" in request.fixturenames:
+        request.getfixturevalue("db")
+        from django.core.management import call_command
+        from io import StringIO
+        call_command("gestionar_catalogo", cargar_iniciales=True, stdout=StringIO())
+
+
 def pytest_configure() -> None:
     """Inicializa Django antes de que pytest recolecte los tests."""
     django.setup()
