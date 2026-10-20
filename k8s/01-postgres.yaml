@@ -52,8 +52,8 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
           resources:
-            requests: { cpu: 50m,  memory: 96Mi }
-            limits:   { cpu: 250m, memory: 192Mi }
+            requests: { cpu: 50m,  memory: 64Mi }
+            limits:   { cpu: 150m, memory: 192Mi }
       volumes:
         - name: inicio
           configMap: { name: postgres-inicio }

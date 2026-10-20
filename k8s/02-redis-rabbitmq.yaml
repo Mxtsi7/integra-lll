@@ -33,15 +33,15 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
-            requests: { cpu: 25m,  memory: 32Mi }
-            limits:   { cpu: 100m, memory: 96Mi }
+            requests: { cpu: 25m,  memory: 16Mi }
+            limits:   { cpu: 50m,  memory: 64Mi }
 ---
-# RabbitMQ: el bus de eventos entre servicios del ADR-003. Todavía ningún
-# servicio publica eventos. Se deja declarado porque es parte de la
-# arquitectura, pero en 0 réplicas: el presupuesto de memoria del namespace
-# (ver k8s/README.md) no alcanza para los 8 pods que SÍ se usan más este,
-# y un broker sin publicadores ni consumidores gastaría 384Mi sin hacer
-# nada. Se sube a 1 cuando el primer servicio publique un evento (Sprint 2).
+# RabbitMQ: el bus de eventos entre servicios del ADR-003.
+#
+# Mide 136Mi en reposo (medido 2026-10-19), de ahí el límite de 256Mi.
+# Lo usa el publicador de `subscriptions` cuando EVENTOS_ASINCRONOS=1; con
+# la bandera en 0 el mismo trabajo se hace dentro de la petición HTTP. Esa
+# es la comparación con y sin cola (ver k8s/pruebas/comparar-cola.sh).
 apiVersion: v1
 kind: Service
 metadata:
@@ -59,7 +59,7 @@ metadata:
   name: rabbitmq
   labels: { app.kubernetes.io/part-of: ojoalgasto }
 spec:
-  replicas: 0   # ver el comentario de arriba: Sprint 2
+  replicas: 1
   # La cuota del namespace (2 CPU) no deja espacio para levantar el pod
   # nuevo antes de bajar el viejo: con RollingUpdate el despliegue se traba.
   strategy: { type: Recreate }
@@ -81,5 +81,5 @@ spec:
             timeoutSeconds: 25
             failureThreshold: 6
           resources:
-            requests: { cpu: 50m, memory: 192Mi }
-            limits: { cpu: 150m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 112Mi }
+            limits:   { cpu: 100m, memory: 256Mi }

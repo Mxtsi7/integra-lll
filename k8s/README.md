@@ -13,40 +13,50 @@ El sistema completo corriendo en el cluster del ramo:
 |---|---|---|
 | `postgres` | StatefulSet + PVC 2Gi | Un esquema por servicio, creado al primer arranque (ADR-002) |
 | `redis` | Deployment | Broker de Celery |
-| `rabbitmq` | Deployment **en 0 réplicas** | Bus de eventos del ADR-003; nadie publica todavía, y no cabe en la cuota. Sprint 2 |
+| `rabbitmq` | Deployment | Bus de eventos del ADR-003; lo usa el publicador cuando `EVENTOS_ASINCRONOS=1` |
 | `auth` | Deployment | Migra y siembra en un initContainer, después gunicorn |
 | `subscriptions` | Deployment | Ídem |
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
 | `gateway` | Deployment | Único punto de entrada (ADR-004) |
 | `web` | Deployment | SPA compilada + nginx, que además hace de proxy hacia el gateway |
+| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→3 y 1→2 (ver `30-autoescalado.yaml`) |
 
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
 
-## El presupuesto de memoria
+## El presupuesto de recursos
 
 El namespace tiene una `ResourceQuota` (`student-provisioner-quota`) que no se
-puede subir. Lo que aprieta es la memoria, no la CPU:
+puede subir. Los límites de cada pod están calculados para que **el HPA tenga
+espacio donde escalar**: si la cuota está llena, el autoescalado no sirve de
+nada, porque el pod nuevo recibe `exceeded quota` y nunca nace.
 
-| Recurso | Tope | En uso con todo arriba | Holgura |
+| Recurso | Tope | En reposo (9 pods) | Peor caso (HPA al máximo, 12 pods) |
 |---|---|---|---|
-| `limits.memory` | 2G (1907Mi) | 1632Mi | 14% |
-| `requests.memory` | 1G (953Mi) | 768Mi | 19% |
-| `limits.cpu` | 2 | 1450m | 28% |
-| `requests.cpu` | 1 | 325m | 68% |
-| `pods` | 12 | 8 | 33% |
+| `limits.memory` | 2752Mi | 1760Mi | 2496Mi |
+| `requests.memory` | 1152Mi | 648Mi | 888Mi |
+| `limits.cpu` | 2000m | 1200m | 1800m |
+| `requests.cpu` | 1000m | 375m | 525m |
+| `pods` | 12 | 9 | 12 |
 
 **Una `ResourceQuota` no mata los pods que ya están corriendo**, solo bloquea
-los nuevos. Por eso un despliegue puede venir funcionando meses y reventar
-recién al siguiente `rollout`, cuando los pods nuevos sí tienen que pasar por
-ella. Si ves `exceeded quota` en `kubectl get events`, es esto.
+los nuevos. Por eso un despliegue puede venir funcionando semanas y reventar
+recién al siguiente `rollout`. Si ves `exceeded quota` en `kubectl get events`,
+es esto.
 
-Los límites salen de medir, no de inventar. Para medir el uso real:
+Para recalcular el presupuesto después de tocar un límite, sin aplicar nada:
 
 ```bash
-# kubectl top no está permitido para nuestro usuario (RBAC), así que se lee
-# del cgroup. El MSYS_NO_PATHCONV es obligatorio en Git Bash: sin él, la
-# ruta /sys/... se convierte en C:/Program Files/Git/sys/... y falla.
+python k8s/pruebas/presupuesto.py k8s
+```
+
+### Los límites salen de medir
+
+`kubectl top` no está permitido para nuestro usuario (RBAC), así que se lee del
+cgroup de cada pod. El `MSYS_NO_PATHCONV` es obligatorio en Git Bash: sin él la
+ruta `/sys/...` se convierte en `C:/Program Files/Git/sys/...` y falla.
+
+```bash
 export MSYS_NO_PATHCONV=1
 for p in $(kubectl get pods -o jsonpath='{.items[*].metadata.name}'); do
   usado=$(kubectl exec "$p" -- cat /sys/fs/cgroup/memory.current)
@@ -54,10 +64,23 @@ for p in $(kubectl get pods -o jsonpath='{.items[*].metadata.name}'); do
 done
 ```
 
-Medición del 2026-10-15: `web` 7Mi, `redis` 17Mi, `postgres` 71Mi,
-`subscriptions-beat` 71Mi, `gateway` 83Mi, `subscriptions` 128Mi. Los límites
-dejan entre 2x y 9x sobre eso. `gateway` y `subscriptions` van holgados a
-propósito: son los que reciben la prueba de estrés.
+Medición del 2026-10-19, con los 9 pods arriba:
+
+| Pod | Uso real | Límite |
+|---|---|---|
+| `web` | 8Mi | 64Mi |
+| `redis` | 14Mi | 64Mi |
+| `postgres` | 69Mi | 192Mi |
+| `subscriptions-beat` | 77Mi | 160Mi |
+| `gateway` | 83Mi | 224Mi |
+| `auth` | 121Mi | 256Mi |
+| `subscriptions` | 128Mi | 288Mi |
+| `rabbitmq` | 136Mi | 256Mi |
+| `subscriptions-worker` | **359Mi** → ver abajo | 256Mi |
+
+El worker se salía del molde: `celery worker` sin `--concurrency` levanta un
+proceso hijo **por core del nodo**, y los nodos tienen 16. Eran 16 procesos
+peleándose 200m de CPU. Con `--concurrency=2` entra holgado.
 
 ## Desplegar
 
