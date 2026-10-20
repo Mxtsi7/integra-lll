@@ -40,6 +40,9 @@ Overleaf), no seis Word que se pegan al final — la costura se nota siempre.
 
 ## Registro de decisiones
 
+- [ADR-007: catálogos de referencia](arquitectura/ADR-007-catalogos-de-referencia.md):
+  monedas, categorías y países en PostgreSQL; API, comandos y despliegue.
+
 Cada decisión técnica relevante se documenta en `arquitectura/` con esta
 estructura:
 
