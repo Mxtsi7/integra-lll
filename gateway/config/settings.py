@@ -97,6 +97,7 @@ RUTAS_PUBLICAS = (
     "/api/auth/email-verification/confirm/",
     "/api/auth/google/nonce/", "/api/auth/google/",
     "/api/auth/logout/",
+    "/api/auth/email-verification/confirm/",
 )
 
 # Cuánto se espera a un servicio antes de responder 504.
