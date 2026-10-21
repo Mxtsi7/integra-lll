@@ -161,9 +161,13 @@ export async function registrarUso(
   id: string,
   datos: UsoPayload,
 ): Promise<Suscripcion> {
+  // Una fecha vacía no se manda: RegistrarUsoSerializer rechaza "" pero
+  // acepta la propiedad ausente (usa hoy). Así ningún llamador puede mandar
+  // un body inválido por un campo de fecha borrado.
+  const cuerpo: UsoPayload = datos.fecha ? datos : { minutos: datos.minutos };
   const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/uso/`, {
     method: 'POST',
-    body: datos,
+    body: cuerpo,
   });
   return desdeLaApi(actualizada);
 }

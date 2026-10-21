@@ -94,9 +94,11 @@ export function SuscripcionDetallePage() {
 
   // CH-14: registra el uso y refresca lo que depende de él.
   const registrar = useCallback(
-    async (minutos: number, fecha: string) => {
+    async (minutos: number, fecha?: string) => {
       if (!id) return;
-      const actualizada = await registrarUso(id, { minutos, fecha });
+      // Sin fecha se omite la propiedad: { minutos } es válido para la API y
+      // usa hoy; { minutos, fecha: "" } no lo es.
+      const actualizada = await registrarUso(id, fecha ? { minutos, fecha } : { minutos });
       if (idActual.current !== id) return; // se navegó a otra suscripción
       // La respuesta trae la suscripción actualizada: horas de uso del mes y
       // costo por hora se recalculan con ella, sin otra petición.

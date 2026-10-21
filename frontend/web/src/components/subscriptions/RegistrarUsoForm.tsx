@@ -17,7 +17,8 @@ interface RegistrarUsoFormProps {
    * Registra el uso en el backend (POST /suscripciones/<id>/uso/). Debe
    * lanzar si falla; el formulario muestra el error y conserva lo escrito.
    */
-  onRegistrar: (minutos: number, fecha: string) => Promise<void>;
+  /** `fecha` es undefined si el usuario dejó "Día" vacío: el backend usa hoy. */
+  onRegistrar: (minutos: number, fecha?: string) => Promise<void>;
 }
 
 const ID_CAMPO: Record<CampoUso, string> = { minutos: "uso-minutos", fecha: "uso-fecha" };
@@ -60,7 +61,9 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
     const cantidad = Number(minutos.trim());
     setGuardando(true);
     try {
-      await onRegistrar(cantidad, fecha);
+      // "Día" vacío no viaja como fecha: "" (el serializer lo rechaza); se
+      // omite y el backend usa hoy (revisión PR #80).
+      await onRegistrar(cantidad, fecha || undefined);
       setMinutos("");
       setConfirmacion(`Registraste ${formatoMinutos(cantidad)}.`);
     } catch (err: unknown) {

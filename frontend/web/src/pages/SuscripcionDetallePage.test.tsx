@@ -157,6 +157,23 @@ describe("Registrar minutos de uso (CH-14)", () => {
     expect(screen.queryByText("9.5 h")).not.toBeInTheDocument();
   });
 
+  it("si se borra el Día, se registra sin la propiedad fecha (el backend usa hoy)", async () => {
+    // Contrato real (RegistrarUsoSerializer): { minutos: 30 } es válido;
+    // { minutos: 30, fecha: "" } y { minutos: 30, fecha: null } no.
+    registrarUsoMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0.5 });
+    await montar();
+    fireEvent.change(minutos(), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText("Día"), { target: { value: "" } });
+    await registrar();
+
+    expect(registrarUsoMock).toHaveBeenCalledTimes(1);
+    const [id, cuerpo] = registrarUsoMock.mock.calls[0];
+    expect(id).toBe("a");
+    expect(Object.keys(cuerpo)).toEqual(["minutos"]); // sin "fecha", ni vacía ni null
+    expect(cuerpo).toEqual({ minutos: 30 });
+    expect(screen.getByRole("status")).toHaveTextContent("Registraste 30 minutos.");
+  });
+
   it("dos envíos seguidos registran una sola vez", async () => {
     registrarUsoMock.mockResolvedValue(SPOTIFY);
     await montar();

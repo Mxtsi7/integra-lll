@@ -204,6 +204,19 @@ describe("uso de una suscripción (CH-14 / CH-15)", () => {
   });
 });
 
+describe("registrarUso con la fecha vacía (revisión PR #80)", () => {
+  it("una fecha vacía no viaja en el body: { minutos } es lo que acepta la API", async () => {
+    const fetchFalso = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => RESPUESTA_REAL.results[0] });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    await registrarUso("abc-123", { minutos: 30, fecha: "" });
+
+    const [, init] = fetchFalso.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({ minutos: 30 });
+    expect(init.body).not.toContain("fecha");
+  });
+});
+
 describe("ErrorDeApi conserva los errores por campo (CH-09)", () => {
   it("un 400 de validación trae todos los campos, no solo el primero", async () => {
     vi.stubGlobal(
