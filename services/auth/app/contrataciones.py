@@ -8,7 +8,7 @@ from django.db import transaction
 from django.http import HttpResponse, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.utils.html import format_html
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -17,6 +17,7 @@ from .contexto import usuario_del_contexto
 from .models import Contratacion, Organizacion, Plan
 from .pagos_eventos import ConflictoPago, EventoPagoSerializer, PagoNoDisponible, comprobar_mock, firma_pago, recibir_pago
 from .planes import transicionar
+from .permisos_plan import PermisosPlanSerializer, permisos_vigentes
 
 
 def url_configurada(valor, *, origen=False):
@@ -49,6 +50,11 @@ class SolicitudContratacionSerializer(serializers.Serializer):
 class ContratacionSerializer(serializers.ModelSerializer):
     url_checkout = serializers.SerializerMethodField()
     url_retorno = serializers.SerializerMethodField()
+    permisos = serializers.SerializerMethodField()
+
+    @extend_schema_field(PermisosPlanSerializer)
+    def get_permisos(self, contrato):
+        return permisos_vigentes(contrato.organizacion_id)
 
     def get_url_checkout(self, contrato) -> str:
         token = signing.dumps({"id": str(contrato.pk)}, key=settings.PAGOS_WEBHOOK_SECRET, salt="pago-mock")
@@ -59,7 +65,7 @@ class ContratacionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Contratacion
-        fields = ("id", "estado", "plan_id", "importe", "moneda", "precio_demo", "vigente_desde", "vigente_hasta", "url_checkout", "url_retorno")
+        fields = ("id", "estado", "plan_id", "importe", "moneda", "precio_demo", "vigente_desde", "vigente_hasta", "url_checkout", "url_retorno", "permisos")
         read_only_fields = fields
 
 
@@ -127,7 +133,8 @@ class WebhookPagoView(APIView):
         responses={200: dict, 400: None, 403: None, 404: None, 409: None, 503: None})
     def post(self, request):
         contrato, repetido, aplicado = recibir_pago(request.body, request.headers.get("X-Pagos-Firma", ""), request.headers.get("X-Pagos-Instante", ""))
-        return Response({"id": str(contrato.pk), "estado": contrato.estado, "repetido": repetido, "aplicado": aplicado})
+        return Response({"id": str(contrato.pk), "estado": contrato.estado, "repetido": repetido, "aplicado": aplicado,
+                         "permisos": permisos_vigentes(contrato.organizacion_id)})
 
 
 class RespuestaMockSerializer(serializers.Serializer):
