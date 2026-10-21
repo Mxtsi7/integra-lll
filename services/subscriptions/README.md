@@ -32,6 +32,30 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
 
+### Eventos de dominio (VI-26 / MX-21)
+
+La creación, actualización de campos del contrato y cada transición de estado
+guardan un evento v2 en `subscription_event_outbox` dentro de la misma
+transacción que el cambio de dominio. Si la transacción falla, ambos registros
+se revierten y no se publica el hecho. El trabajador de Celery consulta el
+outbox cada 10 segundos y publica en el exchange topic durable `suscripciones`
+con la routing key `<evento>.v2`, `mandatory` y publisher confirms.
+
+El cuerpo usa el sobre y esquema de
+[`shared/events/mx21-v2.schema.json`](../../shared/events/mx21-v2.schema.json).
+Los tipos canónicos son `suscripcion.creada`, `suscripcion.actualizada` y
+`suscripcion.estado_cambiado`; no se emiten alias en inglés ni eventos v1 en
+paralelo. Cada evento tiene un UUID propio, organización y correlación. Se
+propaga el `X-Correlation-ID` UUID de la petición o se genera uno si falta.
+Los reintentos conservan el ID del outbox; los consumidores deben deduplicar
+por `id` y organización.
+
+Si RabbitMQ falla o no tiene una ruta enlazada, el evento queda pendiente en
+el outbox y se reintenta con espera exponencial hasta 15 minutos entre
+intentos. Un fallo después del confirm pero antes de marcar el outbox puede
+reentregar el mismo ID; el transporte es al menos una vez, no exactamente una
+vez. No se transportan credenciales ni datos personales.
+
 ### Máquina de estados (RF-03 / VI-08)
 
 Una suscripción nueva inicia en `prueba` (con `fin_prueba`) o `activo`. Los
