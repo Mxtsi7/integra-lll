@@ -138,14 +138,15 @@ proyecto-suscripciones/
 
 ### Anatomía de un servicio
 
-Todos son iguales por dentro. Aprender uno es aprenderlos todos.
+Los servicios comparten la estructura Django básica, aunque los nombres de
+algunos módulos de configuración varían.
 
 ```
-services/subscriptions/
+services/<servicio>/
 ├─ Dockerfile
 ├─ requirements.txt
 ├─ manage.py
-├─ config/            settings, urls, wsgi
+├─ <proyecto>_config/ settings, urls, wsgi, asgi
 ├─ app/
 │  ├─ models.py       entidades del contexto
 │  ├─ services.py     lógica de negocio
@@ -155,6 +156,35 @@ services/subscriptions/
 │  ├─ publishers.py   eventos que emite
 │  └─ consumers.py    eventos que escucha
 └─ tests/
+```
+
+### Prerrequisito — Crear bases ejecutables de Connectors, Analytics y Notifications
+
+#### Flujo de ejecución y pruebas
+
+Al iniciar un contenedor, Docker Compose ejecuta `python manage.py runserver`
+en el puerto del servicio. `manage.py` carga sus `settings.py`; estos definen
+las aplicaciones, las rutas principales y la conexión a PostgreSQL con el
+esquema propio (`connectors`, `analytics` o `notifications`). Cuando llega un
+`GET /health/`, `urls.py` lo dirige a la vista de healthcheck, que responde
+HTTP 200 con el estado y el nombre del servicio.
+
+Las pruebas siguen el mismo recorrido: `python manage.py test <servicio>`
+carga la configuración, descubre las pruebas de `tests.py` y simula una
+petición a `/health/`. La prueba verifica el código HTTP y el JSON esperado;
+no necesita conectarse a PostgreSQL.
+
+```text
+Arranque: manage.py → settings.py → urls.py → vista → respuesta HTTP
+Prueba:   manage.py test → settings.py → tests.py → urls.py → vista → aserciones
+```
+
+Comandos desde la raíz del repositorio:
+
+```bash
+docker compose run --rm connectors python manage.py test connectors
+docker compose run --rm analytics python manage.py test analytics
+docker compose run --rm notifications python manage.py test notifications
 ```
 
 ### Modelo `Subscription` (implementado)

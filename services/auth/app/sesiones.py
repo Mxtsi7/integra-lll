@@ -1,6 +1,7 @@
 """Sesiones por dispositivo: refresh de un uso y revocación inmediata."""
 
 from datetime import datetime, timezone as tz
+from hmac import compare_digest
 
 from django.core.cache import caches
 from django.core.exceptions import ValidationError
@@ -90,19 +91,32 @@ class RefreshView(APIView):
 class LogoutView(APIView):
     authentication_classes = permission_classes = []
 
-    @extend_schema(tags=["Auth"], request=None, responses={204: None, 401: None, 503: None})
+    @extend_schema(
+        tags=["Auth"], request=RefreshSerializer,
+        description=(
+            "Revoca exclusivamente la sesión del refresh_token del body. "
+            "No requiere access token: funciona también con el access vencido. "
+            "Firma, expiración, usuario, sid y JTI se validan en Auth. "
+            "Repetir el logout con el mismo refresh devuelve 204."
+        ),
+        responses={204: None, 400: None, 401: None, 503: None},
+    )
     def post(self, request):
+        datos = RefreshSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
         try:
+            token = RefreshToken(datos.validated_data["refresh_token"])
             with transaction.atomic():
-                usuario = User.objects.select_for_update().filter(pk=request.headers.get("X-Usuario-Id"), is_active=True).first()
+                usuario = User.objects.select_for_update().filter(pk=token.get("user_id")).first()
                 sesion = Sesion.objects.select_for_update().filter(
-                    pk=request.headers.get("X-Sesion-Id"), usuario=usuario,
+                    pk=token.get("sid"), usuario=usuario,
                 ).first()
-                if not usuario or not sesion:
-                    return Response({"detail": "Falta una sesión válida."}, status=401)
+                if (not usuario or not sesion or sesion.vence_en <= timezone.now()
+                        or not compare_digest(sesion.refresh_jti, token["jti"])):
+                    return Response({"detail": "Refresh inválido. No se cerró ninguna sesión."}, status=401)
                 revocar(sesion)
             return Response(status=204)
-        except (ValueError, TypeError, ValidationError):
-            return Response({"detail": "Falta una sesión válida."}, status=401)
+        except (TokenError, ValueError, TypeError, ValidationError):
+            return Response({"detail": "Refresh inválido. No se cerró ninguna sesión."}, status=401)
         except (RedisError, OSError):
             return Response({"detail": "No se pudo cerrar la sesión."}, status=503)

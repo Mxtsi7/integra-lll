@@ -89,12 +89,15 @@ RUTAS = {
     "/api/alertas/": "notifications",
 }
 
-# Las únicas rutas que no exigen token: registrarse, entrar, refrescar.
+# Coincidencias exactas sin access: Auth valida el refresh del body en
+# refresh/logout. No exponer todo /api/auth/ ni confiar en cabeceras del cliente.
 RUTAS_PUBLICAS = (
     "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
     "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
     "/api/auth/email-verification/confirm/",
     "/api/auth/google/nonce/", "/api/auth/google/",
+    "/api/auth/logout/",
+    "/api/auth/email-verification/confirm/",
 )
 
 # Cuánto se espera a un servicio antes de responder 504.

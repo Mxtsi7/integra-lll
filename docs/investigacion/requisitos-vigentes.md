@@ -190,11 +190,54 @@ Permite al usuario autenticado registrar una suscripción con nombre del servici
 
 ## RF-03 — Gestionar el estado del ciclo de vida de una suscripción
 
-**(sin descripción en el documento original)**
+Gestiona el ciclo de vida mediante eventos explícitos. Los estados no forman una
+secuencia lineal y un cambio de estado nunca desactiva ni elimina el registro.
+La cancelación de negocio conserva `activo=true`; solo `DELETE` establece
+`activo=false` (borrado lógico).
+
+**Matriz de transiciones autorizadas (VI-08; cada evento distinto se valida):**
+
+| Estado de origen | Evento/condición autorizada | Estado destino |
+|---|---|---|
+| `prueba` | Finaliza `fin_prueba` sin cancelación | `activo` |
+| `prueba` | Falla el cobro inicial | `por_confirmar` |
+| `prueba`, `activo`, `por_confirmar`, `fantasma` | El usuario solicita la cancelación | `cancelado` |
+| `activo` | Falla un cobro recurrente | `por_confirmar` |
+| `activo` | 60 días consecutivos sin cobros registrados | `por_confirmar` |
+| `por_confirmar` | Se regulariza el cobro o el usuario confirma vigencia | `activo` |
+| `por_confirmar` | 30 días en este estado y 90 días sin cobros ni respuesta | `cancelado` |
+| `activo`, `por_confirmar` | Más de 45 días continuos sin uso ni confirmación | `fantasma` |
+| `fantasma` | Se registra uso | `activo` |
+| Cualquier estado | Se detecta un cobro nuevo del mismo comercio | `activo` |
+
+La transición temporizada de 60 días toma como referencia el último cobro
+registrado; si no hay cobros, toma la fecha de creación de la suscripción. El
+plazo de 30 días se cuenta desde la entrada a `por_confirmar`, y la cancelación
+requiere además 90 días sin cobros en total. «Más de 45 días» significa que el
+día 45 no basta: deben haber transcurrido al menos 46 días calendario.
+
+Las demás combinaciones evento/estado se rechazan sin modificar el estado ni
+crear auditoría. La API admite cancelación y confirmación de vigencia por
+usuarios de la organización; los eventos de cobro y temporizador se aplican
+desde el servicio de dominio. Cada transición registra evento, estado anterior
+y nuevo, fecha y actor. No se automatizan ni se afirman ejecuciones de tareas
+programadas en esta entrega.
+
+**Diferencias registradas respecto del texto original:** RF-03 no tenía
+descripción y sus criterios conservaban la nota «no entendi vien esta revisa en
+txt». VI-08 concreta la matriz con RN-15 y RN-17–RN-21, y añade los eventos de
+fallo/regularización de cobro y la confirmación manual de vigencia. Se precisa
+que `por_confirmar` también puede pasar a `fantasma` tras el umbral de inactividad.
+CU-29 y la decisión confirmada para esta tarea permiten reactivar `cancelado`
+cuando se detecta un cobro nuevo; no se usa una acción manual de reactivación.
+No se incorpora `pausada`, que no existe entre los cinco estados vigentes.
 
 **Criterios de aceptación**
 
-- ⚠️ **INCOMPLETO.** El documento dice literalmente: «no entendi vien esta revisa en txt»
+- Cada combinación autorizada y prohibida de evento/estado tiene prueba.
+- Los umbrales temporales y `fin_prueba` se validan antes de guardar.
+- Todo cambio de estado deja auditoría; `activo=False` no es un estado del ciclo.
+- La agenda de Celery no ejecuta estas transiciones automáticamente en VI-08.
 
 ## RF-04 — Registrar y detectar uso de un servicio
 
