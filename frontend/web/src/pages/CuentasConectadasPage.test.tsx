@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,19 +30,20 @@ function cuenta(extra: Partial<CuentaConectada>): CuentaConectada {
   };
 }
 
+const envolver = (pagina: ReactElement) => (
+  <StrictMode>
+    <MemoryRouter>
+      <ToastProvider>
+        <AuthProvider>{pagina}</AuthProvider>
+      </ToastProvider>
+    </MemoryRouter>
+  </StrictMode>
+);
+
 async function montar(props: CuentasConectadasPageProps = {}) {
-  render(
-    <StrictMode>
-      <MemoryRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <CuentasConectadasPage {...props} />
-          </AuthProvider>
-        </ToastProvider>
-      </MemoryRouter>
-    </StrictMode>,
-  );
+  const resultado = render(envolver(<CuentasConectadasPage {...props} />));
   await act(async () => {});
+  return resultado;
 }
 
 const seccionCuentas = () => screen.getByRole("heading", { name: "Tus cuentas" }).closest("section")!;
@@ -153,6 +155,21 @@ describe("Cuentas conectadas (CH-23)", () => {
     expect(cargarCuentas.mock.calls.length).toBe(llamadasAlMontar + 1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.getByRole("list", { name: "Tus cuentas conectadas" })).toHaveTextContent("ana@gmail.com");
+  });
+
+  it("una respuesta vieja que llega tarde no pisa a la nueva", async () => {
+    let resolverVieja!: (c: CuentaConectada[]) => void;
+    const vieja = () => new Promise<CuentaConectada[]>((r) => (resolverVieja = r));
+    const nueva = async () => [cuenta({ cuenta_externa: "nueva@gmail.com" })];
+
+    const { rerender } = await montar({ cargarCuentas: vieja });
+    rerender(envolver(<CuentasConectadasPage cargarCuentas={nueva} />));
+    await act(async () => {});
+    await act(async () => resolverVieja([cuenta({ cuenta_externa: "vieja@gmail.com" })]));
+
+    const lista = screen.getByRole("list", { name: "Tus cuentas conectadas" });
+    expect(lista).toHaveTextContent("nueva@gmail.com");
+    expect(lista).not.toHaveTextContent("vieja@gmail.com");
   });
 
   it("sin conexión lo dice distinto de un error del servidor", async () => {

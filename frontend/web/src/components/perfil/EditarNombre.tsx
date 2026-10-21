@@ -3,9 +3,9 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import { Boton } from '../ui/Boton';
 import { CampoTexto } from '../ui/Campo';
 import { Fila } from '../ui/Seccion';
+import { MENSAJE_SIN_RED } from '../../utils/mensajes';
 import styles from './Perfil.module.css';
 
-const MENSAJE_SIN_RED = 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
 const MENSAJE_GENERICO = 'No pudimos guardar tu nombre. Intenta de nuevo.';
 
 interface EditarNombreProps {

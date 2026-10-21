@@ -4,10 +4,10 @@ import {
   type EstadoCuentaConectada,
   type ProveedorCuenta,
 } from '@ojoalgasto/shared';
-import { FileSpreadsheet, Mail, RefreshCw, TriangleAlert } from 'lucide-react';
+import { FileSpreadsheet, Mail, TriangleAlert } from 'lucide-react';
 import EmptyState from '../subscriptions/EmptyState';
 import { Spinner } from '../Spinner';
-import { Boton } from '../ui/Boton';
+import { ErrorConReintento } from '../ui/ErrorConReintento';
 import { Insignia, type TonoInsignia } from '../ui/Insignia';
 import styles from './Cuentas.module.css';
 
@@ -65,16 +65,7 @@ export function ListaCuentas({ estado, onReintentar }: ListaCuentasProps) {
     );
   }
 
-  if (estado.tipo === 'error') {
-    return (
-      <div className={styles.errorCaja}>
-        <p role="alert">{estado.mensaje}</p>
-        <Boton variante="secundario" tamano="s" icono={<RefreshCw size={15} aria-hidden="true" />} onClick={onReintentar}>
-          Reintentar
-        </Boton>
-      </div>
-    );
-  }
+  if (estado.tipo === 'error') return <ErrorConReintento mensaje={estado.mensaje} onReintentar={onReintentar} />;
 
   if (estado.cuentas.length === 0) {
     return (

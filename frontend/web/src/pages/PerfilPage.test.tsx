@@ -121,7 +121,8 @@ describe("Editar nombre desde Perfil (CH-08)", () => {
 
     expect(actualizarNombreMock).toHaveBeenCalledTimes(1);
     expect(actualizarNombreMock).toHaveBeenCalledWith("  Ani Pérez  "); // shared lo recorta
-    expect(tarjetaUsuario()).toHaveTextContent("Ani Pérez");
+    // Texto exacto (toHaveTextContent ignora espacios): es la respuesta, no lo escrito.
+    expect(tarjetaUsuario().textContent).toBe("Ani Pérez");
     expect(within(barraSuperior()).getByText("Ani Pérez")).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Guardamos tu nombre.");
     // Se cerró la edición y el foco volvió al botón que la abrió.

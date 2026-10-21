@@ -5,8 +5,8 @@ import { ListaCuentas, type EstadoListaCuentas } from '../components/cuentas/Lis
 import styles from '../components/cuentas/Cuentas.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Seccion } from '../components/ui/Seccion';
+import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
-const MENSAJE_SIN_RED = 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
 const MENSAJE_ERROR = 'No pudimos cargar tus cuentas conectadas. Intenta de nuevo.';
 
 export interface CuentasConectadasPageProps {

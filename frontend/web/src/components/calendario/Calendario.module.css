@@ -93,18 +93,6 @@
   color: var(--tinta);
 }
 
-.errorCaja {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: var(--radio-m);
-  background: var(--coral-suave);
-  color: var(--coral);
-  font-size: 13.5px;
-}
 
 @media (max-width: 560px) {
   .cuadricula {

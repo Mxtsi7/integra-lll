@@ -1,15 +1,15 @@
 import { formatearFechaLarga, formatearMesAnio, generaCobro, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
-import { CalendarDays, RefreshCw } from 'lucide-react';
+import { CalendarDays } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CuadriculaMes, type EventoCalendario } from '../components/calendario/CuadriculaMes';
 import styles from '../components/calendario/Calendario.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Spinner } from '../components/Spinner';
-import { Boton } from '../components/ui/Boton';
+import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Seccion } from '../components/ui/Seccion';
 import { esDelMes, fechaDeIso, isoDeFecha, textoCobros } from '../utils/calendario';
+import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
-const MENSAJE_SIN_RED = 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
 const MENSAJE_ERROR = 'No pudimos cargar tus cobros. Intenta de nuevo.';
 
 type EstadoCarga =
@@ -84,17 +84,7 @@ export function CalendarioPage() {
         )}
 
         {estado.tipo === 'error' && (
-          <div className={styles.errorCaja}>
-            <p role="alert">{estado.mensaje}</p>
-            <Boton
-              variante="secundario"
-              tamano="s"
-              icono={<RefreshCw size={15} aria-hidden="true" />}
-              onClick={() => setIntento((n) => n + 1)}
-            >
-              Reintentar
-            </Boton>
-          </div>
+          <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((n) => n + 1)} />
         )}
 
         {estado.tipo === 'listo' && (

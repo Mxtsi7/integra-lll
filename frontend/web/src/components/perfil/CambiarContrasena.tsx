@@ -12,9 +12,9 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 
 import { Boton } from '../ui/Boton';
 import { CampoContrasena } from '../ui/Campo';
 import { Modal } from '../ui/Modal';
+import { MENSAJE_SIN_RED } from '../../utils/mensajes';
 import styles from './Perfil.module.css';
 
-const MENSAJE_SIN_RED = 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
 const MENSAJE_GENERICO = 'No pudimos cambiar la contraseña. Intenta de nuevo.';
 
 const VACIO: DatosCambioContrasena = { actual: '', nueva: '', confirmacion: '' };
