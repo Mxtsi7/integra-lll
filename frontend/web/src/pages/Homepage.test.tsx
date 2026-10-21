@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   actualizarSuscripcion,
@@ -37,25 +37,50 @@ const SPOTIFY: Suscripcion = {
   estado: "activo",
 };
 
-async function montar() {
+function Pagina({ titulo }: { titulo: string }) {
+  return <h1>{titulo}</h1>;
+}
+
+/**
+ * Monta Inicio dentro de un data router en memoria, como main.tsx (que usa
+ * createBrowserRouter): useBlocker solo funciona en un data router. Por
+ * defecto el historial es [/dashboard, /home] y se está en /home, así
+ * "Atrás" tiene a dónde ir.
+ */
+async function montar(entradas = ["/dashboard", "/home"], indice = entradas.length - 1) {
+  const router = createMemoryRouter(
+    [
+      { path: "/home", element: <Homepage /> },
+      { path: "/dashboard", element: <Pagina titulo="Panel de prueba" /> },
+      { path: "/perfil", element: <Pagina titulo="Perfil de prueba" /> },
+    ],
+    { initialEntries: entradas, initialIndex: indice },
+  );
   // Con StrictMode, como main.tsx: React ejecuta los efectos dos veces en
   // desarrollo, y así se detectan efectos que no lo soportan.
   render(
     <StrictMode>
-      <MemoryRouter>
-        <ToastProvider>
-          <AuthProvider>
-            <Homepage />
-          </AuthProvider>
-        </ToastProvider>
-      </MemoryRouter>
+      <ToastProvider>
+        <AuthProvider>
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ToastProvider>
     </StrictMode>,
   );
   await act(async () => {}); // carga inicial de la lista
+  return router;
+}
+
+/** Navega como lo haría el navegador o un enlace, y espera a que termine. */
+async function navegar(router: Awaited<ReturnType<typeof montar>>, destino: string | number) {
+  await act(async () => {
+    if (typeof destino === "number") await router.navigate(destino);
+    else await router.navigate(destino);
+  });
 }
 
 const dialogo = () => screen.queryByRole("dialog");
-const aviso = () => screen.queryByText("Tienes cambios sin guardar. Si cierras ahora, se pierden.");
+const aviso = () => screen.queryByText("Tienes cambios sin guardar. Si sales ahora, se pierden.");
 const enDialogo = () => within(screen.getByRole("dialog"));
 
 function abrirNueva() {
@@ -231,5 +256,149 @@ describe("Errores del servidor al crear llegan al formulario (CH-09)", () => {
 
     expect(enDialogo().getByLabelText("Monto")).toHaveAttribute("aria-invalid", "true");
     expect(enDialogo().getByText("El monto debe ser mayor a 0.")).toBeInTheDocument();
+  });
+});
+
+describe("Cambios sin guardar al navegar dentro de la app (CH-16, revisión PR #80)", () => {
+  function escribirNueva(nombre: string, monto: string) {
+    fireEvent.change(enDialogo().getByLabelText("Servicio"), { target: { value: nombre } });
+    fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: monto } });
+  }
+
+  it("Atrás con cambios al crear: se retiene, y 'Seguir editando' conserva todos los valores", async () => {
+    const router = await montar();
+    abrirNueva();
+    escribirNueva("Netflix", "9990");
+
+    await navegar(router, -1);
+
+    expect(router.state.location.pathname).toBe("/home"); // no se fue
+    expect(aviso()).toBeInTheDocument();
+    fireEvent.click(enDialogo().getByRole("button", { name: "Seguir editando" }));
+
+    expect(router.state.location.pathname).toBe("/home");
+    expect(aviso()).not.toBeInTheDocument();
+    expect(enDialogo().getByLabelText("Servicio")).toHaveValue("Netflix");
+    expect(enDialogo().getByLabelText("Monto")).toHaveValue("9990");
+  });
+
+  it("Atrás con cambios al crear: 'Descartar cambios' completa la navegación pendiente", async () => {
+    const router = await montar();
+    abrirNueva();
+    escribirNueva("Netflix", "9990");
+
+    await navegar(router, -1);
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Descartar cambios" }));
+    });
+
+    expect(router.state.location.pathname).toBe("/dashboard");
+    expect(screen.getByRole("heading", { name: "Panel de prueba" })).toBeInTheDocument();
+  });
+
+  it("Adelante con cambios también se retiene", async () => {
+    const router = await montar(["/home", "/perfil"], 0);
+    abrirNueva();
+    escribirNueva("Netflix", "9990");
+
+    await navegar(router, 1);
+
+    expect(router.state.location.pathname).toBe("/home");
+    expect(aviso()).toBeInTheDocument();
+  });
+
+  it("una navegación interna (enlace o navigate) con cambios también se retiene", async () => {
+    const router = await montar();
+    abrirNueva();
+    escribirNueva("Netflix", "9990");
+
+    await navegar(router, "/perfil");
+
+    expect(router.state.location.pathname).toBe("/home");
+    expect(aviso()).toBeInTheDocument();
+  });
+
+  it("sin cambios, Atrás navega sin aviso", async () => {
+    const router = await montar();
+    abrirNueva();
+
+    await navegar(router, -1);
+
+    expect(router.state.location.pathname).toBe("/dashboard");
+    expect(aviso()).not.toBeInTheDocument();
+  });
+
+  it("Atrás con cambios al editar: se retiene y permanecer conserva los valores; descartar no guarda", async () => {
+    const router = await montar();
+    abrirEdicion();
+    fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "6990" } });
+
+    await navegar(router, -1);
+    expect(router.state.location.pathname).toBe("/home");
+    fireEvent.click(enDialogo().getByRole("button", { name: "Seguir editando" }));
+    // (en edición el monto es type="number": el valor llega como número)
+    expect(enDialogo().getByLabelText("Monto")).toHaveValue(6990);
+    expect(enDialogo().getByLabelText("Servicio")).toHaveValue("Spotify");
+
+    await navegar(router, -1);
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Descartar cambios" }));
+    });
+    expect(router.state.location.pathname).toBe("/dashboard");
+    expect(actualizarSuscripcion).not.toHaveBeenCalled();
+  });
+
+  it("guardar con una navegación retenida la completa: ya no hay nada que perder", async () => {
+    vi.mocked(crearSuscripcion).mockResolvedValue({ ...SPOTIFY, id: "s2", nombre: "Netflix" });
+    const router = await montar();
+    abrirNueva();
+    escribirNueva("Netflix", "9990");
+    fireEvent.change(enDialogo().getByLabelText("Próximo cobro"), { target: { value: "2026-11-05" } });
+
+    await navegar(router, -1);
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Guardar suscripción" }));
+    });
+
+    expect(crearSuscripcion).toHaveBeenCalledTimes(1);
+    expect(router.state.location.pathname).toBe("/dashboard");
+  });
+});
+
+describe("Guardar con el aviso visible no lo deja pendiente (CH-16, revisión PR #80)", () => {
+  it("al crear: modificar → Cancelar → guardar → reabrir, y el formulario nuevo no muestra aviso", async () => {
+    vi.mocked(crearSuscripcion).mockResolvedValue({ ...SPOTIFY, id: "s2", nombre: "Netflix" });
+    await montar();
+    abrirNueva();
+    fireEvent.change(enDialogo().getByLabelText("Servicio"), { target: { value: "Netflix" } });
+    fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "9990" } });
+    fireEvent.change(enDialogo().getByLabelText("Próximo cobro"), { target: { value: "2026-11-05" } });
+    fireEvent.click(enDialogo().getByRole("button", { name: "Cancelar" }));
+    expect(aviso()).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Guardar suscripción" }));
+    });
+    expect(dialogo()).not.toBeInTheDocument();
+
+    abrirNueva();
+    expect(aviso()).not.toBeInTheDocument();
+  });
+
+  it("al editar: modificar → Cancelar → guardar → reabrir, y no queda aviso", async () => {
+    vi.mocked(actualizarSuscripcion).mockResolvedValue({ ...SPOTIFY, monto: 6990 });
+    await montar();
+    abrirEdicion();
+    fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "6990" } });
+    fireEvent.click(enDialogo().getByRole("button", { name: "Cancelar" }));
+    expect(aviso()).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Guardar cambios" }));
+    });
+    expect(dialogo()).not.toBeInTheDocument();
+
+    abrirEdicion();
+    expect(aviso()).not.toBeInTheDocument();
   });
 });

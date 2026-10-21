@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useBlocker, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import TarjetaSuscripcion from "../components/subscriptions/TarjetaSuscripcion";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
@@ -102,6 +102,34 @@ export const Homepage: React.FC = () => {
   // Cerrar o recargar la pestaña con cambios pide confirmación al navegador.
   useAvisoAlSalir(hayCambiosSinGuardar);
 
+  // Navegar dentro de la app (Atrás/Adelante, un enlace, navigate()) con
+  // cambios sin guardar: el router RETIENE la navegación hasta que se elige
+  // en el aviso. "Seguir editando" la cancela y "Descartar" la deja seguir.
+  // Antes solo se cubría cerrar/recargar la pestaña (revisión PR #80).
+  const navegacion = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hayCambiosSinGuardar.current &&
+      (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+  );
+  // Los handlers async (guardar) terminan varios renders después: leen el
+  // estado del bloqueo desde acá para no usar uno viejo.
+  const navegacionActual = useRef(navegacion);
+  useEffect(() => {
+    navegacionActual.current = navegacion;
+  });
+  const mostrarAviso = confirmandoDescarte || navegacion.state === "blocked";
+
+  const seguirEditando = () => {
+    setConfirmandoDescarte(false);
+    if (navegacion.state === "blocked") navegacion.reset(); // cancela la navegación retenida
+  };
+  // Se usa al descartar y al guardar: si había una navegación retenida, ya
+  // no hay nada que perder y se completa.
+  const continuarNavegacionPendiente = () => {
+    const actual = navegacionActual.current;
+    if (actual.state === "blocked") actual.proceed();
+  };
+
   useEffect(() => {
     let cancelado = false;
 
@@ -175,8 +203,11 @@ export const Homepage: React.FC = () => {
       setSuscripciones((prev) => [...prev, creada]);
       setFiltro("todas");
       setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
-      // Guardado: ya no hay nada que perder.
+      // Guardado: ya no hay nada que perder. También se quita el aviso, por si
+      // se guardó con él visible (antes quedaba pendiente al reabrir).
       hayCambiosSinGuardar.current = false;
+      setConfirmandoDescarte(false);
+      continuarNavegacionPendiente();
       setIsAdding(false);
       return true;
     } catch (e) {
@@ -213,6 +244,8 @@ export const Homepage: React.FC = () => {
       });
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
       hayCambiosSinGuardar.current = false;
+      setConfirmandoDescarte(false);
+      continuarNavegacionPendiente();
       setEditando(null);
     } catch (e) {
       setEditError(mensajeDeError(e, "No pudimos guardar los cambios. Intenta de nuevo."));
@@ -393,10 +426,13 @@ export const Homepage: React.FC = () => {
 
       {isAdding && (
         <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={intentarCerrarAgregar}>
-          {confirmandoDescarte && (
+          {mostrarAviso && (
             <AvisoCambiosSinGuardar
-              onSeguirEditando={() => setConfirmandoDescarte(false)}
-              onDescartar={cerrarAgregar}
+              onSeguirEditando={seguirEditando}
+              onDescartar={() => {
+                cerrarAgregar();
+                continuarNavegacionPendiente();
+              }}
             />
           )}
           <AddSubscriptionForm
@@ -412,10 +448,13 @@ export const Homepage: React.FC = () => {
 
       {editando && (
         <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={intentarCerrarEditar}>
-          {confirmandoDescarte && (
+          {mostrarAviso && (
             <AvisoCambiosSinGuardar
-              onSeguirEditando={() => setConfirmandoDescarte(false)}
-              onDescartar={cerrarEditar}
+              onSeguirEditando={seguirEditando}
+              onDescartar={() => {
+                cerrarEditar();
+                continuarNavegacionPendiente();
+              }}
             />
           )}
           <EditarSuscripcionForm

@@ -5,7 +5,7 @@ import styles from "./SusForm.module.css";
 interface AvisoCambiosSinGuardarProps {
   /** Vuelve al formulario sin tocar nada. */
   onSeguirEditando: () => void;
-  /** Cierra el formulario y se pierden los cambios. */
+  /** Cierra el formulario (y sigue la navegación pendiente, si la hay); se pierden los cambios. */
   onDescartar: () => void;
 }
 
@@ -32,7 +32,7 @@ export function AvisoCambiosSinGuardar({ onSeguirEditando, onDescartar }: AvisoC
 
   return (
     <div ref={contenedor} className={styles.avisoSinGuardar} role="alert">
-      <p className={styles.avisoTexto}>Tienes cambios sin guardar. Si cierras ahora, se pierden.</p>
+      <p className={styles.avisoTexto}>Tienes cambios sin guardar. Si sales ahora, se pierden.</p>
       <div className={styles.avisoAcciones}>
         <Boton
           variante="secundario"
