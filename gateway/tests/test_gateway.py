@@ -7,6 +7,7 @@ Cada prueba dice qué tarea del sprint verifica.
 """
 
 import datetime as dt
+import uuid
 
 import jwt
 import pytest
@@ -54,11 +55,13 @@ def token(**claims):
         "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5),
         "token_type": "access",
         "session_version": "a" * 64,
+        "sid": str(uuid.uuid4()),
     }
     base.update(claims)
     usuario_id = base.get("sub") or base.get("user_id")
     if usuario_id:
         caches["sesiones"].set(f"usuario:{usuario_id}", "a" * 64, timeout=None)
+        caches["sesiones"].set(f"sesion:{base['sid']}", [str(usuario_id), "a" * 64], timeout=600)
     return jwt.encode(base, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITMO)
 
 
@@ -251,4 +254,41 @@ def test_confirmacion_de_reset_es_publica(upstream):
     respuesta = cliente.post("/api/auth/password-reset/confirm/", data={}, content_type="application/json")
     assert respuesta.status_code == 200
     assert "X-Usuario-Id" not in upstream.llamadas[-1]["headers"]
+
+
+@pytest.mark.parametrize("access", [None, "vencido"])
+def test_logout_reenvia_refresh_sin_exigir_access_y_descarta_identidad(upstream, access):
+    cabeceras = con_token(token(exp=1)) if access else {}
+    respuesta = cliente.post(
+        "/api/auth/logout/", data='{"refresh_token":"refresh-firmado"}', content_type="application/json",
+        HTTP_X_USUARIO_ID="ajeno", HTTP_X_SESION_ID="sesion-ajena", HTTP_X_ORGANIZACION_ID="org-ajena",
+        **cabeceras,
+    )
+    assert respuesta.status_code == 200
+    llamada = upstream.llamadas[-1]
+    assert llamada["url"] == settings.SERVICIOS["auth"] + "/api/auth/logout/"
+    assert llamada["data"] == b'{"refresh_token":"refresh-firmado"}'
+    assert not ({nombre.lower() for nombre in llamada["headers"]} & proxy.CABECERAS_DE_IDENTIDAD)
+
+
+def test_sesion_revocada_no_reenvia_y_otra_sigue_activa(upstream):
+    primera, segunda = token(), token()
+    datos = jwt.decode(primera, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITMO])
+    caches["sesiones"].delete(f"sesion:{datos['sid']}")
+    assert cliente.get("/api/usuarios/me/", **con_token(primera)).status_code == 401
+    assert not upstream.llamadas
+    assert cliente.get("/api/usuarios/me/", **con_token(segunda)).status_code == 200
+
+
+@pytest.mark.parametrize("ruta", ["/api/auth/logout/otra/", "/api/auth/change-password/", "/api/auth/email-verification/request/", "/api/auth/email-verification/confirm/", "/api/auth/login/otra/"])
+def test_solo_rutas_publicas_exactas_son_anonimas(upstream, ruta):
+    assert cliente.post(ruta).status_code == 401
+    assert not upstream.llamadas
+
+
+@pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm"])
+def test_contrato_de_rutas_publicas_exactas_de_main(upstream, ruta):
+    respuesta = cliente.post(f"/api/auth/{ruta}/", data={}, content_type="application/json")
+    assert respuesta.status_code == 200
+    assert len(upstream.llamadas) == 1
 
