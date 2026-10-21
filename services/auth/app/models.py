@@ -144,3 +144,14 @@ class Contratacion(ModeloBase):
             models.CheckConstraint(condition=models.Q(importe__gte=0), name="contratacion_importe_no_negativo"),
             models.CheckConstraint(condition=(models.Q(vigente_desde__isnull=True, vigente_hasta__isnull=True) | models.Q(vigente_desde__isnull=False, vigente_hasta__isnull=False, vigente_hasta__gt=models.F("vigente_desde"))), name="contratacion_periodo_valido"),
         ]
+
+
+class EventoPago(ModeloBase):
+    id = models.UUIDField(primary_key=True)
+    contratacion = models.ForeignKey(Contratacion, on_delete=models.CASCADE, related_name="eventos_pago")
+    huella = models.CharField(max_length=64)
+    estado = models.CharField(max_length=10, choices=Contratacion.Estado.choices)
+    aplicado = models.BooleanField(default=False)
+
+    class Meta(ModeloBase.Meta):
+        db_table = "evento_pago"

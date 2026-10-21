@@ -16,6 +16,10 @@ env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(RAIZ_REPO / ".env")
 
 NOMBRE_SERVICIO = "auth"
+PAGOS_MOCK_HABILITADO = env.bool("PAGOS_MOCK_HABILITADO", default=False)
+PAGOS_WEBHOOK_SECRET = env("PAGOS_WEBHOOK_SECRET", default="")
+PAGOS_URL_PUBLICA = env("PAGOS_URL_PUBLICA", default="http://localhost:8000")
+PAGOS_URL_RETORNO = env("PAGOS_URL_RETORNO", default="http://localhost:5173/planes/retorno")
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
@@ -74,6 +78,7 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
+    "ENUM_NAME_OVERRIDES": {"CodigoPlanEnum": ["free", "premium"], "CodigoPlanCatalogoEnum": [("free", "Gratuito"), ("premium", "Premium")]},
     "TITLE": f"Ojo al Gasto · {NOMBRE_SERVICIO}",
     "VERSION": "0.1.0",
 }

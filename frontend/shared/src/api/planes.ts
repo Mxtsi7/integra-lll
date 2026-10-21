@@ -23,3 +23,26 @@ export interface PlanDisponible {
 /** Releer tras contratar/cancelar; los claims no conceden permisos. */
 export const getPermisosPlan = () => pedir<PermisosPlan>('/usuarios/me/permisos/');
 export const getPlanes = () => pedir<PlanDisponible[]>('/planes/');
+
+export interface ContratacionPlan {
+  id: string;
+  estado: 'pendiente' | 'exitosa' | 'cancelada' | 'fallida';
+  plan_id: CodigoPlan;
+  importe: string;
+  moneda: string;
+  precio_demo: boolean;
+  vigente_desde: string | null;
+  vigente_hasta: string | null;
+  url_checkout: string;
+  url_retorno: string;
+}
+
+/** Reutilizar la misma clave UUID al reintentar. El servidor fija el precio. */
+export const iniciarContratacion = (clave_idempotencia: string) =>
+  pedir<ContratacionPlan>('/contrataciones/', {
+    method: 'POST', body: { plan_codigo: 'premium', clave_idempotencia },
+  });
+export const getContratacion = (id: string) =>
+  pedir<ContratacionPlan>(`/contrataciones/${encodeURIComponent(id)}/`);
+export const cancelarContratacion = (id: string) =>
+  pedir<ContratacionPlan>(`/contrataciones/${encodeURIComponent(id)}/cancelar/`, { method: 'POST' });

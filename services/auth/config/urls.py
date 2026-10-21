@@ -16,6 +16,7 @@ from app.views import (
 from app.sesiones import LogoutView, RefreshView
 from app.perfil import CambioClaveView
 from app.permisos_plan import PermisosPlanView, PlanesView
+from app.contrataciones import ContratacionesView, ContratacionDetalleView, CancelarContratacionView, WebhookPagoView, CheckoutMockView
 
 
 def salud(request):
@@ -30,6 +31,11 @@ def inicio(request):
 
 
 urlpatterns = [
+    path("api/contrataciones/", ContratacionesView.as_view(), name="contrataciones"),
+    path("api/contrataciones/<uuid:pk>/", ContratacionDetalleView.as_view(), name="contratacion-detalle"),
+    path("api/contrataciones/<uuid:pk>/cancelar/", CancelarContratacionView.as_view(), name="contratacion-cancelar"),
+    path("api/pagos/webhook/", WebhookPagoView.as_view(), name="webhook-pago"),
+    path("api/pagos/mock/", CheckoutMockView.as_view(), name="checkout-mock"),
     path("api/planes/", PlanesView.as_view(), name="planes"),
     path("api/usuarios/me/permisos/", PermisosPlanView.as_view(), name="permisos-plan"),
     path("health/", salud),
