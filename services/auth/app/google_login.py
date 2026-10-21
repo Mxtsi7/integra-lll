@@ -1,5 +1,6 @@
 """MX-11: identidad Google OIDC, separada de la autorización para leer Gmail."""
 
+from collections.abc import Mapping
 from datetime import timedelta
 from hashlib import sha256
 import secrets
@@ -94,7 +95,7 @@ class GoogleLoginView(APIView):
     def post(self, request):
         if not settings.GOOGLE_CLIENT_ID:
             return Response({"code": "google_no_configurado"}, status=503)
-        if request.data.get("error") in ("access_denied", "cancelled"):
+        if isinstance(request.data, Mapping) and request.data.get("error") in ("access_denied", "cancelled"):
             return Response({"code": "google_cancelado", "detail": "Inicio con Google cancelado."}, status=400)
         formulario = GoogleSerializer(data=request.data)
         formulario.is_valid(raise_exception=True)

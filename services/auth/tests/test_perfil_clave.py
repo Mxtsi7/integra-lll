@@ -60,6 +60,20 @@ def test_patch_solo_cambia_nombre_y_conserva_contrato(usuario):
     assert respuesta.status_code == 200
     assert respuesta.data == {"id": usuario.pk, "nombre": "Actualizado", "correo": usuario.email,
                               "rol": "titular", "organizacion_id": str(usuario.organizacion_id)}
+    usuario.refresh_from_db()
+    assert usuario.nombre == "Actualizado"
+    consulta = APIClient().get("/api/usuarios/me/", **contexto(usuario))
+    assert consulta.status_code == 200
+    assert consulta.data == respuesta.data
+
+
+def test_get_me_rechaza_organizacion_de_sesion_desactualizada(usuario):
+    cabeceras = contexto(usuario)
+    usuario.organizacion = Organizacion.objects.create(nombre="Nuevo hogar")
+    usuario.save(update_fields=["organizacion"])
+    respuesta = APIClient().get("/api/usuarios/me/", **cabeceras)
+    assert respuesta.status_code == 403
+    assert respuesta.data == {"detail": "La organización de la sesión no es válida"}
 
 
 @pytest.mark.parametrize("datos", [{"nombre": ""}, {"nombre": " "}, {"nombre": "x" * 151},

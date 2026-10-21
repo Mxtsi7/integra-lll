@@ -32,6 +32,8 @@ class LimpiezaOrganizacionView(APIView):
 
     def delete(self, request, organizacion_id):
         try:
+            if not isinstance(request.data, dict):
+                raise ValueError
             operacion_id = str(uuid.UUID(str(request.data.get("operacion_id"))))
             instante = request.headers.get("X-Eliminacion-Instante", "")
             if abs(time.time() - int(instante)) > 60:

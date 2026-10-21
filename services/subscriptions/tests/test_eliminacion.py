@@ -1,10 +1,11 @@
+import json
 import uuid
 from unittest.mock import patch
 
 import pytest
 from rest_framework.test import APIClient
 
-from app.models import Cobro, Proveedor, RegistroUso, Subscription
+from app.models import Cobro, Proveedor, RegistroUso, Subscription, TransicionEstado
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -64,6 +65,35 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
     assert Subscription.objects.filter(pk=propia.pk).exists()
 
 
+def transicion(org, sub):
+    return TransicionEstado.objects.create(
+        organizacion_id=org, suscripcion=sub,
+        evento=Subscription.EventoEstado.CANCELACION_USUARIO,
+        estado_anterior=Subscription.Estado.ACTIVO, estado_nuevo=Subscription.Estado.CANCELADO,
+    )
+
+
+def test_historial_tenant_inconsistente_no_se_borra_por_cascada(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
+    ajeno = transicion(otra, propia)
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
+    assert TransicionEstado.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=propia.pk).exists()
+
+
+def test_historial_propio_se_elimina_aunque_apunte_a_suscripcion_ajena(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    ajena = suscripcion(otra, Proveedor.objects.create(nombre="Proveedor"))
+    propio, ajeno = transicion(org, ajena), transicion(otra, ajena)
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+    assert not TransicionEstado.objects.filter(pk=propio.pk).exists()
+    assert TransicionEstado.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=ajena.pk).exists()
+
+
 def test_firma_rechaza_cambio_tenant_destino_y_caducidad(monkeypatch):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, operacion = uuid.uuid4(), uuid.uuid4()
@@ -73,6 +103,20 @@ def test_firma_rechaza_cambio_tenant_destino_y_caducidad(monkeypatch):
     with patch("shared.eliminacion.time.time", return_value=100):
         firma = cabeceras_eliminacion("subscriptions", org, operacion)
     assert llamada(org, operacion, **firma).status_code == 403
+    assert not EstadoOrganizacion.objects.exists()
+
+
+@pytest.mark.parametrize("cuerpo", [[], ["operacion_id"], "texto", None, 1, True])
+def test_cuerpo_json_sin_objeto_se_rechaza_sin_cambios(cuerpo, monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
+    respuesta = APIClient().generic(
+        "DELETE", f"/internal/organizaciones/{org}/",
+        data=json.dumps(cuerpo), content_type="application/json",
+    )
+    assert respuesta.status_code == 403
+    assert Subscription.objects.filter(pk=propia.pk).exists()
     assert not EstadoOrganizacion.objects.exists()
 
 
