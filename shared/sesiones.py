@@ -29,3 +29,18 @@ def sesion_vigente(usuario_id, version):
         return False
     actual = caches["sesiones"].get(f"usuario:{usuario_id}")
     return isinstance(actual, str) and compare_digest(actual, version)
+
+
+def sesion_activa(usuario_id, version, sesion_id):
+    """La ausencia de cualquier registro deniega acceso, también tras perder Redis."""
+    from uuid import UUID
+
+    try:
+        if str(UUID(str(sesion_id))) != sesion_id:
+            return False
+    except (ValueError, TypeError):
+        return False
+    return (
+        sesion_vigente(usuario_id, version)
+        and caches["sesiones"].get(f"sesion:{sesion_id}") == [str(usuario_id), version]
+    )

@@ -1,77 +1,95 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Hourglass, Lock, TriangleAlert } from 'lucide-react';
+import React, { useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Ban, Hourglass, Lock, TriangleAlert } from 'lucide-react';
+import { AuthError, validarPassword, type CodigoErrorEnlace } from '@ojoalgasto/shared';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { PantallaAcceso } from '../components/layout/PantallaAcceso';
-import { CampoTexto } from '../components/ui/Campo';
+import { CampoContrasena } from '../components/ui/Campo';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import styles from './Acceso.module.css';
 
 export interface RestablecerContrasenaProps {
-  // Prop por si Christopher prefiere inyectar el handler de la API directamente
+  /**
+   * Cambia la contraseña en el backend (CH-07). App.tsx lo conecta a
+   * restablecerContrasena() de shared → POST /api/auth/password-reset/confirm/.
+   * Debe lanzar AuthError con `codigo` si el enlace no sirve (MX-04).
+   */
   onSubmitNewPassword?: (password: string, token: string) => Promise<void>;
 }
 
-type StepState = 'form' | 'success' | 'expired' | 'invalid';
+// Estados del enlace según el `code` que devuelve el backend (MX-04).
+// Antes se adivinaba con el status (401 = vencido) o buscando "vencido" en el
+// mensaje, y "ya utilizado" no existía como estado.
+type EstadoEnlace = 'formulario' | 'vencido' | 'invalido' | 'usado';
 
-// Validación visual según RF-01.1: mínimo 8 caracteres, al menos una letra y un número.
-// La validación definitiva se mantiene en el backend (CH-07).
-const validarPassword = (value: string): string | null => {
-  if (value.length < 8) return 'La contraseña debe tener al menos 8 caracteres.';
-  if (!/\p{L}/u.test(value)) return 'La contraseña debe incluir al menos una letra.';
-  if (!/\d/.test(value)) return 'La contraseña debe incluir al menos un número.';
-  return null;
+const ESTADO_POR_CODIGO: Record<CodigoErrorEnlace, EstadoEnlace> = {
+  token_expirado: 'vencido',
+  token_invalido: 'invalido',
+  token_usado: 'usado',
 };
+
+const MENSAJE_EXITO = 'Contraseña actualizada. Inicia sesión con tu contraseña nueva.';
+
+type ErroresCampos = { password?: string; confirmacion?: string };
 
 export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = ({
   onSubmitNewPassword,
 }) => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
+  const navigate = useNavigate();
+  const toast = useToast();
+  const { cerrarSesionLocal } = useAuth();
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [status, setStatus] = useState<StepState>('form');
+  // Sin token en la URL el enlace no sirve: se decide de entrada, sin
+  // mostrar el formulario ni un instante.
+  const [estado, setEstado] = useState<EstadoEnlace>(token ? 'formulario' : 'invalido');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [errores, setErrores] = useState<ErroresCampos>({});
+  const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
 
   // Sin handler real (CH-07) la funcionalidad no está disponible: no se simula éxito.
   const isAvailable = Boolean(onSubmitNewPassword);
 
-  useEffect(() => {
-    // Si no hay token en la URL, el enlace no sirve.
-    if (!token) {
-      setStatus('invalid');
-    }
-  }, [token]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!onSubmitNewPassword || !token) return;
+    if (!onSubmitNewPassword || !token || isLoading) return;
 
-    const passwordError = validarPassword(password);
-    if (passwordError) {
-      setError(passwordError);
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Las contraseñas no coinciden.');
-      return;
-    }
+    // Misma política que el registro y el backend (shared/validaciones.ts).
+    const locales: ErroresCampos = {};
+    const errorPassword = validarPassword(password);
+    if (errorPassword) locales.password = errorPassword;
+    if (!confirmPassword) locales.confirmacion = 'Repite la contraseña.';
+    else if (password !== confirmPassword) locales.confirmacion = 'Las contraseñas no coinciden.';
+    setErrores(locales);
+    setErrorGeneral(null);
+    if (locales.password || locales.confirmacion) return;
 
-    setError(null);
     setIsLoading(true);
-
     try {
       await onSubmitNewPassword(password, token);
-      setStatus('success');
-    } catch (err: any) {
-      // Manejo de estados de error de token según contrato
-      if (err?.status === 401 || err?.message?.includes('vencido')) {
-        setStatus('expired');
-      } else if (err?.status === 400 || err?.message?.includes('inválido')) {
-        setStatus('invalid');
+      // El backend revocó todas las sesiones abiertas y no inicia sesión:
+      // si había una en este navegador ya no sirve. Se borra sin llamar al
+      // backend y se termina en el Login con la confirmación.
+      cerrarSesionLocal();
+      toast.exito(MENSAJE_EXITO);
+      navigate('/login', { replace: true });
+    } catch (err: unknown) {
+      // Ningún error toca la sesión: un enlace malo no cierra sesión a nadie.
+      if (err instanceof AuthError && err.codigo && err.codigo in ESTADO_POR_CODIGO) {
+        setEstado(ESTADO_POR_CODIGO[err.codigo as CodigoErrorEnlace]);
+      } else if (err instanceof AuthError && err.campos?.password) {
+        setErrores({ password: err.campos.password.join(' ') });
+      } else if (err instanceof TypeError) {
+        setErrorGeneral('No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.');
+      } else if (err instanceof AuthError) {
+        // 503 u otro: la contraseña no cambió; se puede reintentar.
+        setErrorGeneral(err.message || 'No pudimos cambiar la contraseña. Intenta de nuevo.');
       } else {
-        setError('No pudimos cambiar la contraseña. Intenta de nuevo.');
+        setErrorGeneral('No pudimos cambiar la contraseña. Intenta de nuevo.');
       }
     } finally {
       setIsLoading(false);
@@ -80,21 +98,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
 
   const pie = <Link to="/login">Volver al inicio de sesión</Link>;
 
-  if (status === 'success') {
-    return (
-      <PantallaAcceso titulo="Contraseña actualizada" pie={pie}>
-        <div className={styles.resultado}>
-          <span className={styles.resultadoIcono}>
-            <CheckCircle2 size={26} aria-hidden="true" />
-          </span>
-          <p className={styles.resultadoTexto}>Ya puedes entrar con tu contraseña nueva.</p>
-          <BotonEnlace to="/login">Iniciar sesión</BotonEnlace>
-        </div>
-      </PantallaAcceso>
-    );
-  }
-
-  if (status === 'expired') {
+  if (estado === 'vencido') {
     return (
       <PantallaAcceso titulo="Enlace vencido" pie={pie}>
         <div className={styles.resultado}>
@@ -110,7 +114,24 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
     );
   }
 
-  if (status === 'invalid') {
+  if (estado === 'usado') {
+    return (
+      <PantallaAcceso titulo="Enlace ya utilizado" pie={pie}>
+        <div className={styles.resultado}>
+          <span className={`${styles.resultadoIcono} ${styles.resultadoIconoAlerta}`}>
+            <Ban size={26} aria-hidden="true" />
+          </span>
+          <p className={styles.resultadoTexto}>
+            Este enlace ya se usó para cambiar la contraseña. Si necesitas cambiarla otra vez, pide
+            un enlace nuevo.
+          </p>
+          <BotonEnlace to="/recuperar-contrasena">Pedir un enlace nuevo</BotonEnlace>
+        </div>
+      </PantallaAcceso>
+    );
+  }
+
+  if (estado === 'invalido') {
     return (
       <PantallaAcceso titulo="Enlace inválido" pie={pie}>
         <div className={styles.resultado}>
@@ -118,7 +139,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
             <TriangleAlert size={26} aria-hidden="true" />
           </span>
           <p className={styles.resultadoTexto}>
-            Este enlace está incompleto o ya se usó. Pide uno nuevo desde la recuperación.
+            Este enlace no es válido o está incompleto. Pide uno nuevo desde la recuperación.
           </p>
           <BotonEnlace to="/recuperar-contrasena">Ir a recuperación</BotonEnlace>
         </div>
@@ -133,32 +154,44 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
       pie={pie}
     >
       <form className={styles.formulario} onSubmit={handleSubmit} noValidate>
-        {error && <p className={styles.error}>{error}</p>}
+        {errorGeneral && (
+          <p className={styles.error} role="alert">
+            {errorGeneral}
+          </p>
+        )}
         {!isAvailable && (
           <p className={styles.aviso}>Esta función todavía no está disponible.</p>
         )}
 
-        <CampoTexto
+        <CampoContrasena
           id="password"
           etiqueta="Nueva contraseña"
-          type="password"
+          autoComplete="new-password"
           placeholder="Mínimo 8 caracteres"
           ayuda="Al menos 8 caracteres, con una letra y un número."
           icono={<Lock size={16} />}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setErrores((actuales) => ({ ...actuales, password: undefined }));
+          }}
+          error={errores.password}
           disabled={isLoading}
           required
         />
 
-        <CampoTexto
+        <CampoContrasena
           id="confirmPassword"
           etiqueta="Repite la contraseña"
-          type="password"
+          autoComplete="new-password"
           placeholder="La misma de arriba"
           icono={<Lock size={16} />}
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+          onChange={(e) => {
+            setConfirmPassword(e.target.value);
+            setErrores((actuales) => ({ ...actuales, confirmacion: undefined }));
+          }}
+          error={errores.confirmacion}
           disabled={isLoading}
           required
         />

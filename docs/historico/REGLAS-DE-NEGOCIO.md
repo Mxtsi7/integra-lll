@@ -85,11 +85,24 @@ RF-03 era el vacío **V-02** de la matriz: el requisito más importante sin espe
 - **Por confirmar → activa por respuesta del usuario.** RN-19 despliega una verificación pasiva, pero no dice qué ocurre si el usuario **responde que sigue vigente**. Solo está definido el caso en que no responde.
 - **Pausada, entrada y salida.** RN-03 y RN-22 mencionan el estado pausada, pero **ninguna regla dice cómo se entra ni cómo se sale**. El diagrama de flujo del equipo sí lo contempla, con una «fecha de reactivación» que ninguna regla ni requisito define.
 
+### Resolución posterior — VI-08
+
+La matriz de [RF-03 vigente](../investigacion/requisitos-vigentes.md#rf-03--gestionar-el-estado-del-ciclo-de-vida-de-una-suscripción)
+resuelve los vacíos aplicables a los cinco estados implementados:
+
+- `fantasma → activo` al registrar uso; `por_confirmar → activo` al confirmar vigencia o regularizar el cobro.
+- Se admite `por_confirmar → fantasma` por más de 45 días sin uso ni confirmación, además de la transición desde `activo`.
+- Se incorpora `prueba → por_confirmar` por fallo del cobro inicial y `activo → por_confirmar` por fallo de un cobro recurrente.
+- Se confirma CU-29: un cobro nuevo reactiva automáticamente a `activo` desde cualquier estado, incluido `cancelado`.
+- `pausada` queda fuera del modelo: no es uno de los cinco estados de RF-13 ni del enumerado de la API.
+
+La cancelación de negocio conserva `activo=true`; `activo=false` sigue reservado al borrado lógico. Las transiciones se validan y auditan en el servicio de dominio. Esta resolución no activa la agenda de Celery: los eventos temporizados quedan disponibles para su invocación futura, sin afirmar ejecuciones automáticas.
+
 ## 6.2 Otros vacíos que se cierran
 
 | Vacío | Cómo se cierra |
 |---|---|
-| `SUSCRIPCION.estado` como cadena libre (M-16 del MER) | Los estados quedan enumerados: prueba gratuita, activa, pausada, por confirmar, fantasma, cancelada |
+| `SUSCRIPCION.estado` como cadena libre (M-16 del MER) | El MER histórico enumeraba prueba gratuita, activa, pausada, por confirmar, fantasma y cancelada. La implementación vigente de VI-08 usa los cinco estados prueba, activo, por confirmar, cancelado y fantasma; excluye `pausada` (ver resolución anterior). |
 | `es_recurrente_variable` sin criterio | RN-12 lo define: variación superior al 30% entre meses |
 | Umbral del alza de tarifa | RN-06 confirma el 5% que ya decía RF-07 |
 | RNF-09 sin umbral | RN-24 aporta un timeout de 3,5 segundos, **pero no es lo mismo** que el umbral bajo carga que pedía RNF-09. Ver CN-07, resuelto el 5-09 con las métricas de RNF-09 |

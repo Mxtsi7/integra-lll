@@ -53,13 +53,19 @@ class TestSubscriptionUpdateDeleteViews:
             url,
             {"estado": "cancelado"},
             format="json",
-            headers={"X-Organizacion-Id": str(org_a)},
+            headers={
+                "X-Organizacion-Id": str(org_a),
+                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Rol": "titular",
+            },
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["estado"] == "cancelado"
 
         subscription_org_a.refresh_from_db()
         assert subscription_org_a.estado == "cancelado"
+        assert subscription_org_a.activo
+        assert subscription_org_a.transiciones_estado.count() == 1
 
     def test_patch_subscription_supports_cancelada_normalization(
         self, api_client: APIClient, org_a: uuid.UUID, subscription_org_a: Subscription
@@ -70,7 +76,11 @@ class TestSubscriptionUpdateDeleteViews:
             url,
             {"estado": "cancelada"},
             format="json",
-            headers={"X-Organizacion-Id": str(org_a)},
+            headers={
+                "X-Organizacion-Id": str(org_a),
+                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Rol": "titular",
+            },
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["estado"] == "cancelado"
