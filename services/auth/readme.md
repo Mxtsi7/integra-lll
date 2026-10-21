@@ -147,3 +147,10 @@ Aplicar `python manage.py migrate` antes de servir tráfico con esta versión
 ```bash
 docker compose run --rm auth pytest tests/test_errores_recuperacion.py tests/test_confirmacion_recuperacion.py -v
 ```
+
+## Inicio de sesión Google (MX-11)
+
+Auth valida ID tokens de Google con nonce de un uso y emite sesiones con
+`proveedor=google`. La primera vinculación exige la contraseña local; una cuenta
+nueva debe completar el registro con consentimiento. Contrato, configuración y
+decisión técnica en [GOOGLE-LOGIN.md](GOOGLE-LOGIN.md).
