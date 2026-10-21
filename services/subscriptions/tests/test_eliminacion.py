@@ -1,3 +1,4 @@
+import json
 import uuid
 from unittest.mock import patch
 
@@ -73,6 +74,20 @@ def test_firma_rechaza_cambio_tenant_destino_y_caducidad(monkeypatch):
     with patch("shared.eliminacion.time.time", return_value=100):
         firma = cabeceras_eliminacion("subscriptions", org, operacion)
     assert llamada(org, operacion, **firma).status_code == 403
+    assert not EstadoOrganizacion.objects.exists()
+
+
+@pytest.mark.parametrize("cuerpo", [[], ["operacion_id"], "texto", None, 1, True])
+def test_cuerpo_json_sin_objeto_se_rechaza_sin_cambios(cuerpo, monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
+    respuesta = APIClient().generic(
+        "DELETE", f"/internal/organizaciones/{org}/",
+        data=json.dumps(cuerpo), content_type="application/json",
+    )
+    assert respuesta.status_code == 403
+    assert Subscription.objects.filter(pk=propia.pk).exists()
     assert not EstadoOrganizacion.objects.exists()
 
 
