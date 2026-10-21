@@ -33,11 +33,12 @@
         "proveedor_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
         "nombre": {"type": "string", "minLength": 1, "maxLength": 100},
         "monto": {"type": "string", "pattern": "^(?!0[.]00$)(0|[1-9][0-9]{0,7})[.][0-9]{2}$"},
-        "moneda": {"enum": ["CLP", "USD"]},
+        "moneda": {"type": "string", "pattern": "^[A-Z]{3}$", "maxLength": 3},
         "ciclo": {"enum": ["mensual", "anual"]},
         "proximo_cobro": {"type": "string", "format": "date"},
         "estado": {"$ref": "#/$defs/estado"},
         "estado_anterior": {"$ref": "#/$defs/estado"},
+        "evento_estado": {"enum": ["fin_prueba", "fallo_cobro_inicial", "cancelacion_usuario", "fallo_cobro", "cobro_regularizado", "confirmacion_usuario", "sin_cobros_60_dias", "sin_respuesta_30_dias", "sin_uso_45_dias", "uso_registrado", "cobro_nuevo_detectado"]},
         "campos_modificados": {"type": "array", "minItems": 1, "uniqueItems": true,
           "items": {"enum": ["proveedor_id", "nombre", "monto", "moneda", "ciclo", "proximo_cobro", "estado"]}}
       }
@@ -46,9 +47,11 @@
       "type": "object", "required": ["alerta_id", "suscripcion_id", "usuario_id", "tipo", "programada_para"],
       "properties": {
         "alerta_id": {"$ref": "#/$defs/uuid"}, "suscripcion_id": {"$ref": "#/$defs/uuid"},
-        "usuario_id": {"$ref": "#/$defs/uuid"}, "tipo": {"enum": ["proximo_cobro", "fin_prueba"]},
+        "usuario_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "tipo": {"enum": ["proximo_cobro", "fin_prueba"]},
         "programada_para": {"$ref": "#/$defs/instante"}
       }
     }
   }
 }
+

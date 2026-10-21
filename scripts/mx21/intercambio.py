@@ -28,10 +28,10 @@ def ejemplos():
                     proximo_cobro='2026-10-25', estado='activo')
     cargas = {
         'suscripcion.creada': snapshot,
-        'suscripcion.actualizada': dict(snapshot, campos_modificados=['monto']),
-        'suscripcion.estado_cambiado': dict(snapshot, estado_anterior='prueba'),
+        'suscripcion.actualizada': dict(snapshot, moneda='EUR', campos_modificados=['moneda']),
+        'suscripcion.estado_cambiado': dict(snapshot, estado_anterior='prueba', evento_estado='fin_prueba'),
         'alerta.activada': dict(alerta_id=str(uuid4()), suscripcion_id=snapshot['suscripcion_id'],
-                               usuario_id=str(uuid4()), tipo='proximo_cobro',
+                               usuario_id=42, tipo='proximo_cobro',
                                programada_para='2026-10-20T12:00:00Z'),
     }
     return [dict(base, id=str(uuid4()), evento=nombre, datos=datos)
@@ -85,6 +85,15 @@ def comprobar(db, canal=None, cola=None, fallos=None):
             copia[campo] = valor
         invalidos.append(copia)
     invalidos += [dict(validos[0], datos=dict(validos[0]['datos'], monto='-1.00'))]
+    for original, cambios in [
+        (validos[3], {'usuario_id': str(uuid4())}),
+        (validos[3], {'usuario_id': 0}),
+        (validos[3], {'usuario_id': '42'}),
+        (validos[0], {'moneda': 'eur'}),
+        (validos[2], {'evento_estado': 'inexistente'}),
+        (validos[2], {'estado_anterior': 'activo'}),
+    ]:
+        invalidos.append(dict(original, datos=dict(original['datos'], **cambios)))
     casos = [(e, True) for e in validos] + [(validos[0], False), (otro_tenant, True)]
     casos += [(e, None) for e in invalidos]
     for indice, (evento, esperado) in enumerate(casos):
@@ -119,7 +128,7 @@ def comprobar(db, canal=None, cola=None, fallos=None):
             print(f'{"APLICADO" if resultado else "DUPLICADO"} {indice + 1}: {evento["evento"]}')
     with closing(sqlite3.connect(db)) as conexion:
         assert conexion.execute('SELECT COUNT(*) FROM efectos').fetchone()[0] == 5
-    print('OK: 4 contratos; 5 efectos (2 tenants); 1 duplicado; 7 rechazos')
+    print(f'OK: 4 contratos; 5 efectos (2 tenants); 1 duplicado; {len(invalidos)} rechazos')
 
 
 def main():
@@ -162,3 +171,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
