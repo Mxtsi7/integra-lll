@@ -4,7 +4,8 @@
   "description": "Workspace de los clientes: web, movil y el codigo que comparten. Ver README.md.",
   "workspaces": [
     "shared",
-    "web"
+    "web",
+    "desktop"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=web",

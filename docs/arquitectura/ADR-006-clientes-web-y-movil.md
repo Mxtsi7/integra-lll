@@ -182,3 +182,12 @@ discutirse bajo presión de plazo.
 | CU-12, CU-13 | El flujo OAuth se restringe al cliente web |
 | CU-23, CU-24 | Las notificaciones incorporan el canal push además del correo |
 | Servicio `notifications` | Gestiona dos canales de salida |
+
+## Ampliación del alcance — 2026-10-21
+
+El tablero vigente añade el cliente Windows (MX-23) y trabajo de OAuth móvil.
+[ADR-008](ADR-008-cliente-windows.md) propone e implementa la base Windows
+reutilizando la web; queda pendiente la revisión del equipo y la recepción de
+SE-04. La exclusividad web de OAuth descrita arriba corresponde a la decisión
+original: no elimina las tareas nuevas del tablero. La implementación OAuth
+móvil y su contrato seguro se validan en su propia entrega.
