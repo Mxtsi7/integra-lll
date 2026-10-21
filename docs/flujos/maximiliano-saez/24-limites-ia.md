@@ -1,59 +1,80 @@
-# MX-24 — Timeout y cupo de ingesta
+# MX-24 — Timeout y cuotas de IA
 
 [Tarjeta](https://trello.com/c/Ehiy29mN). Base main a7d4950: VI-27 está
-implementada; Analytics tiene settings/DB/health. Todavía no hay endpoints
-de chat ni ingesta en este servicio. Se entrega la política reutilizable,
-sin crear un asistente ficticio ni sustituir VI-22/VI-23.
+implementada; Analytics tiene settings/DB/health. No hay endpoints de chat ni
+ingesta: se entrega una política reutilizable para esos componentes.
 
-## Configuración y contrato
+## Reglas y contrato
 
-`IA_TIMEOUT_SEGUNDOS=8`, `IA_MAX_DOCUMENTOS_USUARIO=20` y
-`IA_MAX_LLAMADAS_SIMULTANEAS=4` son valores operativos iniciales configurables,
-no cuotas comerciales ni cifras atribuidas al adjunto. Crear una instancia
-`PoliticaIA` por worker y reutilizarla. Los límites deben ser positivos/finitos.
+- [RN-24](../../historico/REGLAS-DE-NEGOCIO.md): timeout máximo **3,5 segundos**.
+- [RN-25](../../historico/REGLAS-DE-NEGOCIO.md): **tres intentos del mismo PDF
+  por día y usuario**. No es un máximo de documentos distintos ni vitalicio.
+- [RNF-20 vigente](../../investigacion/requisitos-vigentes.md): **200 llamadas
+  por usuario al mes** como control inicial de costo. Una llamada fallida o
+  cancelada puede haber sido facturada: consume cuota y no se reembolsa.
 
-- `await politica.ejecutar(proveedor_async, datos_calculados)` limita tiempo y
-  llamadas simultáneas por proceso; no reserva un documento para un chat.
-- `await politica.procesar_documento(org, usuario, documento_uuid, proveedor_async,
-  datos_calculados)` reserva cupo en PostgreSQL **antes** del proveedor. Usa
-  únicamente identidad validada por Gateway, nunca ids libres del body.
-- El proveedor es una función `async` cancelable que recibe el timeout. Debe
-  configurar también el timeout del SDK/transporte y desactivar reintentos
-  ocultos; no envolver un cliente síncrono bloqueante ni suprimir cancelación.
+Variables: `IA_TIMEOUT_SEGUNDOS=3.5`, `IA_MAX_INTENTOS_PDF_DIA=3`,
+`IA_MAX_LLAMADAS_MES=200`, `IA_MAX_LLAMADAS_SIMULTANEAS=4`. Las tres primeras
+pueden reducirse; se rechazan valores que superen esas reglas. La concurrencia
+es un límite operativo por proceso, no una medición de capacidad distribuida.
+Crear y reutilizar una instancia `PoliticaIA` por worker.
 
-Resultados: `{estado, motivo, datos}`. En éxito, datos del proveedor; ante
-timeout, cuota/capacidad agotada o fallo externo/DB, se conservan exactamente
-los datos calculados suministrados. No inventa texto, puntajes, ceros ni ahorro.
-El motivo permite informar degradación sin impedir consultar esos datos.
-`CancelledError` del request se propaga y libera su reserva.
+```python
+resultado = await politica.ejecutar(
+    proveedor_async, datos_calculados,
+    organizacion_id=org_validada, usuario_id=usuario_validado,
+)
+resultado = await politica.procesar_documento(
+    org_validada, usuario_validado, documento_uuid,
+    proveedor_async, datos_calculados, huella_pdf=sha256_pdf,
+)
+```
 
-El cupo cuenta documentos completados y reservas activas por usuario/tenant.
-Repetir un UUID completado no llama al proveedor y devuelve `ya_procesado`
-con los datos calculados actuales; no afirma recuperar una respuesta IA guardada.
-Un duplicado en curso tampoco ejecuta otra llamada. Error/timeout libera la
-reserva; una caída del proceso la conserva hasta expirar (mínimo 60 s o doble
-timeout). El límite se serializa por usuario con bloqueo real de PostgreSQL.
+La identidad procede del Gateway, nunca del body libre. La huella SHA-256 se
+calcula sobre el PDF validado por el servicio receptor; el componente persiste
+un HMAC de esa huella y del usuario, no el archivo. La misma huella y usuario
+comparten contador aunque cambien de organización. Día y mes corresponden a
+la zona configurada de Django (America/Santiago). Los contadores se serializan
+con bloqueo transaccional de PostgreSQL por usuario, sin FK hacia Auth.
 
-## Datos e integración
+Repetir el UUID completado devuelve `ya_procesado` con datos calculados actuales,
+sin otra llamada ni intento; no recupera una respuesta IA guardada. Un UUID en
+curso tampoco ejecuta otra llamada. Error/timeout/cancelación liberan la reserva
+del documento, pero conservan sus contadores de intento y consumo externo.
+Las reservas abandonadas vencen al menos a los 60 segundos.
 
-Solo se guardan ids internos, UUID de documento, estado y vencimiento. No se
-persisten archivos, texto ni respuesta del proveedor. No hay FK entre esquemas.
-Aplicar la migración de Analytics antes de incorporar esta política en VI-22
-y en ingesta. VI-23 debe aprobar el contexto permitido antes de conectar un
-proveedor real; este componente recibe un callback y no envía datos por sí solo.
+El proveedor debe ser una función async con I/O cancelable, configurar el
+timeout del SDK/transporte y desactivar reintentos ocultos. No debe bloquear
+el event loop ni suprimir cancelación. La espera del proveedor está limitada
+a 3,5 s; este componente no acredita la latencia total de red/DB ni RNF-09
+(50 usuarios, promedio 2,5 s y p95 4 s).
 
-`purgar_cuotas_organizacion(uuid)` elimina los metadatos de ese tenant y sus
-reservas/completados. Al integrar MX-07/#72, su consumidor Analytics debe invocar
-este hook o incluir CupoIngesta en su limpieza; actualmente #72 declara Analytics
-sin modelos de dominio. Esa reconciliación es obligatoria antes del despliegue
-con ingesta real, y no se atribuye a esta rama una integración que aún no existe.
+Resultados: `{estado, motivo, datos}`. Ante timeout, cuota/capacidad agotada,
+respuesta inválida o fallo DB/proveedor, devuelve una copia exacta de los datos
+calculados. No inventa explicaciones, puntajes, ceros ni ahorro. No llama al
+proveedor si no puede comprobar el consumo mensual. La cancelación del request
+se propaga. No se almacena texto, archivo ni respuesta externa.
+
+## Integración y límites de entrega
+
+Aplicar las migraciones 0001 y 0002 de Analytics. VI-22 y el componente de ingesta
+deben envolver sus llamadas con esta política; VI-23 debe validar la sanitización
+antes de habilitar un proveedor real. Este componente recibe un callback y no
+envía datos por sí solo. No acredita costo real de USD 0,50 por ejecución ni
+promedio USD 0,10 por usuario: requiere medición de tokens/modelo/precios.
+
+`purgar_cuotas_organizacion(uuid)` elimina sus cupos, documentos y contadores en
+cascada. Al integrar MX-07/#72, su consumidor Analytics debe invocar el hook
+o incluir CupoIngesta en su limpieza; #72 parte de Analytics sin modelos de
+dominio. Esa reconciliación es obligatoria antes del despliegue con ingesta real.
+La eliminación de datos prima sobre conservar historial de cuotas de ese tenant.
 
 ## Validación
 
-`pytest -q` desde services/analytics contra PostgreSQL. Incluye concurrencia
-real del último cupo, timeout/cancelación, saturación sin bloquear el loop,
-cuota agotada sin llamada, aislamiento A/B, idempotencia, caída de DB/proveedor,
-reservas abandonadas, purga y entradas/configuración inválidas. Los proveedores
-son dobles async explícitos; no se probó Anthropic ni una carga distribuida.
-Analytics se añade al CI existente y health queda descrito en OpenAPI estricto.
+27 pruebas de Analytics pasan contra PostgreSQL: concurrencia real entre
+organizaciones para el último cupo, timeout/cancelación, capacidad, tres intentos
+del mismo PDF, otros PDFs/usuarios, cambio de día/mes, cuota mensual, idempotencia,
+fallos DB/proveedor, reservas abandonadas, purga y entradas inválidas.
+Proveedores async simulados explícitamente; no Anthropic ni carga distribuida.
+Analytics se añade al CI existente y health tiene OpenAPI estricto.
 Revisión humana y recepción de Victor/ingesta pendientes.

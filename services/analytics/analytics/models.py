@@ -19,3 +19,24 @@ class DocumentoIngesta(ModeloBase):
     class Meta(ModeloBase.Meta):
         db_table = "documento_ingesta"
         constraints = [models.UniqueConstraint(fields=["cupo", "clave"], name="documento_ingesta_clave_unica")]
+
+
+class IntentoPDF(models.Model):
+    cupo = models.ForeignKey(CupoIngesta, on_delete=models.CASCADE)
+    huella = models.CharField(max_length=64)
+    dia = models.DateField()
+    intentos = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "intento_pdf"
+        constraints = [models.UniqueConstraint(fields=["cupo", "huella", "dia"], name="intento_pdf_dia_unico")]
+
+
+class ConsumoMensualIA(models.Model):
+    cupo = models.ForeignKey(CupoIngesta, on_delete=models.CASCADE)
+    mes = models.DateField()
+    llamadas = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "consumo_mensual_ia"
+        constraints = [models.UniqueConstraint(fields=["cupo", "mes"], name="consumo_ia_mes_unico")]

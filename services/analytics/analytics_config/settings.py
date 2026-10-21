@@ -13,8 +13,9 @@ env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(REPO_ROOT / ".env")
 
 SERVICE_NAME = "analytics"
-IA_TIMEOUT_SEGUNDOS = env.float("IA_TIMEOUT_SEGUNDOS", default=8)
-IA_MAX_DOCUMENTOS_USUARIO = env.int("IA_MAX_DOCUMENTOS_USUARIO", default=20)
+IA_TIMEOUT_SEGUNDOS = env.float("IA_TIMEOUT_SEGUNDOS", default=3.5)
+IA_MAX_LLAMADAS_MES = env.int("IA_MAX_LLAMADAS_MES", default=200)
+IA_MAX_INTENTOS_PDF_DIA = env.int("IA_MAX_INTENTOS_PDF_DIA", default=3)
 IA_MAX_LLAMADAS_SIMULTANEAS = env.int("IA_MAX_LLAMADAS_SIMULTANEAS", default=4)
 
 SECRET_KEY = env("SECRET_KEY")

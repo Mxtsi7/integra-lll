@@ -3,14 +3,17 @@ import asyncio
 from copy import deepcopy
 from datetime import timedelta
 import inspect
+import hashlib
+import hmac
 from math import isfinite
 from threading import BoundedSemaphore
 from uuid import UUID
 from asgiref.sync import sync_to_async
 from django.conf import settings
-from django.db import DatabaseError, close_old_connections, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
+from django.db.models import Sum
 from django.utils import timezone
-from .models import CupoIngesta, DocumentoIngesta
+from .models import CupoIngesta, DocumentoIngesta, IntentoPDF, ConsumoMensualIA
 
 
 class CuotaAgotada(Exception):
@@ -19,6 +22,13 @@ class CuotaAgotada(Exception):
 
 class DocumentoEnProceso(Exception):
     pass
+
+
+def bloquear_usuario(usuario):
+    # Contador por usuario incluso si cambia de organización; sin FK a Auth.
+    llave = int.from_bytes(hashlib.sha256(f"analytics:ia:{usuario}".encode()).digest()[:8], "big", signed=True)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [llave])
 
 
 def identidad(organizacion_id, usuario_id):
@@ -30,9 +40,12 @@ def identidad(organizacion_id, usuario_id):
 
 
 @transaction.atomic
-def reservar(organizacion_id, usuario_id, documento_id, limite, ttl):
+def reservar(organizacion_id, usuario_id, documento_id, limite, ttl, huella_pdf):
     org, usuario = identidad(organizacion_id, usuario_id)
     documento_id = UUID(str(documento_id))
+    if not isinstance(huella_pdf, str) or len(huella_pdf) != 64 or any(c not in "0123456789abcdef" for c in huella_pdf):
+        raise ValueError("Falta la huella SHA-256 del PDF")
+    bloquear_usuario(usuario)
     cupo, _ = CupoIngesta.objects.get_or_create(organizacion_id=org, usuario_id=usuario)
     cupo = CupoIngesta.objects.select_for_update().get(pk=cupo.pk)
     ahora = timezone.now()
@@ -42,9 +55,29 @@ def reservar(organizacion_id, usuario_id, documento_id, limite, ttl):
         if anterior.estado == "completo":
             return None
         raise DocumentoEnProceso
-    if cupo.documentos.count() >= limite:
+    huella = hmac.new(settings.SECRET_KEY.encode(), f"pdf:{usuario}:{huella_pdf}".encode(), hashlib.sha256).hexdigest()
+    dia = timezone.localdate()
+    intentos = IntentoPDF.objects.filter(cupo__usuario_id=usuario, huella=huella, dia=dia).aggregate(total=Sum("intentos"))["total"] or 0
+    if intentos >= limite:
         raise CuotaAgotada
+    registro, _ = IntentoPDF.objects.get_or_create(cupo=cupo, huella=huella, dia=dia)
+    registro.intentos += 1
+    registro.save(update_fields=["intentos"])
     return DocumentoIngesta.objects.create(cupo=cupo, clave=documento_id, vence_en=ahora + timedelta(seconds=ttl)).pk
+
+
+@transaction.atomic
+def consumir_llamada(organizacion_id, usuario_id, limite):
+    org, usuario = identidad(organizacion_id, usuario_id)
+    bloquear_usuario(usuario)
+    cupo, _ = CupoIngesta.objects.get_or_create(organizacion_id=org, usuario_id=usuario)
+    mes = timezone.localdate().replace(day=1)
+    llamadas = ConsumoMensualIA.objects.filter(cupo__usuario_id=usuario, mes=mes).aggregate(total=Sum("llamadas"))["total"] or 0
+    if llamadas >= limite:
+        raise CuotaAgotada
+    consumo, _ = ConsumoMensualIA.objects.get_or_create(cupo=cupo, mes=mes)
+    consumo.llamadas += 1
+    consumo.save(update_fields=["llamadas"])
 
 
 def cerrar_reserva(reserva_id, completo):
@@ -69,24 +102,33 @@ async def en_bd(funcion, *args):
 
 
 class PoliticaIA:
-    def __init__(self, *, timeout=None, max_documentos=None, simultaneas=None):
+    def __init__(self, *, timeout=None, max_intentos_pdf=None, max_llamadas_mes=None, simultaneas=None):
         self.timeout = timeout if timeout is not None else settings.IA_TIMEOUT_SEGUNDOS
-        self.max_documentos = max_documentos if max_documentos is not None else settings.IA_MAX_DOCUMENTOS_USUARIO
+        self.max_intentos_pdf = max_intentos_pdf if max_intentos_pdf is not None else settings.IA_MAX_INTENTOS_PDF_DIA
+        self.max_llamadas_mes = max_llamadas_mes if max_llamadas_mes is not None else settings.IA_MAX_LLAMADAS_MES
         cantidad = simultaneas if simultaneas is not None else settings.IA_MAX_LLAMADAS_SIMULTANEAS
-        if not isfinite(self.timeout) or self.timeout <= 0 or type(self.max_documentos) is not int or self.max_documentos < 1 or type(cantidad) is not int or cantidad < 1:
+        if (not isfinite(self.timeout) or self.timeout <= 0 or self.timeout > 3.5
+                or any(type(n) is not int or n < 1 for n in (self.max_intentos_pdf, self.max_llamadas_mes, cantidad))
+                or self.max_intentos_pdf > 3 or self.max_llamadas_mes > 200):
             raise ValueError("Los límites IA deben ser positivos")
         self._plazas = BoundedSemaphore(cantidad)
 
     def degradar(self, datos, motivo, *, estado="degradado"):
         return {"estado": estado, "motivo": motivo, "datos": deepcopy(datos)}
 
-    async def ejecutar(self, proveedor, datos_calculados):
+    async def ejecutar(self, proveedor, datos_calculados, *, organizacion_id, usuario_id):
         """Proveedor async recibe timeout y debe usar I/O cancelable, sin retries ocultos."""
         if not inspect.iscoroutinefunction(proveedor):
             raise TypeError("El proveedor debe ser async y no bloquear el event loop")
         if not self._plazas.acquire(blocking=False):
             return self.degradar(datos_calculados, "capacidad")
         try:
+            try:
+                await en_bd(consumir_llamada, organizacion_id, usuario_id, self.max_llamadas_mes)
+            except CuotaAgotada:
+                return self.degradar(datos_calculados, "cuota_agotada")
+            except DatabaseError:
+                return self.degradar(datos_calculados, "cuota_no_disponible")
             try:
                 datos = await asyncio.wait_for(proveedor(self.timeout), timeout=self.timeout)
                 if not isinstance(datos, dict):
@@ -99,11 +141,11 @@ class PoliticaIA:
         finally:
             self._plazas.release()
 
-    async def procesar_documento(self, organizacion_id, usuario_id, documento_id, proveedor, datos_calculados):
+    async def procesar_documento(self, organizacion_id, usuario_id, documento_id, proveedor, datos_calculados, *, huella_pdf):
         if not inspect.iscoroutinefunction(proveedor):
             raise TypeError("El proveedor debe ser async")
         try:
-            reserva = await en_bd(reservar, organizacion_id, usuario_id, documento_id, self.max_documentos, max(60, self.timeout*2))
+            reserva = await en_bd(reservar, organizacion_id, usuario_id, documento_id, self.max_intentos_pdf, max(60, self.timeout*2), huella_pdf)
         except CuotaAgotada:
             return self.degradar(datos_calculados, "cuota_agotada")
         except DocumentoEnProceso:
@@ -114,7 +156,7 @@ class PoliticaIA:
             return self.degradar(datos_calculados, "documento_ya_procesado", estado="ya_procesado")
         completo = False
         try:
-            resultado = await self.ejecutar(proveedor, datos_calculados)
+            resultado = await self.ejecutar(proveedor, datos_calculados, organizacion_id=organizacion_id, usuario_id=usuario_id)
             if resultado["estado"] == "ok":
                 completo = await en_bd(cerrar_reserva, reserva, True)
                 if not completo:
