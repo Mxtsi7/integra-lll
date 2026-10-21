@@ -28,6 +28,12 @@ confirmaciones concurrentes. No se emiten JWT ni se inicia sesión al verificar.
 
 Migración: `0006_verificacion_correo`. Pruebas: `tests/test_verificacion_correo.py`.
 
+El PR #70 parte de `main` tras integrar #68 y #69. Su base anterior,
+`Maxi-perfil-clave`, se eliminó y GitHub cerró automáticamente el PR sin merge;
+se restaura para conservar la dependencia de #71. El orden de migraciones es
+`0005 → 0008_sesion → 0006_verificacion_correo`: las dependencias, y no el número
+del archivo, determinan la secuencia. Aplicarlas antes de desplegar Auth.
+
 La restricción `usuario_email_unico_sin_mayusculas` garantiza unicidad de
 `Lower(email)` también frente al registro concurrente. Registro devuelve `400`
 si pierde esa carrera. La migración comprueba duplicados antes de crearla y
