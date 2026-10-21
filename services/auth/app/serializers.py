@@ -1,6 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from .models import User, Organizacion
 from .passwords import validar_password
 
@@ -29,8 +29,19 @@ class UserSerializer(serializers.ModelSerializer):
             "id": {"read_only": True},
         }
 
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("El correo no está disponible.")
+        return value
+
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(**validated_data)
+        except IntegrityError:
+            if User.objects.filter(email__iexact=validated_data["email"]).exists():
+                raise serializers.ValidationError({"email": ["El correo no está disponible."]}) from None
+            raise
 
 
 class RegisterSerializer(UserSerializer):
@@ -78,12 +89,10 @@ class RegisterSerializer(UserSerializer):
                 )
                 rol = User.Rol.TITULAR
 
-            return User.objects.create_user(
-                consentimiento_en=timezone.now(),
-                organizacion=organizacion,
-                rol=rol,
-                **validated_data,
-            )
+            return super().create({
+                **validated_data, "consentimiento_en": timezone.now(),
+                "organizacion": organizacion, "rol": rol,
+            })
 
 
 class LoginSerializer(serializers.Serializer):

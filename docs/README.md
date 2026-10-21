@@ -9,6 +9,10 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 - [MX-23: cliente Windows, decisión y evidencia](arquitectura/ADR-008-cliente-windows.md).
 
+### `flujos/`
+
+- [Verificación y cambio de correo (MX-28)](flujos/maximiliano-saez/28-verificacion-correo.md).
+
 ### `investigacion/`
 
 - Estado del arte y marco teórico
