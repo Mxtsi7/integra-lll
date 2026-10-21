@@ -21,10 +21,10 @@ from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from .identidad import TokenInvalido, leer_token, validar
+from .identidad import SesionesNoDisponibles, TokenInvalido, leer_token, validar
 
 # Las que el gateway fija; se ignoran si vienen del cliente.
-CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol"}
+CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol", "x-sesion-id"}
 
 # Cabeceras de transporte que no tiene sentido reenviar en ninguna dirección.
 CABECERAS_DE_SALTO = {
@@ -42,7 +42,7 @@ def servicio_para(ruta: str) -> str | None:
 
 
 def es_publica(ruta: str) -> bool:
-    return ruta.startswith(settings.RUTAS_PUBLICAS)
+    return ruta in settings.RUTAS_PUBLICAS
 
 
 def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonResponse:
@@ -75,11 +75,14 @@ def reenviar(request):
             identidad = validar(leer_token(request.headers.get("Authorization")))
         except TokenInvalido as e:
             return respuesta_de_error(401, str(e), correlacion)
+        except SesionesNoDisponibles:
+            return respuesta_de_error(503, "No se pudo comprobar la sesión. Inténtalo nuevamente", correlacion)
 
         # El token se queda en el gateway: los servicios internos no lo
         # necesitan y no deberían verlo.
-        cabeceras.pop("Authorization", None)
+        cabeceras = {nombre: valor for nombre, valor in cabeceras.items() if nombre.lower() != "authorization"}
         cabeceras["X-Usuario-Id"] = identidad["usuario_id"]
+        cabeceras["X-Sesion-Id"] = identidad["sesion_id"]
         if identidad["organizacion_id"]:
             cabeceras["X-Organizacion-Id"] = str(identidad["organizacion_id"])
         if identidad["rol"]:
@@ -112,3 +115,4 @@ def reenviar(request):
             respuesta[nombre] = valor
     respuesta["X-Correlation-ID"] = correlacion
     return respuesta
+

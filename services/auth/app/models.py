@@ -81,3 +81,24 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self) -> str:
         return self.email
+
+
+class TokenRecuperacionUsado(models.Model):
+    """Huella de un enlace consumido; nunca almacena el token ni la identidad."""
+
+    huella = models.CharField(max_length=64, primary_key=True)
+    usado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "token_recuperacion_usado"
+
+
+class Sesion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sesiones")
+    refresh_jti = models.CharField(max_length=64)
+    vence_en = models.DateTimeField()
+    revocada = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "sesion"

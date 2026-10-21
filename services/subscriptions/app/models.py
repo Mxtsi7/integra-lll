@@ -1,8 +1,13 @@
 """Modelos del servicio de suscripciones – Sprint 1."""
 
+from datetime import timedelta
 from decimal import Decimal
+
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models import Max
+from django.utils import timezone
 
 from shared.tenant.base import ModeloBase, ModeloTenant
 
@@ -22,6 +27,19 @@ class Subscription(ModeloTenant):
         POR_CONFIRMAR = "por_confirmar", "Por confirmar"
         CANCELADO = "cancelado", "Cancelado"
         FANTASMA = "fantasma", "Fantasma"
+
+    class EventoEstado(models.TextChoices):
+        FIN_PRUEBA = "fin_prueba", "Fin de prueba"
+        FALLO_COBRO_INICIAL = "fallo_cobro_inicial", "Fallo de cobro inicial"
+        CANCELACION_USUARIO = "cancelacion_usuario", "Cancelación solicitada"
+        FALLO_COBRO = "fallo_cobro", "Fallo de cobro recurrente"
+        COBRO_REGULARIZADO = "cobro_regularizado", "Cobro regularizado"
+        CONFIRMACION_USUARIO = "confirmacion_usuario", "Vigencia confirmada"
+        SIN_COBROS_60_DIAS = "sin_cobros_60_dias", "60 días sin cobros"
+        SIN_RESPUESTA_30_DIAS = "sin_respuesta_30_dias", "30 días sin respuesta"
+        SIN_USO_45_DIAS = "sin_uso_45_dias", "Más de 45 días sin uso"
+        USO_REGISTRADO = "uso_registrado", "Uso registrado"
+        COBRO_NUEVO_DETECTADO = "cobro_nuevo_detectado", "Cobro nuevo detectado"
 
     class Moneda(models.TextChoices):
         CLP = "CLP", "Peso chileno"
@@ -122,31 +140,221 @@ class Subscription(ModeloTenant):
         verbose_name="Última actividad",
     )
 
-    def registrar_uso(self, minutos: int | Decimal, fecha=None) -> "RegistroUso":
-        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
-        from django.db import transaction
-        from django.utils import timezone
+    TRANSICIONES_ESTADO = {
+        EventoEstado.FIN_PRUEBA: (
+            (Estado.PRUEBA,),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.FALLO_COBRO_INICIAL: (
+            (Estado.PRUEBA,),
+            Estado.POR_CONFIRMAR,
+        ),
+        EventoEstado.CANCELACION_USUARIO: (
+            (Estado.PRUEBA, Estado.ACTIVO, Estado.POR_CONFIRMAR, Estado.FANTASMA),
+            Estado.CANCELADO,
+        ),
+        EventoEstado.FALLO_COBRO: (
+            (Estado.ACTIVO,),
+            Estado.POR_CONFIRMAR,
+        ),
+        EventoEstado.COBRO_REGULARIZADO: (
+            (Estado.POR_CONFIRMAR,),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.CONFIRMACION_USUARIO: (
+            (Estado.POR_CONFIRMAR,),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.SIN_COBROS_60_DIAS: (
+            (Estado.ACTIVO,),
+            Estado.POR_CONFIRMAR,
+        ),
+        EventoEstado.SIN_RESPUESTA_30_DIAS: (
+            (Estado.POR_CONFIRMAR,),
+            Estado.CANCELADO,
+        ),
+        EventoEstado.SIN_USO_45_DIAS: (
+            (Estado.ACTIVO, Estado.POR_CONFIRMAR),
+            Estado.FANTASMA,
+        ),
+        EventoEstado.USO_REGISTRADO: (
+            (Estado.FANTASMA,),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.COBRO_NUEVO_DETECTADO: (
+            tuple(Estado.values),
+            Estado.ACTIVO,
+        ),
+    }
+
+    def _fecha_ultimo_cobro(self):
+        fecha = self.cobros.aggregate(fecha=Max("fecha"))["fecha"]
+        return fecha or timezone.localtime(self.creado_en).date()
+
+    def _validar_tiempo_transicion(self, evento: str) -> None:
+        hoy = timezone.localdate()
+
+        if evento == self.EventoEstado.FIN_PRUEBA:
+            if self.fin_prueba is None or self.fin_prueba > hoy:
+                raise ValidationError(
+                    "La prueba solo puede finalizar en o después de fin_prueba."
+                )
+
+        if evento == self.EventoEstado.SIN_COBROS_60_DIAS:
+            dias_sin_cobro = (hoy - self._fecha_ultimo_cobro()).days
+            if dias_sin_cobro < 60:
+                raise ValidationError(
+                    "Se requieren 60 días consecutivos sin cobros registrados."
+                )
+
+        if evento == self.EventoEstado.SIN_RESPUESTA_30_DIAS:
+            ultima_transicion = (
+                self.transiciones_estado.filter(
+                    estado_nuevo=self.Estado.POR_CONFIRMAR
+                )
+                .order_by("-ocurrido_en")
+                .first()
+            )
+            desde_confirmacion = (
+                timezone.localtime(ultima_transicion.ocurrido_en).date()
+                if ultima_transicion
+                else timezone.localtime(self.creado_en).date()
+            )
+            dias_en_confirmacion = (hoy - desde_confirmacion).days
+            dias_sin_cobro = (hoy - self._fecha_ultimo_cobro()).days
+            if dias_en_confirmacion < 30 or dias_sin_cobro < 90:
+                raise ValidationError(
+                    "Se requieren 30 días en por_confirmar y 90 días sin cobros."
+                )
+
+        if evento == self.EventoEstado.SIN_USO_45_DIAS:
+            fecha_uso = self.usos.aggregate(fecha=Max("fecha"))["fecha"]
+            ultima_confirmacion = (
+                self.transiciones_estado.filter(
+                    evento=self.EventoEstado.CONFIRMACION_USUARIO
+                )
+                .order_by("-ocurrido_en")
+                .first()
+            )
+            fechas_actividad = [
+                fecha
+                for fecha in (
+                    fecha_uso,
+                    timezone.localtime(self.ultima_actividad).date()
+                    if self.ultima_actividad
+                    else None,
+                    timezone.localtime(ultima_confirmacion.ocurrido_en).date()
+                    if ultima_confirmacion
+                    else None,
+                )
+                if fecha is not None
+            ]
+            ultima_actividad = max(
+                fechas_actividad or [timezone.localtime(self.creado_en).date()]
+            )
+            if (hoy - ultima_actividad).days <= 45:
+                raise ValidationError(
+                    "Se requieren más de 45 días consecutivos sin uso ni confirmación."
+                )
+
+    def transicionar(
+        self,
+        evento: str,
+        *,
+        actor_id=None,
+        actor_rol: str = "sistema",
+    ) -> "TransicionEstado":
+        """Valida y audita una transición de estado bajo bloqueo de fila."""
+        try:
+            evento = self.EventoEstado(evento)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"evento": "Evento de estado desconocido."}) from exc
+
+        if evento not in self.TRANSICIONES_ESTADO:
+            raise ValidationError({"evento": "Evento de estado desconocido."})
 
         with transaction.atomic():
+            suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
+            if not suscripcion.activo:
+                raise ValidationError(
+                    "Una suscripción desactivada no admite transiciones de estado."
+                )
+
+            estados_origen, estado_destino = self.TRANSICIONES_ESTADO[evento]
+            if suscripcion.estado not in estados_origen:
+                raise ValidationError(
+                    {
+                        "estado": (
+                            f"El evento {evento} no está permitido desde "
+                            f"{suscripcion.estado}."
+                        )
+                    }
+                )
+
+            suscripcion._validar_tiempo_transicion(evento)
+            estado_anterior = suscripcion.estado
+            suscripcion.estado = estado_destino
+            suscripcion.save(update_fields=("estado", "actualizado_en"))
+            transicion = TransicionEstado.objects.create(
+                organizacion_id=suscripcion.organizacion_id,
+                suscripcion=suscripcion,
+                evento=evento,
+                estado_anterior=estado_anterior,
+                estado_nuevo=estado_destino,
+                actor_id=actor_id,
+                actor_rol=actor_rol,
+            )
+
+        self.estado = estado_destino
+        self.actualizado_en = suscripcion.actualizado_en
+        return transicion
+
+    def registrar_uso(
+        self,
+        minutos: int | Decimal,
+        fecha=None,
+        *,
+        actor_id=None,
+        actor_rol: str = "sistema",
+    ) -> "RegistroUso":
+        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
+        with transaction.atomic():
+            suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
+            if not suscripcion.activo:
+                raise ValidationError(
+                    "Una suscripción desactivada no admite registros de uso."
+                )
+
             if fecha is None:
                 fecha = timezone.localdate()
 
-            self.ultima_actividad = timezone.now()
+            suscripcion.ultima_actividad = timezone.now()
             fecha_actual = timezone.localdate()
             if (fecha.year, fecha.month) == (fecha_actual.year, fecha_actual.month):
                 horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-                if self.horas_uso_mes is None:
-                    self.horas_uso_mes = Decimal("0.00")
-                self.horas_uso_mes += horas
+                if suscripcion.horas_uso_mes is None:
+                    suscripcion.horas_uso_mes = Decimal("0.00")
+                suscripcion.horas_uso_mes += horas
 
-            if self.estado == self.Estado.FANTASMA:
-                self.estado = self.Estado.ACTIVO
+            if suscripcion.estado == self.Estado.FANTASMA:
+                suscripcion.transicionar(
+                    self.EventoEstado.USO_REGISTRADO,
+                    actor_id=actor_id,
+                    actor_rol=actor_rol,
+                )
 
-            self.save()
+            suscripcion.save(
+                update_fields=("ultima_actividad", "horas_uso_mes", "actualizado_en")
+            )
+
+            self.estado = suscripcion.estado
+            self.ultima_actividad = suscripcion.ultima_actividad
+            self.horas_uso_mes = suscripcion.horas_uso_mes
+            self.actualizado_en = suscripcion.actualizado_en
 
             return RegistroUso.objects.create(
-                organizacion_id=self.organizacion_id,
-                suscripcion=self,
+                organizacion_id=suscripcion.organizacion_id,
+                suscripcion=suscripcion,
                 fecha=fecha,
                 minutos=int(minutos),
             )
@@ -329,3 +537,41 @@ class ResumenOrganizacion(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.organizacion_id}: {self.total_mensual} en {self.cantidad_activas} activas"
+
+
+class TransicionEstado(ModeloTenant):
+    """Registro inmutable de cada evento que cambia el estado de una suscripción."""
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="transiciones_estado",
+        verbose_name="Suscripción",
+    )
+    evento = models.CharField(
+        max_length=40,
+        choices=Subscription.EventoEstado.choices,
+        verbose_name="Evento autorizado",
+    )
+    estado_anterior = models.CharField(
+        max_length=20,
+        choices=Subscription.Estado.choices,
+        verbose_name="Estado anterior",
+    )
+    estado_nuevo = models.CharField(
+        max_length=20,
+        choices=Subscription.Estado.choices,
+        verbose_name="Estado nuevo",
+    )
+    actor_id = models.UUIDField(null=True, blank=True, verbose_name="Actor")
+    actor_rol = models.CharField(max_length=20, blank=True, verbose_name="Rol del actor")
+    ocurrido_en = models.DateTimeField(auto_now_add=True, verbose_name="Ocurrido en")
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "subscription_state_transition"
+        ordering = ["ocurrido_en", "id"]
+        indexes = [
+            models.Index(fields=["organizacion_id", "suscripcion", "ocurrido_en"]),
+        ]
+        verbose_name = "Transición de estado"
+        verbose_name_plural = "Transiciones de estado"

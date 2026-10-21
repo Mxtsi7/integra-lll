@@ -12,3 +12,5 @@ redis==5.2.1
 django-celery-beat==2.7.0
 google-api-python-client==2.155.0
 google-auth-oauthlib==1.2.1
+# Fernet para shared/cifrado: los tokens OAuth se guardan cifrados (FE-06).
+cryptography==44.0.0

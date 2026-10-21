@@ -86,8 +86,13 @@ RUTAS = {
     "/api/alertas/": "notifications",
 }
 
-# Las únicas rutas que no exigen token: registrarse, entrar, refrescar.
-RUTAS_PUBLICAS = ("/api/auth/",)
+# Coincidencias exactas sin access: Auth valida el refresh del body en
+# refresh/logout. No exponer todo /api/auth/ ni confiar en cabeceras del cliente.
+RUTAS_PUBLICAS = (
+    "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
+    "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
+    "/api/auth/logout/",
+)
 
 # Cuánto se espera a un servicio antes de responder 504.
 TIEMPO_ESPERA_SEGUNDOS = 10
@@ -97,3 +102,15 @@ LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
 USE_TZ = True
+
+
+# Estado compartido de sesiones. Nunca usar caché local en despliegues.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+    "sesiones": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("SESSION_REDIS_URL", default="redis://redis:6379/2"),
+        "KEY_PREFIX": "ojoalgasto:sesiones",
+        "OPTIONS": {"socket_connect_timeout": 2, "socket_timeout": 2},
+    },
+}

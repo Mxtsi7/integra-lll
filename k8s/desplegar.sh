@@ -60,7 +60,8 @@ if ! kubectl get secret ojoalgasto >/dev/null 2>&1; then
     --from-literal=SECRET_KEY="$(openssl rand -hex 32)" \
     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
     --from-literal=POSTGRES_PASSWORD="$CLAVE_POSTGRES" \
-    --from-literal=DATABASE_URL="postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones"
+    --from-literal=DATABASE_URL="postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones" \
+    --from-literal=CLAVES_CIFRADO="$(openssl rand -base64 32 | tr '+/' '-_')"
   echo "   secret creado (clave de Postgres aleatoria)"
 elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -q .; then
   # Despliegue anterior: la base ya está inicializada con esa clave, así que
@@ -72,6 +73,16 @@ elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -
   echo "   secret al día: DATABASE_URL agregada con la clave que ya usaba la base"
 else
   echo "   ya existía, se deja como está"
+fi
+
+# CLAVES_CIFRADO: clave Fernet con la que shared/cifrado guarda los tokens de
+# los conectores (FE-06). Una clave Fernet son 32 bytes en base64 url-safe.
+# Se agrega una sola vez; rotarla es un procedimiento aparte
+# (shared/cifrado/README.md), nunca se regenera sola o lo guardado queda ilegible.
+if ! kubectl get secret ojoalgasto -o jsonpath='{.data.CLAVES_CIFRADO}' | grep -q .; then
+  kubectl patch secret ojoalgasto --type=merge \
+    -p "{\"stringData\":{\"CLAVES_CIFRADO\":\"$(openssl rand -base64 32 | tr '+/' '-_')\"}}" >/dev/null
+  echo "   CLAVES_CIFRADO agregada al secret"
 fi
 
 echo "── aplicando manifiestos ──"

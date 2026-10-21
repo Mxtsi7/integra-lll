@@ -1,5 +1,39 @@
 # Pruebas desde dentro del cluster
 
+## Si solo quieres correr la prueba: un archivo
+
+```bash
+./k8s/pruebas/prueba-de-carga.sh        # menú; en Windows basta doble clic
+```
+
+Es el único punto de entrada que hay que conocer. Muestra el estado del
+cluster, explica qué hace cada opción y llama a los demás scripts por ti:
+
+| Opción | Qué hace | Por debajo |
+|---|---|---|
+| 1 Panel en vivo | abre otra ventana que acumula durante 30 s (reinicio automático, o manual con `r`/Enter) las peticiones reales, la CPU frenada por el límite y si el pod sigue en el Service; la ventana anterior queda resumida | `ver-estres.sh` |
+| 2 Lanzar carga | levanta un pod de Fortio dentro del cluster a N peticiones/s | `estresar.sh N` |
+| 3 Demo completa | 1 + 2 seguidos; mientras tanto se navega la web | |
+| 4 Liberar CPU | apaga RabbitMQ y el worker (inertes) para que el generador quepa | `kubectl scale … --replicas=0` |
+| 5 Devolver | todo de vuelta a 1 réplica, gateway incluido | `kubectl scale … --replicas=1` |
+| 6 Comprobar | BusyBox llama al gateway por la red interna y se borra | `diagnostico-busybox.yaml` |
+| 7 Limpiar | borra Jobs de Fortio y el pod de diagnóstico | |
+| 8 Explicar | qué es esto, qué se va a ver y los números de referencia | |
+| 9 Compañeros | los demás lanzan su Fortio (25 qps) desde su namespace; aquí se abre el panel, se muestra el comando que ellos pegan, cuenta regresiva y conteo final | `carga-fortio-otro-namespace.yaml` por URL |
+| 10 Pods y services | todos los pods con READY, estado, reinicios y nodo, más services y deployments, con conteo | `kubectl get pods/svc/deploy` |
+
+También acepta la acción directa: `prueba-de-carga.sh 100`, `… demo`,
+`… liberar`, `… devolver`, `… comprobar`, `… limpiar`, `… explicar`,
+`… companeros`, `… pods`.
+
+Si el generador queda `Pending` por la bolsa de CPU que comparte **todo el
+curso** (`students-host-envelope`, 20 CPU para todos los namespaces), el menú
+lo detecta, lo explica y ofrece liberar CPU y reintentar. Es para correrlo desde
+la cuenta del proyecto; los demás integrantes lanzan desde su propio namespace
+siguiendo [`GUIA-EQUIPO.md`](GUIA-EQUIPO.md).
+
+---
+
 Dos cosas que **no se pueden ver desde internet**, porque desde afuera solo
 existe el ingress:
 
