@@ -41,7 +41,11 @@ def sobre(evento: str, datos: dict, organizacion_id, correlation_id: str = "") -
         "version": 1,
         "id": str(uuid.uuid4()),
         "ocurrido_en": _ahora(),
-        "correlation_id": correlation_id or "",
+        # Nunca vacío. El contrato lo valida con `format: uuid` (MX-21), y
+        # una cadena vacía lo incumple. Si la petición no trajo la cabecera
+        # —una tarea de fondo, por ejemplo— se genera uno: el evento igual
+        # necesita algo con qué seguirle el rastro.
+        "correlation_id": correlation_id or str(uuid.uuid4()),
         "organizacion_id": str(organizacion_id),
         "datos": datos,
     }

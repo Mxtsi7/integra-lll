@@ -110,6 +110,23 @@ class TestSobre:
         org = uuid.uuid4()
         assert publicador.sobre("suscripcion.creada", {}, org)["organizacion_id"] == str(org)
 
+    def test_el_correlation_id_nunca_va_vacio(self):
+        """El contrato lo valida con `format: uuid` (MX-21): "" lo incumple."""
+        s = publicador.sobre("suscripcion.creada", {}, uuid.uuid4())
+        assert s["correlation_id"]
+        assert uuid.UUID(s["correlation_id"])
+
+    def test_el_correlation_id_generado_viene_con_guiones(self):
+        """32 caracteres sin guiones pasan por UUID y fallan `format: uuid`."""
+        generado = publicador.sobre("suscripcion.creada", {}, uuid.uuid4())["correlation_id"]
+        assert str(uuid.UUID(generado)) == generado
+
+    def test_respeta_el_correlation_id_que_le_pasan(self):
+        """El de la petición manda: es lo que une el evento con el HTTP."""
+        de_la_peticion = str(uuid.uuid4())
+        s = publicador.sobre("suscripcion.creada", {}, uuid.uuid4(), de_la_peticion)
+        assert s["correlation_id"] == de_la_peticion
+
     def test_el_id_es_distinto_en_cada_evento(self):
         """El id sirve para descartar duplicados; repetido no serviría."""
         uno = publicador.sobre("suscripcion.creada", {}, uuid.uuid4())["id"]
