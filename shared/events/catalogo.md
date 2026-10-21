@@ -37,6 +37,25 @@ Todo evento tiene la misma envoltura. Sin excepciones.
 
 ## Eventos
 
+### Contrato de intercambio MX-21 (v2)
+
+La versión 2 conserva la envoltura común definida arriba y valida los payloads
+con el [esquema JSON](mx21-v2.schema.json). Los nombres ingleses identifican
+la referencia funcional; solo se publican los nombres y rutas canónicos:
+
+| Referencia | Evento canónico v2 / routing key | Publica |
+|---|---|---|
+| `subscription.created` | `suscripcion.creada` / `suscripcion.creada.v2` | subscriptions |
+| `subscription.updated` | `suscripcion.actualizada` / `suscripcion.actualizada.v2` | subscriptions |
+| `subscription.state_changed` | `suscripcion.estado_cambiado` / `suscripcion.estado_cambiado.v2` | subscriptions |
+| `alert.due` | `alerta.activada` / `alerta.activada.v2` | notifications |
+
+Se conservan los contratos v1 de las secciones siguientes; no se emiten a la
+vez que v2. Un cambio de estado, incluida una cancelación, produce
+`suscripcion.estado_cambiado.v2` con `estado_anterior` y `evento_estado`.
+Los productores generan un ID de evento por hecho y lo reutilizan en todos
+los reintentos; los consumidores deben deduplicar por ese ID y organización.
+
 ### Publica `subscriptions`
 
 | Evento | Cuándo | Datos | Escucha |

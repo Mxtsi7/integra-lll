@@ -15,6 +15,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
+from events.outbox import registrar_actualizada, registrar_creada
 from app.models import Cobro, Subscription
 from app.serializers import (
     CalendarioCobroSerializer,
@@ -132,6 +133,26 @@ class SubscriptionViewSet(TenantViewSet):
         instance.activo = False
         instance.save()
 
+    def perform_create(self, serializer) -> None:
+        with transaction.atomic():
+            super().perform_create(serializer)
+            registrar_creada(
+                serializer.instance,
+                correlation_id=self._correlation_id(self.request),
+            )
+
+    @staticmethod
+    def _correlation_id(request) -> uuid.UUID:
+        correlation_id = getattr(request, "correlation_id", None)
+        if not correlation_id:
+            return uuid.uuid4()
+        try:
+            return uuid.UUID(str(correlation_id))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValidationError(
+                {"correlation_id": "El identificador de correlación no es válido."}
+            ) from exc
+
     @extend_schema(
         parameters=[
             OpenApiParameter(
@@ -243,6 +264,14 @@ class SubscriptionViewSet(TenantViewSet):
                 .get(pk=serializer.instance.pk)
             )
             serializer.instance = suscripcion
+            valores_anteriores = {
+                "proveedor_id": suscripcion.proveedor_id,
+                "nombre": suscripcion.nombre,
+                "monto": suscripcion.monto,
+                "moneda": suscripcion.moneda,
+                "frecuencia": suscripcion.frecuencia,
+                "fecha_proximo_cobro": suscripcion.fecha_proximo_cobro,
+            }
 
             if (
                 estado_solicitado is not None
@@ -273,9 +302,30 @@ class SubscriptionViewSet(TenantViewSet):
                         Subscription.EventoEstado.CANCELACION_USUARIO,
                         actor_id=self._actor_id(self.request, required=True),
                         actor_rol=actor_rol,
+                        correlation_id=self._correlation_id(self.request),
                     )
                 except DjangoValidationError as exc:
                     raise self._convertir_error_transicion(exc) from exc
+
+            nombres_evento = {
+                "proveedor_id": "proveedor_id",
+                "nombre": "nombre",
+                "monto": "monto",
+                "moneda": "moneda",
+                "frecuencia": "ciclo",
+                "fecha_proximo_cobro": "proximo_cobro",
+            }
+            campos_modificados = [
+                nombres_evento[campo]
+                for campo, valor_anterior in valores_anteriores.items()
+                if getattr(suscripcion, campo) != valor_anterior
+            ]
+            if campos_modificados:
+                registrar_actualizada(
+                    suscripcion,
+                    campos_modificados,
+                    correlation_id=self._correlation_id(self.request),
+                )
 
     @action(detail=True, methods=["get", "post"], url_path="transiciones")
     def transiciones(self, request, pk=None):
@@ -301,6 +351,7 @@ class SubscriptionViewSet(TenantViewSet):
                 serializer.validated_data["evento"],
                 actor_id=actor_id,
                 actor_rol=actor_rol,
+                correlation_id=self._correlation_id(request),
             )
         except DjangoValidationError as exc:
             raise self._convertir_error_transicion(exc) from exc
@@ -342,6 +393,7 @@ class SubscriptionViewSet(TenantViewSet):
                 fecha=fecha,
                 actor_id=self._actor_id(request),
                 actor_rol=getattr(request, "rol", None) or "sin_identificar",
+                correlation_id=self._correlation_id(request),
             )
         except DjangoValidationError as exc:
             raise self._convertir_error_transicion(exc) from exc

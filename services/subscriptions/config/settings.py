@@ -91,6 +91,10 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_TIMEZONE = "America/Santiago"
 CELERY_TASK_TRACK_STARTED = True
 CELERY_BEAT_SCHEDULE = {
+    "despachar-eventos-pendientes": {
+        "task": "app.tasks.despachar_eventos_pendientes",
+        "schedule": 10.0,
+    },
     # Tarea de prueba: cada minuto deja constancia de que el Temporizador
     # vive. Las tareas reales del ciclo de vida se agregan aquí.
     "latido-del-temporizador": {

@@ -18,6 +18,10 @@ def test_el_latido_esta_programado_en_beat():
     programada = settings.CELERY_BEAT_SCHEDULE["latido-del-temporizador"]
     assert programada["task"] == "config.celery.latido"
     assert programada["task"] in app.tasks
+    despacho = settings.CELERY_BEAT_SCHEDULE["despachar-eventos-pendientes"]
+    assert despacho["task"] == "app.tasks.despachar_eventos_pendientes"
+    assert despacho["schedule"] == 10.0
+    assert despacho["task"] in app.tasks
 
 
 def test_el_latido_se_ejecuta_y_devuelve_la_hora():
