@@ -75,9 +75,9 @@ while [ $# -gt 0 ]; do
     --build) BUILD=1 ;;
     k8s|--k8s|kubernetes|cluster) K8S=1 ;;
     -h|--help|--ayuda|ayuda) sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    todo|all) SUITES+=(auth subscriptions gateway connectors shared frontend) ;;
-    backend)  SUITES+=(auth subscriptions gateway connectors shared) ;;
-    auth|subscriptions|gateway|connectors|shared|frontend) SUITES+=("$1") ;;
+    todo|all) SUITES+=(auth subscriptions gateway connectors notifications shared frontend) ;;
+    backend)  SUITES+=(auth subscriptions gateway connectors notifications shared) ;;
+    auth|subscriptions|gateway|connectors|notifications|shared|frontend) SUITES+=("$1") ;;
     *) mal "no sé qué es '$1'. Opciones: auth subscriptions gateway connectors shared frontend backend todo k8s --build"; exit 2 ;;
   esac
   shift
