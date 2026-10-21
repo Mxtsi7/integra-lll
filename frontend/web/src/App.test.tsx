@@ -3,14 +3,14 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getUsuarioActual, guardarTokens, type Usuario } from "@ojoalgasto/shared";
+import { getSuscripciones, getUsuarioActual, guardarTokens, type Usuario } from "@ojoalgasto/shared";
 import { App } from "./App";
 
 // Prueba el árbol de rutas REAL de App.tsx (RutaPrivada.test.tsx usa una
 // copia liviana). Solo se simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getUsuarioActual: vi.fn() };
+  return { ...real, getUsuarioActual: vi.fn(), getSuscripciones: vi.fn() };
 });
 
 const USUARIO: Usuario = {
@@ -78,6 +78,14 @@ describe("App: secciones del menú que ya existen", () => {
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     montar("/cuentas");
     expect(await screen.findByRole("heading", { name: "Tus cuentas" })).toBeInTheDocument();
+    expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+  });
+
+  it("con sesión, /calendario abre la cuadrícula del mes (CH-17)", async () => {
+    vi.mocked(getSuscripciones).mockResolvedValue([]);
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    montar("/calendario");
+    expect(await screen.findByRole("grid")).toBeInTheDocument();
     expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
   });
 });

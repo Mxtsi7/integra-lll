@@ -23,21 +23,29 @@ export function costoPorHora(montoMensual: number, horasUsoMes: number): number 
 }
 
 /**
- * RN-CIC-005: el gasto mensual proyectado incluye las suscripciones activas y
- * las pruebas gratuitas con fecha de término y monto conocidos, todo en
- * equivalente mensual.
+ * RN-CIC-005: qué suscripciones van a cobrarse. Las activas y las pruebas
+ * gratuitas con fecha de término y monto conocidos.
  *
  * Una suscripción fantasma sigue cobrándose —es activa sin uso—, así que
- * entra en la proyección. Ocultarla escondería justo el gasto que el producto
- * existe para mostrar.
+ * cuenta. Ocultarla escondería justo el gasto que el producto existe para
+ * mostrar. Una cancelada o una por confirmar no tienen un cobro seguro.
+ *
+ * La usan la proyección del Panel y el Calendario (CH-17), para que ambos
+ * cuenten los mismos cobros.
+ */
+export function generaCobro(s: Suscripcion): boolean {
+  if (s.estado === 'activo' || s.estado === 'fantasma') return true;
+  if (s.estado === 'prueba') return s.monto > 0 && Boolean(s.fin_prueba);
+  return false;
+}
+
+/**
+ * RN-CIC-005: el gasto mensual proyectado suma, en equivalente mensual, las
+ * suscripciones que generan cobro (ver generaCobro).
  */
 export function gastoProyectado(suscripciones: Suscripcion[]): number {
   return suscripciones
-    .filter((s) => {
-      if (s.estado === 'activo' || s.estado === 'fantasma') return true;
-      if (s.estado === 'prueba') return s.monto > 0 && Boolean(s.fin_prueba);
-      return false;
-    })
+    .filter(generaCobro)
     .reduce((total, s) => total + equivalenteMensual(s.monto, s.frecuencia), 0);
 }
 
