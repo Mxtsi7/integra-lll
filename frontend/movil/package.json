@@ -1,5 +1,8 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 {
@@ -8,17 +11,23 @@
   "main": "index.ts",
   "dependencies": {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
     "@ojoalgasto/shared": "0.1.0",
     "expo": "~57.0.29",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3"
 =======
+=======
+>>>>>>> Stashed changes
     "expo": "~57.0.30",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "@ojoalgasto/shared": "0.1.0"
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   },
   "devDependencies": {
