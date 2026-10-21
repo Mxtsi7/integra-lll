@@ -59,18 +59,34 @@ class TestSubscriptionSerializerValid:
         assert serializer.validated_data["frecuencia"] == "mensual"
         assert serializer.validated_data["estado"] == "activo"
 
-    @pytest.mark.parametrize(
-        "estado",
-        ["prueba", "activo", "por_confirmar", "cancelado", "fantasma"],
-    )
-    def test_subscription_serializer_rf13_estados(
+    @pytest.mark.parametrize("estado", ["prueba", "activo"])
+    def test_subscription_serializer_acepta_estados_iniciales(
         self, valid_payload: dict, estado: str
     ) -> None:
-        """Los 5 estados de RF-13 son aceptados."""
+        """Una suscripción nueva solo inicia en prueba o activo."""
         valid_payload["estado"] = estado
+        if estado == "prueba":
+            valid_payload["fin_prueba"] = date(2026, 12, 1).isoformat()
         serializer = SubscriptionSerializer(data=valid_payload)
         assert serializer.is_valid(), serializer.errors
         assert serializer.validated_data["estado"] == estado
+
+    @pytest.mark.parametrize("estado", ["por_confirmar", "cancelado", "fantasma"])
+    def test_subscription_serializer_rechaza_estados_no_iniciales(
+        self, valid_payload: dict, estado: str
+    ) -> None:
+        valid_payload["estado"] = estado
+        serializer = SubscriptionSerializer(data=valid_payload)
+        assert not serializer.is_valid()
+        assert "estado" in serializer.errors
+
+    def test_subscription_serializer_rechaza_prueba_sin_fecha_fin(
+        self, valid_payload: dict
+    ) -> None:
+        valid_payload["estado"] = "prueba"
+        serializer = SubscriptionSerializer(data=valid_payload)
+        assert not serializer.is_valid()
+        assert "fin_prueba" in serializer.errors
 
     def test_subscription_serializer_save_with_organizacion_id(
         self, valid_payload: dict
