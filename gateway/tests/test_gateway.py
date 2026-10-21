@@ -280,13 +280,13 @@ def test_sesion_revocada_no_reenvia_y_otra_sigue_activa(upstream):
     assert cliente.get("/api/usuarios/me/", **con_token(segunda)).status_code == 200
 
 
-@pytest.mark.parametrize("ruta", ["/api/auth/logout/otra/", "/api/auth/change-password/", "/api/auth/email-verification/request/", "/api/auth/email-verification/confirm/", "/api/auth/login/otra/"])
+@pytest.mark.parametrize("ruta", ["/api/auth/logout/otra/", "/api/auth/change-password/", "/api/auth/email-verification/request/", "/api/auth/email-verification/confirm/otra/", "/api/auth/login/otra/"])
 def test_solo_rutas_publicas_exactas_son_anonimas(upstream, ruta):
     assert cliente.post(ruta).status_code == 401
     assert not upstream.llamadas
 
 
-@pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm"])
+@pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm", "email-verification/confirm"])
 def test_contrato_de_rutas_publicas_exactas_de_main(upstream, ruta):
     respuesta = cliente.post(f"/api/auth/{ruta}/", data={}, content_type="application/json")
     assert respuesta.status_code == 200
