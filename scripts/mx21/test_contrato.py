@@ -1,5 +1,6 @@
 """Regresiones del contrato MX-21; no sustituyen al productor real de VI-26."""
 import copy
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -69,7 +70,7 @@ class ContratoTests(unittest.TestCase):
                 with self.subTest(causa=causa), self.assertRaises(ValidationError):
                     evento['datos']['evento_estado'] = causa
                     aplicar(db, evento, clave, propiedades)
-            with sqlite3.connect(db) as conexion:
+            with closing(sqlite3.connect(db)) as conexion:
                 self.assertEqual(conexion.execute('SELECT COUNT(*) FROM efectos').fetchone()[0], 1)
                 self.assertEqual(conexion.execute('SELECT COUNT(*) FROM inbox').fetchone()[0], 1)
 
