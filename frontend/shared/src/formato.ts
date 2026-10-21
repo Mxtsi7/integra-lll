@@ -53,13 +53,16 @@ export function formatearFechaHora(isoConHora: string): string {
 }
 
 // El 1 de enero de 2024 fue lunes: desde ahí se recorren los 7 días para
-// sacar sus nombres del propio Intl, sin escribirlos a mano.
-const UN_LUNES = new Date(2024, 0, 1);
+// sacar sus nombres del propio Intl, sin escribirlos a mano. Se guarda como
+// números y no como un Date armado al cargar el módulo: un Date es un
+// instante, y si la zona horaria cambia después (el navegador la actualiza
+// si el equipo cambia de zona) ese instante cae el domingo 31 de diciembre.
+const UN_LUNES = { anio: 2024, mes: 0, dia: 1 };
 
 /** Nombres de los días de lunes a domingo (en Chile la semana parte el lunes). */
 export function nombresDiasSemana(largo: 'short' | 'long'): string[] {
   const formato = new Intl.DateTimeFormat('es-CL', { weekday: largo });
   return Array.from({ length: 7 }, (_, i) =>
-    formato.format(new Date(UN_LUNES.getFullYear(), UN_LUNES.getMonth(), UN_LUNES.getDate() + i)),
+    formato.format(new Date(UN_LUNES.anio, UN_LUNES.mes, UN_LUNES.dia + i)),
   );
 }

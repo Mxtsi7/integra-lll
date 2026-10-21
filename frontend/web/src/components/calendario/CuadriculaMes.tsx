@@ -55,8 +55,9 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, eve
   }, [eventos]);
 
   const dias = useMemo(() => semanas.flat().filter((d): d is string => d !== null), [semanas]);
-  // El único día que recibe Tab (tabindex móvil): el último recorrido con
-  // el teclado; si no, el elegido; si no, hoy; si no, el 1. Siempre de este mes.
+  // El único día que recibe Tab (tabindex móvil): el último que tuvo el foco
+  // (con flechas, clic o el lector de pantalla); si no, el elegido; si no,
+  // hoy; si no, el 1. Siempre de este mes.
   const [enfocado, setEnfocado] = useState<string | null>(null);
   const porDefecto = [seleccionado, hoy].find((d) => d !== null && esDelMes(d, anio, mes)) ?? dias[0];
   const diaEnfocado = enfocado !== null && esDelMes(enfocado, anio, mes) ? enfocado : porDefecto;
@@ -114,8 +115,9 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, eve
                     aria-label={`${formatearFechaLarga(iso)}, ${textoCobros(cantidad)}`}
                     aria-current={esHoy ? 'date' : undefined}
                     className={[styles.dia, esHoy ? styles.hoy : '', elegido ? styles.elegido : ''].join(' ')}
+                    onFocus={() => setEnfocado(iso)}
                     onClick={() => {
-                      setEnfocado(iso);
+                      setEnfocado(iso); // Safari no enfoca los botones al hacer clic
                       onSeleccionar(iso);
                     }}
                     onKeyDown={(e) => alTeclear(e, iso)}

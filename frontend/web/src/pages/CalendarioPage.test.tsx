@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorDeApi, getSuscripciones, type Suscripcion } from "@ojoalgasto/shared";
 import { CuadriculaMes } from "../components/calendario/CuadriculaMes";
 import { AuthProvider } from "../context/AuthContext";
@@ -16,6 +16,15 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   return { ...real, getSuscripciones: vi.fn() };
 });
 const getSuscripcionesMock = vi.mocked(getSuscripciones);
+
+// Zona de Chile (UTC-3/-4) aunque CI corra en UTC: así un new Date("YYYY-MM-DD")
+// (medianoche UTC = el día anterior acá) hace fallar los tests de fechas.
+beforeAll(() => {
+  vi.stubEnv("TZ", "America/Santiago");
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 function sus(extra: Partial<Suscripcion>): Suscripcion {
   return {
@@ -152,13 +161,15 @@ describe("Calendario (CH-17)", () => {
 
 describe("Cuadrícula: teclado (CH-17)", () => {
   const tabulables = () => within(cuadricula()).getAllByRole("button").filter((b) => b.tabIndex === 0);
+  // Dentro de act: enfocar un día cambia cuál recibe Tab (estado de React).
+  const enfocar = (boton: HTMLElement) => act(() => boton.focus());
 
   it("solo un día recibe Tab, y las flechas recorren días y semanas", async () => {
     await montar();
     const hoy = dia(/^miércoles, 21 de octubre/);
     expect(tabulables()).toEqual([hoy]);
 
-    hoy.focus();
+    enfocar(hoy);
     fireEvent.keyDown(hoy, { key: "ArrowRight" });
     expect(dia(/^jueves, 22 de octubre/)).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
@@ -173,14 +184,14 @@ describe("Cuadrícula: teclado (CH-17)", () => {
   it("Inicio y Fin van al primer y último día de la semana dentro del mes", async () => {
     await montar();
     const hoy = dia(/^miércoles, 21 de octubre/);
-    hoy.focus();
+    enfocar(hoy);
     fireEvent.keyDown(hoy, { key: "Home" });
     expect(dia(/^lunes, 19 de octubre/)).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     expect(dia(/^domingo, 25 de octubre/)).toHaveFocus();
 
     // Primera semana: parte el jueves 1, no el lunes de septiembre.
-    dia(/^sábado, 3 de octubre/).focus();
+    enfocar(dia(/^sábado, 3 de octubre/));
     fireEvent.keyDown(document.activeElement!, { key: "Home" });
     expect(dia(/^jueves, 1 de octubre/)).toHaveFocus();
   });
@@ -188,10 +199,12 @@ describe("Cuadrícula: teclado (CH-17)", () => {
   it("en el borde del mes no se sale (cruzar de mes es de CH-19)", async () => {
     await montar();
     const primero = dia(/^jueves, 1 de octubre/);
-    primero.focus();
+    enfocar(primero);
     fireEvent.keyDown(primero, { key: "ArrowLeft" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     expect(primero).toHaveFocus();
+    // Y Tab sigue llevando al 1, no salta a otro día.
+    expect(tabulables()).toEqual([primero]);
   });
 });
 

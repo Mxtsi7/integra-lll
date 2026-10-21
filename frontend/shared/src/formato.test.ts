@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { formatearFechaHora, formatearFechaLarga, formatearMesAnio, nombresDiasSemana } from './formato';
+
+// Zona de Chile (UTC-3/-4) aunque CI corra en UTC: así un new Date('YYYY-MM-DD')
+// (medianoche UTC = el día anterior acá) hace fallar los tests de fechas.
+beforeAll(() => {
+  vi.stubEnv('TZ', 'America/Santiago');
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('formatearMesAnio', () => {
   it('el mes va de 0 a 11, como en Date', () => {
