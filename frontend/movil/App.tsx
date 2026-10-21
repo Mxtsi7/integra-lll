@@ -1,5 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
+<<<<<<< Updated upstream
 import { configurarApi } from '@ojoalgasto/shared'
    configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL });
 export default function App() {
@@ -12,6 +13,19 @@ export default function App() {
       <StatusBar style="auto" />
     </View>
 
+=======
+import { configurarApi } from '@ojoalgasto/shared';
+configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL });
+
+export default function App() {
+  return (
+    <View style={styles.container}>
+      <Text>alfin corre
+
+        !</Text>
+      <StatusBar style="auto" />
+    </View>
+>>>>>>> Stashed changes
   );
 }
 

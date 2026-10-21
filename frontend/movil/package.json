@@ -1,14 +1,25 @@
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 {
   "name": "movil",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+<<<<<<< Updated upstream
     "@ojoalgasto/shared": "0.1.0",
     "expo": "~57.0.29",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3"
+=======
+    "expo": "~57.0.30",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "@ojoalgasto/shared": "0.1.0"
+>>>>>>> Stashed changes
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

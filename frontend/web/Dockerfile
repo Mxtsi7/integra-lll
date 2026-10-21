@@ -15,4 +15,4 @@ RUN npm ci
 COPY . .
 
 EXPOSE 5173
-CMD ["npm", "run", "dev", "--workspace=web"]
+CMD ["npm", "run", "dev", "--workspace=web","--workspace=movil"]

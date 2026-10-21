@@ -185,6 +185,8 @@ services:
       - /app/node_modules
       - /app/shared/node_modules
       - /app/web/node_modules
+      - /app/movil/node_modules
+
 
 volumes:
   datos_postgres:
