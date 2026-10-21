@@ -92,6 +92,7 @@ RUTAS_PUBLICAS = (
     "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
     "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
     "/api/auth/logout/",
+    "/api/auth/email-verification/confirm/",
 )
 
 # Cuánto se espera a un servicio antes de responder 504.
