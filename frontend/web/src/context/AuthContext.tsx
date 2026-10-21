@@ -40,6 +40,13 @@ type ApiAuth = {
   cerrarSesionLocal: () => void;
   /** Si el token venció mientras la pestaña estaba abierta, cierra la sesión. */
   verificarSesion: () => void;
+  /**
+   * Reemplaza los datos del usuario con los que confirmó el backend (p. ej.
+   * después de editar el nombre en Perfil, CH-08), para que la barra
+   * superior y el resto de la app muestren lo guardado sin recargar. Sin
+   * sesión no hace nada.
+   */
+  actualizarUsuario: (usuario: Usuario) => void;
 };
 
 /** El login respondió 200 pero con un token que no sirve. */
@@ -241,6 +248,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (estadoRef.current.tipo !== "anonimo") quedarAnonimo();
   }, [quedarAnonimo]);
 
+  const actualizarUsuario = useCallback(
+    (usuario: Usuario) => {
+      if (estadoRef.current.tipo !== "autenticado") return;
+      cambiarEstado({ tipo: "autenticado", usuario });
+    },
+    [cambiarEstado],
+  );
+
   const verificarSesion = useCallback(() => {
     if (estadoRef.current.tipo === "anonimo") return;
     if (!haySesionValida()) {
@@ -261,8 +276,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cerrarSesion,
       cerrarSesionLocal,
       verificarSesion,
+      actualizarUsuario,
     }),
-    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion],
+    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion, actualizarUsuario],
   );
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
