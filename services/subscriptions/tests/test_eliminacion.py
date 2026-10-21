@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from rest_framework.test import APIClient
 
-from app.models import Cobro, Proveedor, RegistroUso, Subscription
+from app.models import Cobro, Proveedor, RegistroUso, Subscription, TransicionEstado
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -63,6 +63,35 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
     assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
     assert Cobro.objects.filter(pk=cobro.pk).exists()
     assert Subscription.objects.filter(pk=propia.pk).exists()
+
+
+def transicion(org, sub):
+    return TransicionEstado.objects.create(
+        organizacion_id=org, suscripcion=sub,
+        evento=Subscription.EventoEstado.CANCELACION_USUARIO,
+        estado_anterior=Subscription.Estado.ACTIVO, estado_nuevo=Subscription.Estado.CANCELADO,
+    )
+
+
+def test_historial_tenant_inconsistente_no_se_borra_por_cascada(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
+    ajeno = transicion(otra, propia)
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
+    assert TransicionEstado.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=propia.pk).exists()
+
+
+def test_historial_propio_se_elimina_aunque_apunte_a_suscripcion_ajena(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    ajena = suscripcion(otra, Proveedor.objects.create(nombre="Proveedor"))
+    propio, ajeno = transicion(org, ajena), transicion(otra, ajena)
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+    assert not TransicionEstado.objects.filter(pk=propio.pk).exists()
+    assert TransicionEstado.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=ajena.pk).exists()
 
 
 def test_firma_rechaza_cambio_tenant_destino_y_caducidad(monkeypatch):

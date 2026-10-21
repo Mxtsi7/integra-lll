@@ -94,7 +94,7 @@ consultas ni claves foráneas entre esquemas (ADR-002).
 
 ## Datos cubiertos y límites de integración
 
-- Subscriptions: elimina cobros, registros de uso y suscripciones del UUID.
+- Subscriptions: elimina cobros, registros de uso, historial de transiciones y suscripciones del UUID.
   Conserva el catálogo global de proveedores. Si una FK local inconsistente
   conecta un hijo de otro tenant, devuelve `409` y conserva los datos para que
   se corrija la inconsistencia, evitando el borrado ajeno por cascada.
