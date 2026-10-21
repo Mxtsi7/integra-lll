@@ -3,7 +3,7 @@
 from decimal import Decimal
 from rest_framework import serializers
 
-from app.models import CategoriaSuscripcion, Moneda, RegistroUso, Subscription
+from app.models import CategoriaSuscripcion, Moneda, RegistroUso, Subscription, TransicionEstado
 from django.core.exceptions import ValidationError as ErrorModelo
 from shared.catalogos.models import validar_asignacion
 
@@ -71,6 +71,24 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                 errores[campo] = error.messages
         if errores:
             raise serializers.ValidationError(errores)
+        if self.instance is None:
+            estado = attrs.get("estado", Subscription.Estado.ACTIVO)
+            if estado not in (Subscription.Estado.PRUEBA, Subscription.Estado.ACTIVO):
+                raise serializers.ValidationError(
+                    {
+                        "estado": (
+                            "Una suscripción nueva solo puede iniciar en prueba "
+                            "o activo."
+                        )
+                    }
+                )
+            if (
+                estado == Subscription.Estado.PRUEBA
+                and attrs.get("fin_prueba") is None
+            ):
+                raise serializers.ValidationError(
+                    {"fin_prueba": "Es obligatorio para una suscripción en prueba."}
+                )
         return attrs
 
     def create(self, validated_data):
@@ -129,3 +147,36 @@ class RegistroUsoSerializer(serializers.ModelSerializer):
         model = RegistroUso
         fields = ("fecha", "minutos")
 
+
+class SolicitarTransicionSerializer(serializers.Serializer):
+    """Eventos de estado que puede solicitar un usuario de la organización."""
+
+    evento = serializers.ChoiceField(
+        choices=(
+            (
+                Subscription.EventoEstado.CANCELACION_USUARIO,
+                Subscription.EventoEstado.CANCELACION_USUARIO.label,
+            ),
+            (
+                Subscription.EventoEstado.CONFIRMACION_USUARIO,
+                Subscription.EventoEstado.CONFIRMACION_USUARIO.label,
+            ),
+        )
+    )
+
+
+class TransicionEstadoSerializer(serializers.ModelSerializer):
+    """Serializa el historial de auditoría de estados."""
+
+    class Meta:
+        model = TransicionEstado
+        fields = (
+            "id",
+            "evento",
+            "estado_anterior",
+            "estado_nuevo",
+            "actor_id",
+            "actor_rol",
+            "ocurrido_en",
+        )
+        read_only_fields = fields

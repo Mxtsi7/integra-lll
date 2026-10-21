@@ -76,11 +76,13 @@ una versión de la aplicación, conservar tablas/datos; no ejecutar la reversió
 de las migraciones en producción. Si se usaron códigos nuevos, no desplegar
 un backend antiguo que vuelva a rechazarlos con choices estáticos.
 
-Antes de integrar, revisar los PR #66/#67 (modelos y máquina de estados),
-#68–#73 (rutas/migraciones de Auth), #75 (registro) y #65 (Expo). Generar una
-migración de unión si hay hojas paralelas del mismo app; no renumerar ni editar
-migraciones ya aplicadas. Esta entrega parte de `728d975` en main y no depende
-de esas ramas. No cambia la máquina de estados, autenticación ni registro.
+La integración con `a7d4950` de main conserva las sesiones de Auth, las reglas
+de creación y la máquina de estados de Suscripciones, además de las validaciones
+de registro y recuperación de la web. Las migraciones de unión
+`0009_merge_catalogo_paises_sesion` (Auth) y
+`0008_merge_catalogos_transicionestado` (Suscripciones) reúnen las hojas paralelas
+sin renumerar ni editar migraciones existentes. Catálogos y estados se validan
+en el mismo serializer. La app Expo de #65 puede reutilizar la API compartida.
 
 ## Mantención
 

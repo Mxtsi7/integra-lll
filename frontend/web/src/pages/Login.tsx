@@ -6,7 +6,7 @@ import { useToast } from "../context/ToastContext";
 import { useAuth } from "../context/AuthContext";
 import { destinoTrasLogin } from "../components/RutaPrivada";
 import { PantallaAcceso } from "../components/layout/PantallaAcceso";
-import { CampoTexto } from "../components/ui/Campo";
+import { CampoContrasena, CampoTexto } from "../components/ui/Campo";
 import { Boton } from "../components/ui/Boton";
 import styles from "./Acceso.module.css";
 
@@ -72,10 +72,10 @@ export default function Login() {
           required
         />
 
-        <CampoTexto
+        {/* CH-05: botón para mostrar u ocultar la contraseña. */}
+        <CampoContrasena
           id="password"
           etiqueta="Contraseña"
-          type="password"
           autoComplete="current-password"
           placeholder="Tu contraseña"
           icono={<Lock size={16} />}

@@ -100,3 +100,14 @@ class Pais(OpcionCatalogo):
 
     class Meta(OpcionCatalogo.Meta):
         db_table = "pais"
+
+
+class Sesion(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sesiones")
+    refresh_jti = models.CharField(max_length=64)
+    vence_en = models.DateTimeField()
+    revocada = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "sesion"

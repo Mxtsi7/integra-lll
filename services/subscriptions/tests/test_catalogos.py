@@ -65,6 +65,19 @@ def test_codigos_desconocidos_rechazados_por_api_y_orm(campo, codigo):
         Subscription.objects.create(organizacion_id=uuid.uuid4(), **data)
 
 
+@pytest.mark.parametrize("cambios,campo", [
+    ({"categoria": "desconocida"}, "categoria"),
+    ({"estado": "cancelado"}, "estado"),
+    ({"estado": "prueba"}, "fin_prueba"),
+])
+def test_creacion_valida_catalogos_y_reglas_de_estado(cambios, campo):
+    data = payload()
+    data.update(cambios)
+    serializer = SubscriptionSerializer(data=data)
+    assert not serializer.is_valid()
+    assert campo in serializer.errors
+
+
 @pytest.mark.parametrize("partial", [True, False])
 def test_inactivo_se_conserva_pero_no_se_asigna(partial):
     sub = crear()
@@ -124,6 +137,7 @@ def test_migracion_preserva_datos_y_detecta_codigos_sin_catalogo():
     anterior = ("app", "0006_subscription_activo")
     destino = ("app", "0007_catalogos")
     executor = MigrationExecutor(connection)
+    hojas = executor.loader.graph.leaf_nodes()
     try:
         executor.migrate([anterior])
         modelos = executor.loader.project_state([anterior]).apps
@@ -145,4 +159,4 @@ def test_migracion_preserva_datos_y_detecta_codigos_sin_catalogo():
     finally:
         # Restaurar incluso si falla una aserción en el diagnóstico.
         modelos.get_model("app", "Subscription").objects.filter(categoria="legacy").update(categoria="otro")
-        MigrationExecutor(connection).migrate([destino])
+        MigrationExecutor(connection).migrate(hojas)

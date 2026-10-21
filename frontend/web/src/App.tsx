@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { restablecerContrasena, solicitarRecuperacion } from '@ojoalgasto/shared';
 import { DashboardPage } from './pages/DashboardPage';
 import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/ConfiguracionPage';
@@ -13,6 +14,19 @@ import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
+
+// CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
+// La respuesta del backend es neutra (no dice si el correo existe), así que
+// la pantalla no la necesita: solo importa si la solicitud falló.
+async function pedirEnlaceRecuperacion(email: string): Promise<void> {
+  await solicitarRecuperacion(email);
+}
+
+// CH-07: conecta la pantalla de AN-14 con POST /api/auth/password-reset/confirm/.
+// La pantalla entrega (password, token); la API recibe (token, password).
+function cambiarContrasena(password: string, token: string): Promise<void> {
+  return restablecerContrasena(token, password);
+}
 
 export function App() {
   return (
@@ -33,8 +47,14 @@ export function App() {
           {/* Rutas de recuperación AN-14. Quedan públicas (fuera de ambas
               guardas): el enlace de restablecer llega por correo y tiene que
               funcionar aunque haya una sesión abierta en este navegador. */}
-          <Route path="/recuperar-contrasena" element={<RecuperarContrasenaPage />} />
-          <Route path="/restablecer-contrasena" element={<RestablecerContrasenaPage />} />
+          <Route
+            path="/recuperar-contrasena"
+            element={<RecuperarContrasenaPage onSolicitarRecuperacion={pedirEnlaceRecuperacion} />}
+          />
+          <Route
+            path="/restablecer-contrasena"
+            element={<RestablecerContrasenaPage onSubmitNewPassword={cambiarContrasena} />}
+          />
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>

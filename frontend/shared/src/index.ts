@@ -17,5 +17,5 @@ export {
 } from './api/suscripciones';
 export * from './api/usuarios';
 export * from './auth';
-
 export * from './api/catalogos';
+export * from './validaciones';
