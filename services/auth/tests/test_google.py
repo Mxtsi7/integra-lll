@@ -49,6 +49,14 @@ def enviar(cliente, nonce, identidad=None, **campos):
     return respuesta
 
 
+@pytest.mark.parametrize("cuerpo", [[], ["idtoken"], "idtoken", 42])
+def test_cuerpo_json_sin_objeto_devuelve_400_sin_consultar_google(cuerpo):
+    with patch("app.google_login.id_token.verify_oauth2_token") as google:
+        respuesta = APIClient().post("/api/auth/google/", cuerpo, format="json")
+    assert respuesta.status_code == 400
+    google.assert_not_called()
+
+
 @pytest.mark.django_db
 def test_primera_vinculacion_exige_password_y_emite_proveedor(usuario):
     cliente = APIClient()
