@@ -18,3 +18,4 @@ export {
 export * from './api/usuarios';
 export * from './auth';
 export * from './validaciones';
+export * from './api/planes';

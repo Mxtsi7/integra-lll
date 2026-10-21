@@ -24,7 +24,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .identidad import SesionesNoDisponibles, TokenInvalido, leer_token, validar
 
 # Las que el gateway fija; se ignoran si vienen del cliente.
-CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol", "x-sesion-id"}
+CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol", "x-sesion-id", "x-plan", "x-features"}
 
 # Cabeceras de transporte que no tiene sentido reenviar en ninguna dirección.
 CABECERAS_DE_SALTO = {
@@ -51,6 +51,27 @@ def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonRespo
     if estado == 401:
         respuesta["WWW-Authenticate"] = "Bearer"
     return respuesta
+
+
+def comprobar_feature(ruta, cabeceras):
+    feature = next((valor for prefijo, valor in {
+        "/api/asistente/": "asistente_financiero",
+        "/api/recomendaciones/": "recomendaciones_automaticas",
+    }.items() if ruta.startswith(prefijo)), None)
+    if not feature:
+        return True
+    permisos = requests.request("GET", settings.SERVICIOS["auth"] + "/api/usuarios/me/permisos/",
+        headers=cabeceras, timeout=settings.TIEMPO_ESPERA_SEGUNDOS, allow_redirects=False)
+    if permisos.status_code in (403, 404):
+        return False
+    if permisos.status_code != 200:
+        raise ValueError("No se pudieron verificar los permisos")
+    datos = permisos.json()
+    if (not isinstance(datos, dict) or datos.get("plan") not in ("free", "premium")
+            or not isinstance(datos.get("features"), dict)
+            or type(datos["features"].get(feature)) is not bool):
+        raise ValueError("Contrato de permisos inválido")
+    return datos["plan"] == "premium" and datos["features"][feature]
 
 
 @csrf_exempt
@@ -89,6 +110,12 @@ def reenviar(request):
             cabeceras["X-Rol"] = str(identidad["rol"])
 
     cabeceras["X-Correlation-ID"] = correlacion
+
+    try:
+        if not comprobar_feature(request.path, cabeceras):
+            return respuesta_de_error(403, "Esta función requiere Premium vigente", correlacion)
+    except (requests.RequestException, ValueError):
+        return respuesta_de_error(503, "No se pudieron comprobar los permisos. Inténtalo nuevamente", correlacion)
 
     destino = settings.SERVICIOS[servicio] + request.get_full_path()
     try:

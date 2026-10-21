@@ -75,6 +75,7 @@ SERVICIOS = {
 # GET /api/suscripciones/. Así cada servicio expone su API bajo /api/
 # y no hay que traducir nada.
 RUTAS = {
+    "/api/planes/": "auth",
     "/api/auth/": "auth",
     "/api/usuarios/": "auth",
     "/api/organizacion/": "auth",
