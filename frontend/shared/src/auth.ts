@@ -1,8 +1,22 @@
 export class AuthError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** `code` del cuerpo, si viene (p. ej. "token_expirado" en recuperación). */
+  codigo?: string;
+  /**
+   * Errores por campo tal como los manda DRF: { campo: ["mensaje", …] }.
+   * Antes solo se guardaba el primer mensaje y se perdían los demás; el
+   * registro (CH-04) los necesita para mostrarlos bajo cada campo.
+   */
+  campos?: Record<string, string[]>;
+  constructor(
+    message: string,
+    status: number,
+    extra: { codigo?: string; campos?: Record<string, string[]> } = {},
+  ) {
     super(message);
     this.status = status;
+    this.codigo = extra.codigo;
+    this.campos = extra.campos;
   }
 }
 
@@ -14,6 +28,9 @@ let endpoints = {
   // POST { refresh_token } → 2xx si quedó revocado. Configurable con
   // configureAuthApi({ endpoints: { logout } }) si el backend usa otra ruta.
   logout: "/auth/logout/",
+  // Recuperación de contraseña (MX-02 / MX-04). Rutas públicas del gateway.
+  passwordReset: "/auth/password-reset/",
+  passwordResetConfirm: "/auth/password-reset/confirm/",
 };
 
 export function configureAuthApi(config: {
@@ -33,8 +50,12 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
 
   if (!res.ok) {
     let message = "Ocurrió un error inesperado";
+    let codigo: string | undefined;
+    let campos: Record<string, string[]> | undefined;
     try {
       const data = (await res.json()) as Record<string, unknown>;
+      if (typeof data.code === "string") codigo = data.code;
+      campos = camposDesdeCuerpo(data);
       if (typeof data.detail === "string") {
         message = data.detail;
       } else {
@@ -49,10 +70,28 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
     } catch {
       // el cuerpo no era JSON
     }
-    throw new AuthError(message, res.status);
+    throw new AuthError(message, res.status, { codigo, campos });
   }
 
   return res.json() as Promise<T>;
+}
+
+// Errores de validación de DRF: cada clave trae una lista de mensajes. Se
+// ignoran las claves de control (detail, code, solicitar_nuevo_enlace).
+const CLAVES_NO_CAMPO = new Set(["detail", "code", "solicitar_nuevo_enlace"]);
+
+function camposDesdeCuerpo(data: Record<string, unknown>): Record<string, string[]> | undefined {
+  const campos: Record<string, string[]> = {};
+  for (const [clave, valor] of Object.entries(data)) {
+    if (CLAVES_NO_CAMPO.has(clave)) continue;
+    if (Array.isArray(valor)) {
+      const mensajes = valor.filter((m): m is string => typeof m === "string");
+      if (mensajes.length > 0) campos[clave] = mensajes;
+    } else if (typeof valor === "string") {
+      campos[clave] = [valor];
+    }
+  }
+  return Object.keys(campos).length > 0 ? campos : undefined;
 }
 
 export type LoginPayload = { correo: string; password: string };
@@ -273,4 +312,30 @@ export async function revocarSesion(): Promise<boolean> {
   } finally {
     clearTimeout(temporizador);
   }
+}
+
+// ── Recuperación de contraseña (CH-06 / CH-07) ────────────────────────
+
+/**
+ * POST /auth/password-reset/ (MX-02). El backend responde lo mismo exista o
+ * no el correo (anti-enumeración): siempre 200 con un mensaje neutro.
+ * Lanza AuthError (400 si el correo está mal formado) o TypeError sin red.
+ */
+export function solicitarRecuperacion(correo: string): Promise<{ detail: string }> {
+  return postJSON<{ detail: string }>(endpoints.passwordReset, { email: correo.trim() });
+}
+
+/** `code` que manda el backend cuando el enlace de recuperación no sirve (MX-04). */
+export type CodigoErrorEnlace = "token_invalido" | "token_expirado" | "token_usado";
+
+/**
+ * POST /auth/password-reset/confirm/ (MX-04). Cambia la contraseña con el
+ * token del enlace; el backend revoca las sesiones abiertas y NO inicia
+ * sesión. Errores (AuthError):
+ * - 400 code=token_invalido · 410 code=token_expirado | token_usado
+ * - 400 sin code y con campos.password: la clave no cumple la política
+ * - 503: no se pudo completar; la contraseña no cambió
+ */
+export async function restablecerContrasena(token: string, password: string): Promise<void> {
+  await postJSON<{ detail: string }>(endpoints.passwordResetConfirm, { token, password });
 }

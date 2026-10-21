@@ -12,6 +12,9 @@ import uuid
 from .models import Organizacion, User
 from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
 from shared.sesiones import registrar_credenciales
+from .sesiones import emitir_tokens
+from .contexto import usuario_del_contexto
+from .perfil import CambioPerfilSerializer
 from .serializers import (
     LoginSerializer,
     RegisterSerializer,
@@ -164,27 +167,16 @@ class LoginView(APIView):
                 )
             try:
                 version = registrar_credenciales(user)
+                tokens = emitir_tokens(user, version=version)
             except (RedisError, OSError):
+                transaction.set_rollback(True)
                 return Response(
                     {"detail": "No se pudo iniciar sesión. Inténtalo nuevamente."},
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
-            refresh = RefreshToken.for_user(user)
-            refresh["session_version"] = version
-
-        refresh["organizacion_id"] = (
-            str(user.organizacion_id) if user.organizacion_id else None
-        )
-        refresh["rol"] = user.rol
-
-        access = refresh.access_token
-        access["organizacion_id"] = refresh["organizacion_id"]
-        access["rol"] = user.rol
-
         return Response(
             {
-                "access_token": str(access),
-                "refresh_token": str(refresh),
+                **tokens,
                 "usuario": {
                     "id": user.id,
                     "nombre": user.nombre,
@@ -319,23 +311,36 @@ class UsuarioActualView(generics.RetrieveAPIView):
         tags=["Usuarios"],
         summary="Usuario actual (me)",
         description=(
-            "Devuelve el usuario identificado por la cabecera X-Usuario-Id "
-            "(la pone el gateway tras validar el JWT). Es la ruta que consume el frontend."
+            "Devuelve el usuario activo identificado por X-Usuario-Id y valida "
+            "X-Organizacion-Id contra su pertenencia vigente. El gateway inyecta "
+            "ambas cabeceras tras validar el JWT. Una organización desactualizada "
+            "devuelve 403; el cliente debe descartar la sesión y volver a iniciar sesión."
         ),
         responses={
             200: UsuarioActualSerializer,
-            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
-            404: OpenApiResponse(description="El usuario del token ya no existe."),
+            403: OpenApiResponse(description=(
+                "Contexto de usuario ausente/inválido o la organización de la sesión "
+                "no coincide con la pertenencia vigente."
+            )),
+            404: OpenApiResponse(description="El usuario del token no existe o está inactivo."),
         },
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
     def get_object(self):
-        usuario_id = self.request.headers.get("X-Usuario-Id")
-        if not usuario_id:
-            raise PermissionDenied("Falta el contexto de usuario")
-        return get_object_or_404(User, pk=usuario_id)
+        return usuario_del_contexto(self.request)
+
+    @extend_schema(tags=["Usuarios"], request=CambioPerfilSerializer,
+                   responses={200: UsuarioActualSerializer, 400: None, 403: None, 404: None})
+    def patch(self, request):
+        datos = CambioPerfilSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        with transaction.atomic():
+            usuario = usuario_del_contexto(request, bloquear=True)
+            usuario.nombre = datos.validated_data["nombre"]
+            usuario.save(update_fields=["nombre"])
+        return Response(UsuarioActualSerializer(usuario).data)
 
 
 class UserDetailView(generics.RetrieveAPIView):

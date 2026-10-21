@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AuthError,
   configurarTokenStorage,
   configureAuthApi,
+  register,
+  restablecerContrasena,
+  solicitarRecuperacion,
   guardarTokens,
   haySesionValida,
   logout,
@@ -218,5 +222,111 @@ describe("revocarSesion (logout en el backend, MX-29)", () => {
     logout();
     expect(await revocarSesion()).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("errores del backend en AuthError (CH-04)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    configureAuthApi({ baseUrl: "http://api.test/api" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const json = (status: number, cuerpo: unknown) =>
+    new Response(JSON.stringify(cuerpo), { status, headers: { "Content-Type": "application/json" } });
+
+  it("conserva TODOS los errores por campo, no solo el primero", async () => {
+    fetchMock.mockResolvedValue(
+      json(400, {
+        email: ["user with this email already exists."],
+        password: ["La contraseña debe tener al menos 8 caracteres, una letra y un número."],
+      }),
+    );
+
+    const error = await register({ nombre: "Ana", correo: "a@b.cl", password: "x", aceptaDatos: true }).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(AuthError);
+    expect((error as AuthError).status).toBe(400);
+    expect((error as AuthError).message).toBe("user with this email already exists.");
+    expect((error as AuthError).campos).toEqual({
+      email: ["user with this email already exists."],
+      password: ["La contraseña debe tener al menos 8 caracteres, una letra y un número."],
+    });
+  });
+
+  it("guarda el code del cuerpo y no lo confunde con un campo", async () => {
+    fetchMock.mockResolvedValue(
+      json(410, {
+        code: "token_usado",
+        detail: "El enlace ya fue utilizado. Solicita uno nuevo.",
+        solicitar_nuevo_enlace: "/api/auth/password-reset/",
+      }),
+    );
+
+    const error = (await restablecerContrasena("tok", "clave1234").catch((e: unknown) => e)) as AuthError;
+
+    expect(error.status).toBe(410);
+    expect(error.codigo).toBe("token_usado");
+    expect(error.message).toBe("El enlace ya fue utilizado. Solicita uno nuevo.");
+    expect(error.campos).toBeUndefined();
+  });
+});
+
+describe("recuperación de contraseña (CH-06 / CH-07)", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    configureAuthApi({ baseUrl: "http://api.test/api" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const json = (status: number, cuerpo: unknown) =>
+    new Response(JSON.stringify(cuerpo), { status, headers: { "Content-Type": "application/json" } });
+
+  it("solicitarRecuperacion hace POST /auth/password-reset/ con el correo sin espacios", async () => {
+    fetchMock.mockResolvedValue(json(200, { detail: "Si el correo está registrado, recibirás un enlace." }));
+
+    const respuesta = await solicitarRecuperacion("  ana@ejemplo.com ");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/api/auth/password-reset/");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body)).toEqual({ email: "ana@ejemplo.com" });
+    expect(respuesta.detail).toBe("Si el correo está registrado, recibirás un enlace.");
+  });
+
+  it("restablecerContrasena hace POST /auth/password-reset/confirm/ con token y password", async () => {
+    fetchMock.mockResolvedValue(json(200, { detail: "Contraseña restablecida. Inicia sesión nuevamente." }));
+
+    await restablecerContrasena("MQ.abc-123", "clave1234");
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/api/auth/password-reset/confirm/");
+    expect(JSON.parse(init.body)).toEqual({ token: "MQ.abc-123", password: "clave1234" });
+  });
+
+  it("una contraseña rechazada llega como error del campo password", async () => {
+    fetchMock.mockResolvedValue(json(400, { password: ["La contraseña debe tener al menos 8 caracteres, una letra y un número."] }));
+
+    const error = (await restablecerContrasena("tok", "corta").catch((e: unknown) => e)) as AuthError;
+
+    expect(error.status).toBe(400);
+    expect(error.codigo).toBeUndefined();
+    expect(error.campos?.password).toEqual([
+      "La contraseña debe tener al menos 8 caracteres, una letra y un número.",
+    ]);
   });
 });
