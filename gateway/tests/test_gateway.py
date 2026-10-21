@@ -286,6 +286,45 @@ def test_solo_rutas_publicas_exactas_son_anonimas(upstream, ruta):
     assert not upstream.llamadas
 
 
+@pytest.mark.parametrize("ruta", ["/api/auth/google/nonce/", "/api/auth/google/"])
+def test_google_solo_expone_las_dos_rutas_exactas(upstream, ruta):
+    respuesta = cliente.get(ruta) if ruta.endswith("nonce/") else cliente.post(ruta)
+    assert respuesta.status_code == 200
+    assert upstream.llamadas[-1]["url"] == settings.SERVICIOS["auth"] + ruta
+    assert "X-Usuario-Id" not in upstream.llamadas[-1]["headers"]
+
+
+@pytest.mark.parametrize("ruta", ["/api/auth/google/otra/", "/api/auth/google/nonce/otra/"])
+def test_subrutas_google_siguen_protegidas(upstream, ruta):
+    assert cliente.post(ruta).status_code == 401
+    assert not upstream.llamadas
+
+
+def test_google_reenvia_cookie_y_permite_cors_con_credenciales_solo_a_origen_configurado(upstream):
+    cookie = "google_login_nonce=secreto-prueba; HttpOnly; Max-Age=300; Path=/api/auth/google/; SameSite=Lax"
+    upstream.respuesta = RespuestaFalsa(cabeceras={"Set-Cookie": cookie})
+    origen = settings.CORS_ALLOWED_ORIGINS[0]
+    respuesta = cliente.get("/api/auth/google/nonce/", HTTP_ORIGIN=origen)
+    assert respuesta["Set-Cookie"] == cookie
+    assert respuesta["Access-Control-Allow-Origin"] == origen
+    assert respuesta["Access-Control-Allow-Credentials"] == "true"
+    cliente.post("/api/auth/google/", HTTP_COOKIE="google_login_nonce=secreto-prueba", HTTP_ORIGIN=origen)
+    assert upstream.llamadas[-1]["headers"]["Cookie"] == "google_login_nonce=secreto-prueba"
+    ajena = cliente.get("/api/auth/google/nonce/", HTTP_ORIGIN="https://ajeno.example")
+    assert "Access-Control-Allow-Origin" not in ajena
+    assert "Access-Control-Allow-Credentials" not in ajena
+
+
+def test_preflight_google_admite_post_json_con_credenciales(upstream):
+    respuesta = cliente.options("/api/auth/google/", HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0],
+                                HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+                                HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type")
+    assert respuesta.status_code == 200
+    assert respuesta["Access-Control-Allow-Credentials"] == "true"
+    assert "content-type" in respuesta["Access-Control-Allow-Headers"]
+    assert not upstream.llamadas
+
+
 @pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm", "email-verification/confirm"])
 def test_contrato_de_rutas_publicas_exactas_de_main(upstream, ruta):
     respuesta = cliente.post(f"/api/auth/{ruta}/", data={}, content_type="application/json")

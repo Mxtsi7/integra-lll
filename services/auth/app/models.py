@@ -121,3 +121,22 @@ class SolicitudVerificacionCorreo(ModeloBase):
 
     class Meta(ModeloBase.Meta):
         db_table = "solicitud_verificacion_correo"
+
+
+class IdentidadGoogle(models.Model):
+    usuario = models.OneToOneField(User, on_delete=models.CASCADE, related_name="identidad_google")
+    subject = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        db_table = "identidad_google"
+
+
+class IntentoGoogle(models.Model):
+    """Huellas efímeras; no persiste ID tokens ni secretos del navegador."""
+
+    huella = models.CharField(max_length=64, primary_key=True)
+    navegador = models.CharField(max_length=64)
+    vence_en = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "intento_google"
