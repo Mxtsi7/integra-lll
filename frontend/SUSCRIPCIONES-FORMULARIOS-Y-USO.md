@@ -129,6 +129,7 @@ const intentarCerrarAgregar = useCallback(() => {
 | Cerrar con cambios | Aviso dentro del modal; el formulario sigue con todo lo escrito |
 | "Seguir editando" | Quita el aviso y el foco vuelve a donde estaba |
 | "Descartar cambios" | Cierra; al reabrir, el formulario está vacío |
+| Atrás/Adelante o navegar dentro de la app con cambios | La navegación queda retenida (`useBlocker`) y sale el mismo aviso; "Descartar" la completa |
 | Cerrar o recargar la pestaña con cambios | El navegador pide confirmación (`beforeunload`) |
 | Guardar | Se limpia el estado: no queda ningún aviso pendiente |
 
@@ -246,9 +247,8 @@ Manual (`npm run dev`, con backend):
 
 - **CH-09:** la UI rechaza la notación científica (`1e3`), que el backend acepta. Se agregó la casilla
   de período de prueba porque el formulario no tenía cómo indicarlo.
-- **CH-16:** la navegación con los botones atrás/adelante del navegador no se intercepta: la app usa
-  `BrowserRouter` y `useBlocker` solo funciona con un *data router*. Dentro de la app no se puede salir
-  del formulario sin pasar por el aviso, porque el modal tapa la navegación.
+- **CH-16:** para retener Atrás/Adelante, `main.tsx` pasó de `BrowserRouter` a un *data router*
+  (`createBrowserRouter`), que es donde funciona `useBlocker`. Las rutas siguen en `App.tsx`.
 - **CH-14/15:** van en un solo commit porque comparten la sección "Uso" del detalle.
 
 ## Pendiente
