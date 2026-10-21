@@ -36,7 +36,7 @@ class TestUsuarios:
             rol=User.Rol.TITULAR,
         )
 
-        r = self.client.get(reverse("usuario-actual"), HTTP_X_USUARIO_ID=str(titular.id))
+        r = self.client.get(reverse("usuario-actual"), HTTP_X_USUARIO_ID=str(titular.id), HTTP_X_ORGANIZACION_ID=str(org.id))
 
         assert r.status_code == status.HTTP_200_OK
         assert r.data["rol"] == "titular"

@@ -14,6 +14,7 @@ from app.views import (
     UsuarioActualView,
 )
 from app.sesiones import LogoutView, RefreshView
+from app.perfil import CambioClaveView
 
 
 def salud(request):
@@ -35,6 +36,7 @@ urlpatterns = [
     path("api/auth/login/", LoginView.as_view(), name="login"),
     path("api/auth/logout/", LogoutView.as_view(), name="logout"),
     path("api/auth/refresh/", RefreshView.as_view(), name="refresh"),
+    path("api/auth/change-password/", CambioClaveView.as_view(), name="change-password"),
     path(
         "api/auth/password-reset/",
         SolicitudRecuperacionView.as_view(),
