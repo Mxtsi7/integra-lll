@@ -4,7 +4,8 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react';
-import { useId } from 'react';
+import { useId, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import styles from './Campo.module.css';
 
 interface Base {
@@ -16,9 +17,22 @@ interface Base {
   icono?: ReactNode;
 }
 
-type CampoTextoProps = Base & InputHTMLAttributes<HTMLInputElement>;
+type CampoTextoProps = Base &
+  InputHTMLAttributes<HTMLInputElement> & {
+    /** Control a la derecha, dentro del campo (p. ej. el botón de ver contraseña). */
+    accesorio?: ReactNode;
+  };
 
-export function CampoTexto({ etiqueta, ayuda, error, icono, id, className = '', ...resto }: CampoTextoProps) {
+export function CampoTexto({
+  etiqueta,
+  ayuda,
+  error,
+  icono,
+  accesorio,
+  id,
+  className = '',
+  ...resto
+}: CampoTextoProps) {
   const generado = useId();
   const idControl = id ?? generado;
   const idAyuda = `${idControl}-ayuda`;
@@ -40,6 +54,7 @@ export function CampoTexto({ etiqueta, ayuda, error, icono, id, className = '', 
           aria-describedby={ayuda || error ? idAyuda : undefined}
           {...resto}
         />
+        {accesorio}
       </div>
       {(error || ayuda) && (
         <p id={idAyuda} className={error ? styles.error : styles.ayuda}>
@@ -47,6 +62,49 @@ export function CampoTexto({ etiqueta, ayuda, error, icono, id, className = '', 
         </p>
       )}
     </div>
+  );
+}
+
+type CampoContrasenaProps = Omit<CampoTextoProps, 'type' | 'accesorio'>;
+
+/**
+ * Campo de contraseña con botón para mostrarla u ocultarla (CH-05).
+ *
+ * - Empieza siempre oculta (type="password").
+ * - El botón es type="button": nunca envía el formulario.
+ * - Al hacer clic con el mouse el foco se queda en el campo (preventDefault
+ *   en mousedown), así se puede seguir escribiendo.
+ * - Accesible: es un botón nativo (Tab + Enter/Espacio), con nombre fijo
+ *   "Mostrar contraseña" y aria-pressed para el estado, que es el patrón de
+ *   botón de alternancia de WAI-ARIA (el nombre no cambia, cambia el estado).
+ * - El valor no se toca: solo cambia el type del input.
+ */
+export function CampoContrasena({ id, disabled, ...resto }: CampoContrasenaProps) {
+  const [visible, setVisible] = useState(false);
+  const generado = useId();
+  const idControl = id ?? generado;
+  return (
+    <CampoTexto
+      {...resto}
+      id={idControl}
+      disabled={disabled}
+      type={visible ? 'text' : 'password'}
+      accesorio={
+        <button
+          type="button"
+          className={styles.alternar}
+          aria-label="Mostrar contraseña"
+          aria-pressed={visible}
+          aria-controls={idControl}
+          title={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+          disabled={disabled}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setVisible((v) => !v)}
+        >
+          {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
+        </button>
+      }
+    />
   );
 }
 
