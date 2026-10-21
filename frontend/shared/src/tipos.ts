@@ -57,3 +57,37 @@ export interface Usuario {
   organizacion_id: string;
   plan: string;
 }
+
+/** Fuente de cobros que se puede conectar (CuentaConectada.Proveedor en connectors). */
+export type ProveedorCuenta = 'gmail' | 'outlook' | 'csv';
+
+/** CuentaConectada.Estado en connectors (FE-01). */
+export type EstadoCuentaConectada = 'conectada' | 'requiere_reautorizacion' | 'desconectada' | 'error';
+
+/**
+ * Una cuenta conectada tal como la entrega CuentaConectadaSerializer
+ * (services/connectors). Es el contrato de la página Cuentas (CH-23): el
+ * listado que integre AN-17 tiene que devolver esto. Los tokens nunca
+ * salen de la API, por eso no están acá.
+ */
+export interface CuentaConectada {
+  id: string;
+  proveedor: ProveedorCuenta;
+  /** "Gmail", "Outlook"… lo traduce el backend (get_proveedor_display). */
+  proveedor_legible: string;
+  /** El correo o identificador con que el proveedor conoce la cuenta. */
+  cuenta_externa: string;
+  estado: EstadoCuentaConectada;
+  /** "Conectada", "Requiere reautorización"… lo traduce el backend. */
+  estado_legible: string;
+  /** Por qué quedó en error o pide reautorizar. Vacío si no aplica. */
+  detalle_del_estado: string;
+  /** True si no se puede usar sin volver a autorizar (estado o token ilegible). */
+  necesita_reautorizacion: boolean;
+  /** ISO 8601 con hora, o null. */
+  token_expira_en: string | null;
+  /** ISO 8601 con hora, o null si nunca se sincronizó bien. */
+  ultima_sincronizacion: string | null;
+  creado_en: string;
+  actualizado_en: string;
+}

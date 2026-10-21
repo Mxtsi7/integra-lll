@@ -72,3 +72,12 @@ describe("App: rutas privadas", () => {
     expect(await screen.findByText("Bienvenido de nuevo")).toBeInTheDocument();
   });
 });
+
+describe("App: secciones del menú que ya existen", () => {
+  it("con sesión, /cuentas abre Cuentas conectadas y no el 'En construcción' (CH-23)", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    montar("/cuentas");
+    expect(await screen.findByRole("heading", { name: "Tus cuentas" })).toBeInTheDocument();
+    expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+  });
+});

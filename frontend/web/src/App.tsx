@@ -5,6 +5,7 @@ import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
+import { CuentasConectadasPage } from './pages/CuentasConectadasPage';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
@@ -69,7 +70,10 @@ export function App() {
                 al comodín y devolvían al Panel en silencio. */}
             <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
             <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
-            <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
+            {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
+                accionConectar (ConectarCorreo). Sin ellas, la página dice
+                que todavía no está disponible. */}
+            <Route path="/cuentas" element={<CuentasConectadasPage />} />
             <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
           </Route>
 

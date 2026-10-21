@@ -1,0 +1,97 @@
+/* Cuentas conectadas (CH-23). */
+
+.mensaje {
+  padding: 8px 0;
+  color: var(--tinta-2);
+  font-size: 14px;
+}
+
+.errorCaja {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13.5px;
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cuenta {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.cuenta:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.cuentaIcono {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 10px;
+  border-radius: var(--radio-s);
+  background: var(--turquesa-suave);
+  color: var(--turquesa);
+}
+
+.cuentaTexto {
+  flex: 1;
+  min-width: 0;
+}
+
+.cuentaProveedor {
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+/* Un correo largo se corta en vez de empujar la insignia fuera. */
+.cuentaExterna {
+  font-size: 13.5px;
+  color: var(--tinta-2);
+  overflow-wrap: anywhere;
+}
+
+.cuentaDetalle {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--tinta-3);
+}
+
+.cuentaAviso {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--acento);
+}
+
+/* Página */
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

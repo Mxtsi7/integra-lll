@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Bell, Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
-import { Boton } from '../components/ui/Boton';
-import { Insignia } from '../components/ui/Insignia';
+import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
 import { useTema } from '../hooks/useTema';
 import styles from './ConfiguracionPage.module.css';
@@ -83,23 +82,19 @@ export function ConfiguracionPage() {
         </div>
 
         <div className={styles.columna}>
+          {/* CH-23: las cuentas viven en una sola página (/cuentas). Antes acá
+              había estados escritos a mano ("No conectado") que no salían
+              de ningún dato real. */}
           <Seccion
             titulo="Cuentas conectadas"
-            descripcion="Cuando esté lista, los cobros nuevos se registran solos desde tu correo."
+            descripcion="Conecta tu correo y los cobros nuevos se registran solos."
             icono={<Link2 size={19} aria-hidden="true" />}
             tinte="turquesa"
           >
-            <Fila etiqueta="Correo electrónico">
-              <Insignia>No conectado</Insignia>
-            </Fila>
-            <Fila etiqueta="Cuenta bancaria">
-              <Insignia>No disponible</Insignia>
-            </Fila>
             <div className={styles.pieSeccion}>
-              {/* TODO: habilitar cuando el servicio de conectores esté listo */}
-              <Boton variante="secundario" disabled title="Próximamente">
-                Conectar correo
-              </Boton>
+              <BotonEnlace to="/cuentas" variante="secundario">
+                Ver cuentas conectadas
+              </BotonEnlace>
             </div>
           </Seccion>
 

@@ -1,9 +1,9 @@
-import { CalendarDays, ChartNoAxesColumn, Link2, Sparkles } from 'lucide-react';
+import { CalendarDays, ChartNoAxesColumn, Sparkles } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { BotonEnlace } from '../components/ui/Boton';
 import styles from './ProximamentePage.module.css';
 
-type Clave = 'calendario' | 'recomendaciones' | 'cuentas' | 'informes';
+type Clave = 'calendario' | 'recomendaciones' | 'informes';
 
 /**
  * Lo que va a hacer cada sección que todavía no existe. Antes estos cuatro
@@ -29,14 +29,6 @@ const SECCIONES: Record<
     mientras: 'El Panel ya marca las suscripciones fantasma: las que pagas y no usas.',
     ruta: '/dashboard',
     accion: 'Ver fantasmas',
-  },
-  cuentas: {
-    titulo: 'Cuentas conectadas',
-    Icono: Link2,
-    que: 'Conecta tu correo y los cobros nuevos se registran solos, sin tipear nada.',
-    mientras: 'Hoy registras cada suscripción a mano desde Inicio.',
-    ruta: '/home',
-    accion: 'Agregar suscripción',
   },
   informes: {
     titulo: 'Informes',
