@@ -7,6 +7,12 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ## Qué va en cada carpeta
 
+- [MX-24: timeout y cuotas IA](flujos/maximiliano-saez/24-limites-ia.md).
+
+### `flujos/`
+
+- [Verificación y cambio de correo (MX-28)](flujos/maximiliano-saez/28-verificacion-correo.md).
+
 ### `investigacion/`
 
 - Estado del arte y marco teórico
