@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pika
 import pytest
@@ -17,7 +17,7 @@ from rest_framework.test import APIClient
 from app.models import OutboxEvento, Subscription
 from events.despacho import despachar_pendientes
 from events.outbox import registrar_creada
-from events.publicador import crear_payload
+from events.publicador import crear_payload, publicar
 
 
 CUERPO = {
@@ -179,6 +179,45 @@ def test_reintentos_reutilizan_id_y_marcan_publicado_solo_con_ack(organizacion):
     evento.refresh_from_db()
     assert evento.publicado_en is not None
     assert evento.correlation_id == correlation_id
+
+
+@pytest.mark.django_db
+def test_publicador_envia_routing_v2_durable_y_obligatorio(organizacion):
+    evento = registrar_creada(crear_suscripcion(organizacion))
+    conexion = MagicMock()
+    canal = conexion.channel.return_value
+    canal.basic_publish.return_value = True
+
+    with patch("events.publicador.pika.BlockingConnection", return_value=conexion):
+        publicar(evento)
+
+    canal.exchange_declare.assert_called_once_with(
+        exchange="suscripciones",
+        exchange_type="topic",
+        durable=True,
+    )
+    canal.confirm_delivery.assert_called_once_with()
+    kwargs = canal.basic_publish.call_args.kwargs
+    assert kwargs["routing_key"] == "suscripcion.creada.v2"
+    assert kwargs["mandatory"] is True
+    assert json.loads(kwargs["body"])["id"] == str(evento.id)
+    assert kwargs["properties"].message_id == str(evento.id)
+    assert kwargs["properties"].delivery_mode == pika.DeliveryMode.Persistent.value
+    assert kwargs["properties"].content_type == "application/json"
+    conexion.close.assert_called_once_with()
+
+
+@pytest.mark.django_db
+def test_publicador_rechaza_confirmacion_negativa(organizacion):
+    evento = registrar_creada(crear_suscripcion(organizacion))
+    conexion = MagicMock()
+    conexion.channel.return_value.basic_publish.return_value = False
+
+    with patch("events.publicador.pika.BlockingConnection", return_value=conexion):
+        with pytest.raises(pika.exceptions.AMQPError, match="no confirmó"):
+            publicar(evento)
+
+    conexion.close.assert_called_once_with()
 
 
 @pytest.mark.django_db

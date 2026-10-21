@@ -38,7 +38,7 @@ def publicar(evento) -> None:
             durable=True,
         )
         canal.confirm_delivery()
-        canal.basic_publish(
+        confirmado = canal.basic_publish(
             exchange=EXCHANGE,
             routing_key=f"{evento.evento}.v{evento.version}",
             body=json.dumps(crear_payload(evento), separators=(",", ":")).encode(
@@ -54,6 +54,8 @@ def publicar(evento) -> None:
             ),
             mandatory=True,
         )
+        if not confirmado:
+            raise pika.exceptions.AMQPError("RabbitMQ no confirmó la publicación.")
     finally:
         if conexion.is_open:
             conexion.close()
