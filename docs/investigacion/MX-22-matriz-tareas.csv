@@ -1,179 +1,179 @@
-id,linea,responsable,tipo,tarea,tarjeta,requisitos,alcance,dependencias
-MX-01,3,Maximiliano Sáez,REVISIÓN,"Revisar PR de backend, contratos e integración",https://trello.com/c/EQ0vkrHA,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
-MX-02,4,Maximiliano Sáez,CÓDIGO,Solicitar recuperación de contraseña,https://trello.com/c/HO7dEi6N,RF-01.4,API compartida,Depende de: MX-30 (Maximiliano Sáez).
-MX-03,5,Maximiliano Sáez,CÓDIGO,Confirmar recuperación y establecer nueva contraseña,https://trello.com/c/DCZS7Z6i,RF-01.4,API compartida,"Depende de: MX-02 (Maximiliano Sáez), MX-30 (Maximiliano Sáez)."
-MX-04,6,Maximiliano Sáez,CÓDIGO,"Resolver tokens de recuperación vencidos, inválidos y usados",https://trello.com/c/pcOZ8DyP,RF-01.4,API compartida,Depende de: MX-03 (Maximiliano Sáez).
-MX-05,7,Maximiliano Sáez,CÓDIGO,Cambiar contraseña desde una sesión autenticada,https://trello.com/c/up0nSpgG,RF-01.5,API compartida,"Depende de: MX-30 (Maximiliano Sáez), MX-29 (Maximiliano Sáez)."
-MX-06,8,Maximiliano Sáez,CÓDIGO,Actualizar nombre del perfil y contrato de correo,https://trello.com/c/5kr9ZaP8,RF-01.5,API compartida,Sin prerequisito pendiente del plan.
-MX-07,9,Maximiliano Sáez,CÓDIGO,Eliminar cuenta y coordinar limpieza entre servicios,https://trello.com/c/50Mkov2i,RF-01.7; RF-20,API compartida,"Depende de: MX-29 (Maximiliano Sáez), FE-05 (Felipe Orellana)."
-MX-08,10,Maximiliano Sáez,CÓDIGO,Exponer plan vigente en el perfil,https://trello.com/c/rM7nrprc,RF-17; RF-20,API compartida,Depende de: MX-15 (Maximiliano Sáez).
-MX-09,11,Maximiliano Sáez,CÓDIGO,Definir permisos y features por plan,https://trello.com/c/cP9ziws6,RF-17; RF-20,API compartida,Depende de: MX-08 (Maximiliano Sáez).
-MX-10,12,Maximiliano Sáez,CÓDIGO,"Completar refresh, rotación y revocación de tokens",https://trello.com/c/dlybrwRf,RF-01.6; RF-20,API compartida,Depende de: MX-29 (Maximiliano Sáez).
-MX-11,13,Maximiliano Sáez,ESTUDIO + CÓDIGO,Estudiar e implementar acceso con Google,https://trello.com/c/o9pCDLIM,RF-01.3,API compartida,Sin prerequisito pendiente del plan.
-MX-12,14,Maximiliano Sáez,PRUEBAS,Ampliar pruebas de registro y organización,https://trello.com/c/MWCPTdFH,RF-01.1; RF-20,API compartida,Sin prerequisito pendiente del plan.
-MX-13,15,Maximiliano Sáez,PRUEBAS,Verificar aislamiento de usuarios y organizaciones,https://trello.com/c/3RpH5SWy,RF-20,API compartida,"Depende de: MX-06 (Maximiliano Sáez), MX-07 (Maximiliano Sáez)."
-MX-14,16,Maximiliano Sáez,DOCUMENTACIÓN,Documentar nuevos contratos Auth en OpenAPI,https://trello.com/c/USauKRiT,RF-01; RF-17,API compartida,"Depende de: MX-04 (Maximiliano Sáez), MX-05 (Maximiliano Sáez), MX-06 (Maximiliano Sáez), MX-07 (Maximiliano Sáez), MX-08 (Maximiliano Sáez), MX-09 (Maximiliano Sáez), MX-10 (Maximiliano Sáez), MX-11 (Maximiliano Sáez), MX-28 (Maximiliano Sáez)."
-MX-15,17,Maximiliano Sáez,CÓDIGO,Modelar planes y estados de contratación,https://trello.com/c/bKmWM5xh,RF-17; RF-20,API compartida,Sin prerequisito pendiente del plan.
-MX-16,18,Maximiliano Sáez,CÓDIGO,Listar planes y precios,https://trello.com/c/JxKWL5Wp,RF-17; RF-20,API compartida,Depende de: MX-15 (Maximiliano Sáez).
-MX-17,19,Maximiliano Sáez,CÓDIGO,Iniciar contratación mediante pasarela o mock,https://trello.com/c/mhEXuxIA,RF-17; RF-20,API compartida,Depende de: MX-16 (Maximiliano Sáez).
-MX-18,20,Maximiliano Sáez,CÓDIGO,Confirmar pagos con webhook idempotente,https://trello.com/c/GR6fDDrU,RF-17; RF-20,API compartida,Depende de: MX-17 (Maximiliano Sáez).
-MX-19,21,Maximiliano Sáez,CÓDIGO,Sincronizar features tras cambios de contratación,https://trello.com/c/lN3zwhlC,RF-17; RF-20,API compartida,"Depende de: MX-09 (Maximiliano Sáez), MX-18 (Maximiliano Sáez)."
-MX-20,22,Maximiliano Sáez,PRUEBAS,Probar contratación y autorización por plan,https://trello.com/c/KC6lAfT3,RF-17; RF-20,API compartida,Depende de: MX-19 (Maximiliano Sáez).
-MX-21,23,Maximiliano Sáez,ESTUDIO,Acordar contratos RabbitMQ y validar intercambio,https://trello.com/c/DgW1gqBf,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
-MX-22,24,Maximiliano Sáez,DOCUMENTACIÓN,Documentar matriz de requisitos y brechas,https://trello.com/c/mFzJLeUL,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
-MX-23,25,Maximiliano Sáez,ESTUDIO + CÓDIGO,Elegir y levantar cliente desktop Windows,https://trello.com/c/Ll8g4eCM,TRANSVERSAL,Windows,Sin prerequisito pendiente del plan.
-MX-24,26,Maximiliano Sáez,CÓDIGO,Aplicar timeout IA y límites de ingesta,https://trello.com/c/Ehiy29mN,RF-05; RF-18; RN-24; RN-25; RNF-20,API compartida,Depende de: VI-27 (Victor Gonzales).
-MX-25,27,Maximiliano Sáez,CÓDIGO,Explicar recomendaciones en lenguaje natural,https://trello.com/c/LWr1b2G7,RF-18,API compartida,"Depende de: VI-17 (Victor Gonzales), MX-24 (Maximiliano Sáez), VI-23 (Victor Gonzales)."
-MX-26,28,Maximiliano Sáez,PRUEBAS,Probar recomendaciones y degradación sin uso,https://trello.com/c/IQOxqtLx,RF-18,API compartida,"Depende de: VI-17 (Victor Gonzales), MX-24 (Maximiliano Sáez), MX-25 (Maximiliano Sáez)."
-MX-27,29,Maximiliano Sáez,CÓDIGO,Crear seed y simulación de registros de uso,https://trello.com/c/WR5yF8UG,RF-04,API compartida,Depende de: VI-10 (Victor Gonzales).
-MX-28,DERIVADA,Maximiliano Sáez,CÓDIGO,Implementar contrato backend de verificación de correo,https://trello.com/c/iJ5pbI0q,RF-01.1; RF-01.5,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
-MX-29,DERIVADA,Maximiliano Sáez,CÓDIGO,Revocar sesión en backend al cerrar sesión,https://trello.com/c/LKvkdcZ9,RF-01.6; RF-20,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
-MX-30,DERIVADA,Maximiliano Sáez,CÓDIGO,Alinear política de contraseña del backend,https://trello.com/c/fSEc3EdJ,RF-01.1; RF-01.4; RF-01.5,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
-CH-01,31,Christopher Solis,CÓDIGO,Proteger rutas privadas web,https://trello.com/c/8aJVV5UO,RF-01.2; RF-20,Web,Depende de: CH-02 (Christopher Solis).
-CH-02,32,Christopher Solis,CÓDIGO,Restaurar sesión web al recargar,https://trello.com/c/RasULQIn,RF-01.2; RF-20,Web,Sin prerequisito pendiente del plan.
-CH-03,33,Christopher Solis,CÓDIGO,Añadir cierre de sesión completo en web,https://trello.com/c/u74y9ZVQ,RF-01.6,Web,"Depende de: MX-29 (Maximiliano Sáez), CH-02 (Christopher Solis)."
-CH-04,34,Christopher Solis,CÓDIGO,Alinear validaciones de registro web,https://trello.com/c/45sQgIF5,RF-01.1,Web,Depende de: MX-30 (Maximiliano Sáez).
-CH-05,35,Christopher Solis,CÓDIGO,Mostrar u ocultar contraseña en Login y Registro,https://trello.com/c/sfQv7EGW,RF-01.1; RF-01.2,Web,Sin prerequisito pendiente del plan.
-CH-06,36,Christopher Solis,CÓDIGO,Solicitar recuperación de contraseña desde web,https://trello.com/c/xoFbp7JM,RF-01.4,Web,"Depende de: MX-02 (Maximiliano Sáez), AN-14 (Andrea Travola)."
-CH-07,37,Christopher Solis,CÓDIGO,Restablecer contraseña y resolver enlace inválido en web,https://trello.com/c/f6rh8kNq,RF-01.4,Web,"Depende de: MX-04 (Maximiliano Sáez), AN-14 (Andrea Travola), MX-30 (Maximiliano Sáez)."
-CH-08,38,Christopher Solis,CÓDIGO,Editar nombre desde Perfil web,https://trello.com/c/gsvVYIGY,RF-01.5,Web,Depende de: MX-06 (Maximiliano Sáez).
-CH-09,39,Christopher Solis,CÓDIGO,Completar validaciones del formulario de creación web,https://trello.com/c/G1nXsxJi,RF-02,Web,Sin prerequisito pendiente del plan.
-CH-10,40,Christopher Solis,CÓDIGO,Cancelar suscripción desde web sin borrarla,https://trello.com/c/5OQnSioe,RF-03; RF-10,Web,Depende de: VI-03 (Victor Gonzales).
-CH-11,41,Christopher Solis,CÓDIGO,Conectar filtros web de estado y fecha,https://trello.com/c/3mpj2oPW,RF-02; RF-03,Web,Sin prerequisito pendiente del plan.
-CH-12,42,Christopher Solis,CÓDIGO,Ordenar suscripciones web,https://trello.com/c/oawT2niZ,RF-02; RF-03,Web,Depende de: VI-02 (Victor Gonzales).
-CH-13,43,Christopher Solis,CÓDIGO,Limpiar filtros y distinguir búsqueda sin coincidencias,https://trello.com/c/hS8MSBDo,RF-02; RF-03,Web,"Depende de: CH-11 (Christopher Solis), CH-12 (Christopher Solis)."
-CH-14,44,Christopher Solis,CÓDIGO,Registrar minutos de uso desde Detalle web,https://trello.com/c/4Z77IYH6,RF-04,Web,Depende de: VI-10 (Victor Gonzales).
-CH-15,45,Christopher Solis,CÓDIGO,Mostrar historial de uso web por fecha,https://trello.com/c/kb1AN6uo,RF-04,Web,Depende de: VI-10 (Victor Gonzales).
-CH-16,46,Christopher Solis,CÓDIGO,Avisar cambios sin guardar en formularios web,https://trello.com/c/kevH5711,RF-02; RF-08,Web,Depende de: CH-09 (Christopher Solis).
-CH-17,47,Christopher Solis,CÓDIGO,Construir página web Calendario,https://trello.com/c/W2OvNtMD,RF-12,Web,Sin prerequisito pendiente del plan.
-CH-18,48,Christopher Solis,CÓDIGO,Ubicar cobros en cada fecha del calendario web,https://trello.com/c/8jyFr5IX,RF-12,Web,"Depende de: CH-17 (Christopher Solis), VI-07 (Victor Gonzales)."
-CH-19,49,Christopher Solis,CÓDIGO,Navegar meses y volver a hoy en web,https://trello.com/c/eIMmEazV,RF-12,Web,Depende de: CH-17 (Christopher Solis).
-CH-20,50,Christopher Solis,CÓDIGO,Mostrar detalle del día seleccionado,https://trello.com/c/xGR9OY7I,RF-12,Web,Depende de: CH-18 (Christopher Solis).
-CH-21,51,Christopher Solis,CÓDIGO,Crear agenda web de próximos cobros,https://trello.com/c/TSgKhV0n,RF-12,Web,Depende de: VI-07 (Victor Gonzales).
-CH-22,52,Christopher Solis,CÓDIGO,Integrar motivo y ahorro en recomendaciones web,https://trello.com/c/7IQ4ZAoh,RF-18,Web,"Depende de: VI-17 (Victor Gonzales), MX-25 (Maximiliano Sáez), AN-20 (Andrea Travola)."
-CH-23,53,Christopher Solis,DISEÑO,Preparar ruta y estructura web de Cuentas conectadas,https://trello.com/c/Zqv6DKcj,RF-05,Web,Sin prerequisito pendiente del plan.
-CH-24,54,Christopher Solis,CÓDIGO,Verificar y completar modo oscuro web,https://trello.com/c/rFxdHZ4T,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
-CH-25,55,Christopher Solis,CÓDIGO,Mejorar accesibilidad de formularios y modales,https://trello.com/c/oAPwjANk,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
-CH-26,56,Christopher Solis,CÓDIGO,Integrar estado vacío de Recomendaciones web,https://trello.com/c/2XVDQmOT,RF-18,Web,"Depende de: AN-20 (Andrea Travola), VI-17 (Victor Gonzales)."
-CH-27,57,Christopher Solis,CÓDIGO,Mostrar progreso de importación de documentos,https://trello.com/c/VpNyZtdX,RF-05; RF-19,Web,Depende de: FE-08 (Felipe Orellana).
-CH-28,58,Christopher Solis,REVISIÓN,Revisar PR del frontend y contratos compartidos,https://trello.com/c/tVFFqff7,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
-CH-29,59,Christopher Solis,CÓDIGO,Cambiar contraseña desde Configuración web,https://trello.com/c/V6perYcs,RF-01.5,Web,"Depende de: MX-05 (Maximiliano Sáez), MX-30 (Maximiliano Sáez)."
-CH-30,60,Christopher Solis,CÓDIGO,Configurar canales y tipos de alertas en web,https://trello.com/c/amcHK31A,RF-09,Web,Depende de: FE-21 (Felipe Orellana).
-CH-31,61,Christopher Solis,CÓDIGO,"Integrar filtros, lectura y contador en alertas web",https://trello.com/c/Ehc2wPV8,RF-09,Web,"Depende de: SE-01 (Sebastian Mena), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana)."
-CH-32,62,Christopher Solis,CÓDIGO,Descartar recomendaciones desde web,https://trello.com/c/MoVZesZf,RF-18,Web,"Depende de: AN-20 (Andrea Travola), VI-18 (Victor Gonzales)."
-FE-01,64,Felipe Orellana,CÓDIGO,Modelar cuentas conectadas por organización,https://trello.com/c/buNv3GqZ,RF-05; RF-20,API / operación compartida,"Depende de: VI-27 (Victor Gonzales), FE-06 (Felipe Orellana)."
-FE-02,65,Felipe Orellana,CÓDIGO,Listar cuentas conectadas y su estado,https://trello.com/c/r7Naqppy,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
-FE-03,66,Felipe Orellana,CÓDIGO,Iniciar OAuth de Gmail o Outlook,https://trello.com/c/LNHraYWk,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
-FE-04,67,Felipe Orellana,CÓDIGO,Procesar callback OAuth y guardar credenciales,https://trello.com/c/KQpZp8dA,RF-05; RF-20,API / operación compartida,"Depende de: FE-03 (Felipe Orellana), FE-06 (Felipe Orellana)."
-FE-05,68,Felipe Orellana,CÓDIGO,Desconectar cuenta y revocar acceso,https://trello.com/c/vWLCdptN,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
-FE-06,69,Felipe Orellana,CÓDIGO,Cifrar tokens de conectores y gestionar claves,https://trello.com/c/WlzGQCY9,RF-05; RF-20,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-FE-07,70,Felipe Orellana,CÓDIGO,Validar y recibir archivos CSV y cartolas,https://trello.com/c/tV3Z3NSh,RF-05; RF-19,API / operación compartida,Depende de: FE-08 (Felipe Orellana).
-FE-08,71,Felipe Orellana,CÓDIGO,Modelar importaciones y exponer su progreso,https://trello.com/c/b5S7T4F3,RF-05; RF-19,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-FE-09,72,Felipe Orellana,CÓDIGO,Procesar CSV y detectar cobros recurrentes,https://trello.com/c/Fg6Ahh6t,RF-05; RF-19,API / operación compartida,"Depende de: FE-07 (Felipe Orellana), FE-12 (Felipe Orellana)."
-FE-10,73,Felipe Orellana,CÓDIGO,Previsualizar cobros detectados,https://trello.com/c/wEyBQl1F,RF-05; RF-19,API / operación compartida,Depende de: FE-09 (Felipe Orellana).
-FE-11,74,Felipe Orellana,CÓDIGO,Confirmar candidatos y crear o actualizar suscripciones,https://trello.com/c/e9NEuzGF,RF-05; RF-19,API / operación compartida,Depende de: FE-10 (Felipe Orellana).
-FE-12,75,Felipe Orellana,CÓDIGO,Normalizar nombres de proveedores,https://trello.com/c/b715JBnS,RF-05,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-FE-13,76,Felipe Orellana,CÓDIGO,Leer correo con límites y sanitización,https://trello.com/c/tvqX9hCl,RF-05,API / operación compartida,"Depende de: FE-04 (Felipe Orellana), FE-08 (Felipe Orellana), FE-12 (Felipe Orellana)."
-FE-14,77,Felipe Orellana,CÓDIGO,Gestionar errores de conectores y reautorización,https://trello.com/c/FkIFKmro,RF-05,API / operación compartida,"Depende de: FE-04 (Felipe Orellana), FE-13 (Felipe Orellana)."
-FE-15,78,Felipe Orellana,PRUEBAS,Probar OAuth e importación con mocks,https://trello.com/c/rMJsQZoM,RF-05,API / operación compartida,"Depende de: FE-05 (Felipe Orellana), FE-11 (Felipe Orellana), FE-14 (Felipe Orellana)."
-FE-16,79,Felipe Orellana,CÓDIGO,Modelar alertas y estados de lectura,https://trello.com/c/i5DbjtUy,RF-09,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-FE-17,80,Felipe Orellana,CÓDIGO,Generar alertas de próximos cobros,https://trello.com/c/PnmyWai0,RF-09,API / operación compartida,"Depende de: FE-16 (Felipe Orellana), FE-21 (Felipe Orellana)."
-FE-18,81,Felipe Orellana,CÓDIGO,Generar avisos de fin de prueba gratuita,https://trello.com/c/11MyWDFn,RF-09,API / operación compartida,"Depende de: FE-16 (Felipe Orellana), FE-21 (Felipe Orellana)."
-FE-19,82,Felipe Orellana,CÓDIGO,Listar alertas con filtro y paginación,https://trello.com/c/S4Q2TMgo,RF-09,API / operación compartida,Depende de: FE-16 (Felipe Orellana).
-FE-20,83,Felipe Orellana,CÓDIGO,Marcar alertas leídas y consultar contador,https://trello.com/c/zJswjNNC,RF-09,API / operación compartida,Depende de: FE-16 (Felipe Orellana).
-FE-21,84,Felipe Orellana,CÓDIGO,Leer y guardar preferencias de notificación,https://trello.com/c/NEwMlEHd,RF-09,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-FE-22,85,Felipe Orellana,CÓDIGO,Respetar límite diario push y horario de descanso,https://trello.com/c/1eRM6IlO,RF-09,API / operación compartida,"Depende de: FE-17 (Felipe Orellana), FE-18 (Felipe Orellana), FE-21 (Felipe Orellana)."
-FE-23,86,Felipe Orellana,CÓDIGO,Anular alertas pendientes cuando cambia la suscripción,https://trello.com/c/57OUDmhC,RF-09,API / operación compartida,"Depende de: FE-24 (Felipe Orellana), VI-03 (Victor Gonzales)."
-FE-24,87,Felipe Orellana,CÓDIGO,Conectar Notifications con RabbitMQ,https://trello.com/c/KVs2FHQq,RF-09,API / operación compartida,"Depende de: MX-21 (Maximiliano Sáez), FE-16 (Felipe Orellana), VI-26 (Victor Gonzales)."
-FE-25,88,Felipe Orellana,PRUEBAS,"Probar alertas, preferencias y límites",https://trello.com/c/lcVQJgSg,RF-09,API / operación compartida,"Depende de: FE-17 (Felipe Orellana), FE-18 (Felipe Orellana), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana), FE-21 (Felipe Orellana), FE-22 (Felipe Orellana), FE-23 (Felipe Orellana)."
-FE-26,89,Felipe Orellana,REVISIÓN,Revisar PR de conectores y notificaciones,https://trello.com/c/oNA1gbVG,TRANSVERSAL,API / operación compartida,Sin prerequisito pendiente del plan.
-FE-27,90,Felipe Orellana,DOCUMENTACIÓN,Documentar operación del lector de correo y permisos,https://trello.com/c/jANO777x,RF-05,API / operación compartida,"Depende de: FE-13 (Felipe Orellana), FE-14 (Felipe Orellana)."
-FE-28,91,Felipe Orellana,CÓDIGO,Agregar uso por periodo en Analytics,https://trello.com/c/63vEhZW0,RF-04; RF-18,API / operación compartida,"Depende de: VI-10 (Victor Gonzales), VI-27 (Victor Gonzales)."
-FE-29,92,Felipe Orellana,CÓDIGO,Calcular puntaje de uso y señalar posible bajo uso,https://trello.com/c/Bcm3lH7v,RF-04; RF-18,API / operación compartida,Depende de: FE-28 (Felipe Orellana).
-VI-01,94,Victor Gonzales,CÓDIGO,Añadir búsqueda por nombre al listado,https://trello.com/c/acTJGaJ2,RF-02,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-02,95,Victor Gonzales,CÓDIGO,Ordenar suscripciones en servidor,https://trello.com/c/oZhA4zru,RF-02,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-03,96,Victor Gonzales,CÓDIGO,Cancelar suscripción sin hacer soft-delete,https://trello.com/c/UqvYhFaM,RF-03; RF-10,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
-VI-04,97,Victor Gonzales,CÓDIGO,Consultar historial de cobros por suscripción,https://trello.com/c/b7IwUpsW,RF-05,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-05,98,Victor Gonzales,CÓDIGO,Definir presupuesto mensual y comparar proyección,https://trello.com/c/lvpGgSMo,RF-13,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-06,99,Victor Gonzales,CÓDIGO,Exponer resumen agregado del panel,https://trello.com/c/hLihvoFr,RF-11,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-07,100,Victor Gonzales,CÓDIGO,Exponer calendario de cobros por mes,https://trello.com/c/sN6AkV1V,RF-12,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-08,101,Victor Gonzales,ESTUDIO + CÓDIGO,Precisar e implementar máquina de estados,https://trello.com/c/tzFyAKmf,RF-03,API / operación compartida,Sin prerequisito pendiente del plan.
-VI-09,102,Victor Gonzales,CÓDIGO,Reactivar o confirmar un cobro detectado,https://trello.com/c/dhUYBgLf,RF-03,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
-VI-10,103,Victor Gonzales,CÓDIGO,"Completar uso, agregados mensuales y última actividad",https://trello.com/c/zGMe27Ed,RF-04,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
-VI-11,104,Victor Gonzales,PRUEBAS,Probar ciclo de vida y soft-delete,https://trello.com/c/vgTWw7Td,RF-03; RF-10; RF-20,API / operación compartida,"Depende de: VI-03 (Victor Gonzales), VI-09 (Victor Gonzales), VI-10 (Victor Gonzales)."
-VI-12,105,Victor Gonzales,DOCUMENTACIÓN,"Documentar filtros, orden y paginación en OpenAPI",https://trello.com/c/xx2hLRVM,RF-02,API / operación compartida,"Depende de: VI-01 (Victor Gonzales), VI-02 (Victor Gonzales), VI-04 (Victor Gonzales), VI-06 (Victor Gonzales), VI-07 (Victor Gonzales)."
-VI-13,106,Victor Gonzales,CÓDIGO,Levantar todos los servicios con healthchecks,https://trello.com/c/3FEwdub4,TRANSVERSAL,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-VI-14,107,Victor Gonzales,CÓDIGO,Preparar entorno backend para app móvil,https://trello.com/c/YCvcIhbg,TRANSVERSAL,API / operación compartida,Depende de: VI-13 (Victor Gonzales).
-VI-15,108,Victor Gonzales,DOCUMENTACIÓN,Documentar y verificar Docker en Windows,https://trello.com/c/t1Zx3p2l,TRANSVERSAL,API / operación compartida,"Depende de: VI-13 (Victor Gonzales), MX-23 (Maximiliano Sáez)."
-VI-16,109,Victor Gonzales,PRUEBAS,Verificar conexión real móvil–backend,https://trello.com/c/l1zvDwFB,TRANSVERSAL,API / operación compartida,"Depende de: VI-14 (Victor Gonzales), SE-10 (Sebastian Mena), MX-10 (Maximiliano Sáez)."
-VI-17,110,Victor Gonzales,CÓDIGO,"Listar recomendaciones, motivo y ahorro",https://trello.com/c/UH8sY3ox,RF-18,API / operación compartida,"Depende de: FE-29 (Felipe Orellana), VI-20 (Victor Gonzales), VI-21 (Victor Gonzales), VI-27 (Victor Gonzales)."
-VI-18,111,Victor Gonzales,CÓDIGO,Descartar recomendaciones,https://trello.com/c/vRoim5xk,RF-18,API / operación compartida,Depende de: VI-17 (Victor Gonzales).
-VI-19,112,Victor Gonzales,CÓDIGO,Detectar alza de tarifa y posible doble cobro,https://trello.com/c/8RXrZGeX,RF-07; RF-09,API / operación compartida,"Depende de: VI-04 (Victor Gonzales), VI-27 (Victor Gonzales)."
-VI-20,113,Victor Gonzales,CÓDIGO,Recomendar consolidación por categoría,https://trello.com/c/4YOUjM59,RF-18,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-VI-21,114,Victor Gonzales,ESTUDIO,Aplicar umbral mínimo de ahorro,https://trello.com/c/a7dFwbZL,RF-18,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-VI-22,115,Victor Gonzales,CÓDIGO,Implementar proxy del asistente financiero Premium,https://trello.com/c/gyMbvJyK,RF-17; RF-18,API / operación compartida,"Depende de: MX-09 (Maximiliano Sáez), MX-24 (Maximiliano Sáez), VI-23 (Victor Gonzales), VI-27 (Victor Gonzales)."
-VI-23,116,Victor Gonzales,CÓDIGO,Sanitizar contexto antes de enviar a IA,https://trello.com/c/tYTnJ2pr,RF-18; RF-20,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
-VI-24,117,Victor Gonzales,CÓDIGO,Mejorar wrapper de IA y limitar llamadas,https://trello.com/c/SiR7NyEs,RF-18; RN-24; RNF-20,API / operación compartida,Depende de: VI-22 (Victor Gonzales).
-VI-25,118,Victor Gonzales,CÓDIGO,Exportar cobros y suscripciones del periodo en CSV,https://trello.com/c/7HpYL5Cl,RF-15,API / operación compartida,Depende de: VI-04 (Victor Gonzales).
-VI-26,119,Victor Gonzales,CÓDIGO,Publicar eventos de dominio de suscripciones,https://trello.com/c/7zMEZHt0,TRANSVERSAL,API / operación compartida,Depende de: MX-21 (Maximiliano Sáez).
-VI-27,DERIVADA,Victor Gonzales,CÓDIGO,"Crear bases ejecutables de Connectors, Analytics y Notifications",https://trello.com/c/c6WkBP1E,TRANSVERSAL,API / operación compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
-SE-01,121,Sebastian Mena,DISEÑO,Construir estructura del Centro web de alertas,https://trello.com/c/QPSuIkdU,RF-09,Web,Sin prerequisito pendiente del plan.
-SE-02,122,Sebastian Mena,CÓDIGO,Mostrar restricciones Premium en web,https://trello.com/c/h550BZbL,RF-17,Web,Depende de: MX-09 (Maximiliano Sáez).
-SE-03,123,Sebastian Mena,CÓDIGO,Implementar estados de contratación Premium en web,https://trello.com/c/QKhoOJiU,RF-17,Web,"Depende de: MX-16 (Maximiliano Sáez), MX-17 (Maximiliano Sáez), MX-19 (Maximiliano Sáez)."
-SE-04,124,Sebastian Mena,CÓDIGO,Integrar calendario en el cliente Windows,https://trello.com/c/7BqFZ3EY,RF-12,Windows,"Depende de: MX-23 (Maximiliano Sáez), CH-18 (Christopher Solis), CH-19 (Christopher Solis), CH-20 (Christopher Solis)."
-SE-05,125,Sebastian Mena,CÓDIGO,Inicializar app móvil Expo y comprobar arranque,https://trello.com/c/9hDu662U,TRANSVERSAL,Móvil,Sin prerequisito pendiente del plan.
-SE-06,126,Sebastian Mena,CÓDIGO,Configurar navegación principal móvil,https://trello.com/c/IqFU388Q,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
-SE-07,127,Sebastian Mena,CÓDIGO,Configurar cliente HTTP móvil por entorno,https://trello.com/c/pOMTSbSu,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
-SE-08,128,Sebastian Mena,CÓDIGO,Implementar almacenamiento seguro y sesión móvil,https://trello.com/c/0209aDl9,RF-01.2; RF-20,Móvil,Depende de: SE-05 (Sebastian Mena).
-SE-09,129,Sebastian Mena,DISEÑO,Construir pantalla móvil Iniciar sesión,https://trello.com/c/RAyxXTB0,RF-01.2,Móvil,Depende de: SE-06 (Sebastian Mena).
-SE-10,130,Sebastian Mena,CÓDIGO,Conectar Login móvil con Auth,https://trello.com/c/xk8uvKE7,RF-01.2,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-09 (Sebastian Mena)."
-SE-11,131,Sebastian Mena,DISEÑO,Construir pantalla móvil Registro,https://trello.com/c/qiCX7XzC,RF-01.1,Móvil,Depende de: SE-06 (Sebastian Mena).
-SE-12,132,Sebastian Mena,CÓDIGO,Conectar Registro móvil y validaciones del servidor,https://trello.com/c/OZkuXEKU,RF-01.1,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-11 (Sebastian Mena), MX-30 (Maximiliano Sáez)."
-SE-13,133,Sebastian Mena,CÓDIGO,Mostrar cuenta creada y continuar a Login móvil,https://trello.com/c/XgWXXap5,RF-01.1,Móvil,Depende de: SE-12 (Sebastian Mena).
-SE-14,134,Sebastian Mena,CÓDIGO,Solicitar recuperación desde móvil,https://trello.com/c/qqlELTeB,RF-01.4,Móvil,"Depende de: MX-02 (Maximiliano Sáez), SE-06 (Sebastian Mena), SE-07 (Sebastian Mena)."
-SE-15,135,Sebastian Mena,CÓDIGO,Cerrar sesión y limpiar datos privados en móvil,https://trello.com/c/4UasOTuF,RF-01.6,Móvil,"Depende de: SE-08 (Sebastian Mena), MX-29 (Maximiliano Sáez)."
-SE-16,136,Sebastian Mena,CÓDIGO,Volver a Login cuando la sesión móvil no sea válida,https://trello.com/c/vX3FKzw7,RF-01.2; RF-20,Móvil,"Depende de: SE-08 (Sebastian Mena), MX-10 (Maximiliano Sáez)."
-SE-17,137,Sebastian Mena,CÓDIGO,Construir Home móvil de suscripciones,https://trello.com/c/d48mufb1,RF-02,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
-SE-18,138,Sebastian Mena,CÓDIGO,Crear tarjeta móvil de suscripción,https://trello.com/c/cFFNwiOl,RF-02,Móvil,Depende de: SE-05 (Sebastian Mena).
-SE-19,139,Sebastian Mena,CÓDIGO,Conectar listado móvil paginado,https://trello.com/c/7rn6rOqr,RF-02,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-17 (Sebastian Mena), SE-18 (Sebastian Mena)."
-SE-20,140,Sebastian Mena,CÓDIGO,Mostrar vacío móvil y acceso a primera suscripción,https://trello.com/c/toaWAanB,RF-02,Móvil,"Depende de: SE-17 (Sebastian Mena), AN-28 (Andrea Travola)."
-SE-21,141,Sebastian Mena,CÓDIGO,Construir Detalle móvil de suscripción,https://trello.com/c/bd9E5mBT,RF-02,Móvil,"Depende de: SE-06 (Sebastian Mena), SE-07 (Sebastian Mena), SE-18 (Sebastian Mena)."
-SE-22,142,Sebastian Mena,CÓDIGO,Crear formulario móvil de nueva suscripción,https://trello.com/c/OPBoG41Q,RF-02,Móvil,Depende de: SE-06 (Sebastian Mena).
-SE-23,143,Sebastian Mena,CÓDIGO,Conectar creación móvil y actualizar listado,https://trello.com/c/V47DRMKU,RF-02,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-22 (Sebastian Mena)."
-SE-24,144,Sebastian Mena,CÓDIGO,Crear formulario móvil de edición,https://trello.com/c/bRGjlAM4,RF-08,Móvil,Depende de: SE-21 (Sebastian Mena).
-SE-25,145,Sebastian Mena,CÓDIGO,Conectar PATCH móvil y actualizar detalle,https://trello.com/c/u1DwU8tq,RF-08,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-24 (Sebastian Mena)."
-SE-26,146,Sebastian Mena,CÓDIGO,Confirmar retiro y ejecutar DELETE móvil,https://trello.com/c/ahoZdXYv,RF-10,Móvil,Depende de: SE-21 (Sebastian Mena).
-SE-27,147,Sebastian Mena,CÓDIGO,Aplicar filtros móviles por estado y fecha,https://trello.com/c/IxYRhHLp,RF-02,Móvil,Depende de: SE-19 (Sebastian Mena).
-SE-28,148,Sebastian Mena,CÓDIGO,Registrar minutos de uso desde móvil,https://trello.com/c/vkvaNKHf,RF-04,Móvil,"Depende de: SE-21 (Sebastian Mena), VI-10 (Victor Gonzales)."
-SE-29,149,Sebastian Mena,CÓDIGO,Ordenar listado móvil y mostrar criterio,https://trello.com/c/V3K2mDjk,RF-02,Móvil,"Depende de: SE-19 (Sebastian Mena), VI-02 (Victor Gonzales)."
-SE-30,150,Sebastian Mena,CÓDIGO,Mostrar historial móvil de uso por fecha,https://trello.com/c/RCLbTxsE,RF-04,Móvil,"Depende de: SE-21 (Sebastian Mena), VI-10 (Victor Gonzales)."
-SE-31,151,Sebastian Mena,CÓDIGO,Avisar cambios sin guardar en móvil,https://trello.com/c/UHEjiCc8,RF-02; RF-08,Móvil,"Depende de: SE-22 (Sebastian Mena), SE-24 (Sebastian Mena)."
-SE-32,152,Sebastian Mena,CÓDIGO,Configurar preferencias de notificación móvil,https://trello.com/c/65tJtsAy,RF-09,Móvil,"Depende de: AN-04 (Andrea Travola), FE-21 (Felipe Orellana)."
-AN-01,156,Andrea Travola,CÓDIGO,Conectar resumen de gasto del Panel móvil,https://trello.com/c/vy9kprqY,RF-11,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola), VI-06 (Victor Gonzales)."
-AN-02,157,Andrea Travola,CÓDIGO,Visualizar gastos móviles con alternativa textual,https://trello.com/c/dSRJFYjg,RF-11,Móvil,Depende de: AN-01 (Andrea Travola).
-AN-03,158,Andrea Travola,CÓDIGO,Mostrar y editar Perfil móvil,https://trello.com/c/npqDyS0f,RF-01.5,Móvil,"Depende de: SE-06 (Sebastian Mena), SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), MX-06 (Maximiliano Sáez)."
-AN-04,159,Andrea Travola,CÓDIGO,Construir Configuración móvil,https://trello.com/c/wIdimCde,TRANSVERSAL,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
-AN-05,160,Andrea Travola,DISEÑO,Maquetar Recomendaciones móviles y detalle,https://trello.com/c/9PVOeWba,RF-18,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
-AN-06,161,Andrea Travola,CÓDIGO,Mostrar cuentas conectadas en móvil,https://trello.com/c/cRKUn7r3,RF-05,Móvil,"Depende de: SE-06 (Sebastian Mena), FE-02 (Felipe Orellana), AN-28 (Andrea Travola)."
-AN-07,162,Andrea Travola,CÓDIGO,Construir calendario y agenda móviles,https://trello.com/c/Mx4AUswP,RF-12,Móvil,"Depende de: SE-06 (Sebastian Mena), VI-07 (Victor Gonzales), AN-28 (Andrea Travola)."
-AN-08,163,Andrea Travola,CÓDIGO,Mostrar planes y contratación Premium móvil,https://trello.com/c/G8WRcx9M,RF-17,Móvil,"Depende de: SE-06 (Sebastian Mena), MX-16 (Maximiliano Sáez), MX-17 (Maximiliano Sáez), MX-19 (Maximiliano Sáez)."
-AN-09,164,Andrea Travola,CÓDIGO,Iniciar autorización de correo desde móvil,https://trello.com/c/sv09xMv9,RF-05,Móvil,"Depende de: SE-06 (Sebastian Mena), FE-03 (Felipe Orellana), VI-14 (Victor Gonzales)."
-AN-10,165,Andrea Travola,DISEÑO,Construir Centro móvil de alertas,https://trello.com/c/NNmweOpt,RF-09,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
-AN-11,166,Andrea Travola,CÓDIGO,Mostrar restricciones Premium móviles,https://trello.com/c/NkYAT7cK,RF-17,Móvil,"Depende de: MX-09 (Maximiliano Sáez), SE-06 (Sebastian Mena)."
-AN-12,167,Andrea Travola,CÓDIGO,Verificar correo desde la app móvil,https://trello.com/c/pDYJXBnu,RF-01.1; RF-01.5,Móvil,"Depende de: MX-28 (Maximiliano Sáez), SE-06 (Sebastian Mena), VI-14 (Victor Gonzales)."
-AN-13,168,Andrea Travola,CÓDIGO,Verificar correo desde web,https://trello.com/c/JXcRumua,RF-01.1; RF-01.5,Web,Depende de: MX-28 (Maximiliano Sáez).
-AN-14,169,Andrea Travola,DISEÑO,Preparar UX y componentes de recuperación web,https://trello.com/c/j2JEE0qA,RF-01.4,Web,Sin prerequisito pendiente del plan.
-AN-15,170,Andrea Travola,CÓDIGO,Iniciar conexión Gmail/Outlook desde web,https://trello.com/c/D7LInCPk,RF-05,Web,"Depende de: CH-23 (Christopher Solis), FE-03 (Felipe Orellana)."
-AN-16,171,Andrea Travola,CÓDIGO,Mostrar retorno OAuth en web,https://trello.com/c/3jYHgKTg,RF-05,Web,"Depende de: AN-15 (Andrea Travola), FE-04 (Felipe Orellana)."
-AN-17,172,Andrea Travola,CÓDIGO,Integrar listado y desconexión de cuentas web,https://trello.com/c/NXXfxTqp,RF-05,Web,"Depende de: CH-23 (Christopher Solis), FE-02 (Felipe Orellana), FE-05 (Felipe Orellana)."
-AN-18,173,Andrea Travola,CÓDIGO,Implementar borrado de cuenta en web,https://trello.com/c/rWE1hZqB,RF-01.7,Web,Depende de: MX-07 (Maximiliano Sáez).
-AN-19,174,Andrea Travola,CÓDIGO,Implementar borrado de cuenta en móvil,https://trello.com/c/CWYMRwIS,RF-01.7,Móvil,"Depende de: MX-07 (Maximiliano Sáez), SE-06 (Sebastian Mena), SE-08 (Sebastian Mena)."
-AN-20,175,Andrea Travola,CÓDIGO,Construir página web de Recomendaciones,https://trello.com/c/7RPNKw5a,RF-18,Web,Depende de: VI-17 (Victor Gonzales).
-AN-21,176,Andrea Travola,CÓDIGO,Integrar página móvil de Recomendaciones,https://trello.com/c/4S4wS8rM,RF-18,Móvil,"Depende de: AN-05 (Andrea Travola), VI-17 (Victor Gonzales)."
-AN-22,177,Andrea Travola,CÓDIGO,Construir Informes web por periodo,https://trello.com/c/yFQhVhNE,RF-11; RF-15,Web,"Depende de: VI-06 (Victor Gonzales), VI-04 (Victor Gonzales), VI-25 (Victor Gonzales)."
-AN-23,178,Andrea Travola,CÓDIGO,Construir Informes móviles por periodo,https://trello.com/c/eKV62lcI,RF-11; RF-15,Móvil,"Depende de: SE-06 (Sebastian Mena), VI-06 (Victor Gonzales), AN-28 (Andrea Travola)."
-AN-24,179,Andrea Travola,CÓDIGO,Integrar lectura y badge en alertas móviles,https://trello.com/c/AH77Jku7,RF-09,Móvil,"Depende de: AN-10 (Andrea Travola), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana)."
-AN-25,180,Andrea Travola,CÓDIGO,Descartar recomendaciones desde móvil,https://trello.com/c/MlYxzLQA,RF-18,Móvil,"Depende de: AN-21 (Andrea Travola), VI-18 (Victor Gonzales)."
-AN-26,181,Andrea Travola,CÓDIGO,Compartir o guardar resumen de gastos móvil,https://trello.com/c/2MBDSzTk,RF-11; RF-15,Móvil,"Depende de: AN-23 (Andrea Travola), VI-25 (Victor Gonzales)."
-AN-27,182,Andrea Travola,CÓDIGO,Capturar callback OAuth móvil y mostrar resultado,https://trello.com/c/nxexYbrl,RF-05,Móvil,"Depende de: AN-09 (Andrea Travola), FE-04 (Felipe Orellana)."
-AN-28,183,Andrea Travola,CÓDIGO,Crear estados reutilizables para pantallas móviles,https://trello.com/c/gwScgJMJ,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
+id,linea,responsable,tipo,tarea,tarjeta,requisitos,alcance,dependencias
+MX-01,3,Maximiliano Sáez,REVISIÓN,"Revisar PR de backend, contratos e integración",https://trello.com/c/EQ0vkrHA,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
+MX-02,4,Maximiliano Sáez,CÓDIGO,Solicitar recuperación de contraseña,https://trello.com/c/HO7dEi6N,RF-01.4,API compartida,Depende de: MX-30 (Maximiliano Sáez).
+MX-03,5,Maximiliano Sáez,CÓDIGO,Confirmar recuperación y establecer nueva contraseña,https://trello.com/c/DCZS7Z6i,RF-01.4,API compartida,"Depende de: MX-02 (Maximiliano Sáez), MX-30 (Maximiliano Sáez)."
+MX-04,6,Maximiliano Sáez,CÓDIGO,"Resolver tokens de recuperación vencidos, inválidos y usados",https://trello.com/c/pcOZ8DyP,RF-01.4,API compartida,Depende de: MX-03 (Maximiliano Sáez).
+MX-05,7,Maximiliano Sáez,CÓDIGO,Cambiar contraseña desde una sesión autenticada,https://trello.com/c/up0nSpgG,RF-01.5,API compartida,"Depende de: MX-30 (Maximiliano Sáez), MX-29 (Maximiliano Sáez)."
+MX-06,8,Maximiliano Sáez,CÓDIGO,Actualizar nombre del perfil y contrato de correo,https://trello.com/c/5kr9ZaP8,RF-01.5,API compartida,Sin prerequisito pendiente del plan.
+MX-07,9,Maximiliano Sáez,CÓDIGO,Eliminar cuenta y coordinar limpieza entre servicios,https://trello.com/c/50Mkov2i,RF-01.7; RF-20,API compartida,"Depende de: MX-29 (Maximiliano Sáez), FE-05 (Felipe Orellana)."
+MX-08,10,Maximiliano Sáez,CÓDIGO,Exponer plan vigente en el perfil,https://trello.com/c/rM7nrprc,RF-17; RF-20,API compartida,Depende de: MX-15 (Maximiliano Sáez).
+MX-09,11,Maximiliano Sáez,CÓDIGO,Definir permisos y features por plan,https://trello.com/c/cP9ziws6,RF-17; RF-20,API compartida,Depende de: MX-08 (Maximiliano Sáez).
+MX-10,12,Maximiliano Sáez,CÓDIGO,"Completar refresh, rotación y revocación de tokens",https://trello.com/c/dlybrwRf,RF-01.6; RF-20,API compartida,Depende de: MX-29 (Maximiliano Sáez).
+MX-11,13,Maximiliano Sáez,ESTUDIO + CÓDIGO,Estudiar e implementar acceso con Google,https://trello.com/c/o9pCDLIM,RF-01.3,API compartida,Sin prerequisito pendiente del plan.
+MX-12,14,Maximiliano Sáez,PRUEBAS,Ampliar pruebas de registro y organización,https://trello.com/c/MWCPTdFH,RF-01.1; RF-20,API compartida,Sin prerequisito pendiente del plan.
+MX-13,15,Maximiliano Sáez,PRUEBAS,Verificar aislamiento de usuarios y organizaciones,https://trello.com/c/3RpH5SWy,RF-20,API compartida,"Depende de: MX-06 (Maximiliano Sáez), MX-07 (Maximiliano Sáez)."
+MX-14,16,Maximiliano Sáez,DOCUMENTACIÓN,Documentar nuevos contratos Auth en OpenAPI,https://trello.com/c/USauKRiT,RF-01; RF-17,API compartida,"Depende de: MX-04 (Maximiliano Sáez), MX-05 (Maximiliano Sáez), MX-06 (Maximiliano Sáez), MX-07 (Maximiliano Sáez), MX-08 (Maximiliano Sáez), MX-09 (Maximiliano Sáez), MX-10 (Maximiliano Sáez), MX-11 (Maximiliano Sáez), MX-28 (Maximiliano Sáez)."
+MX-15,17,Maximiliano Sáez,CÓDIGO,Modelar planes y estados de contratación,https://trello.com/c/bKmWM5xh,RF-17; RF-20,API compartida,Sin prerequisito pendiente del plan.
+MX-16,18,Maximiliano Sáez,CÓDIGO,Listar planes y precios,https://trello.com/c/JxKWL5Wp,RF-17; RF-20,API compartida,Depende de: MX-15 (Maximiliano Sáez).
+MX-17,19,Maximiliano Sáez,CÓDIGO,Iniciar contratación mediante pasarela o mock,https://trello.com/c/mhEXuxIA,RF-17; RF-20,API compartida,Depende de: MX-16 (Maximiliano Sáez).
+MX-18,20,Maximiliano Sáez,CÓDIGO,Confirmar pagos con webhook idempotente,https://trello.com/c/GR6fDDrU,RF-17; RF-20,API compartida,Depende de: MX-17 (Maximiliano Sáez).
+MX-19,21,Maximiliano Sáez,CÓDIGO,Sincronizar features tras cambios de contratación,https://trello.com/c/lN3zwhlC,RF-17; RF-20,API compartida,"Depende de: MX-09 (Maximiliano Sáez), MX-18 (Maximiliano Sáez)."
+MX-20,22,Maximiliano Sáez,PRUEBAS,Probar contratación y autorización por plan,https://trello.com/c/KC6lAfT3,RF-17; RF-20,API compartida,Depende de: MX-19 (Maximiliano Sáez).
+MX-21,23,Maximiliano Sáez,ESTUDIO,Acordar contratos RabbitMQ y validar intercambio,https://trello.com/c/DgW1gqBf,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
+MX-22,24,Maximiliano Sáez,DOCUMENTACIÓN,Documentar matriz de requisitos y brechas,https://trello.com/c/mFzJLeUL,TRANSVERSAL,Transversal,Sin prerequisito pendiente del plan.
+MX-23,25,Maximiliano Sáez,ESTUDIO + CÓDIGO,Elegir y levantar cliente desktop Windows,https://trello.com/c/Ll8g4eCM,TRANSVERSAL,Windows,Sin prerequisito pendiente del plan.
+MX-24,26,Maximiliano Sáez,CÓDIGO,Aplicar timeout IA y límites de ingesta,https://trello.com/c/Ehiy29mN,RF-05; RF-18; RN-24; RN-25; RNF-20,API compartida,Depende de: VI-27 (Victor Gonzales).
+MX-25,27,Maximiliano Sáez,CÓDIGO,Explicar recomendaciones en lenguaje natural,https://trello.com/c/LWr1b2G7,RF-18,API compartida,"Depende de: VI-17 (Victor Gonzales), MX-24 (Maximiliano Sáez), VI-23 (Victor Gonzales)."
+MX-26,28,Maximiliano Sáez,PRUEBAS,Probar recomendaciones y degradación sin uso,https://trello.com/c/IQOxqtLx,RF-18,API compartida,"Depende de: VI-17 (Victor Gonzales), MX-24 (Maximiliano Sáez), MX-25 (Maximiliano Sáez)."
+MX-27,29,Maximiliano Sáez,CÓDIGO,Crear seed y simulación de registros de uso,https://trello.com/c/WR5yF8UG,RF-04,API compartida,Depende de: VI-10 (Victor Gonzales).
+MX-28,DERIVADA,Maximiliano Sáez,CÓDIGO,Implementar contrato backend de verificación de correo,https://trello.com/c/iJ5pbI0q,RF-01.1; RF-01.5,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
+MX-29,DERIVADA,Maximiliano Sáez,CÓDIGO,Revocar sesión en backend al cerrar sesión,https://trello.com/c/LKvkdcZ9,RF-01.6; RF-20,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
+MX-30,DERIVADA,Maximiliano Sáez,CÓDIGO,Alinear política de contraseña del backend,https://trello.com/c/fSEc3EdJ,RF-01.1; RF-01.4; RF-01.5,API compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
+CH-01,31,Christopher Solis,CÓDIGO,Proteger rutas privadas web,https://trello.com/c/8aJVV5UO,RF-01.2; RF-20,Web,Depende de: CH-02 (Christopher Solis).
+CH-02,32,Christopher Solis,CÓDIGO,Restaurar sesión web al recargar,https://trello.com/c/RasULQIn,RF-01.2; RF-20,Web,Sin prerequisito pendiente del plan.
+CH-03,33,Christopher Solis,CÓDIGO,Añadir cierre de sesión completo en web,https://trello.com/c/u74y9ZVQ,RF-01.6,Web,"Depende de: MX-29 (Maximiliano Sáez), CH-02 (Christopher Solis)."
+CH-04,34,Christopher Solis,CÓDIGO,Alinear validaciones de registro web,https://trello.com/c/45sQgIF5,RF-01.1,Web,Depende de: MX-30 (Maximiliano Sáez).
+CH-05,35,Christopher Solis,CÓDIGO,Mostrar u ocultar contraseña en Login y Registro,https://trello.com/c/sfQv7EGW,RF-01.1; RF-01.2,Web,Sin prerequisito pendiente del plan.
+CH-06,36,Christopher Solis,CÓDIGO,Solicitar recuperación de contraseña desde web,https://trello.com/c/xoFbp7JM,RF-01.4,Web,"Depende de: MX-02 (Maximiliano Sáez), AN-14 (Andrea Travola)."
+CH-07,37,Christopher Solis,CÓDIGO,Restablecer contraseña y resolver enlace inválido en web,https://trello.com/c/f6rh8kNq,RF-01.4,Web,"Depende de: MX-04 (Maximiliano Sáez), AN-14 (Andrea Travola), MX-30 (Maximiliano Sáez)."
+CH-08,38,Christopher Solis,CÓDIGO,Editar nombre desde Perfil web,https://trello.com/c/gsvVYIGY,RF-01.5,Web,Depende de: MX-06 (Maximiliano Sáez).
+CH-09,39,Christopher Solis,CÓDIGO,Completar validaciones del formulario de creación web,https://trello.com/c/G1nXsxJi,RF-02,Web,Sin prerequisito pendiente del plan.
+CH-10,40,Christopher Solis,CÓDIGO,Cancelar suscripción desde web sin borrarla,https://trello.com/c/5OQnSioe,RF-03; RF-10,Web,Depende de: VI-03 (Victor Gonzales).
+CH-11,41,Christopher Solis,CÓDIGO,Conectar filtros web de estado y fecha,https://trello.com/c/3mpj2oPW,RF-02; RF-03,Web,Sin prerequisito pendiente del plan.
+CH-12,42,Christopher Solis,CÓDIGO,Ordenar suscripciones web,https://trello.com/c/oawT2niZ,RF-02; RF-03,Web,Depende de: VI-02 (Victor Gonzales).
+CH-13,43,Christopher Solis,CÓDIGO,Limpiar filtros y distinguir búsqueda sin coincidencias,https://trello.com/c/hS8MSBDo,RF-02; RF-03,Web,"Depende de: CH-11 (Christopher Solis), CH-12 (Christopher Solis)."
+CH-14,44,Christopher Solis,CÓDIGO,Registrar minutos de uso desde Detalle web,https://trello.com/c/4Z77IYH6,RF-04,Web,Depende de: VI-10 (Victor Gonzales).
+CH-15,45,Christopher Solis,CÓDIGO,Mostrar historial de uso web por fecha,https://trello.com/c/kb1AN6uo,RF-04,Web,Depende de: VI-10 (Victor Gonzales).
+CH-16,46,Christopher Solis,CÓDIGO,Avisar cambios sin guardar en formularios web,https://trello.com/c/kevH5711,RF-02; RF-08,Web,Depende de: CH-09 (Christopher Solis).
+CH-17,47,Christopher Solis,CÓDIGO,Construir página web Calendario,https://trello.com/c/W2OvNtMD,RF-12,Web,Sin prerequisito pendiente del plan.
+CH-18,48,Christopher Solis,CÓDIGO,Ubicar cobros en cada fecha del calendario web,https://trello.com/c/8jyFr5IX,RF-12,Web,"Depende de: CH-17 (Christopher Solis), VI-07 (Victor Gonzales)."
+CH-19,49,Christopher Solis,CÓDIGO,Navegar meses y volver a hoy en web,https://trello.com/c/eIMmEazV,RF-12,Web,Depende de: CH-17 (Christopher Solis).
+CH-20,50,Christopher Solis,CÓDIGO,Mostrar detalle del día seleccionado,https://trello.com/c/xGR9OY7I,RF-12,Web,Depende de: CH-18 (Christopher Solis).
+CH-21,51,Christopher Solis,CÓDIGO,Crear agenda web de próximos cobros,https://trello.com/c/TSgKhV0n,RF-12,Web,Depende de: VI-07 (Victor Gonzales).
+CH-22,52,Christopher Solis,CÓDIGO,Integrar motivo y ahorro en recomendaciones web,https://trello.com/c/7IQ4ZAoh,RF-18,Web,"Depende de: VI-17 (Victor Gonzales), MX-25 (Maximiliano Sáez), AN-20 (Andrea Travola)."
+CH-23,53,Christopher Solis,DISEÑO,Preparar ruta y estructura web de Cuentas conectadas,https://trello.com/c/Zqv6DKcj,RF-05,Web,Sin prerequisito pendiente del plan.
+CH-24,54,Christopher Solis,CÓDIGO,Verificar y completar modo oscuro web,https://trello.com/c/rFxdHZ4T,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
+CH-25,55,Christopher Solis,CÓDIGO,Mejorar accesibilidad de formularios y modales,https://trello.com/c/oAPwjANk,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
+CH-26,56,Christopher Solis,CÓDIGO,Integrar estado vacío de Recomendaciones web,https://trello.com/c/2XVDQmOT,RF-18,Web,"Depende de: AN-20 (Andrea Travola), VI-17 (Victor Gonzales)."
+CH-27,57,Christopher Solis,CÓDIGO,Mostrar progreso de importación de documentos,https://trello.com/c/VpNyZtdX,RF-05; RF-19,Web,Depende de: FE-08 (Felipe Orellana).
+CH-28,58,Christopher Solis,REVISIÓN,Revisar PR del frontend y contratos compartidos,https://trello.com/c/tVFFqff7,TRANSVERSAL,Web,Sin prerequisito pendiente del plan.
+CH-29,59,Christopher Solis,CÓDIGO,Cambiar contraseña desde Configuración web,https://trello.com/c/V6perYcs,RF-01.5,Web,"Depende de: MX-05 (Maximiliano Sáez), MX-30 (Maximiliano Sáez)."
+CH-30,60,Christopher Solis,CÓDIGO,Configurar canales y tipos de alertas en web,https://trello.com/c/amcHK31A,RF-09,Web,Depende de: FE-21 (Felipe Orellana).
+CH-31,61,Christopher Solis,CÓDIGO,"Integrar filtros, lectura y contador en alertas web",https://trello.com/c/Ehc2wPV8,RF-09,Web,"Depende de: SE-01 (Sebastian Mena), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana)."
+CH-32,62,Christopher Solis,CÓDIGO,Descartar recomendaciones desde web,https://trello.com/c/MoVZesZf,RF-18,Web,"Depende de: AN-20 (Andrea Travola), VI-18 (Victor Gonzales)."
+FE-01,64,Felipe Orellana,CÓDIGO,Modelar cuentas conectadas por organización,https://trello.com/c/buNv3GqZ,RF-05; RF-20,API / operación compartida,"Depende de: VI-27 (Victor Gonzales), FE-06 (Felipe Orellana)."
+FE-02,65,Felipe Orellana,CÓDIGO,Listar cuentas conectadas y su estado,https://trello.com/c/r7Naqppy,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
+FE-03,66,Felipe Orellana,CÓDIGO,Iniciar OAuth de Gmail o Outlook,https://trello.com/c/LNHraYWk,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
+FE-04,67,Felipe Orellana,CÓDIGO,Procesar callback OAuth y guardar credenciales,https://trello.com/c/KQpZp8dA,RF-05; RF-20,API / operación compartida,"Depende de: FE-03 (Felipe Orellana), FE-06 (Felipe Orellana)."
+FE-05,68,Felipe Orellana,CÓDIGO,Desconectar cuenta y revocar acceso,https://trello.com/c/vWLCdptN,RF-05; RF-20,API / operación compartida,Depende de: FE-01 (Felipe Orellana).
+FE-06,69,Felipe Orellana,CÓDIGO,Cifrar tokens de conectores y gestionar claves,https://trello.com/c/WlzGQCY9,RF-05; RF-20,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+FE-07,70,Felipe Orellana,CÓDIGO,Validar y recibir archivos CSV y cartolas,https://trello.com/c/tV3Z3NSh,RF-05; RF-19,API / operación compartida,Depende de: FE-08 (Felipe Orellana).
+FE-08,71,Felipe Orellana,CÓDIGO,Modelar importaciones y exponer su progreso,https://trello.com/c/b5S7T4F3,RF-05; RF-19,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+FE-09,72,Felipe Orellana,CÓDIGO,Procesar CSV y detectar cobros recurrentes,https://trello.com/c/Fg6Ahh6t,RF-05; RF-19,API / operación compartida,"Depende de: FE-07 (Felipe Orellana), FE-12 (Felipe Orellana)."
+FE-10,73,Felipe Orellana,CÓDIGO,Previsualizar cobros detectados,https://trello.com/c/wEyBQl1F,RF-05; RF-19,API / operación compartida,Depende de: FE-09 (Felipe Orellana).
+FE-11,74,Felipe Orellana,CÓDIGO,Confirmar candidatos y crear o actualizar suscripciones,https://trello.com/c/e9NEuzGF,RF-05; RF-19,API / operación compartida,Depende de: FE-10 (Felipe Orellana).
+FE-12,75,Felipe Orellana,CÓDIGO,Normalizar nombres de proveedores,https://trello.com/c/b715JBnS,RF-05,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+FE-13,76,Felipe Orellana,CÓDIGO,Leer correo con límites y sanitización,https://trello.com/c/tvqX9hCl,RF-05,API / operación compartida,"Depende de: FE-04 (Felipe Orellana), FE-08 (Felipe Orellana), FE-12 (Felipe Orellana)."
+FE-14,77,Felipe Orellana,CÓDIGO,Gestionar errores de conectores y reautorización,https://trello.com/c/FkIFKmro,RF-05,API / operación compartida,"Depende de: FE-04 (Felipe Orellana), FE-13 (Felipe Orellana)."
+FE-15,78,Felipe Orellana,PRUEBAS,Probar OAuth e importación con mocks,https://trello.com/c/rMJsQZoM,RF-05,API / operación compartida,"Depende de: FE-05 (Felipe Orellana), FE-11 (Felipe Orellana), FE-14 (Felipe Orellana)."
+FE-16,79,Felipe Orellana,CÓDIGO,Modelar alertas y estados de lectura,https://trello.com/c/i5DbjtUy,RF-09,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+FE-17,80,Felipe Orellana,CÓDIGO,Generar alertas de próximos cobros,https://trello.com/c/PnmyWai0,RF-09,API / operación compartida,"Depende de: FE-16 (Felipe Orellana), FE-21 (Felipe Orellana)."
+FE-18,81,Felipe Orellana,CÓDIGO,Generar avisos de fin de prueba gratuita,https://trello.com/c/11MyWDFn,RF-09,API / operación compartida,"Depende de: FE-16 (Felipe Orellana), FE-21 (Felipe Orellana)."
+FE-19,82,Felipe Orellana,CÓDIGO,Listar alertas con filtro y paginación,https://trello.com/c/S4Q2TMgo,RF-09,API / operación compartida,Depende de: FE-16 (Felipe Orellana).
+FE-20,83,Felipe Orellana,CÓDIGO,Marcar alertas leídas y consultar contador,https://trello.com/c/zJswjNNC,RF-09,API / operación compartida,Depende de: FE-16 (Felipe Orellana).
+FE-21,84,Felipe Orellana,CÓDIGO,Leer y guardar preferencias de notificación,https://trello.com/c/NEwMlEHd,RF-09,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+FE-22,85,Felipe Orellana,CÓDIGO,Respetar límite diario push y horario de descanso,https://trello.com/c/1eRM6IlO,RF-09,API / operación compartida,"Depende de: FE-17 (Felipe Orellana), FE-18 (Felipe Orellana), FE-21 (Felipe Orellana)."
+FE-23,86,Felipe Orellana,CÓDIGO,Anular alertas pendientes cuando cambia la suscripción,https://trello.com/c/57OUDmhC,RF-09,API / operación compartida,"Depende de: FE-24 (Felipe Orellana), VI-03 (Victor Gonzales)."
+FE-24,87,Felipe Orellana,CÓDIGO,Conectar Notifications con RabbitMQ,https://trello.com/c/KVs2FHQq,RF-09,API / operación compartida,"Depende de: MX-21 (Maximiliano Sáez), FE-16 (Felipe Orellana), VI-26 (Victor Gonzales)."
+FE-25,88,Felipe Orellana,PRUEBAS,"Probar alertas, preferencias y límites",https://trello.com/c/lcVQJgSg,RF-09,API / operación compartida,"Depende de: FE-17 (Felipe Orellana), FE-18 (Felipe Orellana), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana), FE-21 (Felipe Orellana), FE-22 (Felipe Orellana), FE-23 (Felipe Orellana)."
+FE-26,89,Felipe Orellana,REVISIÓN,Revisar PR de conectores y notificaciones,https://trello.com/c/oNA1gbVG,TRANSVERSAL,API / operación compartida,Sin prerequisito pendiente del plan.
+FE-27,90,Felipe Orellana,DOCUMENTACIÓN,Documentar operación del lector de correo y permisos,https://trello.com/c/jANO777x,RF-05,API / operación compartida,"Depende de: FE-13 (Felipe Orellana), FE-14 (Felipe Orellana)."
+FE-28,91,Felipe Orellana,CÓDIGO,Agregar uso por periodo en Analytics,https://trello.com/c/63vEhZW0,RF-04; RF-18,API / operación compartida,"Depende de: VI-10 (Victor Gonzales), VI-27 (Victor Gonzales)."
+FE-29,92,Felipe Orellana,CÓDIGO,Calcular puntaje de uso y señalar posible bajo uso,https://trello.com/c/Bcm3lH7v,RF-04; RF-18,API / operación compartida,Depende de: FE-28 (Felipe Orellana).
+VI-01,94,Victor Gonzales,CÓDIGO,Añadir búsqueda por nombre al listado,https://trello.com/c/acTJGaJ2,RF-02,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-02,95,Victor Gonzales,CÓDIGO,Ordenar suscripciones en servidor,https://trello.com/c/oZhA4zru,RF-02,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-03,96,Victor Gonzales,CÓDIGO,Cancelar suscripción sin hacer soft-delete,https://trello.com/c/UqvYhFaM,RF-03; RF-10,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
+VI-04,97,Victor Gonzales,CÓDIGO,Consultar historial de cobros por suscripción,https://trello.com/c/b7IwUpsW,RF-05,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-05,98,Victor Gonzales,CÓDIGO,Definir presupuesto mensual y comparar proyección,https://trello.com/c/lvpGgSMo,RF-13,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-06,99,Victor Gonzales,CÓDIGO,Exponer resumen agregado del panel,https://trello.com/c/hLihvoFr,RF-11,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-07,100,Victor Gonzales,CÓDIGO,Exponer calendario de cobros por mes,https://trello.com/c/sN6AkV1V,RF-12,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-08,101,Victor Gonzales,ESTUDIO + CÓDIGO,Precisar e implementar máquina de estados,https://trello.com/c/tzFyAKmf,RF-03,API / operación compartida,Sin prerequisito pendiente del plan.
+VI-09,102,Victor Gonzales,CÓDIGO,Reactivar o confirmar un cobro detectado,https://trello.com/c/dhUYBgLf,RF-03,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
+VI-10,103,Victor Gonzales,CÓDIGO,"Completar uso, agregados mensuales y última actividad",https://trello.com/c/zGMe27Ed,RF-04,API / operación compartida,Depende de: VI-08 (Victor Gonzales).
+VI-11,104,Victor Gonzales,PRUEBAS,Probar ciclo de vida y soft-delete,https://trello.com/c/vgTWw7Td,RF-03; RF-10; RF-20,API / operación compartida,"Depende de: VI-03 (Victor Gonzales), VI-09 (Victor Gonzales), VI-10 (Victor Gonzales)."
+VI-12,105,Victor Gonzales,DOCUMENTACIÓN,"Documentar filtros, orden y paginación en OpenAPI",https://trello.com/c/xx2hLRVM,RF-02,API / operación compartida,"Depende de: VI-01 (Victor Gonzales), VI-02 (Victor Gonzales), VI-04 (Victor Gonzales), VI-06 (Victor Gonzales), VI-07 (Victor Gonzales)."
+VI-13,106,Victor Gonzales,CÓDIGO,Levantar todos los servicios con healthchecks,https://trello.com/c/3FEwdub4,TRANSVERSAL,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+VI-14,107,Victor Gonzales,CÓDIGO,Preparar entorno backend para app móvil,https://trello.com/c/YCvcIhbg,TRANSVERSAL,API / operación compartida,Depende de: VI-13 (Victor Gonzales).
+VI-15,108,Victor Gonzales,DOCUMENTACIÓN,Documentar y verificar Docker en Windows,https://trello.com/c/t1Zx3p2l,TRANSVERSAL,API / operación compartida,"Depende de: VI-13 (Victor Gonzales), MX-23 (Maximiliano Sáez)."
+VI-16,109,Victor Gonzales,PRUEBAS,Verificar conexión real móvil–backend,https://trello.com/c/l1zvDwFB,TRANSVERSAL,API / operación compartida,"Depende de: VI-14 (Victor Gonzales), SE-10 (Sebastian Mena), MX-10 (Maximiliano Sáez)."
+VI-17,110,Victor Gonzales,CÓDIGO,"Listar recomendaciones, motivo y ahorro",https://trello.com/c/UH8sY3ox,RF-18,API / operación compartida,"Depende de: FE-29 (Felipe Orellana), VI-20 (Victor Gonzales), VI-21 (Victor Gonzales), VI-27 (Victor Gonzales)."
+VI-18,111,Victor Gonzales,CÓDIGO,Descartar recomendaciones,https://trello.com/c/vRoim5xk,RF-18,API / operación compartida,Depende de: VI-17 (Victor Gonzales).
+VI-19,112,Victor Gonzales,CÓDIGO,Detectar alza de tarifa y posible doble cobro,https://trello.com/c/8RXrZGeX,RF-07; RF-09,API / operación compartida,"Depende de: VI-04 (Victor Gonzales), VI-27 (Victor Gonzales)."
+VI-20,113,Victor Gonzales,CÓDIGO,Recomendar consolidación por categoría,https://trello.com/c/4YOUjM59,RF-18,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+VI-21,114,Victor Gonzales,ESTUDIO,Aplicar umbral mínimo de ahorro,https://trello.com/c/a7dFwbZL,RF-18,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+VI-22,115,Victor Gonzales,CÓDIGO,Implementar proxy del asistente financiero Premium,https://trello.com/c/gyMbvJyK,RF-17; RF-18,API / operación compartida,"Depende de: MX-09 (Maximiliano Sáez), MX-24 (Maximiliano Sáez), VI-23 (Victor Gonzales), VI-27 (Victor Gonzales)."
+VI-23,116,Victor Gonzales,CÓDIGO,Sanitizar contexto antes de enviar a IA,https://trello.com/c/tYTnJ2pr,RF-18; RF-20,API / operación compartida,Depende de: VI-27 (Victor Gonzales).
+VI-24,117,Victor Gonzales,CÓDIGO,Mejorar wrapper de IA y limitar llamadas,https://trello.com/c/SiR7NyEs,RF-18; RN-24; RNF-20,API / operación compartida,Depende de: VI-22 (Victor Gonzales).
+VI-25,118,Victor Gonzales,CÓDIGO,Exportar cobros y suscripciones del periodo en CSV,https://trello.com/c/7HpYL5Cl,RF-15,API / operación compartida,Depende de: VI-04 (Victor Gonzales).
+VI-26,119,Victor Gonzales,CÓDIGO,Publicar eventos de dominio de suscripciones,https://trello.com/c/7zMEZHt0,TRANSVERSAL,API / operación compartida,Depende de: MX-21 (Maximiliano Sáez).
+VI-27,DERIVADA,Victor Gonzales,CÓDIGO,"Crear bases ejecutables de Connectors, Analytics y Notifications",https://trello.com/c/c6WkBP1E,TRANSVERSAL,API / operación compartida,Origen: prerequisito del alcance. Sin prerequisito pendiente del plan.
+SE-01,121,Sebastian Mena,DISEÑO,Construir estructura del Centro web de alertas,https://trello.com/c/QPSuIkdU,RF-09,Web,Sin prerequisito pendiente del plan.
+SE-02,122,Sebastian Mena,CÓDIGO,Mostrar restricciones Premium en web,https://trello.com/c/h550BZbL,RF-17,Web,Depende de: MX-09 (Maximiliano Sáez).
+SE-03,123,Sebastian Mena,CÓDIGO,Implementar estados de contratación Premium en web,https://trello.com/c/QKhoOJiU,RF-17,Web,"Depende de: MX-16 (Maximiliano Sáez), MX-17 (Maximiliano Sáez), MX-19 (Maximiliano Sáez)."
+SE-04,124,Sebastian Mena,CÓDIGO,Integrar calendario en el cliente Windows,https://trello.com/c/7BqFZ3EY,RF-12,Windows,"Depende de: MX-23 (Maximiliano Sáez), CH-18 (Christopher Solis), CH-19 (Christopher Solis), CH-20 (Christopher Solis)."
+SE-05,125,Sebastian Mena,CÓDIGO,Inicializar app móvil Expo y comprobar arranque,https://trello.com/c/9hDu662U,TRANSVERSAL,Móvil,Sin prerequisito pendiente del plan.
+SE-06,126,Sebastian Mena,CÓDIGO,Configurar navegación principal móvil,https://trello.com/c/IqFU388Q,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
+SE-07,127,Sebastian Mena,CÓDIGO,Configurar cliente HTTP móvil por entorno,https://trello.com/c/pOMTSbSu,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
+SE-08,128,Sebastian Mena,CÓDIGO,Implementar almacenamiento seguro y sesión móvil,https://trello.com/c/0209aDl9,RF-01.2; RF-20,Móvil,Depende de: SE-05 (Sebastian Mena).
+SE-09,129,Sebastian Mena,DISEÑO,Construir pantalla móvil Iniciar sesión,https://trello.com/c/RAyxXTB0,RF-01.2,Móvil,Depende de: SE-06 (Sebastian Mena).
+SE-10,130,Sebastian Mena,CÓDIGO,Conectar Login móvil con Auth,https://trello.com/c/xk8uvKE7,RF-01.2,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-09 (Sebastian Mena)."
+SE-11,131,Sebastian Mena,DISEÑO,Construir pantalla móvil Registro,https://trello.com/c/qiCX7XzC,RF-01.1,Móvil,Depende de: SE-06 (Sebastian Mena).
+SE-12,132,Sebastian Mena,CÓDIGO,Conectar Registro móvil y validaciones del servidor,https://trello.com/c/OZkuXEKU,RF-01.1,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-11 (Sebastian Mena), MX-30 (Maximiliano Sáez)."
+SE-13,133,Sebastian Mena,CÓDIGO,Mostrar cuenta creada y continuar a Login móvil,https://trello.com/c/XgWXXap5,RF-01.1,Móvil,Depende de: SE-12 (Sebastian Mena).
+SE-14,134,Sebastian Mena,CÓDIGO,Solicitar recuperación desde móvil,https://trello.com/c/qqlELTeB,RF-01.4,Móvil,"Depende de: MX-02 (Maximiliano Sáez), SE-06 (Sebastian Mena), SE-07 (Sebastian Mena)."
+SE-15,135,Sebastian Mena,CÓDIGO,Cerrar sesión y limpiar datos privados en móvil,https://trello.com/c/4UasOTuF,RF-01.6,Móvil,"Depende de: SE-08 (Sebastian Mena), MX-29 (Maximiliano Sáez)."
+SE-16,136,Sebastian Mena,CÓDIGO,Volver a Login cuando la sesión móvil no sea válida,https://trello.com/c/vX3FKzw7,RF-01.2; RF-20,Móvil,"Depende de: SE-08 (Sebastian Mena), MX-10 (Maximiliano Sáez)."
+SE-17,137,Sebastian Mena,CÓDIGO,Construir Home móvil de suscripciones,https://trello.com/c/d48mufb1,RF-02,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
+SE-18,138,Sebastian Mena,CÓDIGO,Crear tarjeta móvil de suscripción,https://trello.com/c/cFFNwiOl,RF-02,Móvil,Depende de: SE-05 (Sebastian Mena).
+SE-19,139,Sebastian Mena,CÓDIGO,Conectar listado móvil paginado,https://trello.com/c/7rn6rOqr,RF-02,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-17 (Sebastian Mena), SE-18 (Sebastian Mena)."
+SE-20,140,Sebastian Mena,CÓDIGO,Mostrar vacío móvil y acceso a primera suscripción,https://trello.com/c/toaWAanB,RF-02,Móvil,"Depende de: SE-17 (Sebastian Mena), AN-28 (Andrea Travola)."
+SE-21,141,Sebastian Mena,CÓDIGO,Construir Detalle móvil de suscripción,https://trello.com/c/bd9E5mBT,RF-02,Móvil,"Depende de: SE-06 (Sebastian Mena), SE-07 (Sebastian Mena), SE-18 (Sebastian Mena)."
+SE-22,142,Sebastian Mena,CÓDIGO,Crear formulario móvil de nueva suscripción,https://trello.com/c/OPBoG41Q,RF-02,Móvil,Depende de: SE-06 (Sebastian Mena).
+SE-23,143,Sebastian Mena,CÓDIGO,Conectar creación móvil y actualizar listado,https://trello.com/c/V47DRMKU,RF-02,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), SE-22 (Sebastian Mena)."
+SE-24,144,Sebastian Mena,CÓDIGO,Crear formulario móvil de edición,https://trello.com/c/bRGjlAM4,RF-08,Móvil,Depende de: SE-21 (Sebastian Mena).
+SE-25,145,Sebastian Mena,CÓDIGO,Conectar PATCH móvil y actualizar detalle,https://trello.com/c/u1DwU8tq,RF-08,Móvil,"Depende de: SE-07 (Sebastian Mena), SE-24 (Sebastian Mena)."
+SE-26,146,Sebastian Mena,CÓDIGO,Confirmar retiro y ejecutar DELETE móvil,https://trello.com/c/ahoZdXYv,RF-10,Móvil,Depende de: SE-21 (Sebastian Mena).
+SE-27,147,Sebastian Mena,CÓDIGO,Aplicar filtros móviles por estado y fecha,https://trello.com/c/IxYRhHLp,RF-02,Móvil,Depende de: SE-19 (Sebastian Mena).
+SE-28,148,Sebastian Mena,CÓDIGO,Registrar minutos de uso desde móvil,https://trello.com/c/vkvaNKHf,RF-04,Móvil,"Depende de: SE-21 (Sebastian Mena), VI-10 (Victor Gonzales)."
+SE-29,149,Sebastian Mena,CÓDIGO,Ordenar listado móvil y mostrar criterio,https://trello.com/c/V3K2mDjk,RF-02,Móvil,"Depende de: SE-19 (Sebastian Mena), VI-02 (Victor Gonzales)."
+SE-30,150,Sebastian Mena,CÓDIGO,Mostrar historial móvil de uso por fecha,https://trello.com/c/RCLbTxsE,RF-04,Móvil,"Depende de: SE-21 (Sebastian Mena), VI-10 (Victor Gonzales)."
+SE-31,151,Sebastian Mena,CÓDIGO,Avisar cambios sin guardar en móvil,https://trello.com/c/UHEjiCc8,RF-02; RF-08,Móvil,"Depende de: SE-22 (Sebastian Mena), SE-24 (Sebastian Mena)."
+SE-32,152,Sebastian Mena,CÓDIGO,Configurar preferencias de notificación móvil,https://trello.com/c/65tJtsAy,RF-09,Móvil,"Depende de: AN-04 (Andrea Travola), FE-21 (Felipe Orellana)."
+AN-01,156,Andrea Travola,CÓDIGO,Conectar resumen de gasto del Panel móvil,https://trello.com/c/vy9kprqY,RF-11,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola), VI-06 (Victor Gonzales)."
+AN-02,157,Andrea Travola,CÓDIGO,Visualizar gastos móviles con alternativa textual,https://trello.com/c/dSRJFYjg,RF-11,Móvil,Depende de: AN-01 (Andrea Travola).
+AN-03,158,Andrea Travola,CÓDIGO,Mostrar y editar Perfil móvil,https://trello.com/c/npqDyS0f,RF-01.5,Móvil,"Depende de: SE-06 (Sebastian Mena), SE-07 (Sebastian Mena), SE-08 (Sebastian Mena), MX-06 (Maximiliano Sáez)."
+AN-04,159,Andrea Travola,CÓDIGO,Construir Configuración móvil,https://trello.com/c/wIdimCde,TRANSVERSAL,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
+AN-05,160,Andrea Travola,DISEÑO,Maquetar Recomendaciones móviles y detalle,https://trello.com/c/9PVOeWba,RF-18,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
+AN-06,161,Andrea Travola,CÓDIGO,Mostrar cuentas conectadas en móvil,https://trello.com/c/cRKUn7r3,RF-05,Móvil,"Depende de: SE-06 (Sebastian Mena), FE-02 (Felipe Orellana), AN-28 (Andrea Travola)."
+AN-07,162,Andrea Travola,CÓDIGO,Construir calendario y agenda móviles,https://trello.com/c/Mx4AUswP,RF-12,Móvil,"Depende de: SE-06 (Sebastian Mena), VI-07 (Victor Gonzales), AN-28 (Andrea Travola)."
+AN-08,163,Andrea Travola,CÓDIGO,Mostrar planes y contratación Premium móvil,https://trello.com/c/G8WRcx9M,RF-17,Móvil,"Depende de: SE-06 (Sebastian Mena), MX-16 (Maximiliano Sáez), MX-17 (Maximiliano Sáez), MX-19 (Maximiliano Sáez)."
+AN-09,164,Andrea Travola,CÓDIGO,Iniciar autorización de correo desde móvil,https://trello.com/c/sv09xMv9,RF-05,Móvil,"Depende de: SE-06 (Sebastian Mena), FE-03 (Felipe Orellana), VI-14 (Victor Gonzales)."
+AN-10,165,Andrea Travola,DISEÑO,Construir Centro móvil de alertas,https://trello.com/c/NNmweOpt,RF-09,Móvil,"Depende de: SE-06 (Sebastian Mena), AN-28 (Andrea Travola)."
+AN-11,166,Andrea Travola,CÓDIGO,Mostrar restricciones Premium móviles,https://trello.com/c/NkYAT7cK,RF-17,Móvil,"Depende de: MX-09 (Maximiliano Sáez), SE-06 (Sebastian Mena)."
+AN-12,167,Andrea Travola,CÓDIGO,Verificar correo desde la app móvil,https://trello.com/c/pDYJXBnu,RF-01.1; RF-01.5,Móvil,"Depende de: MX-28 (Maximiliano Sáez), SE-06 (Sebastian Mena), VI-14 (Victor Gonzales)."
+AN-13,168,Andrea Travola,CÓDIGO,Verificar correo desde web,https://trello.com/c/JXcRumua,RF-01.1; RF-01.5,Web,Depende de: MX-28 (Maximiliano Sáez).
+AN-14,169,Andrea Travola,DISEÑO,Preparar UX y componentes de recuperación web,https://trello.com/c/j2JEE0qA,RF-01.4,Web,Sin prerequisito pendiente del plan.
+AN-15,170,Andrea Travola,CÓDIGO,Iniciar conexión Gmail/Outlook desde web,https://trello.com/c/D7LInCPk,RF-05,Web,"Depende de: CH-23 (Christopher Solis), FE-03 (Felipe Orellana)."
+AN-16,171,Andrea Travola,CÓDIGO,Mostrar retorno OAuth en web,https://trello.com/c/3jYHgKTg,RF-05,Web,"Depende de: AN-15 (Andrea Travola), FE-04 (Felipe Orellana)."
+AN-17,172,Andrea Travola,CÓDIGO,Integrar listado y desconexión de cuentas web,https://trello.com/c/NXXfxTqp,RF-05,Web,"Depende de: CH-23 (Christopher Solis), FE-02 (Felipe Orellana), FE-05 (Felipe Orellana)."
+AN-18,173,Andrea Travola,CÓDIGO,Implementar borrado de cuenta en web,https://trello.com/c/rWE1hZqB,RF-01.7,Web,Depende de: MX-07 (Maximiliano Sáez).
+AN-19,174,Andrea Travola,CÓDIGO,Implementar borrado de cuenta en móvil,https://trello.com/c/CWYMRwIS,RF-01.7,Móvil,"Depende de: MX-07 (Maximiliano Sáez), SE-06 (Sebastian Mena), SE-08 (Sebastian Mena)."
+AN-20,175,Andrea Travola,CÓDIGO,Construir página web de Recomendaciones,https://trello.com/c/7RPNKw5a,RF-18,Web,Depende de: VI-17 (Victor Gonzales).
+AN-21,176,Andrea Travola,CÓDIGO,Integrar página móvil de Recomendaciones,https://trello.com/c/4S4wS8rM,RF-18,Móvil,"Depende de: AN-05 (Andrea Travola), VI-17 (Victor Gonzales)."
+AN-22,177,Andrea Travola,CÓDIGO,Construir Informes web por periodo,https://trello.com/c/yFQhVhNE,RF-11; RF-15,Web,"Depende de: VI-06 (Victor Gonzales), VI-04 (Victor Gonzales), VI-25 (Victor Gonzales)."
+AN-23,178,Andrea Travola,CÓDIGO,Construir Informes móviles por periodo,https://trello.com/c/eKV62lcI,RF-11; RF-15,Móvil,"Depende de: SE-06 (Sebastian Mena), VI-06 (Victor Gonzales), AN-28 (Andrea Travola)."
+AN-24,179,Andrea Travola,CÓDIGO,Integrar lectura y badge en alertas móviles,https://trello.com/c/AH77Jku7,RF-09,Móvil,"Depende de: AN-10 (Andrea Travola), FE-19 (Felipe Orellana), FE-20 (Felipe Orellana)."
+AN-25,180,Andrea Travola,CÓDIGO,Descartar recomendaciones desde móvil,https://trello.com/c/MlYxzLQA,RF-18,Móvil,"Depende de: AN-21 (Andrea Travola), VI-18 (Victor Gonzales)."
+AN-26,181,Andrea Travola,CÓDIGO,Compartir o guardar resumen de gastos móvil,https://trello.com/c/2MBDSzTk,RF-11; RF-15,Móvil,"Depende de: AN-23 (Andrea Travola), VI-25 (Victor Gonzales)."
+AN-27,182,Andrea Travola,CÓDIGO,Capturar callback OAuth móvil y mostrar resultado,https://trello.com/c/nxexYbrl,RF-05,Móvil,"Depende de: AN-09 (Andrea Travola), FE-04 (Felipe Orellana)."
+AN-28,183,Andrea Travola,CÓDIGO,Crear estados reutilizables para pantallas móviles,https://trello.com/c/gwScgJMJ,TRANSVERSAL,Móvil,Depende de: SE-05 (Sebastian Mena).
