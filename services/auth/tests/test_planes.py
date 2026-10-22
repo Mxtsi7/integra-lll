@@ -88,6 +88,15 @@ def test_periodo_incompleto_no_se_persiste(contrato):
         Contratacion.objects.filter(pk=contrato.pk).update(vigente_desde=datetime.now(tz.utc))
 
 
+def test_estado_desconocido_se_rechaza_sin_modificar_contrato(contrato):
+    Contratacion.objects.filter(pk=contrato.pk).update(estado="nuevo")
+    with pytest.raises(ValidationError):
+        transicionar(contrato.pk, "exitosa")
+    contrato.refresh_from_db()
+    assert contrato.estado == "nuevo"
+    assert contrato.vigente_desde is None
+
+
 def test_renovacion_no_acorta_periodo_ya_pagado(contrato):
     primera = transicionar(contrato.pk, "exitosa")
     siguiente = Contratacion.objects.create(organizacion=contrato.organizacion, plan_id="premium", clave_idempotencia=uuid4(), importe=contrato.importe, moneda="CLP")
