@@ -16,6 +16,7 @@ from app.views import (
 )
 from app.sesiones import LogoutView, RefreshView
 from app.perfil import CambioClaveView
+from app.permisos_plan import PermisosPlanView, PlanesView
 from app.verificacion_correo_api import ConfirmacionVerificacionView, SolicitudVerificacionView
 
 
@@ -31,6 +32,8 @@ def inicio(request):
 
 
 urlpatterns = [
+    path("api/planes/", PlanesView.as_view(), name="planes"),
+    path("api/usuarios/me/permisos/", PermisosPlanView.as_view(), name="permisos-plan"),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
