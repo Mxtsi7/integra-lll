@@ -79,7 +79,12 @@ def comprobar_feature(ruta, cabeceras):
 
 @csrf_exempt
 def reenviar(request):
-    correlacion = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
+    # str() y no .hex: el contrato de eventos (shared/events/catalogo.md) pide
+    # el correlation_id en forma canónica con guiones, y su esquema lo valida
+    # con `format: uuid`. `.hex` devuelve 32 caracteres sin guiones, que ese
+    # validador rechaza. El ejemplo del propio catálogo ya usaba la forma con
+    # guiones; acá se generaba distinto.
+    correlacion = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
 
     servicio = servicio_para(request.path)
     if servicio is None:
