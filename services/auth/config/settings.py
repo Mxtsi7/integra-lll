@@ -103,6 +103,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 JWT_SECRET = env("JWT_SECRET")
 JWT_ALGORITMO = env("JWT_ALGORITMO", default="HS256")
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID", default="")
 
 # ─── Recuperación de contraseña ───────────────────────────────
 RECUPERACION_MINUTOS = 60

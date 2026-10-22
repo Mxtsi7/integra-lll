@@ -284,6 +284,27 @@ def test_registros_de_uso_concurrentes_conservan_el_agregado_mensual() -> None:
 
 
 @pytest.mark.django_db
+def test_serializer_patch_no_revert_e_transicion_concurrente() -> None:
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    serializador = SubscriptionSerializer(instance=suscripcion)
+
+    suscripcion.transicionar(
+        Subscription.EventoEstado.CANCELACION_USUARIO,
+        actor_id=uuid.uuid4(),
+        actor_rol="titular",
+    )
+    suscripcion.refresh_from_db()
+
+    datos = {"nombre": "Netflix Premium"}
+    actualizados = serializador.update(suscripcion, datos)
+
+    assert actualizados.nombre == "Netflix Premium"
+    assert actualizados.estado == Subscription.Estado.CANCELADO
+    assert actualizados.transiciones_estado.count() == 1
+    assert actualizados.transiciones_estado.first().evento == Subscription.EventoEstado.CANCELACION_USUARIO
+
+
+@pytest.mark.django_db
 def test_fin_gracia_requiere_30_dias_en_estado_y_90_sin_cobros() -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.POR_CONFIRMAR)
     preparar_ventana_gracia(suscripcion)

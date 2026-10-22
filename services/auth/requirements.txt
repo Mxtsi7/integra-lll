@@ -11,3 +11,4 @@ djangorestframework-simplejwt==5.3.1
 
 
 redis==5.2.1
+google-auth[requests]==2.62.0
