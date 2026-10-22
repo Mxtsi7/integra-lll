@@ -92,3 +92,7 @@ usaron Rust, la respuesta ya está escrita y fechada.
 4. **Plazos internos 3 días antes del real**
 5. **Las limitaciones se declaran.** Nombrar un sesgo metodológico suma;
    esconderlo, resta
+
+## Flujos de Maximiliano Sáez
+
+- [MX-15/MX-08 — Planes, contratación y perfil](flujos/maximiliano-saez/15-08-planes-perfil.md).
