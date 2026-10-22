@@ -10,10 +10,10 @@ from django.db import migrations, models
 def cargar(apps, schema_editor):
     Pais = apps.get_model("app", "Pais")
     datos = json.loads((Path(__file__).parent / "data" / "paises-24.6.1.json").read_text(encoding="utf-8"))
-    for opcion in datos:
-        Pais.objects.using(schema_editor.connection.alias).get_or_create(
-            codigo=opcion["codigo"], defaults={"nombre": opcion["nombre"], "orden": 0}
-        )
+    Pais.objects.using(schema_editor.connection.alias).bulk_create(
+        [Pais(codigo=opcion["codigo"], nombre=opcion["nombre"], orden=0) for opcion in datos],
+        ignore_conflicts=True,
+    )
 
 
 class Migration(migrations.Migration):
