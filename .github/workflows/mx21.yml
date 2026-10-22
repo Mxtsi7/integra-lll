@@ -4,6 +4,8 @@ on:
     paths:
       - 'shared/events/**'
       - 'scripts/mx21/**'
+      - 'scripts/vi26/**'
+      - 'services/subscriptions/tests/test_eventos_mx21.py'
       - '.github/workflows/mx21.yml'
       - 'docs/arquitectura/MX-21*'
       - 'services/auth/app/models.py'
@@ -29,6 +31,10 @@ jobs:
       - run: pip install -r scripts/mx21/requirements.txt
       - run: python -m unittest discover -s scripts/mx21 -p 'test_*.py' -v
       - run: python scripts/mx21/intercambio.py
+        env:
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+      - run: pip install Django==5.1.5
+      - run: python scripts/vi26/probar_publicador.py
         env:
           RABBITMQ_URL: amqp://guest:guest@localhost:5672/
 

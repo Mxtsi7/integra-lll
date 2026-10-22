@@ -61,7 +61,7 @@ def crear_suscripcion(organizacion_id: uuid.UUID) -> Subscription:
         moneda="CLP",
         frecuencia=Subscription.Frecuencia.MENSUAL,
         fecha_proximo_cobro=date(2026, 11, 1),
-        categoria=Subscription.Categoria.STREAMING,
+        categoria="streaming",
         estado=Subscription.Estado.ACTIVO,
     )
 
@@ -186,7 +186,7 @@ def test_publicador_envia_routing_v2_durable_y_obligatorio(organizacion):
     evento = registrar_creada(crear_suscripcion(organizacion))
     conexion = MagicMock()
     canal = conexion.channel.return_value
-    canal.basic_publish.return_value = True
+    canal.basic_publish.return_value = None  # Contrato real de pika 1.x.
 
     with patch("events.publicador.pika.BlockingConnection", return_value=conexion):
         publicar(evento)
@@ -208,16 +208,26 @@ def test_publicador_envia_routing_v2_durable_y_obligatorio(organizacion):
 
 
 @pytest.mark.django_db
-def test_publicador_rechaza_confirmacion_negativa(organizacion):
+def test_publicador_propagaa_nack_del_broker(organizacion):
+    """Regresión VI-26/pika-1.x: en publisher-confirms mode el broker rechaza con
+    NackError (no devuelve False). El publicador debe dejar que esa excepción
+    suba para que despacho.py la contabilice como fallo y reintente.
+
+    NOTA: este test pertenece a la rama vi-26; debe moverse junto con los commits
+    del outbox (5e8688c, 541a022, 4fab085) cuando se abra esa PR.
+    El workflow ideal es probarlo contra un RabbitMQ real (ver el CI de #79).
+    """
     evento = registrar_creada(crear_suscripcion(organizacion))
     conexion = MagicMock()
-    conexion.channel.return_value.basic_publish.return_value = False
+    nack = pika.exceptions.NackError([])
+    conexion.channel.return_value.basic_publish.side_effect = nack
 
     with patch("events.publicador.pika.BlockingConnection", return_value=conexion):
-        with pytest.raises(pika.exceptions.AMQPError, match="no confirmó"):
+        with pytest.raises(pika.exceptions.NackError):
             publicar(evento)
 
     conexion.close.assert_called_once_with()
+
 
 
 @pytest.mark.django_db

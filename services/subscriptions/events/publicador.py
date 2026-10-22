@@ -28,7 +28,13 @@ def crear_payload(evento) -> dict:
 
 
 def publicar(evento) -> None:
-    """Publica de forma durable y confirma el mensaje antes de completar."""
+    """Publica de forma durable y confirma el mensaje antes de completar.
+
+    NOTA pika 1.x: con confirm_delivery() activo, basic_publish devuelve None
+    (no True/False). Un rechazo del broker lanza NackError o UnroutableError
+    directamente, ambos subclases de AMQPError, que el llamador ya captura.
+    No se debe chequear el valor de retorno: si no lanza, la publicación fue exitosa.
+    """
     conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     try:
         canal = conexion.channel()
@@ -38,7 +44,7 @@ def publicar(evento) -> None:
             durable=True,
         )
         canal.confirm_delivery()
-        confirmado = canal.basic_publish(
+        canal.basic_publish(
             exchange=EXCHANGE,
             routing_key=f"{evento.evento}.v{evento.version}",
             body=json.dumps(crear_payload(evento), separators=(",", ":")).encode(
@@ -54,8 +60,6 @@ def publicar(evento) -> None:
             ),
             mandatory=True,
         )
-        if not confirmado:
-            raise pika.exceptions.AMQPError("RabbitMQ no confirmó la publicación.")
     finally:
         if conexion.is_open:
             conexion.close()
