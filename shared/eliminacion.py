@@ -50,12 +50,15 @@ class LimpiezaOrganizacionView(APIView):
 
         with transaction.atomic():
             estado = bloquear_organizacion(organizacion_id)
+            bloqueo = self.validar_limpieza(organizacion_id)
+            if bloqueo is not None:
+                # Un retorno normal confirma atomic(): revertir también los
+                # cambios que haya hecho el validador antes de bloquear.
+                transaction.set_rollback(True)
+                return bloqueo
             estado.eliminada = True
             estado.operacion_id = operacion_id
             estado.save(update_fields=["eliminada", "operacion_id"])
-            bloqueo = self.validar_limpieza(organizacion_id)
-            if bloqueo is not None:
-                return bloqueo
             for modelo in self.modelos:
                 modelo.objects.filter(organizacion_id=organizacion_id).delete()
         return Response(status=204)

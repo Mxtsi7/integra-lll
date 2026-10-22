@@ -98,12 +98,14 @@ consultas ni claves foráneas entre esquemas (ADR-002).
   Conserva el catálogo global de proveedores. Si una FK local inconsistente
   conecta un hijo de otro tenant, devuelve `409` y conserva los datos para que
   se corrija la inconsistencia, evitando el borrado ajeno por cascada.
-- Connectors: marca las cuentas como desconectadas. CSV y cuentas OAuth con
+- Connectors: CSV y cuentas OAuth con
   revocación acreditada se eliminan si no hay revocaciones pendientes en el tenant.
   Si hay cuentas OAuth de Gmail/Outlook sin `revocado_en`, devuelve
   `409 revocacion_proveedor_pendiente`: FE-05 todavía no provee adaptadores para
   revocar la autorización externa. Conserva los tokens cifrados y la operación
-  pendiente para permitir esa revocación y reintentar después. Borrar el token
+  pendiente para permitir esa revocación y reintentar después. El bloqueo revierte
+  todos los cambios locales del intento, incluida la desconexión y la marca de
+  eliminación; no acredita una limpieza terminada. Borrar el token
   local no demuestra que el proveedor haya revocado el acceso, tampoco encontrar
   tokens nulos. Aplicar migración `connectors.0002_cuenta_revocada`. FE-05 deberá
   registrar `revocado_en` únicamente tras confirmar la revocación con el proveedor;
@@ -117,8 +119,10 @@ Cada consumidor instala la app `shared.borrado` y aplica su migración
 `borrado.0001_initial` en su propio esquema. Su fila `EstadoOrganizacion` guarda
 solo UUID de organización, operación y marca de eliminación. El middleware de
 escritura toma un bloqueo sobre esa fila hasta terminar cada POST/PUT/PATCH/DELETE
-con contexto tenant. La limpieza toma el mismo bloqueo y persiste la marca antes
-de borrar o responder `409`/`204`. Así espera las escrituras en vuelo y rechaza
+con contexto tenant. La limpieza toma el mismo bloqueo, valida y persiste la marca
+en la misma transacción que el borrado confirmado con `204`. Un `409` revierte
+todo el intento y permite corregir el bloqueo y reintentar. Así espera las
+escrituras en vuelo y, tras una limpieza exitosa, rechaza
 las posteriores con `410 organizacion_eliminada`, incluso después de reiniciar
 el servicio. No usa Redis ni consulta auth para guardar esa marca.
 

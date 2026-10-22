@@ -33,19 +33,25 @@ def test_csv_se_elimina_sin_tocar_otro_tenant(monkeypatch):
 def test_revocacion_externa_pendiente_conserva_token_cifrado_para_reintento(monkeypatch, claves):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org = uuid.uuid4()
+    estado = EstadoOrganizacion.objects.create(organizacion_id=org)
     cuenta = CuentaConectada.objects.create(
         organizacion_id=org, proveedor="gmail", cuenta_externa="prueba@test.cl", refresh_token="token-prueba",
     )
     assert limpiar(org).status_code == 409
     cuenta.refresh_from_db()
-    assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
+    assert cuenta.estado == CuentaConectada.Estado.CONECTADA
     assert cuenta.refresh_token == "token-prueba"
-    assert EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+    estado.refresh_from_db()
+    assert not estado.eliminada
+    assert estado.operacion_id is None
+    assert limpiar(org).status_code == 409
     # Simula únicamente el registro posterior a un ACK real del adaptador FE-05.
     from django.utils import timezone
     cuenta.revocado_en = timezone.now()
     cuenta.save(update_fields=["revocado_en"])
     assert limpiar(org).status_code == 204
+    estado.refresh_from_db()
+    assert estado.eliminada
     assert not CuentaConectada.objects.filter(pk=cuenta.pk).exists()
 
 

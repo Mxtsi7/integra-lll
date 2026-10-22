@@ -63,6 +63,12 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
     assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
     assert Cobro.objects.filter(pk=cobro.pk).exists()
     assert Subscription.objects.filter(pk=propia.pk).exists()
+    assert not EstadoOrganizacion.objects.filter(organizacion_id=org, eliminada=True).exists()
+    # Corregir la inconsistencia permite reintentar la misma operación.
+    cobro.organizacion_id = org
+    cobro.save(update_fields=["organizacion_id"])
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+    assert EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
 
 
 def transicion(org, sub):
