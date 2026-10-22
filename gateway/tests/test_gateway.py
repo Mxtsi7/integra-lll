@@ -217,7 +217,12 @@ def test_toda_respuesta_lleva_correlation_id_y_lo_respeta_si_viene(upstream):
     assert upstream.llamadas[-1]["headers"]["X-Correlation-ID"] == "abc123"
 
     r = cliente.get("/api/suscripciones/")           # incluso un 401
-    assert len(r["X-Correlation-ID"]) == 32
+    generado = r["X-Correlation-ID"]
+    # No se comprueba el largo sino que sea un UUID canónico: el contrato de
+    # eventos lo valida con `format: uuid`, y una cadena de 32 caracteres sin
+    # guiones pasa el largo pero falla el contrato.
+    assert uuid.UUID(generado)
+    assert str(uuid.UUID(generado)) == generado, "debe venir con guiones"
 
 
 def test_reset_revoca_el_access_anterior_sin_afectar_otro_usuario(upstream):
