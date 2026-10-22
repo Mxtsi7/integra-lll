@@ -151,6 +151,17 @@ class Contratacion(ModeloBase):
         ]
 
 
+class EventoPago(ModeloBase):
+    id = models.UUIDField(primary_key=True)
+    contratacion = models.ForeignKey(Contratacion, on_delete=models.CASCADE, related_name="eventos_pago")
+    huella = models.CharField(max_length=64)
+    estado = models.CharField(max_length=10, choices=Contratacion.Estado.choices)
+    aplicado = models.BooleanField(default=False)
+
+    class Meta(ModeloBase.Meta):
+        db_table = "evento_pago"
+
+
 class SolicitudVerificacionCorreo(ModeloBase):
     usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="verificaciones_correo")
     huella = models.CharField(max_length=64, unique=True)

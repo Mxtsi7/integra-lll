@@ -96,3 +96,5 @@ usaron Rust, la respuesta ya está escrita y fechada.
 ## Flujos de Maximiliano Sáez
 
 - [MX-15/MX-08 — Planes, contratación y perfil](flujos/maximiliano-saez/15-08-planes-perfil.md).
+- [MX-09/MX-16 — Permisos y catálogo](flujos/maximiliano-saez/09-16-permisos-catalogo.md).
+- [MX-17/MX-18 — Checkout y webhook mock](flujos/maximiliano-saez/17-18-contratacion-mock.md).

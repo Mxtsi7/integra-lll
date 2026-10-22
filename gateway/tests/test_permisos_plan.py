@@ -56,6 +56,20 @@ def test_auth_caido_no_autoriza_por_claim(transporte):
     assert peticion.call_count == 1
 
 
+@pytest.mark.parametrize("ruta", ["/api/pagos/webhook/", "/api/pagos/mock/"])
+def test_solo_pago_exacto_llega_al_verificador_sin_jwt(transporte, ruta):
+    peticion, _ = transporte
+    assert Client().post(ruta, data="{}", content_type="application/json").status_code == 200
+    assert peticion.call_count == 1
+
+
+@pytest.mark.parametrize("ruta", ["/api/pagos/webhook/otra/", "/api/pagos/mock/otra/", "/api/contrataciones/"])
+def test_contrataciones_y_sufijos_no_se_hacen_publicos(transporte, ruta):
+    peticion, _ = transporte
+    assert Client().post(ruta, data="{}", content_type="application/json").status_code == 401
+    peticion.assert_not_called()
+
+
 @pytest.mark.parametrize("plan", ["free", "premium"])
 def test_feature_ausente_deniega_sin_llamar_al_dominio(transporte, plan):
     peticion, permiso = transporte
