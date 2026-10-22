@@ -66,6 +66,14 @@
   font-size: 13.5px;
 }
 
+/* Error de un campo suelto (la casilla de términos), con el mismo aspecto
+   que el error que CampoTexto muestra bajo cada input. */
+.errorCampo {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--coral);
+}
+
 /* Estado de resultado: cuenta creada, correo enviado, enlace vencido… */
 
 .resultado {

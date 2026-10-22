@@ -24,7 +24,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .identidad import SesionesNoDisponibles, TokenInvalido, leer_token, validar
 
 # Las que el gateway fija; se ignoran si vienen del cliente.
-CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol"}
+CABECERAS_DE_IDENTIDAD = {"x-usuario-id", "x-organizacion-id", "x-rol", "x-sesion-id"}
 
 # Cabeceras de transporte que no tiene sentido reenviar en ninguna dirección.
 CABECERAS_DE_SALTO = {
@@ -42,7 +42,7 @@ def servicio_para(ruta: str) -> str | None:
 
 
 def es_publica(ruta: str) -> bool:
-    return ruta.startswith(settings.RUTAS_PUBLICAS)
+    return ruta in settings.RUTAS_PUBLICAS
 
 
 def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonResponse:
@@ -55,7 +55,12 @@ def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonRespo
 
 @csrf_exempt
 def reenviar(request):
-    correlacion = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
+    # str() y no .hex: el contrato de eventos (shared/events/catalogo.md) pide
+    # el correlation_id en forma canónica con guiones, y su esquema lo valida
+    # con `format: uuid`. `.hex` devuelve 32 caracteres sin guiones, que ese
+    # validador rechaza. El ejemplo del propio catálogo ya usaba la forma con
+    # guiones; acá se generaba distinto.
+    correlacion = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
 
     servicio = servicio_para(request.path)
     if servicio is None:
@@ -80,8 +85,9 @@ def reenviar(request):
 
         # El token se queda en el gateway: los servicios internos no lo
         # necesitan y no deberían verlo.
-        cabeceras.pop("Authorization", None)
+        cabeceras = {nombre: valor for nombre, valor in cabeceras.items() if nombre.lower() != "authorization"}
         cabeceras["X-Usuario-Id"] = identidad["usuario_id"]
+        cabeceras["X-Sesion-Id"] = identidad["sesion_id"]
         if identidad["organizacion_id"]:
             cabeceras["X-Organizacion-Id"] = str(identidad["organizacion_id"])
         if identidad["rol"]:

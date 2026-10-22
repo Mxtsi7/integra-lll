@@ -14,7 +14,7 @@ El contrato del token está en gateway/README.md. Lo esencial:
 import jwt
 from django.conf import settings
 from redis.exceptions import RedisError
-from shared.sesiones import sesion_vigente
+from shared.sesiones import sesion_activa as sesion_vigente
 
 
 class TokenInvalido(Exception):
@@ -55,7 +55,7 @@ def validar(token: str) -> dict:
     if claims.get("token_type") != "access":
         raise TokenInvalido("Se requiere un token de acceso")
     try:
-        vigente = sesion_vigente(usuario_id, claims.get("session_version"))
+        vigente = sesion_vigente(usuario_id, claims.get("session_version"), claims.get("sid"))
     except (RedisError, OSError) as e:
         raise SesionesNoDisponibles from e
     if not vigente:
@@ -65,5 +65,6 @@ def validar(token: str) -> dict:
         "usuario_id": str(usuario_id),
         "organizacion_id": claims.get("organizacion_id"),
         "rol": claims.get("rol"),
+        "sesion_id": claims["sid"],
     }
 
