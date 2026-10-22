@@ -9,6 +9,9 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ### `flujos/`
 
+- [MX-22: matriz de las 174 tareas y brechas](investigacion/MX-22-matriz-requisitos.md).
+- [MX-01: registro de revisión y decisiones](revisiones/MX-01-revision-2026-10-21.md).
+
 - [Verificación y cambio de correo (MX-28)](flujos/maximiliano-saez/28-verificacion-correo.md).
 
 ### `investigacion/`
