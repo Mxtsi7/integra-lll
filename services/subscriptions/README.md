@@ -26,7 +26,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
-| `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` |
+| `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
@@ -64,7 +64,8 @@ formato `YYYY-MM` y devuelve una lista ordenada por fecha y servicio. Cada
 elemento incluye `id`, `suscripcion_id`, `fecha`, `servicio`, `importe`,
 `moneda` y `tipo` (`confirmado` o `proyectado`). En cobros confirmados, `id`
 es el identificador del cobro; en proyecciones, es el identificador de la
-suscripción que lo origina.
+suscripción que lo origina. No uses `id` como enlace genérico al detalle; si
+la interfaz necesita enlazar a la suscripción, debe usar `suscripcion_id`.
 
 Los confirmados usan el importe, moneda y fecha registrados en `Cobro`.
 Las proyecciones usan los datos actuales de la suscripción y su frecuencia
