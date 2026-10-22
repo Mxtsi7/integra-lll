@@ -32,6 +32,12 @@ type ApiAuth = {
    * revocación falle; `revocada` dice si el servidor la confirmó.
    */
   cerrarSesion: () => Promise<{ revocada: boolean }>;
+  /**
+   * Borra la sesión de este navegador SIN llamar al backend. Es para cuando
+   * el backend ya la invalidó por su cuenta: p. ej. al restablecer la
+   * contraseña (CH-07), que revoca todas las sesiones abiertas.
+   */
+  cerrarSesionLocal: () => void;
   /** Si el token venció mientras la pestaña estaba abierta, cierra la sesión. */
   verificarSesion: () => void;
 };
@@ -230,6 +236,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { revocada };
   }, [quedarAnonimo]);
 
+  const cerrarSesionLocal = useCallback(() => {
+    logout();
+    if (estadoRef.current.tipo !== "anonimo") quedarAnonimo();
+  }, [quedarAnonimo]);
+
   const verificarSesion = useCallback(() => {
     if (estadoRef.current.tipo === "anonimo") return;
     if (!haySesionValida()) {
@@ -248,9 +259,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       estaAutenticado: estado.tipo === "autenticado",
       iniciarSesion,
       cerrarSesion,
+      cerrarSesionLocal,
       verificarSesion,
     }),
-    [estado, iniciarSesion, cerrarSesion, verificarSesion],
+    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion],
   );
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;

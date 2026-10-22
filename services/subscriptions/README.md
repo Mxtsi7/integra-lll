@@ -24,11 +24,64 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `POST` | `/api/suscripciones/` | Crea una nueva suscripción para la organización | `201 Created` |
 | `GET` | `/api/suscripciones/<id>/` | Obtiene el detalle de una suscripción propia | `200 OK` / `404` |
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
-| `PATCH` | `/api/suscripciones/<id>/` | Actualiza parcialmente (ej. estado) | `200 OK` / `404` |
+| `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
+| `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
+| `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
+
+### Máquina de estados (RF-03 / VI-08)
+
+Una suscripción nueva inicia en `prueba` (con `fin_prueba`) o `activo`. Los
+cambios posteriores se realizan mediante eventos autorizados, no escribiendo
+arbitrariamente el campo `estado`. `PATCH` conserva compatibilidad para la
+cancelación; ambas rutas de cancelación requieren un `X-Usuario-Id` y `X-Rol`
+válidos (`titular` o `integrante`). Otros cambios directos de estado responden
+`400 Bad Request`.
+
+El `POST /api/suscripciones/<id>/transiciones/` acepta:
+
+```json
+{"evento": "confirmacion_usuario"}
+```
+
+o:
+
+```json
+{"evento": "cancelacion_usuario"}
+```
+
+Debe incluir `X-Usuario-Id` y `X-Rol` (`titular` o `integrante`), además de
+`X-Organizacion-Id`. Un evento no permitido para el estado actual responde
+`400`; actor ausente o rol inválido responde `403`. Los eventos de temporizador
+y cobro se aplican por el servicio de dominio; esta entrega no programa ni
+afirma la ejecución automática de esas tareas.
+
+Cada cambio aceptado persiste `evento`, `estado_anterior`, `estado_nuevo`,
+`actor_id`, `actor_rol` y `ocurrido_en`. El GET de transiciones devuelve esos
+registros en orden cronológico. Cambiar el estado a `cancelado` conserva
+`activo=true`; `DELETE` es la única operación de este contrato que marca
+`activo=false`.
+
+Ejemplo: confirmar que una suscripción `por_confirmar` sigue vigente:
+
+```bash
+curl -X POST "http://localhost:8002/api/suscripciones/<id>/transiciones/" \
+  -H "Content-Type: application/json" \
+  -H "X-Organizacion-Id: <tu-uuid>" \
+  -H "X-Usuario-Id: <usuario-uuid>" \
+  -H "X-Rol: titular" \
+  -d "{\"evento\":\"confirmacion_usuario\"}"
+```
+
+Consultar la auditoría:
+
+```bash
+curl "http://localhost:8002/api/suscripciones/<id>/transiciones/" \
+  -H "X-Organizacion-Id: <tu-uuid>"
+```
 
 ---
 
@@ -343,4 +396,3 @@ Comprueba:
 cd services/subscriptions
 .\venv\Scripts\pytest.exe -v
 ```
-
