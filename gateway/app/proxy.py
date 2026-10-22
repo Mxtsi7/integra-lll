@@ -68,8 +68,11 @@ def comprobar_feature(ruta, cabeceras):
         raise ValueError("No se pudieron verificar los permisos")
     datos = permisos.json()
     if (not isinstance(datos, dict) or datos.get("plan") not in ("free", "premium")
-            or not isinstance(datos.get("features"), dict)
-            or type(datos["features"].get(feature)) is not bool):
+            or not isinstance(datos.get("features"), dict)):
+        raise ValueError("Contrato de permisos inválido")
+    if feature not in datos["features"]:
+        return False
+    if type(datos["features"][feature]) is not bool:
         raise ValueError("Contrato de permisos inválido")
     return datos["plan"] == "premium" and datos["features"][feature]
 

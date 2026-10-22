@@ -54,3 +54,11 @@ def test_auth_caido_no_autoriza_por_claim(transporte):
     peticion.side_effect = requests.Timeout()
     assert Client().get("/api/asistente/", **con_token(token(plan="premium"))).status_code == 503
     assert peticion.call_count == 1
+
+
+@pytest.mark.parametrize("plan", ["free", "premium"])
+def test_feature_ausente_deniega_sin_llamar_al_dominio(transporte, plan):
+    peticion, permiso = transporte
+    permiso._content = json.dumps({"plan": plan, "features": {}}).encode()
+    assert Client().get("/api/asistente/", **con_token(token())).status_code == 403
+    assert peticion.call_count == 1
