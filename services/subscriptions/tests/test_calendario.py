@@ -101,6 +101,30 @@ class TestCalendarioCobros:
             (str(cobro.id), "confirmado")
         ]
 
+    def test_cobro_en_dia_distinto_al_ancla_igual_omite_proyeccion(self):
+        """Regresión VI-07: si el cobro real cayó el 14 y la proyección es el 15,
+        ambos en el mismo mes, NO deben aparecer los dos.
+        La deduplicación es por suscripción/mes, no por fecha exacta.
+        """
+        suscripcion = self.crear_suscripcion(fecha=date(2026, 10, 15))
+        cobro = Cobro.objects.create(
+            organizacion_id=self.organizacion,
+            suscripcion=suscripcion,
+            monto=Decimal("13500.00"),
+            moneda="CLP",
+            fecha=date(2026, 10, 14),  # cobró un día antes del ancla
+        )
+
+        response = self.get_calendario("2026-10")
+
+        assert response.status_code == status.HTTP_200_OK
+        # Solo debe aparecer el cobro confirmado; la proyección del 15 se suprime.
+        ids_tipos = [(evento["id"], evento["tipo"]) for evento in response.data]
+        assert ids_tipos == [(str(cobro.id), "confirmado")], (
+            "La proyección del día 15 no debe aparecer cuando ya hay un cobro "
+            "confirmado de la misma suscripción en el mismo mes (día 14)."
+        )
+
     def test_diciembre_enero_y_limites_del_mes(self):
         cierre = self.crear_suscripcion(
             nombre="Cierre", fecha=date(2026, 12, 31)
