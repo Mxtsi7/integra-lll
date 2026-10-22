@@ -25,6 +25,7 @@ export const getPermisosPlan = () => pedir<PermisosPlan>('/usuarios/me/permisos/
 export const getPlanes = () => pedir<PlanDisponible[]>('/planes/');
 
 export interface ContratacionPlan {
+  permisos: PermisosPlan;
   id: string;
   estado: 'pendiente' | 'exitosa' | 'cancelada' | 'fallida';
   plan_id: CodigoPlan;

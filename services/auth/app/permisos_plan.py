@@ -11,6 +11,11 @@ def features_para(plan):
     return {"asistente_financiero": plan == "premium", "recomendaciones_automaticas": plan == "premium"}
 
 
+def permisos_vigentes(organizacion_id):
+    plan = plan_vigente(organizacion_id)
+    return {"plan": plan, "features": features_para(plan)}
+
+
 class PermisosPlanSerializer(serializers.Serializer):
     plan = serializers.ChoiceField(choices=["free", "premium"])
     features = serializers.DictField(child=serializers.BooleanField())
@@ -34,8 +39,7 @@ class PermisosPlanView(APIView):
     @extend_schema(tags=["Planes"], responses={200: PermisosPlanSerializer, 403: None, 404: None})
     def get(self, request):
         usuario = usuario_del_contexto(request)
-        plan = plan_vigente(usuario.organizacion_id)
-        return Response({"plan": plan, "features": features_para(plan)})
+        return Response(permisos_vigentes(usuario.organizacion_id), headers={"Cache-Control": "no-store"})
 
 
 class PlanesView(APIView):
