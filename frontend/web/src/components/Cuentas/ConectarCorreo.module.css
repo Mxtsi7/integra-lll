@@ -1,13 +1,13 @@
 .caja {
   max-width: 640px;
-  background: #ffffff;
-  border: 1px solid #ece8e4;
-  border-radius: 24px;
+  background: var(--vidrio);
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-l);
   padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  box-shadow: 0 8px 28px rgba(30, 24, 60, 0.08);
+  box-shadow: var(--sombra-tile);
 }
 
 .consentimiento {
@@ -16,7 +16,7 @@
   align-items: flex-start;
   font-size: 14px;
   line-height: 1.55;
-  color: #2b2b3a;
+  color: var(--tinta);
   cursor: pointer;
 }
 
@@ -24,50 +24,18 @@
   width: 18px;
   height: 18px;
   margin-top: 2px;
-  accent-color: #e0701a;
+  accent-color: var(--acento);
   flex-shrink: 0;
 }
 
-.botones {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.boton {
-  height: 44px;
-  padding: 0 24px;
-  border: 0;
-  border-radius: 999px;
-  background: #e0701a;
-  color: #ffffff;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.boton:hover:not(:disabled) {
-  background: #c85f10;
-}
-
-.boton:focus-visible {
-  outline: 3px solid #f6c9a3;
-  outline-offset: 2px;
-}
-
-.boton:disabled {
-  background: #f0ebe6;
-  color: #8a8480;
-  cursor: not-allowed;
-}
+.botones, .proveedor { display: flex; flex-direction: column; gap: 16px; }
+.proveedor { align-items: flex-start; }
 
 .error {
   margin: 0;
   padding: 10px 14px;
-  border-radius: 12px;
-  background: #fdecea;
-  color: #a12d24;
+  border-radius: var(--radio-s);
+  background: var(--coral-suave);
+  color: var(--coral);
   font-size: 13px;
 }

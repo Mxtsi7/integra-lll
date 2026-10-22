@@ -7,6 +7,11 @@ describe('esUrlAutorizacionValida', () => {
     expect(esUrlAutorizacionValida('outlook', 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?x=1')).toBe(true);
   });
   it('rechaza el proveedor equivocado', () => {
+    expect(esUrlAutorizacionValida('gmail', 'https://accounts.google.com:8443/auth')).toBe(false);
+    // @ts-expect-error Una entrada externa puede incumplir el tipo público.
+    expect(esUrlAutorizacionValida('yahoo', 'https://accounts.google.com/auth')).toBe(false);
+    // @ts-expect-error También se rechazan propiedades heredadas de Object.
+    expect(esUrlAutorizacionValida('toString', 'https://accounts.google.com/auth')).toBe(false);
     expect(esUrlAutorizacionValida('gmail', 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize')).toBe(false);
     expect(esUrlAutorizacionValida('outlook', 'https://accounts.google.com/o/oauth2/v2/auth')).toBe(false);
   });
