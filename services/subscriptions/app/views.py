@@ -7,6 +7,7 @@ import uuid
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import action
@@ -166,8 +167,8 @@ class SubscriptionViewSet(TenantViewSet):
         responses=CalendarioCobroSerializer(many=True),
         description=(
             "Devuelve cobros confirmados y proyecciones mensuales/anuales de la "
-            "organización. Los cobros confirmados prevalecen sobre una proyección "
-            "de la misma suscripción en la misma fecha."
+            "organización. Solo incluye proyecciones desde hoy en adelante; si una "
+            "suscripción ya tiene un cobro confirmado en el mes, no la proyecta."
         ),
     )
     @action(detail=False, methods=["get"], url_path="calendario-cobros")
@@ -202,9 +203,8 @@ class SubscriptionViewSet(TenantViewSet):
             }
             for cobro in cobros
         ]
-        fechas_confirmadas = {
-            (cobro.suscripcion_id, cobro.fecha) for cobro in cobros
-        }
+        suscripciones_confirmadas = {cobro.suscripcion_id for cobro in cobros}
+        hoy = timezone.localdate()
 
         suscripciones_proyectables = (
             suscripciones_tenant.filter(activo=True)
@@ -212,7 +212,11 @@ class SubscriptionViewSet(TenantViewSet):
         )
         for suscripcion in suscripciones_proyectables:
             fecha = _fecha_proyectada_en_mes(suscripcion, inicio, fin)
-            if fecha is None or (suscripcion.id, fecha) in fechas_confirmadas:
+            if (
+                fecha is None
+                or fecha < hoy
+                or suscripcion.id in suscripciones_confirmadas
+            ):
                 continue
             eventos.append(
                 {

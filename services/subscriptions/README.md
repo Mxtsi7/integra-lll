@@ -69,10 +69,15 @@ suscripción que lo origina.
 Los confirmados usan el importe, moneda y fecha registrados en `Cobro`.
 Las proyecciones usan los datos actuales de la suscripción y su frecuencia
 mensual o anual; los días se ajustan al último día del mes cuando sea
-necesario (por ejemplo, del 31 de enero al 28 o 29 de febrero). Una proyección
-no se repite cuando ya hay un cobro confirmado para esa suscripción y fecha.
-Las suscripciones canceladas o desactivadas no generan proyecciones; sus
-cobros confirmados permanecen visibles en el calendario.
+necesario (por ejemplo, del 31 de enero al 28 o 29 de febrero). Solo se
+incluyen proyecciones cuya fecha sea hoy o posterior. Una proyección se omite
+si ya hay cualquier cobro confirmado de esa suscripción en el mismo mes,
+independientemente del día de ambos. Las suscripciones canceladas o
+desactivadas no generan proyecciones; sus cobros confirmados, incluso los
+históricos, permanecen visibles en el calendario.
+
+La prueba del contrato del endpoint se ejecuta desde `services/subscriptions`
+con `pytest tests/test_calendario.py -v`.
 
 Ejemplo de elemento:
 

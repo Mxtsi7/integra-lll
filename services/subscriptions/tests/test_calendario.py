@@ -13,6 +13,10 @@ from app.models import Cobro, Subscription
 
 @pytest.mark.django_db
 class TestCalendarioCobros:
+    @pytest.fixture(autouse=True)
+    def fijar_hoy(self, monkeypatch):
+        monkeypatch.setattr("app.views.timezone.localdate", lambda: date(2024, 1, 1))
+
     def setup_method(self):
         self.client = APIClient()
         self.organizacion = uuid.uuid4()
@@ -33,7 +37,7 @@ class TestCalendarioCobros:
             organizacion_id=organizacion_id or self.organizacion,
             nombre=nombre,
             monto=Decimal("12990.00"),
-            moneda=Subscription.Moneda.CLP,
+            moneda="CLP",
             frecuencia=frecuencia,
             fecha_proximo_cobro=fecha,
             estado=estado,
@@ -52,7 +56,7 @@ class TestCalendarioCobros:
             organizacion_id=self.organizacion,
             suscripcion=suscripcion,
             monto=Decimal("14990.00"),
-            moneda=Subscription.Moneda.USD,
+            moneda="USD",
             fecha=date(2026, 10, 5),
         )
         otra = self.crear_suscripcion(nombre="Otro", fecha=date(2026, 10, 20))
@@ -79,6 +83,22 @@ class TestCalendarioCobros:
                 "moneda": "CLP",
                 "tipo": "proyectado",
             },
+        ]
+
+    def test_cobro_confirmado_omite_proyeccion_del_mismo_mes(self):
+        suscripcion = self.crear_suscripcion(fecha=date(2026, 10, 15))
+        cobro = Cobro.objects.create(
+            organizacion_id=self.organizacion,
+            suscripcion=suscripcion,
+            monto=suscripcion.monto,
+            fecha=date(2026, 10, 14),
+        )
+
+        response = self.get_calendario("2026-10")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert [(evento["id"], evento["tipo"]) for evento in response.data] == [
+            (str(cobro.id), "confirmado")
         ]
 
     def test_diciembre_enero_y_limites_del_mes(self):
@@ -137,6 +157,20 @@ class TestCalendarioCobros:
 
         assert [evento["fecha"] for evento in aniversario.data] == ["2025-02-28"]
         assert mes_siguiente.data == []
+
+    def test_no_proyecta_cobros_anteriores_a_hoy(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.views.timezone.localdate", lambda: date(2026, 10, 16)
+        )
+        self.crear_suscripcion(fecha=date(2026, 8, 15))
+
+        agosto = self.get_calendario("2026-08")
+        octubre = self.get_calendario("2026-10")
+        noviembre = self.get_calendario("2026-11")
+
+        assert agosto.data == []
+        assert octubre.data == []
+        assert [evento["fecha"] for evento in noviembre.data] == ["2026-11-15"]
 
     def test_solo_proyecta_activas_no_canceladas_y_de_su_organizacion(self):
         cancelada = self.crear_suscripcion(
