@@ -36,7 +36,7 @@ def transicionar(contratacion_id, estado, *, ahora=None):
         "pendiente": {"exitosa", "cancelada", "fallida"},
         "exitosa": {"cancelada"}, "cancelada": set(), "fallida": set(),
     }
-    if estado not in destinos[contrato.estado]:
+    if estado not in destinos.get(contrato.estado, set()):
         raise ValidationError({"estado": "La transición de contratación no es válida."})
     ahora = ahora or timezone.now()
     if estado == Contratacion.Estado.EXITOSA:

@@ -68,3 +68,11 @@ def test_contrataciones_y_sufijos_no_se_hacen_publicos(transporte, ruta):
     peticion, _ = transporte
     assert Client().post(ruta, data="{}", content_type="application/json").status_code == 401
     peticion.assert_not_called()
+
+
+@pytest.mark.parametrize("plan", ["free", "premium"])
+def test_feature_ausente_deniega_sin_llamar_al_dominio(transporte, plan):
+    peticion, permiso = transporte
+    permiso._content = json.dumps({"plan": plan, "features": {}}).encode()
+    assert Client().get("/api/asistente/", **con_token(token())).status_code == 403
+    assert peticion.call_count == 1
