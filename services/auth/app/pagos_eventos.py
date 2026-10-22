@@ -41,14 +41,14 @@ class EventoPagoSerializer(serializers.Serializer):
 
 def recibir_pago(cuerpo, firma, instante):
     comprobar_mock()
+    if len(cuerpo) > 8192:
+        raise ValidationError("Evento de pago demasiado grande.")
     try:
         segundos = int(instante)
         if abs(time.time() - segundos) > 300 or not hmac.compare_digest(firma, firma_pago(cuerpo, instante)):
             raise ValueError
     except (TypeError, ValueError):
         raise PermissionDenied("Firma o instante de pago inválido.") from None
-    if len(cuerpo) > 8192:
-        raise ValidationError("Evento de pago demasiado grande.")
     try:
         datos = json.loads(cuerpo)
     except (ValueError, UnicodeDecodeError):

@@ -59,6 +59,19 @@ def test_inicio_es_idempotente_y_no_concede_plan(cuenta):
     assert not EventoPago.objects.exists()
 
 
+def test_cuerpo_excesivo_se_rechaza_antes_de_calcular_hmac(cuenta, monkeypatch):
+    from unittest.mock import Mock
+    from app import pagos_eventos
+    firma = Mock(side_effect=AssertionError("No debe firmar un cuerpo excesivo"))
+    monkeypatch.setattr(pagos_eventos, "firma_pago", firma)
+    respuesta = APIClient().post("/api/pagos/webhook/", b"x" * 8193,
+        content_type="application/json", HTTP_X_PAGOS_FIRMA="invalida",
+        HTTP_X_PAGOS_INSTANTE=str(int(time.time())))
+    assert respuesta.status_code == 400
+    firma.assert_not_called()
+    assert not EventoPago.objects.exists()
+
+
 @pytest.mark.parametrize("extra", [{"importe": "0.01"}, {"organizacion_id": str(uuid4())}, {"estado": "exitosa"}, {"url_retorno": "https://ajeno.test/"}])
 def test_navegador_no_fija_importe_estado_tenant_ni_retorno(cuenta, extra):
     assert iniciar(cuenta, **extra).status_code == 400
