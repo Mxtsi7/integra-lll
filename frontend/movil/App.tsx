@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, Text, View } from 'react-native';
 import { configurarApi } from '@ojoalgasto/shared';
-  configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL });
+configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api' });
 
 export default function App() {
   return (
