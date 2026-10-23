@@ -113,6 +113,67 @@ def test_revisarla_dos_veces_no_mueve_la_fecha():
     assert alerta.revisada_en == primera
 
 
+# ── Concurrencia: lecturas obsoletas ─────────────────────────────────────
+
+
+def test_una_instancia_vieja_no_revierte_una_revision():
+    """Regresión del hallazgo de la revisión de #83.
+
+    Antes: las marcas comparaban `self.lectura` en memoria y después hacían un
+    save sin condición. Cargar dos instancias, revisar con una y leer con la
+    otra dejaba la fila en `leida` con `revisada_en` informado — un estado que
+    no existe en la progresión pendiente → leída → revisada.
+    """
+    alerta = crear()
+    primera = Alerta.objects.get(pk=alerta.pk)
+    segunda = Alerta.objects.get(pk=alerta.pk)
+
+    primera.marcar_revisada()
+    cambio = segunda.marcar_leida()
+
+    assert cambio is False, "la instancia vieja no debería haber cambiado nada"
+    desde_bd = Alerta.objects.get(pk=alerta.pk)
+    assert desde_bd.lectura == Alerta.Lectura.REVISADA
+    assert desde_bd.revisada_en is not None
+
+
+def test_dos_marcas_concurrentes_no_mueven_la_primera_fecha():
+    alerta = crear()
+    primera = Alerta.objects.get(pk=alerta.pk)
+    segunda = Alerta.objects.get(pk=alerta.pk)
+
+    primera.marcar_leida()
+    fecha_original = Alerta.objects.get(pk=alerta.pk).leida_en
+
+    segunda.marcar_leida(cuando=timezone.now() + timedelta(hours=3))
+
+    assert Alerta.objects.get(pk=alerta.pk).leida_en == fecha_original
+
+
+def test_revisar_conserva_la_fecha_de_lectura_de_otra_instancia():
+    """`Coalesce` solo rellena `leida_en` si estaba vacía."""
+    alerta = crear()
+    primera = Alerta.objects.get(pk=alerta.pk)
+    segunda = Alerta.objects.get(pk=alerta.pk)
+
+    primera.marcar_leida()
+    leida = Alerta.objects.get(pk=alerta.pk).leida_en
+
+    segunda.marcar_revisada(cuando=timezone.now() + timedelta(hours=2))
+
+    desde_bd = Alerta.objects.get(pk=alerta.pk)
+    assert desde_bd.leida_en == leida
+    assert desde_bd.lectura == Alerta.Lectura.REVISADA
+
+
+def test_las_marcas_dicen_si_cambiaron_algo():
+    alerta = crear()
+    assert alerta.marcar_leida() is True
+    assert alerta.marcar_leida() is False
+    assert alerta.marcar_revisada() is True
+    assert alerta.marcar_revisada() is False
+
+
 # ── Idempotencia del consumidor (FE-24) ──────────────────────────────────
 
 
