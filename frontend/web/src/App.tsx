@@ -7,6 +7,8 @@ import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { CuentasConectadasPage } from './pages/CuentasConectadasPage';
 import { CalendarioPage } from './pages/CalendarioPage';
+import { AgendaPage } from './pages/AgendaPage';
+import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
@@ -75,7 +77,8 @@ export function App() {
             {/* Secciones del menú. Las que todavía no tienen backend muestran
                 ProximamentePage; antes caían al comodín y devolvían al Panel
                 en silencio. */}
-            <Route path="/calendario" element={<CalendarioPage />} />
+            <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
+            <Route path={RUTA_AGENDA} element={<AgendaPage />} />
             <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
             {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
                 accionConectar (ConectarCorreo). Sin ellas, la página dice

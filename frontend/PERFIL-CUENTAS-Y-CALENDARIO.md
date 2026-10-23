@@ -91,6 +91,9 @@ accionConectar?: ReactNode;                        // AN-15: <ConectarCorreo …
 Ruta `/calendario` con el mes actual de lunes a domingo, hoy marcado y un día
 elegido.
 
+> **Actualización:** desde CH-18 los cobros del calendario vienen del endpoint
+> de VI-07 (`calendario-cobros`). Ver `CALENDARIO-DE-COBROS.md`.
+
 - **Datos reales:** cada suscripción aporta su próximo cobro, con la misma
   regla que la proyección del Panel. La regla se sacó de `gastoProyectado` a
   `generaCobro()` (`shared/src/calculos.ts`). CH-18 reemplazará esta fuente

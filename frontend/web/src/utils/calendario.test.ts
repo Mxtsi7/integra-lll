@@ -1,5 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { diasDelMes, esDelMes, fechaDeIso, isoDeFecha, semanasDelMes, sumarDias } from './calendario';
+import {
+  diasDelMes,
+  esDelMes,
+  fechaDeIso,
+  isoDeFecha,
+  mesDeFecha,
+  partesDeMes,
+  primerDiaDelMes,
+  semanasDelMes,
+  sumarDias,
+  sumarMeses,
+  sumarMesesAFecha,
+} from './calendario';
 
 // Zona de Chile (UTC-3/-4) aunque CI corra en UTC: así un new Date('YYYY-MM-DD')
 // (medianoche UTC = el día anterior acá) hace fallar los tests de fechas.
@@ -73,5 +85,27 @@ describe('fechas sin pasar por UTC', () => {
     expect(sumarDias('2026-10-31', 1)).toBe('2026-11-01');
     expect(sumarDias('2026-01-01', -1)).toBe('2025-12-31');
     expect(sumarDias('2028-02-28', 1)).toBe('2028-02-29');
+  });
+});
+
+describe('meses "YYYY-MM" (CH-19)', () => {
+  it('mesDeFecha, partesDeMes y primerDiaDelMes', () => {
+    expect(mesDeFecha('2026-10-24')).toBe('2026-10');
+    expect(partesDeMes('2026-10')).toEqual({ anio: 2026, mes: 9 });
+    expect(primerDiaDelMes('2026-10')).toBe('2026-10-01');
+  });
+
+  it('sumarMeses cruza diciembre y enero', () => {
+    expect(sumarMeses('2026-12', 1)).toBe('2027-01');
+    expect(sumarMeses('2026-01', -1)).toBe('2025-12');
+    expect(sumarMeses('2026-10', 14)).toBe('2027-12');
+    expect(sumarMeses('2026-10', 0)).toBe('2026-10');
+  });
+
+  it('sumarMesesAFecha no se desborda en meses cortos', () => {
+    expect(sumarMesesAFecha('2026-01-31', 1)).toBe('2026-02-28');
+    expect(sumarMesesAFecha('2028-01-31', 1)).toBe('2028-02-29');
+    expect(sumarMesesAFecha('2026-03-31', -1)).toBe('2026-02-28');
+    expect(sumarMesesAFecha('2026-12-15', 1)).toBe('2027-01-15');
   });
 });

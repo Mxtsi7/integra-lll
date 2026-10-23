@@ -62,3 +62,39 @@ export function semanasDelMes(anio: number, mes: number): (string | null)[][] {
   for (let i = 0; i < casillas.length; i += 7) semanas.push(casillas.slice(i, i + 7));
   return semanas;
 }
+
+// ── Meses (CH-19) ─────────────────────────────────────────────────────
+// Un mes se maneja como "YYYY-MM", igual que el parámetro ?mes= de la API
+// (VI-07) y de la URL de la página.
+
+/** "2026-10-24" → "2026-10". */
+export function mesDeFecha(iso: string): string {
+  return iso.slice(0, 7);
+}
+
+/** "2026-10" → { anio: 2026, mes: 9 } (mes de 0 a 11, como en Date). */
+export function partesDeMes(clave: string): { anio: number; mes: number } {
+  const [anio, mes] = clave.split('-').map(Number);
+  return { anio, mes: mes - 1 };
+}
+
+/** Suma (o resta) meses: "2026-12" + 1 → "2027-01"; "2026-01" − 1 → "2025-12". */
+export function sumarMeses(clave: string, cantidad: number): string {
+  const { anio, mes } = partesDeMes(clave);
+  return mesDeFecha(isoDeFecha(new Date(anio, mes + cantidad, 1)));
+}
+
+/** Primer día del mes: "2026-10" → "2026-10-01". */
+export function primerDiaDelMes(clave: string): string {
+  return `${clave}-01`;
+}
+
+/**
+ * El mismo día N meses después, sin desbordarse: el 31 de enero + 1 mes es
+ * el 28 (o 29) de febrero, no el 3 de marzo como haría Date solo.
+ */
+export function sumarMesesAFecha(iso: string, cantidad: number): string {
+  const { anio, mes } = partesDeMes(sumarMeses(mesDeFecha(iso), cantidad));
+  const dia = Math.min(Number(iso.slice(8)), diasDelMes(anio, mes));
+  return isoDeFecha(new Date(anio, mes, dia));
+}

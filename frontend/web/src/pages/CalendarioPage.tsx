@@ -1,112 +1,86 @@
-import { formatearFechaLarga, formatearMesAnio, generaCobro, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
-import { CalendarDays } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { CuadriculaMes, type EventoCalendario } from '../components/calendario/CuadriculaMes';
+import { formatearMesAnio } from '@ojoalgasto/shared';
+import { useState } from 'react';
+import { CuadriculaMes } from '../components/calendario/CuadriculaMes';
+import { DetalleDia } from '../components/calendario/DetalleDia';
+import { NavegacionMes } from '../components/calendario/NavegacionMes';
+import { PRESENTACION_TIPO } from '../components/calendario/presentacion';
 import styles from '../components/calendario/Calendario.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Spinner } from '../components/Spinner';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
-import { Seccion } from '../components/ui/Seccion';
-import { esDelMes, fechaDeIso, isoDeFecha, textoCobros } from '../utils/calendario';
-import { MENSAJE_SIN_RED } from '../utils/mensajes';
-
-const MENSAJE_ERROR = 'No pudimos cargar tus cobros. Intenta de nuevo.';
-
-type EstadoCarga =
-  | { tipo: 'cargando' }
-  | { tipo: 'error'; mensaje: string }
-  | { tipo: 'listo'; eventos: EventoCalendario[] };
+import { useCobrosDelMes } from '../hooks/useCobrosDelMes';
+import { useMesEnUrl } from '../hooks/useMesEnUrl';
+import { esDelMes, isoDeFecha, mesDeFecha, partesDeMes, primerDiaDelMes } from '../utils/calendario';
 
 /**
- * Por ahora cada suscripción aporta su próximo cobro (fecha_proximo_cobro),
- * con la misma regla que la proyección del Panel (generaCobro). CH-18 cambia
- * esta fuente por el rango mensual de VI-07 cuando exista.
- */
-function eventosDesde(suscripciones: Suscripcion[]): EventoCalendario[] {
-  return suscripciones.filter(generaCobro).map((s) => ({
-    id: `${s.id}-${s.fecha_proximo_cobro}`,
-    fecha: s.fecha_proximo_cobro,
-    titulo: s.nombre,
-    monto: s.monto,
-    moneda: s.moneda,
-    suscripcionId: s.id,
-  }));
-}
-
-const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
-
-/**
- * Calendario de pagos (CH-17): el mes actual en una cuadrícula, con los días
- * que tienen cobros marcados y un día elegido. Los datos son los reales de
- * la API; no hay datos de ejemplo salvo que se active USAR_DATOS_DE_EJEMPLO
- * en shared (el mismo interruptor que usa el resto de la web).
+ * Calendario de pagos.
+ *
+ * - CH-17: cuadrícula del mes, accesible, con un día elegido.
+ * - CH-18: los cobros de VI-07 en su día, confirmados y previstos.
+ * - CH-19: anterior / Hoy / siguiente; el mes vive en la URL (?mes=YYYY-MM).
+ * - CH-20: detalle del día elegido con total por moneda.
+ *
+ * Todo sale de GET /api/suscripciones/calendario-cobros/; no hay datos en el código.
  */
 export function CalendarioPage() {
-  // "Hoy" se fija al abrir la página. El mes que se ve sale de ahí; CH-19
-  // agrega anterior / siguiente / volver a hoy.
+  // "Hoy" se fija al abrir la página.
   const [hoy] = useState(() => isoDeFecha(new Date()));
-  const fechaHoy = fechaDeIso(hoy);
-  const anio = fechaHoy.getFullYear();
-  const mes = fechaHoy.getMonth();
+  const { mes, irAMes } = useMesEnUrl(hoy);
+  const { anio, mes: indiceMes } = partesDeMes(mes);
+  const { estado, reintentar } = useCobrosDelMes(mes);
 
-  const [seleccionado, setSeleccionado] = useState<string>(hoy);
-  const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
-  const [intento, setIntento] = useState(0);
+  // El día elegido. Si se navegó a otro mes, se muestra hoy (si es de ese
+  // mes) o el día 1: el detalle siempre es de un día que está a la vista.
+  const [elegido, setElegido] = useState(hoy);
+  const seleccionado = [elegido, hoy].find((d) => esDelMes(d, anio, indiceMes)) ?? primerDiaDelMes(mes);
 
-  useEffect(() => {
-    let vigente = true;
-    setEstado({ tipo: 'cargando' });
-    getSuscripciones()
-      .then((suscripciones) => {
-        if (vigente) setEstado({ tipo: 'listo', eventos: eventosDesde(suscripciones) });
-      })
-      .catch((err: unknown) => {
-        if (vigente) setEstado({ tipo: 'error', mensaje: err instanceof TypeError ? MENSAJE_SIN_RED : MENSAJE_ERROR });
-      });
-    return () => {
-      vigente = false;
-    };
-  }, [intento]);
+  const cobros = estado.tipo === 'listo' ? estado.cobros : null;
+  const cobrosDelDia = cobros?.filter((c) => c.fecha === seleccionado) ?? null;
 
-  const eventosDelMes = useMemo(
-    () => (estado.tipo === 'listo' ? estado.eventos.filter((e) => esDelMes(e.fecha, anio, mes)) : []),
-    [estado, anio, mes],
-  );
-  const cobrosDelDia = eventosDelMes.filter((e) => e.fecha === seleccionado).length;
+  function irAHoy() {
+    setElegido(hoy);
+    irAMes(mesDeFecha(hoy));
+  }
 
   return (
-    <AppLayout headerTitulo="Calendario" headerSubtitulo="El próximo cobro de cada suscripción, en su día.">
-      <Seccion titulo={conMayuscula(formatearMesAnio(anio, mes))} icono={<CalendarDays size={19} aria-hidden="true" />} tinte="acento">
-        {estado.tipo === 'cargando' && (
-          <div className={styles.mensaje}>
-            <Spinner size={22} etiqueta="Cargando tus cobros" />
-          </div>
-        )}
+    <AppLayout headerTitulo="Calendario" headerSubtitulo="Tus cobros confirmados y los que vienen, día por día.">
+      <NavegacionMes mes={mes} vista="mes" onIrAMes={irAMes} onHoy={irAHoy} />
 
-        {estado.tipo === 'error' && (
-          <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((n) => n + 1)} />
-        )}
+      <div className={styles.disposicion}>
+        <div className={`tile ${styles.panelMes}`}>
+          {estado.tipo === 'cargando' && (
+            <div className={styles.estadoCarga}>
+              <Spinner size={18} etiqueta="Cargando tus cobros" />
+            </div>
+          )}
+          {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={reintentar} />}
+          {estado.tipo === 'listo' && estado.cobros.length === 0 && (
+            <p className={styles.mensaje}>No hay cobros en {formatearMesAnio(anio, indiceMes)}.</p>
+          )}
 
-        {estado.tipo === 'listo' && (
-          <>
-            {eventosDelMes.length === 0 && <p className={styles.mensaje}>No hay cobros este mes.</p>}
-            <CuadriculaMes
-              anio={anio}
-              mes={mes}
-              hoy={hoy}
-              seleccionado={seleccionado}
-              onSeleccionar={setSeleccionado}
-              eventos={eventosDelMes}
-            />
-            {/* CH-20 reemplaza este resumen por el detalle de los cobros del día. */}
-            <p className={styles.resumen} aria-live="polite">
-              <strong>{conMayuscula(formatearFechaLarga(seleccionado))}</strong>
-              {' · '}
-              {conMayuscula(textoCobros(cobrosDelDia))}
-            </p>
-          </>
-        )}
-      </Seccion>
+          {/* La cuadrícula queda a la vista mientras carga: al cruzar de mes
+              con el teclado el foco no se pierde. */}
+          <CuadriculaMes
+            anio={anio}
+            mes={indiceMes}
+            hoy={hoy}
+            seleccionado={seleccionado}
+            onSeleccionar={setElegido}
+            cobros={cobros}
+            onCambiarMes={(destino) => irAMes(mesDeFecha(destino))}
+          />
+
+          <p className={styles.leyenda} aria-hidden="true">
+            {Object.entries(PRESENTACION_TIPO).map(([tipo, { etiqueta }]) => (
+              <span key={tipo} className={styles.leyendaItem} data-tipo={tipo}>
+                {etiqueta}
+              </span>
+            ))}
+          </p>
+        </div>
+
+        <DetalleDia fecha={seleccionado} cobros={cobrosDelDia} error={estado.tipo === 'error'} />
+      </div>
     </AppLayout>
   );
 }

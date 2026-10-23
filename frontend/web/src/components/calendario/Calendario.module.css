@@ -1,5 +1,99 @@
-/* Calendario (CH-17). Colores solo con las variables del tema, para que
-   funcione igual en claro y oscuro. */
+/* Calendario y Agenda (CH-17 a CH-21). Colores solo con las variables del
+   tema, para que funcione igual en claro y oscuro. */
+
+/* ── Barra: mes, anterior / Hoy / siguiente y vista ───────────────── */
+
+.barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tituloMes {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.grupoMes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flecha {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-s);
+  background: var(--vidrio);
+  color: var(--tinta);
+  cursor: pointer;
+}
+
+.flecha:hover {
+  border-color: var(--vidrio-borde-fuerte);
+}
+
+.flecha:focus-visible,
+.vista:focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.vistas {
+  display: flex;
+  padding: 3px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: 999px;
+  background: var(--vidrio);
+}
+
+.vista {
+  padding: 5px 14px;
+  border-radius: 999px;
+  color: var(--tinta-2);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.vista[aria-current='page'] {
+  background: var(--acento-suave);
+  color: var(--acento);
+}
+
+/* ── Disposición: mes a la izquierda, detalle del día a la derecha ── */
+
+.disposicion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+
+.panelMes {
+  padding: 18px;
+}
+
+.estadoCarga {
+  padding: 4px 0 10px;
+}
+
+/* ── Cuadrícula ─────────────────────────────────────────────────── */
 
 .cuadricula {
   width: 100%;
@@ -17,23 +111,26 @@
 }
 
 .vacia {
-  height: 64px;
+  height: 92px;
 }
 
 .dia {
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 3px;
   width: 100%;
-  height: 64px;
-  padding: 8px;
+  height: 92px;
+  padding: 7px;
   border: 1px solid var(--vidrio-borde);
   border-radius: var(--radio-s);
   background: var(--vidrio);
   color: var(--tinta);
   font: inherit;
+  text-align: left;
   cursor: pointer;
+  overflow: hidden;
   transition: border-color var(--rapido), background var(--rapido);
 }
 
@@ -61,58 +158,216 @@
   background: var(--acento-suave);
 }
 
-/* Cuántos cobros hay ese día. El número también va en el nombre accesible
-   del botón ("…, 2 cobros"); acá es solo visual. */
+/* Cobros escritos en la casilla (escritorio). */
+.cobrosDia {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cobroDia {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Confirmado: relleno. Previsto: solo borde punteado. El tipo también va
+   escrito en el nombre accesible y en la leyenda: no depende del color. */
+.cobroDia[data-tipo='confirmado'] {
+  background: var(--turquesa-suave);
+  color: var(--tinta);
+}
+
+.cobroDia[data-tipo='proyectado'] {
+  border: 1px dashed var(--vidrio-borde-fuerte);
+  color: var(--tinta-2);
+}
+
+.cobroServicio {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.cobroImporte {
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+.masCobros {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tinta-3);
+}
+
+/* Cuántos cobros (celular). */
 .marca {
+  display: none;
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  min-width: 22px;
-  padding: 1px 6px;
+  right: 4px;
+  bottom: 4px;
+  min-width: 18px;
+  padding: 0 4px;
   border-radius: 999px;
   background: var(--turquesa-suave);
   color: var(--turquesa);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   text-align: center;
 }
 
+.leyenda {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--tinta-2);
+}
+
+.leyendaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.leyendaItem::before {
+  content: '';
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.leyendaItem[data-tipo='confirmado']::before {
+  background: var(--turquesa-suave);
+}
+
+.leyendaItem[data-tipo='proyectado']::before {
+  border: 1px dashed var(--vidrio-borde-fuerte);
+}
+
 .mensaje {
-  padding: 8px 0 12px;
+  padding: 4px 0 10px;
   color: var(--tinta-2);
   font-size: 14px;
 }
 
-.resumen {
-  margin-top: 14px;
+/* ── Detalle del día (CH-20) y Agenda (CH-21) ───────────────────── */
+
+.detalle {
+  padding: 18px;
+}
+
+.detalleTitulo {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.detalleResumen {
+  margin: 2px 0 12px;
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.listaCobros {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.filaCobro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.filaCobro:first-child {
+  border-top: none;
+}
+
+.filaServicio {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--tinta);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.filaServicio:hover {
+  text-decoration: underline;
+}
+
+.filaImporte {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.total {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--vidrio-borde-fuerte);
   font-size: 14px;
   color: var(--tinta-2);
 }
 
-.resumen strong {
+.total strong {
   color: var(--tinta);
 }
 
+.agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+}
 
-@media (max-width: 560px) {
+.agendaFecha {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+@media (max-width: 1100px) {
+  .disposicion {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
   .cuadricula {
     border-spacing: 3px;
   }
 
   .dia,
   .vacia {
-    height: 48px;
+    height: 52px;
   }
 
   .dia {
     padding: 5px;
   }
 
+  .cobrosDia {
+    display: none;
+  }
+
   .marca {
-    right: 4px;
-    bottom: 4px;
-    min-width: 18px;
-    padding: 0 4px;
-    font-size: 11px;
+    display: block;
   }
 }
