@@ -38,8 +38,16 @@ def al_crear_suscripcion(suscripcion, correlation_id: str = "") -> str:
         recalcular_resumen(suscripcion.organizacion_id)
         return "sincrono"
 
+    # Los cinco campos que el catálogo declara para `suscripcion.creada`, ni
+    # uno menos. Faltaba `proveedor_id`: el consumidor que lo espere recibía un
+    # evento incompleto sin que nada avisara, porque nadie valida el payload
+    # contra el contrato todavía. Va null cuando la suscripción no tiene
+    # proveedor asociado, que es un caso legítimo.
     datos = {
         "suscripcion_id": str(suscripcion.id),
+        "proveedor_id": (
+            str(suscripcion.proveedor_id) if suscripcion.proveedor_id else None
+        ),
         "monto": str(suscripcion.monto),
         "ciclo": suscripcion.frecuencia,
         "proximo_cobro": (

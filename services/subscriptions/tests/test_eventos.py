@@ -29,17 +29,24 @@ def org() -> uuid.UUID:
     return uuid.uuid4()
 
 
-def crear(org, monto, frecuencia=Subscription.Frecuencia.MENSUAL, estado=Subscription.Estado.ACTIVO):
+def crear(org, monto, frecuencia=Subscription.Frecuencia.MENSUAL,
+          estado=Subscription.Estado.ACTIVO, moneda=Subscription.Moneda.CLP):
     return Subscription.objects.create(
         organizacion_id=org,
-        nombre=f"Servicio {monto}",
+        nombre=f"Servicio {monto} {moneda}",
         monto=Decimal(monto),
-        moneda=Subscription.Moneda.CLP,
+        moneda=moneda,
         frecuencia=frecuencia,
         fecha_proximo_cobro=date(2026, 11, 1),
         categoria=Subscription.Categoria.STREAMING,
         estado=estado,
     )
+
+
+def solo(resumenes):
+    """Para las pruebas de una sola moneda: exige que haya exactamente una fila."""
+    assert len(resumenes) == 1, f"se esperaba una moneda y hay {len(resumenes)}"
+    return resumenes[0]
 
 
 CUERPO = {
@@ -60,16 +67,16 @@ class TestRecalcularResumen:
     def test_suma_las_mensuales_tal_cual(self, org):
         crear(org, "1000")
         crear(org, "2500")
-        assert recalcular_resumen(org).total_mensual == Decimal("3500.00")
+        assert solo(recalcular_resumen(org)).total_mensual == Decimal("3500.00")
 
     def test_divide_las_anuales_por_doce(self, org):
         crear(org, "12000", frecuencia=Subscription.Frecuencia.ANUAL)
-        assert recalcular_resumen(org).total_mensual == Decimal("1000.00")
+        assert solo(recalcular_resumen(org)).total_mensual == Decimal("1000.00")
 
     def test_ignora_las_que_no_estan_activas(self, org):
         crear(org, "1000")
         crear(org, "9999", estado=Subscription.Estado.CANCELADO)
-        resumen = recalcular_resumen(org)
+        resumen = solo(recalcular_resumen(org))
         assert resumen.total_mensual == Decimal("1000.00")
         assert resumen.cantidad_activas == 1
 
@@ -77,22 +84,97 @@ class TestRecalcularResumen:
         otra = uuid.uuid4()
         crear(org, "1000")
         crear(otra, "5000")
-        assert recalcular_resumen(org).total_mensual == Decimal("1000.00")
-        assert recalcular_resumen(otra).total_mensual == Decimal("5000.00")
+        assert solo(recalcular_resumen(org)).total_mensual == Decimal("1000.00")
+        assert solo(recalcular_resumen(otra)).total_mensual == Decimal("5000.00")
 
     def test_es_idempotente(self, org):
         """Regla 1 del catálogo: RabbitMQ entrega *al menos* una vez."""
         crear(org, "1000")
-        primero = recalcular_resumen(org)
-        segundo = recalcular_resumen(org)
+        primero = solo(recalcular_resumen(org))
+        segundo = solo(recalcular_resumen(org))
         assert primero.id == segundo.id
         assert segundo.total_mensual == Decimal("1000.00")
         assert ResumenOrganizacion.objects.filter(organizacion_id=org).count() == 1
 
-    def test_sin_suscripciones_deja_cero_y_no_revienta(self, org):
-        resumen = recalcular_resumen(org)
-        assert resumen.total_mensual == Decimal("0")
-        assert resumen.cantidad_activas == 0
+    def test_sin_suscripciones_no_deja_ninguna_fila(self, org):
+        """Sin suscripciones no hay moneda de la cual informar.
+
+        Antes devolvía una fila con total 0. Con el resumen por moneda eso ya
+        no tiene sentido: ¿cero de qué divisa? Devuelve una lista vacía y no
+        inventa una fila en una moneda que la organización nunca usó.
+        """
+        assert recalcular_resumen(org) == []
+        assert not ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+
+
+@pytest.mark.django_db
+class TestMonedas:
+    """Regresión del [P1] de la revisión de la #78.
+
+    Antes se sumaba `monto` sin mirar la divisa: 10.000 CLP más 10 USD daban
+    10.010, que no es plata de ninguna moneda.
+    """
+
+    def test_no_suma_clp_con_usd(self, org):
+        crear(org, "10000", moneda=Subscription.Moneda.CLP)
+        crear(org, "10", moneda=Subscription.Moneda.USD)
+
+        por_moneda = {r.moneda: r.total_mensual for r in recalcular_resumen(org)}
+
+        assert por_moneda == {"CLP": Decimal("10000.00"), "USD": Decimal("10.00")}
+        assert Decimal("10010") not in por_moneda.values()
+
+    def test_una_fila_por_moneda(self, org):
+        crear(org, "1000", moneda=Subscription.Moneda.CLP)
+        crear(org, "2000", moneda=Subscription.Moneda.CLP)
+        crear(org, "5", moneda=Subscription.Moneda.USD)
+
+        resumenes = recalcular_resumen(org)
+
+        assert len(resumenes) == 2
+        por_moneda = {r.moneda: (r.total_mensual, r.cantidad_activas) for r in resumenes}
+        assert por_moneda["CLP"] == (Decimal("3000.00"), 2)
+        assert por_moneda["USD"] == (Decimal("5.00"), 1)
+
+    def test_las_anuales_se_dividen_dentro_de_su_moneda(self, org):
+        crear(org, "12000", frecuencia=Subscription.Frecuencia.ANUAL, moneda=Subscription.Moneda.CLP)
+        crear(org, "120", frecuencia=Subscription.Frecuencia.ANUAL, moneda=Subscription.Moneda.USD)
+
+        por_moneda = {r.moneda: r.total_mensual for r in recalcular_resumen(org)}
+
+        assert por_moneda == {"CLP": Decimal("1000.00"), "USD": Decimal("10.00")}
+
+    def test_una_moneda_que_se_deja_de_usar_no_queda_de_fantasma(self, org):
+        usd = crear(org, "10", moneda=Subscription.Moneda.USD)
+        crear(org, "1000", moneda=Subscription.Moneda.CLP)
+        assert len(recalcular_resumen(org)) == 2
+
+        usd.activo = False
+        usd.save(update_fields=["activo"])
+
+        resumenes = recalcular_resumen(org)
+        assert [r.moneda for r in resumenes] == ["CLP"]
+        assert not ResumenOrganizacion.objects.filter(
+            organizacion_id=org, moneda="USD"
+        ).exists()
+
+    def test_sigue_siendo_idempotente_con_varias_monedas(self, org):
+        crear(org, "1000", moneda=Subscription.Moneda.CLP)
+        crear(org, "10", moneda=Subscription.Moneda.USD)
+
+        primeros = {r.moneda: r.id for r in recalcular_resumen(org)}
+        segundos = {r.moneda: r.id for r in recalcular_resumen(org)}
+
+        assert primeros == segundos
+        assert ResumenOrganizacion.objects.filter(organizacion_id=org).count() == 2
+
+    def test_no_mezcla_monedas_entre_organizaciones(self, org):
+        otra = uuid.uuid4()
+        crear(org, "1000", moneda=Subscription.Moneda.CLP)
+        crear(otra, "10", moneda=Subscription.Moneda.USD)
+
+        assert [r.moneda for r in recalcular_resumen(org)] == ["CLP"]
+        assert [r.moneda for r in recalcular_resumen(otra)] == ["USD"]
 
 
 # ── el sobre del catálogo ────────────────────────────────────────────
@@ -171,7 +253,29 @@ class TestInterruptor:
         assert evento == "suscripcion.creada"
         assert str(organizacion) == str(org)
         assert correlation == "corr-1"
-        assert set(datos) == {"suscripcion_id", "monto", "ciclo", "proximo_cobro"}
+        assert set(datos) == {
+            "suscripcion_id", "proveedor_id", "monto", "ciclo", "proximo_cobro",
+        }
+
+    def test_el_payload_lleva_los_cinco_campos_del_catalogo(self, cliente, org, settings):
+        """Regresión del [P2] de la revisión: faltaba `proveedor_id`.
+
+        El catálogo declara suscripcion_id, proveedor_id, monto, ciclo y
+        proximo_cobro. Nadie valida el payload contra el contrato todavía, así
+        que un campo faltante no lo avisa nada.
+        """
+        settings.EVENTOS_ASINCRONOS = True
+        with patch.object(despacho, "publicar") as publicar_falso:
+            cliente.post(
+                "/api/suscripciones/", CUERPO, format="json",
+                headers={"X-Organizacion-Id": str(org)},
+            )
+        datos = publicar_falso.call_args.args[1]
+        del_catalogo = {"suscripcion_id", "proveedor_id", "monto", "ciclo", "proximo_cobro"}
+        assert set(datos) == del_catalogo
+        # Sin proveedor va null, no ausente: el consumidor puede confiar en la
+        # forma del sobre aunque el dato no esté.
+        assert datos["proveedor_id"] is None
 
     def test_si_rabbitmq_esta_caido_la_suscripcion_igual_se_crea(self, cliente, org, settings):
         """El ADR-003 existe para desacoplar; tumbar el POST sería lo contrario."""
