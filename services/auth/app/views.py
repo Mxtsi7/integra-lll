@@ -327,7 +327,9 @@ class UsuarioActualView(EliminarCuentaMixin, generics.RetrieveAPIView):
         },
     )
     def get(self, request, *args, **kwargs):
-        return super().get(request, *args, **kwargs)
+        respuesta = super().get(request, *args, **kwargs)
+        respuesta["Cache-Control"] = "no-store"
+        return respuesta
 
     def get_object(self):
         return usuario_del_contexto(self.request)

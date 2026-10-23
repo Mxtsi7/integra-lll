@@ -1,3 +1,6 @@
+
+Este MD solo se conserva para guardar constancia, no es necesario leerlo, si quiere usar expo debe leer "IniciarExpo.MD"
+
 # App móvil
 
 Todavía no está creada. Este directorio reserva el lugar para que la
