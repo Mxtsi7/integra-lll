@@ -1,6 +1,8 @@
 """Modelos del servicio de notificaciones — FE-16."""
 
 from django.db import models
+from django.db.models import Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from shared.tenant.base import ModeloTenant
@@ -112,30 +114,57 @@ class Alerta(ModeloTenant):
         """Lo que cuenta la campana del frontend (FE-20)."""
         return self.lectura == self.Lectura.PENDIENTE
 
-    def marcar_leida(self, *, cuando=None) -> None:
-        """Idempotente: volver a marcarla no mueve la fecha original."""
-        if self.lectura != self.Lectura.PENDIENTE:
-            return
-        self.lectura = self.Lectura.LEIDA
-        self.leida_en = cuando or timezone.now()
-        self.save(update_fields=["lectura", "leida_en", "actualizado_en"])
+    # ── marcas de lectura ────────────────────────────────────────────
+    #
+    # Las dos se hacen con un UPDATE condicionado por el estado actual EN LA
+    # BASE, no comparando `self.lectura` en memoria. La versión anterior hacía
+    # `if self.lectura != PENDIENTE: return` y después un save sin condición:
+    # con dos instancias cargadas en paralelo, la segunda pisaba a la primera.
+    # Marcar una revisada y después leída desde otra instancia dejaba la fila
+    # en `leida` con `revisada_en` ya informado, un estado que no existe.
+    #
+    # `filter(...).update(...)` devuelve cuántas filas cambió: 0 significa que
+    # otra escritura llegó antes, y entonces no se toca nada.
 
-    def marcar_revisada(self, *, cuando=None) -> None:
+    def marcar_leida(self, *, cuando=None) -> bool:
+        """Pendiente → leída. Devuelve si esta llamada fue la que la cambió.
+
+        Idempotente: si ya estaba leída o revisada, no mueve ninguna fecha.
+        """
+        ahora = cuando or timezone.now()
+        cambiadas = type(self).objects.filter(
+            pk=self.pk, lectura=self.Lectura.PENDIENTE
+        ).update(lectura=self.Lectura.LEIDA, leida_en=ahora, actualizado_en=ahora)
+        if cambiadas:
+            self.lectura = self.Lectura.LEIDA
+            self.leida_en = ahora
+        else:
+            # Otra escritura ganó: se recarga para no seguir con datos viejos.
+            self.refresh_from_db()
+        return bool(cambiadas)
+
+    def marcar_revisada(self, *, cuando=None) -> bool:
         """Descarta la alerta sin tocar la suscripción (RF-07).
 
         Si estaba pendiente, también queda leída: no tendría sentido una
-        alerta revisada que la campana sigue contando como sin ver.
+        alerta revisada que la campana sigue contando como sin ver. La fecha
+        de lectura original se conserva con `Coalesce`: solo se rellena si
+        estaba vacía.
         """
-        if self.lectura == self.Lectura.REVISADA:
-            return
         ahora = cuando or timezone.now()
-        if self.leida_en is None:
-            self.leida_en = ahora
-        self.lectura = self.Lectura.REVISADA
-        self.revisada_en = ahora
-        self.save(
-            update_fields=["lectura", "leida_en", "revisada_en", "actualizado_en"]
+        cambiadas = (
+            type(self)
+            .objects.filter(pk=self.pk)
+            .exclude(lectura=self.Lectura.REVISADA)
+            .update(
+                lectura=self.Lectura.REVISADA,
+                revisada_en=ahora,
+                leida_en=Coalesce("leida_en", Value(ahora)),
+                actualizado_en=ahora,
+            )
         )
+        self.refresh_from_db()
+        return bool(cambiadas)
 
     # ── meta ─────────────────────────────────────────────────────────
 
