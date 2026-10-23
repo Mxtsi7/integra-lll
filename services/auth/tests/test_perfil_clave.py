@@ -59,7 +59,7 @@ def test_patch_solo_cambia_nombre_y_conserva_contrato(usuario):
     respuesta = APIClient().patch("/api/usuarios/me/", {"nombre": "Actualizado"}, **contexto(usuario))
     assert respuesta.status_code == 200
     assert respuesta.data == {"id": usuario.pk, "nombre": "Actualizado", "correo": usuario.email,
-                              "rol": "titular", "organizacion_id": str(usuario.organizacion_id)}
+                              "rol": "titular", "organizacion_id": str(usuario.organizacion_id), "plan": "free"}
     usuario.refresh_from_db()
     assert usuario.nombre == "Actualizado"
     consulta = APIClient().get("/api/usuarios/me/", **contexto(usuario))
