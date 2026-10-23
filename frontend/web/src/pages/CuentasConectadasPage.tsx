@@ -1,8 +1,8 @@
 import type { CuentaConectada } from '@ojoalgasto/shared';
 import { Link2, Plug } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ListaCuentas, type EstadoListaCuentas } from '../components/cuentas/ListaCuentas';
-import styles from '../components/cuentas/Cuentas.module.css';
+import { ListaCuentas, type EstadoListaCuentas } from '../components/Cuentas/ListaCuentas';
+import styles from '../components/Cuentas/Cuentas.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Seccion } from '../components/ui/Seccion';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
