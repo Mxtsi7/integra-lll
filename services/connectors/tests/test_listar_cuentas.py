@@ -138,6 +138,50 @@ def test_filtra_las_que_necesitan_reautorizacion(cliente, claves):
     assert [c["cuenta_externa"] for c in respuesta.data["results"]] == ["vencida@gmail.com"]
 
 
+def test_una_cuenta_en_error_tambien_necesita_reautorizacion(cliente, claves):
+    """Regresión: el filtro y la propiedad decían cosas distintas.
+
+    `necesita_reautorizacion` devuelve True para ERROR, pero el filtro solo
+    miraba REQUIERE_REAUTORIZACION. La cuenta desaparecía justo al pedir las
+    que necesitan acción.
+    """
+    crear(cuenta="rota@gmail.com", estado=CuentaConectada.Estado.ERROR)
+
+    respuesta = cliente.get(LISTA, {"necesita_reautorizacion": "true"}, headers=cabecera())
+
+    assert [c["cuenta_externa"] for c in respuesta.data["results"]] == ["rota@gmail.com"]
+
+
+def test_la_de_error_no_aparece_entre_las_que_no_necesitan(cliente, claves):
+    crear(cuenta="ok@gmail.com", estado=CuentaConectada.Estado.CONECTADA)
+    crear(cuenta="rota@gmail.com", estado=CuentaConectada.Estado.ERROR)
+
+    respuesta = cliente.get(LISTA, {"necesita_reautorizacion": "false"}, headers=cabecera())
+
+    assert [c["cuenta_externa"] for c in respuesta.data["results"]] == ["ok@gmail.com"]
+
+
+def test_el_filtro_y_el_json_nunca_se_contradicen(cliente, claves):
+    """Lo que el listado dice de cada fila tiene que calzar con el filtro."""
+    for estado in CuentaConectada.Estado.values:
+        CuentaConectada.objects.all().delete()
+        crear(estado=estado)
+
+        con = cliente.get(LISTA, {"necesita_reautorizacion": "true"}, headers=cabecera())
+        aparece = len(con.data["results"]) == 1
+        dice = cliente.get(LISTA, headers=cabecera()).data["results"][0]["necesita_reautorizacion"]
+
+        assert aparece == dice, f"estado {estado}: el filtro dice {aparece} y el JSON dice {dice}"
+
+
+def test_la_lista_de_estados_es_la_misma_en_los_dos_lados(claves):
+    """Si alguien agrega un estado a uno solo de los dos, esto falla."""
+    de_la_consulta = CuentaConectada.filtro_exigen_reautorizar().children[0][1]
+    assert tuple(de_la_consulta) == tuple(CuentaConectada.ESTADOS_QUE_EXIGEN_REAUTORIZAR)
+    for estado in CuentaConectada.ESTADOS_QUE_EXIGEN_REAUTORIZAR:
+        assert CuentaConectada(estado=estado).necesita_reautorizacion is True
+
+
 @pytest.mark.parametrize(
     "parametros",
     [
