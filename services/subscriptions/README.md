@@ -26,11 +26,49 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
+| `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
+
+### Calendario mensual de cobros
+
+`GET /api/suscripciones/calendario-cobros/?mes=2026-10` requiere `mes` en
+formato `YYYY-MM` y devuelve una lista ordenada por fecha y servicio. Cada
+elemento incluye `id`, `suscripcion_id`, `fecha`, `servicio`, `importe`,
+`moneda` y `tipo` (`confirmado` o `proyectado`). En cobros confirmados, `id`
+es el identificador del cobro; en proyecciones, es el identificador de la
+suscripción que lo origina. No uses `id` como enlace genérico al detalle; si
+la interfaz necesita enlazar a la suscripción, debe usar `suscripcion_id`.
+
+Los confirmados usan el importe, moneda y fecha registrados en `Cobro`.
+Las proyecciones usan los datos actuales de la suscripción y su frecuencia
+mensual o anual; los días se ajustan al último día del mes cuando sea
+necesario (por ejemplo, del 31 de enero al 28 o 29 de febrero). Solo se
+incluyen proyecciones cuya fecha sea hoy o posterior. Una proyección se omite
+si ya hay cualquier cobro confirmado de esa suscripción en el mismo mes,
+independientemente del día de ambos. Las suscripciones canceladas o
+desactivadas no generan proyecciones; sus cobros confirmados, incluso los
+históricos, permanecen visibles en el calendario.
+
+La prueba del contrato del endpoint se ejecuta desde `services/subscriptions`
+con `pytest tests/test_calendario.py -v`.
+
+Ejemplo de elemento:
+
+```json
+{
+  "id": "9244c232-9780-4976-a08e-29d14c9f00c1",
+  "suscripcion_id": "9244c232-9780-4976-a08e-29d14c9f00c1",
+  "fecha": "2026-10-15",
+  "servicio": "Netflix",
+  "importe": "12990.00",
+  "moneda": "CLP",
+  "tipo": "proyectado"
+}
+```
 
 ### Máquina de estados (RF-03 / VI-08)
 
