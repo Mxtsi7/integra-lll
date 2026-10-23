@@ -64,7 +64,8 @@ TEMPLATES = [
 
 ESQUEMA_BD = env("ESQUEMA_BD", default=SERVICE_NAME)
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+if "sqlite" not in DATABASES["default"]["ENGINE"]:
+    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

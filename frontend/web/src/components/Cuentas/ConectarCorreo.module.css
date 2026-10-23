@@ -1,0 +1,41 @@
+.caja {
+  max-width: 640px;
+  background: var(--vidrio);
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-l);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: var(--sombra-tile);
+}
+
+.consentimiento {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--tinta);
+  cursor: pointer;
+}
+
+.consentimiento input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--acento);
+  flex-shrink: 0;
+}
+
+.botones, .proveedor { display: flex; flex-direction: column; gap: 16px; }
+.proveedor { align-items: flex-start; }
+
+.error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radio-s);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13px;
+}
