@@ -5,6 +5,7 @@
   "workspaces": [
     "shared",
     "web",
+    "movil",
     "desktop"
   ],
   "scripts": {
