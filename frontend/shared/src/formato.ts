@@ -66,3 +66,8 @@ export function nombresDiasSemana(largo: 'short' | 'long'): string[] {
     formato.format(new Date(UN_LUNES.anio, UN_LUNES.mes, UN_LUNES.dia + i)),
   );
 }
+
+/** "octubre de 2026" → "Octubre de 2026". Para títulos que empiezan con un mes o un día. */
+export function conMayuscula(texto: string): string {
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}

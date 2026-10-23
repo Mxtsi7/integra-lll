@@ -3,7 +3,7 @@
  * la app móvil muestren exactamente el mismo número.
  */
 
-import type { Frecuencia, Suscripcion } from './tipos';
+import type { Frecuencia, Moneda, Suscripcion } from './tipos';
 
 /** RN-CIC-005: los cobros anuales se convierten a equivalente mensual. */
 export function equivalenteMensual(monto: number, frecuencia: Frecuencia): number {
@@ -30,8 +30,8 @@ export function costoPorHora(montoMensual: number, horasUsoMes: number): number 
  * cuenta. Ocultarla escondería justo el gasto que el producto existe para
  * mostrar. Una cancelada o una por confirmar no tienen un cobro seguro.
  *
- * La usan la proyección del Panel y el Calendario (CH-17), para que ambos
- * cuenten los mismos cobros.
+ * La usa la proyección del Panel. El Calendario ya no: desde CH-18 los
+ * cobros del mes los calcula el backend (VI-07).
  */
 export function generaCobro(s: Suscripcion): boolean {
   if (s.estado === 'activo' || s.estado === 'fantasma') return true;
@@ -54,4 +54,17 @@ export function conteoPorEstado(suscripciones: Suscripcion[]): Record<Suscripcio
   const conteo = { prueba: 0, activo: 0, por_confirmar: 0, cancelado: 0, fantasma: 0 };
   for (const s of suscripciones) conteo[s.estado] += 1;
   return conteo;
+}
+
+/**
+ * Suma montos separados por moneda (CH-20, CH-21): pesos y dólares no se
+ * suman entre sí. Se suma en centavos para que 4,99 + 4,99 dé 9,98 exacto y
+ * no 9,980000000000001. El orden es el de la primera aparición de cada moneda.
+ */
+export function totalesPorMoneda(montos: { importe: number; moneda: Moneda }[]): { moneda: Moneda; total: number }[] {
+  const centavos = new Map<Moneda, number>();
+  for (const { importe, moneda } of montos) {
+    centavos.set(moneda, (centavos.get(moneda) ?? 0) + Math.round(importe * 100));
+  }
+  return [...centavos].map(([moneda, total]) => ({ moneda, total: total / 100 }));
 }

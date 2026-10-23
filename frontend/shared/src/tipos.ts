@@ -91,3 +91,23 @@ export interface CuentaConectada {
   creado_en: string;
   actualizado_en: string;
 }
+
+/** Un cobro ya registrado o uno que se espera según la frecuencia (VI-07). */
+export type TipoCobroCalendario = 'confirmado' | 'proyectado';
+
+/**
+ * Un cobro del calendario mensual, tal como lo entrega
+ * GET /api/suscripciones/calendario-cobros/?mes=YYYY-MM (CalendarioCobroSerializer).
+ * Solo `importe` cambia: la API lo manda como texto ("14990.00") y acá es número.
+ */
+export interface CobroCalendario {
+  id: string;
+  suscripcion_id: string;
+  /** "YYYY-MM-DD": día de negocio, no un instante (no se pasa por UTC). */
+  fecha: string;
+  /** Nombre del servicio: Netflix, Spotify… */
+  servicio: string;
+  importe: number;
+  moneda: Moneda;
+  tipo: TipoCobroCalendario;
+}
