@@ -3,7 +3,34 @@
 from decimal import Decimal
 from rest_framework import serializers
 
-from app.models import RegistroUso, Subscription, TransicionEstado
+import re
+
+from app.models import (
+    Cobro,
+    Presupuesto,
+    RegistroUso,
+    Subscription,
+    TransicionEstado,
+)
+
+
+class CobroSerializer(serializers.ModelSerializer):
+    """Serializa el histórico de cobros reales de una suscripción (VI-04 / RF-05)."""
+
+    hubo_alza = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = Cobro
+        fields = (
+            "id",
+            "suscripcion_id",
+            "monto",
+            "moneda",
+            "fecha",
+            "hubo_alza",
+            "creado_en",
+        )
+        read_only_fields = fields
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
@@ -166,3 +193,58 @@ class TransicionEstadoSerializer(serializers.ModelSerializer):
             "ocurrido_en",
         )
         read_only_fields = fields
+
+
+class PresupuestoSerializer(serializers.ModelSerializer):
+    """Serializa y valida el presupuesto mensual de una organización (VI-05 / RF-13 / RF-19)."""
+
+    class Meta:
+        model = Presupuesto
+        fields = ("id", "mes", "moneda", "monto", "creado_en", "actualizado_en")
+        read_only_fields = ("id", "creado_en", "actualizado_en")
+
+    def validate_mes(self, value: str) -> str:
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", value):
+            raise serializers.ValidationError("Debe tener el formato YYYY-MM.")
+        return value
+
+    def validate_monto(self, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise serializers.ValidationError("El monto presupuestado debe ser mayor a 0.")
+        return value
+
+
+class PresupuestoComparacionSerializer(serializers.Serializer):
+    """Contrato de comparación entre presupuesto mensual y proyección/gasto (VI-05)."""
+
+    mes = serializers.CharField()
+    moneda = serializers.CharField()
+    presupuesto = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    gasto_real = serializers.DecimalField(max_digits=10, decimal_places=2)
+    gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_esperado = serializers.DecimalField(max_digits=10, decimal_places=2)
+    diferencia = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    porcentaje_consumido = serializers.FloatField()
+    alerta_superado = serializers.BooleanField()
+
+
+class ConteoEstadosSerializer(serializers.Serializer):
+    """Conteo de suscripciones por estado."""
+
+    activo = serializers.IntegerField(default=0)
+    prueba = serializers.IntegerField(default=0)
+    por_confirmar = serializers.IntegerField(default=0)
+    cancelado = serializers.IntegerField(default=0)
+    fantasma = serializers.IntegerField(default=0)
+    total = serializers.IntegerField(default=0)
+
+
+class ResumenPanelSerializer(serializers.Serializer):
+    """Contrato del resumen agregado del panel para el periodo (VI-06 / RF-11 / RF-09)."""
+
+    periodo = serializers.CharField()
+    moneda = serializers.CharField()
+    gasto_real = serializers.DecimalField(max_digits=10, decimal_places=2)
+    gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
+    conteo_estados = ConteoEstadosSerializer()

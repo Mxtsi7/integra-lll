@@ -5,8 +5,10 @@ from datetime import date
 import re
 import uuid
 
+from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
@@ -17,16 +19,51 @@ from rest_framework.response import Response
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from app.models import Cobro, Subscription
+from app.models import Cobro, Presupuesto, Subscription
 from app.serializers import (
     CalendarioCobroSerializer,
+    CobroSerializer,
+    PresupuestoComparacionSerializer,
+    PresupuestoSerializer,
     RegistrarUsoSerializer,
     RegistroUsoSerializer,
+    ResumenPanelSerializer,
     SolicitarTransicionSerializer,
     SubscriptionSerializer,
     TransicionEstadoSerializer,
 )
 from shared.tenant.base import TenantViewSet
+
+
+def _resolver_rango_mes(mes: str | None = None) -> tuple[date, date, str]:
+    """Valida o infiere el mes en formato YYYY-MM y devuelve (inicio, fin, mes)."""
+    if not mes:
+        hoy = timezone.localdate()
+        mes = f"{hoy.year:04d}-{hoy.month:02d}"
+    elif not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", mes):
+        raise ValidationError({"mes": "Debe tener el formato YYYY-MM."})
+
+    try:
+        inicio = date.fromisoformat(f"{mes}-01")
+    except ValueError:
+        raise ValidationError({"mes": "Debe ser un mes válido en formato YYYY-MM."})
+
+    fin = date(inicio.year, inicio.month, monthrange(inicio.year, inicio.month)[1])
+    return inicio, fin, mes
+
+
+def _calcular_gasto_proyectado(
+    suscripciones, inicio: date, fin: date, suscripciones_con_cobro: set
+) -> Decimal:
+    """Calcula la suma de montos proyectados en el rango para suscripciones sin cobro confirmado."""
+    hoy = timezone.localdate()
+    total_proyectado = Decimal("0.00")
+    for suscripcion in suscripciones:
+        fecha = _fecha_proyectada_en_mes(suscripcion, inicio, fin)
+        if fecha is None or fecha < hoy or suscripcion.id in suscripciones_con_cobro:
+            continue
+        total_proyectado += suscripcion.monto
+    return total_proyectado
 
 
 def _fecha_proyectada_en_mes(
@@ -127,6 +164,46 @@ class SubscriptionViewSet(TenantViewSet):
 
             qs = qs.filter(fecha_proximo_cobro=fecha)
 
+        # VI-01: Búsqueda server-side por nombre (insensible a mayúsculas, limitada a 100 caracteres)
+        nombre = self.request.query_params.get("nombre")
+        if nombre is None:
+            nombre = self.request.query_params.get("search")
+        if nombre is not None:
+            nombre_limpio = nombre.strip()[:100]
+            if nombre_limpio:
+                qs = qs.filter(nombre__icontains=nombre_limpio)
+
+        # VI-02: Ordenamiento server-side con allowlist y desempate estable por id
+        orden = self.request.query_params.get("orden")
+        if orden is None:
+            orden = self.request.query_params.get("ordering")
+        if orden is not None and orden.strip():
+            orden_param = orden.strip()
+            orden_normalizado = orden_param
+            if orden_param in ("fecha_cobro", "+fecha_cobro"):
+                orden_normalizado = "fecha_proximo_cobro"
+            elif orden_param == "-fecha_cobro":
+                orden_normalizado = "-fecha_proximo_cobro"
+
+            campos_permitidos = {
+                "nombre", "-nombre",
+                "monto", "-monto",
+                "fecha_proximo_cobro", "-fecha_proximo_cobro",
+            }
+            if orden_normalizado not in campos_permitidos:
+                raise ValidationError(
+                    {
+                        "orden": (
+                            f"Campo de orden no permitido: '{orden_param}'. "
+                            "Campos válidos: nombre, monto, fecha_proximo_cobro "
+                            "(use prefijo '-' para orden descendente)."
+                        )
+                    }
+                )
+
+            desempate = "-id" if orden_normalizado.startswith("-") else "id"
+            qs = qs.order_by(orden_normalizado, desempate)
+
         return qs
 
     def perform_destroy(self, instance: Subscription) -> None:
@@ -219,6 +296,184 @@ class SubscriptionViewSet(TenantViewSet):
         )
         serializer = CalendarioCobroSerializer(eventos, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        responses=CobroSerializer(many=True),
+        description="Consulta el histórico de cobros reales de una suscripción propia (VI-04 / RF-05).",
+    )
+    @action(detail=True, methods=["get"], url_path="cobros")
+    def cobros(self, request, pk=None):
+        """GET /api/suscripciones/<id>/cobros/ (VI-04 / RF-05)."""
+        suscripcion = self.get_object()
+        qs = suscripcion.cobros.all().order_by("-fecha", "-id")
+
+        desde = request.query_params.get("desde")
+        if desde:
+            fecha_desde = parse_date(desde)
+            if not fecha_desde:
+                raise ValidationError({"desde": "Debe tener el formato YYYY-MM-DD."})
+            qs = qs.filter(fecha__gte=fecha_desde)
+
+        hasta = request.query_params.get("hasta")
+        if hasta:
+            fecha_hasta = parse_date(hasta)
+            if not fecha_hasta:
+                raise ValidationError({"hasta": "Debe tener el formato YYYY-MM-DD."})
+            qs = qs.filter(fecha__lte=fecha_hasta)
+
+        page = self.paginate_queryset(qs)
+        if page is not None:
+            serializer = CobroSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CobroSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name="mes", type=str, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="moneda", type=str, location=OpenApiParameter.QUERY, required=False),
+        ],
+        responses=PresupuestoComparacionSerializer,
+        description="Compara el presupuesto mensual con el gasto real y proyectado (VI-05).",
+    )
+    @action(detail=False, methods=["get", "post"], url_path="presupuesto")
+    def presupuesto(self, request):
+        """GET /api/suscripciones/presupuesto/ y POST /api/suscripciones/presupuesto/ (VI-05)."""
+        if request.method == "POST":
+            serializer = PresupuestoSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            mes = serializer.validated_data["mes"]
+            moneda = serializer.validated_data.get("moneda", Subscription.Moneda.CLP)
+            monto = serializer.validated_data["monto"]
+
+            presupuesto_obj, _ = Presupuesto.objects.update_or_create(
+                organizacion_id=request.organizacion_id,
+                mes=mes,
+                moneda=moneda,
+                defaults={"monto": monto},
+            )
+            return Response(PresupuestoSerializer(presupuesto_obj).data, status=status.HTTP_200_OK)
+
+        # GET: Comparar presupuesto vs proyección
+        mes_param = request.query_params.get("mes")
+        moneda = (request.query_params.get("moneda") or Subscription.Moneda.CLP).upper()
+        if moneda not in Subscription.Moneda.values:
+            raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
+
+        inicio, fin, mes = _resolver_rango_mes(mes_param)
+
+        presupuesto_obj = Presupuesto.objects.filter(
+            organizacion_id=request.organizacion_id,
+            mes=mes,
+            moneda=moneda,
+        ).first()
+
+        suscripciones_tenant = TenantViewSet.get_queryset(self).filter(moneda=moneda)
+        cobros = Cobro.objects.filter(
+            organizacion_id=request.organizacion_id,
+            moneda=moneda,
+            fecha__range=(inicio, fin),
+        )
+        gasto_real = cobros.aggregate(total=Sum("monto"))["total"] or Decimal("0.00")
+        suscripciones_con_cobro = set(cobros.values_list("suscripcion_id", flat=True))
+
+        suscripciones_proyectables = (
+            suscripciones_tenant.filter(activo=True)
+            .exclude(estado=Subscription.Estado.CANCELADO)
+        )
+        gasto_proyectado = _calcular_gasto_proyectado(
+            suscripciones_proyectables, inicio, fin, suscripciones_con_cobro
+        )
+        total_esperado = gasto_real + gasto_proyectado
+
+        if presupuesto_obj:
+            presupuesto_monto = presupuesto_obj.monto
+            diferencia = presupuesto_monto - total_esperado
+            porcentaje = (
+                round(float((total_esperado / presupuesto_monto) * 100), 2)
+                if presupuesto_monto > 0
+                else 0.0
+            )
+            alerta = total_esperado > presupuesto_monto
+        else:
+            presupuesto_monto = None
+            diferencia = None
+            porcentaje = 0.0
+            alerta = False
+
+        datos = {
+            "mes": mes,
+            "moneda": moneda,
+            "presupuesto": presupuesto_monto,
+            "gasto_real": gasto_real,
+            "gasto_proyectado": gasto_proyectado,
+            "total_esperado": total_esperado,
+            "diferencia": diferencia,
+            "porcentaje_consumido": porcentaje,
+            "alerta_superado": alerta,
+        }
+        return Response(PresupuestoComparacionSerializer(datos).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(name="mes", type=str, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(name="moneda", type=str, location=OpenApiParameter.QUERY, required=False),
+        ],
+        responses=ResumenPanelSerializer,
+        description="Resumen agregado del panel con gasto real, proyección y conteo por estado (VI-06).",
+    )
+    @action(detail=False, methods=["get"], url_path="resumen")
+    def resumen(self, request):
+        """GET /api/suscripciones/resumen/ (VI-06 / RF-11 / RF-09)."""
+        mes_param = request.query_params.get("mes")
+        moneda = (request.query_params.get("moneda") or Subscription.Moneda.CLP).upper()
+        if moneda not in Subscription.Moneda.values:
+            raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
+
+        inicio, fin, periodo = _resolver_rango_mes(mes_param)
+
+        cobros = Cobro.objects.filter(
+            organizacion_id=request.organizacion_id,
+            moneda=moneda,
+            fecha__range=(inicio, fin),
+        )
+        gasto_real = cobros.aggregate(total=Sum("monto"))["total"] or Decimal("0.00")
+        suscripciones_con_cobro = set(cobros.values_list("suscripcion_id", flat=True))
+
+        suscripciones_tenant = TenantViewSet.get_queryset(self)
+        suscripciones_proyectables = (
+            suscripciones_tenant.filter(activo=True, moneda=moneda)
+            .exclude(estado=Subscription.Estado.CANCELADO)
+        )
+        gasto_proyectado = _calcular_gasto_proyectado(
+            suscripciones_proyectables, inicio, fin, suscripciones_con_cobro
+        )
+        total_estimado = gasto_real + gasto_proyectado
+
+        conteo_estados = {
+            "activo": 0,
+            "prueba": 0,
+            "por_confirmar": 0,
+            "cancelado": 0,
+            "fantasma": 0,
+            "total": 0,
+        }
+        for suscripcion in suscripciones_tenant:
+            estado = suscripcion.estado
+            if estado in conteo_estados:
+                conteo_estados[estado] += 1
+            conteo_estados["total"] += 1
+
+        datos = {
+            "periodo": periodo,
+            "moneda": moneda,
+            "gasto_real": gasto_real,
+            "gasto_proyectado": gasto_proyectado,
+            "total_estimado": total_estimado,
+            "conteo_estados": conteo_estados,
+        }
+        return Response(ResumenPanelSerializer(datos).data, status=status.HTTP_200_OK)
 
     @staticmethod
     def _actor_id(request, *, required: bool = False):
