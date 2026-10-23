@@ -27,6 +27,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
+| `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
 | `GET` | `/api/suscripciones/<id>/uso/` | Consulta el histórico de uso por fecha descendente (CU-23 / RF-04 / RF-15) | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
@@ -47,7 +48,7 @@ registrados.
 | `services/subscriptions/app/models.py` | `Subscription.registrar_uso()` persiste el registro y recalcula `horas_uso_mes` desde los minutos históricos del mes local actual, dentro de una transacción y con bloqueo de la suscripción. |
 | `services/subscriptions/app/views.py` | Documenta el contrato GET/POST de uso y delega el registro al método de dominio existente. |
 | `services/subscriptions/tests/test_views.py` | Cubre fecha inválida, cambio de mes, uso retroactivo de otro mes, agregado mensual y redondeo. |
-| `services/subscriptions/tests/test_state_machine.py` | Incluye una prueba de escrituras concurrentes; se omite en bases que no soportan `select_for_update`. |
+| `services/subscriptions/tests/test_state_machine.py` | Incluye prueba de escrituras concurrentes y fixture `reloj_umbral` para DST; se omite en bases que no soportan `select_for_update`. |
 | `frontend/shared/src/api/suscripciones.ts` | Extiende `UsoPayload` con `fecha` opcional (`YYYY-MM-DD`). |
 | `services/subscriptions/README.md` | Registra el contrato, el flujo, los archivos y las verificaciones de VI-10. |
 
@@ -82,6 +83,43 @@ con `188 passed, 1 skipped`; las 21 pruebas del paquete compartido y su
 soporta bloqueos de fila; para ejecutarla se requiere una base compatible,
 como PostgreSQL. El daemon de Docker no estaba disponible durante esa
 verificación.
+
+### Calendario mensual de cobros
+
+`GET /api/suscripciones/calendario-cobros/?mes=2026-10` requiere `mes` en
+formato `YYYY-MM` y devuelve una lista ordenada por fecha y servicio. Cada
+elemento incluye `id`, `suscripcion_id`, `fecha`, `servicio`, `importe`,
+`moneda` y `tipo` (`confirmado` o `proyectado`). En cobros confirmados, `id`
+es el identificador del cobro; en proyecciones, es el identificador de la
+suscripción que lo origina. No uses `id` como enlace genérico al detalle; si
+la interfaz necesita enlazar a la suscripción, debe usar `suscripcion_id`.
+
+Los confirmados usan el importe, moneda y fecha registrados en `Cobro`.
+Las proyecciones usan los datos actuales de la suscripción y su frecuencia
+mensual o anual; los días se ajustan al último día del mes cuando sea
+necesario (por ejemplo, del 31 de enero al 28 o 29 de febrero). Solo se
+incluyen proyecciones cuya fecha sea hoy o posterior. Una proyección se omite
+si ya hay cualquier cobro confirmado de esa suscripción en el mismo mes,
+independientemente del día de ambos. Las suscripciones canceladas o
+desactivadas no generan proyecciones; sus cobros confirmados, incluso los
+históricos, permanecen visibles en el calendario.
+
+La prueba del contrato del endpoint se ejecuta desde `services/subscriptions`
+con `pytest tests/test_calendario.py -v`.
+
+Ejemplo de elemento:
+
+```json
+{
+  "id": "9244c232-9780-4976-a08e-29d14c9f00c1",
+  "suscripcion_id": "9244c232-9780-4976-a08e-29d14c9f00c1",
+  "fecha": "2026-10-15",
+  "servicio": "Netflix",
+  "importe": "12990.00",
+  "moneda": "CLP",
+  "tipo": "proyectado"
+}
+```
 
 ### Máquina de estados (RF-03 / VI-08)
 
