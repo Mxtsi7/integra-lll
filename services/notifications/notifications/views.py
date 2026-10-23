@@ -7,7 +7,7 @@ from django.db import connection
 from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
@@ -109,38 +109,53 @@ class AlertaViewSet(SoloLecturaTenantViewSet):
 
     # ── FE-20: el contador y las marcas de lectura ───────────────────
 
+    def _del_tenant(self):
+        """Las alertas de la organización, con la MISMA comprobación que el listado.
+
+        Las acciones que no son `list` consultaban el ORM directo con
+        `request.organizacion_id`. Si faltaba la cabecera, eso filtraba por
+        `None`: cero filas, y la respuesta salía 200 diciendo "no tienes
+        avisos". Una configuración rota se veía igual que una bandeja vacía.
+
+        `MezclaTenant.get_queryset()` es quien levanta el 403, así que se
+        reusa y después se le sacan los filtros del listado, que no aplican
+        acá.
+        """
+        organizacion = getattr(self.request, "organizacion_id", None)
+        if not organizacion:
+            raise PermissionDenied("Falta el contexto de organización")
+        return Alerta.objects.filter(organizacion_id=organizacion)
+
     @action(detail=False, methods=["get"], url_path="contador")
     def contador(self, request):
         """Lo que necesita la campana: cuántas sin ver, y cuántas hay."""
-        # Sin get_queryset() porque la acción no es "list" y además conviene
-        # contar sobre el tenant sin arrastrar los filtros del listado.
-        base = Alerta.objects.filter(organizacion_id=request.organizacion_id)
+        base = self._del_tenant()
         datos = {
             "pendientes": base.filter(lectura=Alerta.Lectura.PENDIENTE).count(),
             "total": base.count(),
         }
         return Response(ContadorSerializer(datos).data)
 
-    @action(detail=True, methods=["post"], url_path="leer")
+    # PATCH además de POST: la tarjeta pide PATCH y los clientes que ya
+    # existen usan POST. Aceptar los dos en la acción específica no habilita
+    # el PATCH genérico del recurso, que sigue devolviendo 405.
+    @action(detail=True, methods=["post", "patch"], url_path="leer")
     def leer(self, request, pk=None):
         alerta = self.get_object()
         alerta.marcar_leida()
         return Response(self.get_serializer(alerta).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["post"], url_path="revisar")
+    @action(detail=True, methods=["post", "patch"], url_path="revisar")
     def revisar(self, request, pk=None):
         """Descarta la alerta sin tocar la suscripción (RF-07)."""
         alerta = self.get_object()
         alerta.marcar_revisada()
         return Response(self.get_serializer(alerta).data, status=status.HTTP_200_OK)
 
-    @action(detail=False, methods=["post"], url_path="leer-todas")
+    @action(detail=False, methods=["post", "patch"], url_path="leer-todas")
     def leer_todas(self, request):
         """Vacía la campana de una. Devuelve cuántas cambiaron."""
-        pendientes = Alerta.objects.filter(
-            organizacion_id=request.organizacion_id,
-            lectura=Alerta.Lectura.PENDIENTE,
-        )
+        pendientes = self._del_tenant().filter(lectura=Alerta.Lectura.PENDIENTE)
         # Se recorre en vez de un `update()` masivo para que cada alerta pase
         # por `marcar_leida` y quede con su `leida_en`. Un update() dejaría el
         # estado cambiado y la fecha en NULL, que es un dato a medias.

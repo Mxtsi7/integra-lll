@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 from rest_framework import status
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from notifications.models import Alerta
@@ -215,6 +216,68 @@ def test_leerla_dos_veces_no_falla_ni_descuenta_de_mas(cliente):
 
     assert respuesta.status_code == status.HTTP_200_OK
     assert cliente.get(CONTADOR, headers=cab()).data["pendientes"] == 0
+
+
+# ── Regresiones de la revisión de la #84 ─────────────────────────────────
+
+
+@pytest.mark.parametrize("ruta", [CONTADOR, LISTA + "leer-todas/"])
+def test_las_acciones_sin_cabecera_dan_403_no_cero(cliente, ruta):
+    """Antes consultaban el ORM directo: sin cabecera filtraban por None y
+    respondían 200 con cero alertas. Una configuración rota se veía igual que
+    una bandeja vacía."""
+    crear()
+    metodo = cliente.get if ruta == CONTADOR else cliente.post
+    respuesta = metodo(ruta)
+    assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_leer_todas_sin_cabecera_no_toca_nada(cliente):
+    alerta = crear()
+    cliente.post(LISTA + "leer-todas/")
+    alerta.refresh_from_db()
+    assert alerta.pendiente is True
+
+
+def test_el_orden_es_total_con_fechas_iguales(cliente):
+    """Sin desempate por id, páginas consecutivas podían repetir o saltarse filas."""
+    fijo = timezone.now()
+    for i in range(15):
+        a = crear(titulo=f"alerta {i:02d}")
+        Alerta.objects.filter(pk=a.pk).update(creado_en=fijo)
+
+    primera = cliente.get(LISTA, headers=cab()).data["results"]
+    segunda = cliente.get(LISTA, {"page": 2}, headers=cab()).data["results"]
+    ids = [a["id"] for a in primera] + [a["id"] for a in segunda]
+
+    assert len(set(ids)) == 15, "hay filas repetidas entre páginas"
+
+
+def test_el_orden_se_repite_entre_consultas(cliente):
+    fijo = timezone.now()
+    for i in range(12):
+        a = crear(titulo=f"a{i:02d}")
+        Alerta.objects.filter(pk=a.pk).update(creado_en=fijo)
+
+    uno = [a["id"] for a in cliente.get(LISTA, headers=cab()).data["results"]]
+    otro = [a["id"] for a in cliente.get(LISTA, headers=cab()).data["results"]]
+    assert uno == otro
+
+
+@pytest.mark.parametrize("accion", ["leer", "revisar"])
+def test_las_acciones_aceptan_patch_ademas_de_post(cliente, accion):
+    """La tarjeta pide PATCH; los clientes que ya existen usan POST."""
+    alerta = crear()
+    respuesta = cliente.patch(f"{LISTA}{alerta.id}/{accion}/", headers=cab())
+    assert respuesta.status_code == status.HTTP_200_OK
+
+
+def test_aceptar_patch_en_la_accion_no_habilita_el_patch_del_recurso(cliente):
+    alerta = crear()
+    respuesta = cliente.patch(
+        f"{LISTA}{alerta.id}/", {"titulo": "x"}, format="json", headers=cab()
+    )
+    assert respuesta.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
 # ── No se escribe por acá ────────────────────────────────────────────────

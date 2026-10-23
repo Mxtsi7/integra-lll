@@ -170,6 +170,12 @@ class Alerta(ModeloTenant):
 
     class Meta(ModeloTenant.Meta):
         db_table = "alerta"
+        # `id` como desempate, no solo `-creado_en`. Dos alertas creadas en el
+        # mismo instante —que es lo normal cuando las genera un consumidor en
+        # lote— no tenían orden total, así que páginas consecutivas podían
+        # repetir una fila y saltarse otra. El paginador confía en que el orden
+        # sea determinista entre consultas.
+        ordering = ["-creado_en", "-id"]
         constraints = [
             # Un evento genera una alerta y nada más. Es lo que hace
             # idempotente al consumidor de FE-24 sin que tenga que llevar
