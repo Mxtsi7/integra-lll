@@ -333,3 +333,4 @@ def test_api_rechaza_cambio_directo_a_un_estado_no_autorizado() -> None:
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.ACTIVO
     assert not TransicionEstado.objects.filter(suscripcion=suscripcion).exists()
+
