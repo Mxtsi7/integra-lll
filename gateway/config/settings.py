@@ -49,8 +49,11 @@ WSGI_APPLICATION = "config.wsgi.application"
 DATABASES = {}
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:5173"])
-# El token viaja en la cabecera Authorization, no en cookies.
-CORS_ALLOW_CREDENTIALS = False
+# Google usa una cookie efímera para ligar el nonce al navegador. Solo los
+# orígenes explícitos de CORS_ALLOWED_ORIGINS pueden enviar credenciales.
+# La autenticación de la API sigue usando Authorization: Bearer.
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ["X-Correlation-ID"]
 
 # ── JWT ─────────────────────────────────────────────────────────────
@@ -75,6 +78,9 @@ SERVICIOS = {
 # GET /api/suscripciones/. Así cada servicio expone su API bajo /api/
 # y no hay que traducir nada.
 RUTAS = {
+    "/api/contrataciones/": "auth",
+    "/api/pagos/": "auth",
+    "/api/planes/": "auth",
     "/api/auth/": "auth",
     "/api/usuarios/": "auth",
     "/api/organizacion/": "auth",
@@ -89,9 +95,13 @@ RUTAS = {
 # Coincidencias exactas sin access: Auth valida el refresh del body en
 # refresh/logout. No exponer todo /api/auth/ ni confiar en cabeceras del cliente.
 RUTAS_PUBLICAS = (
+    "/api/pagos/webhook/", "/api/pagos/mock/",
     "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
     "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
+    "/api/auth/email-verification/confirm/",
+    "/api/auth/google/nonce/", "/api/auth/google/",
     "/api/auth/logout/",
+    "/api/auth/email-verification/confirm/",
 )
 
 # Cuánto se espera a un servicio antes de responder 504.
