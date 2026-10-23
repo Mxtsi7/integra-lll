@@ -1,8 +1,10 @@
 from django.utils import timezone
 from rest_framework import serializers
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from .models import User, Organizacion
 from .passwords import validar_password
+from .planes import plan_vigente
+from drf_spectacular.utils import extend_schema_field
 
 
 
@@ -29,8 +31,19 @@ class UserSerializer(serializers.ModelSerializer):
             "id": {"read_only": True},
         }
 
+    def validate_email(self, value):
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("El correo no está disponible.")
+        return value
+
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        try:
+            with transaction.atomic():
+                return User.objects.create_user(**validated_data)
+        except IntegrityError:
+            if User.objects.filter(email__iexact=validated_data["email"]).exists():
+                raise serializers.ValidationError({"email": ["El correo no está disponible."]}) from None
+            raise
 
 
 class RegisterSerializer(UserSerializer):
@@ -78,12 +91,10 @@ class RegisterSerializer(UserSerializer):
                 )
                 rol = User.Rol.TITULAR
 
-            return User.objects.create_user(
-                consentimiento_en=timezone.now(),
-                organizacion=organizacion,
-                rol=rol,
-                **validated_data,
-            )
+            return super().create({
+                **validated_data, "consentimiento_en": timezone.now(),
+                "organizacion": organizacion, "rol": rol,
+            })
 
 
 class LoginSerializer(serializers.Serializer):
@@ -137,10 +148,15 @@ class UsuarioActualSerializer(serializers.ModelSerializer):
     # Declarado a mano para que salga como texto y no como objeto UUID:
     # si se deja que lo deduzca ModelSerializer queda un ReadOnlyField crudo.
     organizacion_id = serializers.UUIDField(read_only=True)
+    plan = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.ChoiceField(choices=["free", "premium"]))
+    def get_plan(self, usuario):
+        return plan_vigente(usuario.organizacion_id)
 
     class Meta:
         model = User
-        fields = ("id", "nombre", "correo", "rol", "organizacion_id")
+        fields = ("id", "nombre", "correo", "rol", "organizacion_id", "plan")
         # `correo` y `organizacion_id` van declarados arriba, no pueden repetirse aca.
         read_only_fields = ("id", "nombre", "rol")
 

@@ -1,9 +1,13 @@
 """Vistas del servicio de suscripciones."""
 
+from calendar import monthrange
+from datetime import date
+import re
 import uuid
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.decorators import action
@@ -11,8 +15,11 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
-from app.models import Subscription
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+
+from app.models import Cobro, Subscription
 from app.serializers import (
+    CalendarioCobroSerializer,
     RegistrarUsoSerializer,
     RegistroUsoSerializer,
     SolicitarTransicionSerializer,
@@ -21,6 +28,37 @@ from app.serializers import (
 )
 from events.despacho import al_crear_suscripcion
 from shared.tenant.base import TenantViewSet
+
+
+def _fecha_proyectada_en_mes(
+    suscripcion: Subscription, inicio: date, fin: date
+) -> date | None:
+    """Calcula la ocurrencia recurrente del mes sin desplazar el día ancla."""
+    frecuencia_meses = {
+        Subscription.Frecuencia.MENSUAL: 1,
+        Subscription.Frecuencia.ANUAL: 12,
+    }.get(suscripcion.frecuencia)
+    if frecuencia_meses is None:
+        raise ValidationError(
+            {"frecuencia": f"Frecuencia no soportada: {suscripcion.frecuencia}."}
+        )
+
+    ancla = suscripcion.fecha_proximo_cobro
+    if ancla > fin:
+        return None
+
+    diferencia_meses = (inicio.year - ancla.year) * 12 + inicio.month - ancla.month
+    periodos = max(0, diferencia_meses // frecuencia_meses)
+
+    while True:
+        mes_indice = ancla.month - 1 + periodos * frecuencia_meses
+        anio = ancla.year + mes_indice // 12
+        mes = mes_indice % 12 + 1
+        dia = min(ancla.day, monthrange(anio, mes)[1])
+        fecha = date(anio, mes, dia)
+        if fecha >= inicio:
+            return fecha if fecha <= fin else None
+        periodos += 1
 
 
 class SubscriptionPagination(PageNumberPagination):
@@ -114,6 +152,92 @@ class SubscriptionViewSet(TenantViewSet):
         """Desactiva la suscripción y conserva el registro y sus cobros históricos."""
         instance.activo = False
         instance.save()
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="mes",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Mes del calendario en formato YYYY-MM, por ejemplo 2026-12.",
+            )
+        ],
+        responses=CalendarioCobroSerializer(many=True),
+        description=(
+            "Devuelve cobros confirmados y proyecciones mensuales/anuales de la "
+            "organización. Solo incluye proyecciones desde hoy en adelante; si una "
+            "suscripción ya tiene un cobro confirmado en el mes, no la proyecta."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="calendario-cobros")
+    def calendario_cobros(self, request):
+        """GET /api/suscripciones/calendario-cobros/?mes=YYYY-MM."""
+        mes = request.query_params.get("mes", "")
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", mes):
+            raise ValidationError({"mes": "Debe tener el formato YYYY-MM."})
+
+        try:
+            inicio = date.fromisoformat(f"{mes}-01")
+        except ValueError:
+            raise ValidationError({"mes": "Debe ser un mes válido en formato YYYY-MM."})
+
+        fin = date(inicio.year, inicio.month, monthrange(inicio.year, inicio.month)[1])
+        # Usa el queryset base para incluir pagos históricos de suscripciones ya dadas de baja.
+        suscripciones_tenant = TenantViewSet.get_queryset(self)
+        cobros = Cobro.objects.filter(
+            organizacion_id=request.organizacion_id,
+            suscripcion__in=suscripciones_tenant,
+            fecha__range=(inicio, fin),
+        ).select_related("suscripcion")
+        eventos = [
+            {
+                "id": cobro.id,
+                "suscripcion_id": cobro.suscripcion_id,
+                "fecha": cobro.fecha,
+                "servicio": cobro.suscripcion.nombre,
+                "importe": cobro.monto,
+                "moneda": cobro.moneda,
+                "tipo": "confirmado",
+            }
+            for cobro in cobros
+        ]
+        suscripciones_confirmadas = {cobro.suscripcion_id for cobro in cobros}
+        hoy = timezone.localdate()
+
+        suscripciones_proyectables = (
+            suscripciones_tenant.filter(activo=True)
+            .exclude(estado=Subscription.Estado.CANCELADO)
+        )
+        for suscripcion in suscripciones_proyectables:
+            fecha = _fecha_proyectada_en_mes(suscripcion, inicio, fin)
+            if (
+                fecha is None
+                or fecha < hoy
+                or suscripcion.id in suscripciones_confirmadas
+            ):
+                continue
+            eventos.append(
+                {
+                    "id": suscripcion.id,
+                    "suscripcion_id": suscripcion.id,
+                    "fecha": fecha,
+                    "servicio": suscripcion.nombre,
+                    "importe": suscripcion.monto,
+                    "moneda": suscripcion.moneda,
+                    "tipo": "proyectado",
+                }
+            )
+
+        eventos.sort(
+            key=lambda evento: (
+                evento["fecha"],
+                evento["servicio"].casefold(),
+                str(evento["id"]),
+            )
+        )
+        serializer = CalendarioCobroSerializer(eventos, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @staticmethod
     def _actor_id(request, *, required: bool = False):
