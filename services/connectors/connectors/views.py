@@ -90,14 +90,21 @@ class CuentaConectadaViewSet(SoloLecturaTenantViewSet):
 
         reautorizar = self.request.query_params.get("necesita_reautorizacion")
         if reautorizar is not None:
-            # `necesita_reautorizacion` es una propiedad de Python, no una
-            # columna, así que no se puede filtrar por ella. Se traduce al
-            # estado que la define, para que el filtro siga ocurriendo en la
-            # base y no trayendo todas las filas a memoria.
+            # La regla vive en el modelo, no acá: `filtro_exigen_reautorizar()`
+            # es la MISMA lista de estados que usa la propiedad. Tenerla escrita
+            # dos veces fue el error anterior: el filtro solo miraba
+            # REQUIERE_REAUTORIZACION, así que una cuenta en ERROR desaparecía
+            # al pedir las que necesitan acción y aparecía al pedir las que no,
+            # con su propio JSON diciendo `necesita_reautorizacion: true`.
+            #
+            # Queda una diferencia que el modelo documenta y no se puede cerrar
+            # en SQL: una cuenta "conectada" cuyo token ya no descifra. Para esa
+            # el camino es `marcar_para_reautorizar()`, que la deja en un estado
+            # consultable.
             if reautorizar.lower() in ("true", "1"):
-                qs = qs.filter(estado=CuentaConectada.Estado.REQUIERE_REAUTORIZACION)
+                qs = qs.filter(CuentaConectada.filtro_exigen_reautorizar())
             elif reautorizar.lower() in ("false", "0"):
-                qs = qs.exclude(estado=CuentaConectada.Estado.REQUIERE_REAUTORIZACION)
+                qs = qs.exclude(CuentaConectada.filtro_exigen_reautorizar())
             else:
                 raise ValidationError(
                     {"necesita_reautorizacion": "Debe ser true o false."}
