@@ -26,8 +26,10 @@ class ComandoCatalogo(BaseCommand):
         if options["cargar_iniciales"]:
             if any(options[k] is not None for k in ("catalogo", "codigo", "nombre", "orden")) or options["activar"] or options["desactivar"]:
                 raise CommandError("--cargar-iniciales se usa sin otras opciones.")
-            with connection.schema_editor(atomic=False) as editor:
-                import_module(self.migracion_inicial).cargar(apps, editor)
+            # La carga solo necesita la conexión; abrir un schema editor
+            # intenta cambiar las FK de SQLite dentro de esta transacción.
+            editor = connection.schema_editor(atomic=False)
+            import_module(self.migracion_inicial).cargar(apps, editor)
             self.stdout.write("Datos iniciales cargados; las opciones existentes se conservaron.")
             return
         if not options["catalogo"] or not options["codigo"]:

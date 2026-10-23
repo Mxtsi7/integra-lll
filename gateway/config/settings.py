@@ -80,6 +80,10 @@ SERVICIOS = {
 RUTAS = {
     "/api/catalogos/suscripciones/": "subscriptions",
     "/api/catalogos/paises/": "auth",
+
+    "/api/contrataciones/": "auth",
+    "/api/pagos/": "auth",
+    "/api/planes/": "auth",
     "/api/auth/": "auth",
     "/api/usuarios/": "auth",
     "/api/organizacion/": "auth",
@@ -94,6 +98,7 @@ RUTAS = {
 # Coincidencias exactas sin access: Auth valida el refresh del body en
 # refresh/logout. No exponer todo /api/auth/ ni confiar en cabeceras del cliente.
 RUTAS_PUBLICAS = (
+    "/api/pagos/webhook/", "/api/pagos/mock/",
     "/api/auth/register/", "/api/auth/login/", "/api/auth/refresh/",
     "/api/auth/password-reset/", "/api/auth/password-reset/confirm/",
     "/api/auth/email-verification/confirm/",

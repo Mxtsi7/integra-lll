@@ -1,6 +1,6 @@
 """Pruebas de transiciones autorizadas, umbrales y auditoría de RF-03."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 import uuid
 
@@ -19,6 +19,23 @@ TRANSICIONES_PERMITIDAS = [
     for evento, (estados, _) in Subscription.TRANSICIONES_ESTADO.items()
     for estado in estados
 ]
+
+
+@pytest.fixture(params=[
+    datetime(2026, 10, 21, 3, 30, tzinfo=UTC),
+    datetime(2026, 10, 21, 15, 0, tzinfo=UTC),
+], ids=['madrugada_santiago', 'mediodia_santiago'])
+def reloj_umbral(request, monkeypatch):
+    # La ventana cruza el cambio de hora de septiembre en ambos casos.
+    monkeypatch.setattr(timezone, 'now', lambda: request.param)
+    with timezone.override('America/Santiago'):
+        yield
+
+
+def fecha_local_hace(dias: int) -> datetime:
+    # El dominio cuenta fechas locales, no bloques de 24 horas en UTC.
+    fecha = timezone.localdate() - timedelta(days=dias)
+    return timezone.make_aware(datetime.combine(fecha, time(12)))
 
 
 def crear_suscripcion(estado: str) -> Subscription:
@@ -144,9 +161,9 @@ def test_fin_prueba_no_puede_transicionar_antes_de_la_fecha() -> None:
 
 
 @pytest.mark.django_db
-def test_sin_cobros_requiere_60_dias_completos() -> None:
+def test_sin_cobros_requiere_60_dias_completos(reloj_umbral) -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
-    fecha_creacion = timezone.now() - timedelta(days=59)
+    fecha_creacion = fecha_local_hace(59)
     Subscription.objects.filter(pk=suscripcion.pk).update(creado_en=fecha_creacion)
     suscripcion.refresh_from_db()
 
@@ -154,7 +171,7 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
         suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
 
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=60)
+        creado_en=fecha_local_hace(60)
     )
     suscripcion.refresh_from_db()
     suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
@@ -164,10 +181,10 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("dias_sin_uso", [45, 46])
-def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int) -> None:
+def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int, reloj_umbral) -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=dias_sin_uso)
+        creado_en=fecha_local_hace(dias_sin_uso)
     )
     suscripcion.refresh_from_db()
 
@@ -316,3 +333,4 @@ def test_api_rechaza_cambio_directo_a_un_estado_no_autorizado() -> None:
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.ACTIVO
     assert not TransicionEstado.objects.filter(suscripcion=suscripcion).exists()
+

@@ -3,6 +3,8 @@ from rest_framework import serializers
 from django.db import IntegrityError, transaction
 from .models import User, Organizacion
 from .passwords import validar_password
+from .planes import plan_vigente
+from drf_spectacular.utils import extend_schema_field
 
 
 
@@ -146,10 +148,15 @@ class UsuarioActualSerializer(serializers.ModelSerializer):
     # Declarado a mano para que salga como texto y no como objeto UUID:
     # si se deja que lo deduzca ModelSerializer queda un ReadOnlyField crudo.
     organizacion_id = serializers.UUIDField(read_only=True)
+    plan = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.ChoiceField(choices=["free", "premium"]))
+    def get_plan(self, usuario):
+        return plan_vigente(usuario.organizacion_id)
 
     class Meta:
         model = User
-        fields = ("id", "nombre", "correo", "rol", "organizacion_id")
+        fields = ("id", "nombre", "correo", "rol", "organizacion_id", "plan")
         # `correo` y `organizacion_id` van declarados arriba, no pueden repetirse aca.
         read_only_fields = ("id", "nombre", "rol")
 

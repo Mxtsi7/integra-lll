@@ -148,6 +148,18 @@ class RegistroUsoSerializer(serializers.ModelSerializer):
         fields = ("fecha", "minutos")
 
 
+class CalendarioCobroSerializer(serializers.Serializer):
+    """Contrato del calendario mensual de cobros confirmados y proyectados."""
+
+    id = serializers.UUIDField()
+    suscripcion_id = serializers.UUIDField()
+    fecha = serializers.DateField()
+    servicio = serializers.CharField()
+    importe = serializers.DecimalField(max_digits=10, decimal_places=2)
+    moneda = serializers.CharField(max_length=3)
+    tipo = serializers.ChoiceField(choices=("confirmado", "proyectado"))
+
+
 class SolicitarTransicionSerializer(serializers.Serializer):
     """Eventos de estado que puede solicitar un usuario de la organización."""
 

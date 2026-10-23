@@ -14,7 +14,8 @@ import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
-
+import VerificarCorreoPage from './pages/VerificarCorreoPage';
+import { confirmarCorreo, reenviarVerificacion, haySesionParaReenvio } from '@ojoalgasto/shared';
 // CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
 // La respuesta del backend es neutra (no dice si el correo existe), así que
 // la pantalla no la necesita: solo importa si la solicitud falló.
@@ -54,6 +55,10 @@ export function App() {
           <Route
             path="/restablecer-contrasena"
             element={<RestablecerContrasenaPage onSubmitNewPassword={cambiarContrasena} />}
+          />
+          <Route
+            path="/verificar-correo"
+            element={<VerificarCorreoPage onConfirmar={confirmarCorreo}  onReenviar={reenviarVerificacion} haySesion={haySesionParaReenvio}/>}
           />
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
