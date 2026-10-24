@@ -24,6 +24,45 @@ El sistema completo corriendo en el cluster del ramo:
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
 
+## Rotar la clave de Postgres
+
+La clave de la base estuvo en `k8s/00-configuracion.yaml`, dentro de un
+`DATABASE_URL`, en un repo público. El commit que la sacó del archivo **no la
+invalidó**: la base siguió usándola, y sigue siendo la misma hoy.
+
+```bash
+./k8s/rotar-clave-postgres.sh            # ensayo, no toca nada
+./k8s/rotar-clave-postgres.sh --aplicar
+```
+
+### Por qué no basta con editar el Secret
+
+Dos cosas se sumaron:
+
+- `desplegar.sh` solo genera una clave aleatoria **si el Secret no existe**. El
+  Secret ya existía, así que esa rama nunca corrió.
+- `POSTGRES_PASSWORD` solo se aplica en el **primer arranque** de Postgres. Con
+  la base ya inicializada, cambiar esa variable no cambia nada.
+
+Por eso el script hace `ALTER USER` dentro del pod y recién después actualiza
+el Secret, con `POSTGRES_PASSWORD` y `DATABASE_URL` en el mismo patch: si
+quedaran desincronizados, ningún servicio podría conectar.
+
+### Hay una ventana de corte
+
+Entre el `ALTER USER` y el reinicio de los servicios, las conexiones ya
+abiertas siguen funcionando pero las nuevas fallan. Django abre una por
+petición, así que el sitio responde error durante el reinicio —alrededor de un
+minuto—. **No correrlo durante la demo.**
+
+Cómo saber si todavía está la vieja, sin imprimirla:
+
+```bash
+kubectl get secret ojoalgasto -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d | wc -c
+```
+
+8 caracteres es la publicada. Las que genera el script son de 32.
+
 ## El presupuesto de recursos
 
 El namespace tiene una `ResourceQuota` (`student-provisioner-quota`) que no se
