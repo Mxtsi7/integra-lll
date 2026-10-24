@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { Frecuencia, Moneda, Suscripcion } from "@ojoalgasto/shared";
 import { CampoSelect, CampoTexto } from "../ui/Campo";
 import { Boton } from "../ui/Boton";
-import { CATEGORIAS, etiquetaFrecuencia } from "./presentacion";
+import { EstadoCargaCatalogos, useCatalogos } from "../../context/CatalogosContext";
 import styles from "./SusForm.module.css";
 
 export interface NuevaSuscripcionFormData {
@@ -24,37 +24,47 @@ interface NuevaSuscripcionFormProps {
    */
   onAdd?: (suscripcion: Omit<Suscripcion, "id">) => Promise<boolean> | boolean;
   onCancel?: () => void;
-  monedas?: Moneda[];
-  frecuencias?: Frecuencia[];
   /** true mientras el POST está en vuelo: deshabilita el botón de enviar. */
   isSaving?: boolean;
   /** Mensaje del backend si el guardado falló. Se muestra dentro del formulario. */
   error?: string | null;
 }
 
-const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
-// Solo 'mensual' | 'anual': son los únicos valores que acepta el backend.
-const DEFAULT_FRECUENCIAS: Frecuencia[] = ["mensual", "anual"];
-
-const EMPTY_FORM = (monedas: Moneda[], frecuencias: Frecuencia[]): NuevaSuscripcionFormData => ({
+const EMPTY_FORM = (): NuevaSuscripcionFormData => ({
   nombre: "",
   monto: "",
-  moneda: monedas[0],
-  frecuencia: frecuencias[0],
-  categoria: "otro",
+  moneda: "",
+  frecuencia: "" as Frecuencia,
+  categoria: "",
   fechaDeCobro: "",
 });
 
 export function NuevaSuscripcionForm({
   onAdd,
   onCancel,
-  monedas = DEFAULT_MONEDAS,
-  frecuencias = DEFAULT_FRECUENCIAS,
   isSaving = false,
   error = null,
 }: NuevaSuscripcionFormProps) {
-  const [formData, setFormData] = useState<NuevaSuscripcionFormData>(EMPTY_FORM(monedas, frecuencias));
+  const [formData, setFormData] = useState<NuevaSuscripcionFormData>(EMPTY_FORM());
   const [errorLocal, setErrorLocal] = useState<string | null>(null);
+
+  const { datos, cargando, error: errorCatalogo } = useCatalogos();
+  const monedas = datos?.monedas ?? [];
+  const categorias = datos?.categorias ?? [];
+  const frecuencias = datos?.frecuencias ?? [];
+  const listo = !!datos && !cargando && !errorCatalogo
+    && monedas.some((o) => o.activo) && categorias.some((o) => o.activo) && frecuencias.length > 0;
+  const seleccionValida = monedas.some((o) => o.activo && o.codigo === formData.moneda)
+    && categorias.some((o) => o.activo && o.codigo === formData.categoria)
+    && frecuencias.some((o) => o.codigo === formData.frecuencia);
+  useEffect(() => {
+    if (!datos) return;
+    setFormData((actual) => ({ ...actual,
+      moneda: actual.moneda || datos.predeterminados.moneda || '',
+      categoria: actual.categoria || datos.predeterminados.categoria || '',
+      frecuencia: actual.frecuencia || datos.predeterminados.frecuencia,
+    }));
+  }, [datos]);
 
   const handleChange = (field: keyof NuevaSuscripcionFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }) as NuevaSuscripcionFormData);
@@ -62,6 +72,7 @@ export function NuevaSuscripcionForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!listo || !seleccionValida || isSaving) return;
 
     const monto = parseFloat(formData.monto.replace(",", "."));
     if (!formData.nombre.trim() || Number.isNaN(monto) || monto <= 0) {
@@ -88,7 +99,8 @@ export function NuevaSuscripcionForm({
     // Solo se limpia si el guardado salió bien; si falló, el usuario no
     // pierde lo que ya había escrito.
     if (exito) {
-      setFormData(EMPTY_FORM(monedas, frecuencias));
+      setFormData({ ...EMPTY_FORM(), moneda: datos?.predeterminados.moneda ?? '',
+        categoria: datos?.predeterminados.categoria ?? '', frecuencia: datos?.predeterminados.frecuencia ?? '' as Frecuencia });
     }
   };
 
@@ -102,80 +114,86 @@ export function NuevaSuscripcionForm({
         </p>
       )}
 
-      <CampoTexto
-        etiqueta="Servicio"
-        type="text"
-        placeholder="Netflix, Spotify, el gimnasio…"
-        value={formData.nombre}
-        onChange={(e) => handleChange("nombre", e.target.value)}
-        autoFocus
-        required
-      />
-
-      <div className={styles.filaDoble}>
+      <EstadoCargaCatalogos sinOpciones={!!datos && !listo} />
+      <fieldset disabled={isSaving || !listo} className={styles.campos}>
         <CampoTexto
-          etiqueta="Monto"
-          type="number"
-          inputMode="decimal"
-          step="0.01"
-          min="0"
-          placeholder="0"
-          value={formData.monto}
-          onChange={(e) => handleChange("monto", e.target.value)}
+          etiqueta="Servicio"
+          type="text"
+          placeholder="Netflix, Spotify, el gimnasio…"
+          value={formData.nombre}
+          onChange={(e) => handleChange("nombre", e.target.value)}
+          autoFocus
           required
         />
-        <CampoSelect
-          etiqueta="Moneda"
-          className={styles.moneda}
-          value={formData.moneda}
-          onChange={(e) => handleChange("moneda", e.target.value)}
-        >
-          {monedas.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
 
-      <div className={styles.filaDoble}>
-        <CampoSelect
-          etiqueta="Se cobra"
-          value={formData.frecuencia}
-          onChange={(e) => handleChange("frecuencia", e.target.value)}
-        >
-          {frecuencias.map((f) => (
-            <option key={f} value={f}>
-              {etiquetaFrecuencia(f)}
-            </option>
-          ))}
-        </CampoSelect>
-        <CampoSelect
-          etiqueta="Categoría"
-          value={formData.categoria}
-          onChange={(e) => handleChange("categoria", e.target.value)}
-        >
-          {CATEGORIAS.map((c) => (
-            <option key={c.valor} value={c.valor}>
-              {c.etiqueta}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
+        <div className={styles.filaDoble}>
+          <CampoTexto
+            etiqueta="Monto"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            placeholder="0"
+            value={formData.monto}
+            onChange={(e) => handleChange("monto", e.target.value)}
+            required
+          />
+          <CampoSelect
+            etiqueta="Moneda"
+            className={styles.moneda}
+            value={formData.moneda}
+            onChange={(e) => handleChange("moneda", e.target.value)}
+          >
+            {!monedas.some((o) => o.activo && o.codigo === formData.moneda) && <option value={formData.moneda}>Selecciona una moneda</option>}
+            {monedas.filter((o) => o.activo).map((m) => (
+              <option key={m.codigo} value={m.codigo}>
+                {m.nombre} ({m.codigo}){!m.activo && " (inactiva)"}
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
-      <CampoTexto
-        etiqueta="Próximo cobro"
-        type="date"
-        value={formData.fechaDeCobro}
-        onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
-        required
-      />
+        <div className={styles.filaDoble}>
+          <CampoSelect
+            etiqueta="Se cobra"
+            value={formData.frecuencia}
+            onChange={(e) => handleChange("frecuencia", e.target.value)}
+          >
+            {!formData.frecuencia && <option value="">Selecciona frecuencia</option>}
+            {frecuencias.map((f) => (
+              <option key={f.codigo} value={f.codigo}>
+                {f.nombre}
+              </option>
+            ))}
+          </CampoSelect>
+          <CampoSelect
+            etiqueta="Categoría"
+            value={formData.categoria}
+            onChange={(e) => handleChange("categoria", e.target.value)}
+          >
+            {!categorias.some((o) => o.activo && o.codigo === formData.categoria) && <option value={formData.categoria}>Selecciona una categoría</option>}
+            {categorias.filter((o) => o.activo).map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.nombre}{!c.activo && " (inactiva)"}
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
+        <CampoTexto
+          etiqueta="Próximo cobro"
+          type="date"
+          value={formData.fechaDeCobro}
+          onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
+          required
+        />
+
+      </fieldset>
       <div className={styles.acciones}>
         <Boton variante="secundario" onClick={onCancel} disabled={isSaving}>
           Cancelar
         </Boton>
-        <Boton type="submit" cargando={isSaving}>
+        <Boton type="submit" cargando={isSaving} disabled={!listo || !seleccionValida}>
           {isSaving ? "Guardando…" : "Guardar suscripción"}
         </Boton>
       </div>
