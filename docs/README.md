@@ -7,6 +7,8 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ## Qué va en cada carpeta
 
+- [MX-24: timeout y cuotas IA](flujos/maximiliano-saez/24-limites-ia.md).
+
 ### `flujos/`
 
 - [MX-22: matriz de las 174 tareas y brechas](investigacion/MX-22-matriz-requisitos.md).
