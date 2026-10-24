@@ -37,6 +37,30 @@ Todo evento tiene la misma envoltura. Sin excepciones.
 
 ## Eventos
 
+### Contrato de intercambio MX-21 (v2, para revisión de receptores)
+
+La [decisión MX-21](../../docs/arquitectura/MX-21-contratos-rabbitmq.md) amplía este
+catálogo con un [esquema verificable](mx21-v2.schema.json), ejemplos y prueba AMQP.
+Conserva la envoltura; `id` equivale a event_id y `organizacion_id` al tenant.
+Los nombres ingleses solo sirven de referencia, no son rutas alternativas.
+
+| Referencia | Evento canónico v2 / routing key | Publica |
+|---|---|---|
+| `subscription.created` | `suscripcion.creada` / `suscripcion.creada.v2` | subscriptions |
+| `subscription.updated` | `suscripcion.actualizada` / `suscripcion.actualizada.v2` | subscriptions |
+| `subscription.state_changed` | `suscripcion.estado_cambiado` / `suscripcion.estado_cambiado.v2` | subscriptions |
+| `alert.due` | `alerta.activada` / `alerta.activada.v2` | notifications |
+
+Las tablas siguientes conservan los contratos v1; no se migran consumidores
+automáticamente. Los productores/consumidores reales corresponden a VI-26 y FE-24.
+En v2, `alerta.activada.datos.usuario_id` es entero positivo de Auth (no UUID),
+`moneda` acepta códigos de tres letras mayúsculas del catálogo de BD y
+`estado_cambiado` admite `evento_estado` opcional, tomado de `TransicionEstado.evento`.
+Una cancelación en VI-26 publica solo `suscripcion.estado_cambiado.v2` por defecto;
+`suscripcion.cancelada` v1 se conserva como definición, sin emisión doble automática.
+Si hay receptores v1 activos, acordar el adaptador descrito en MX-21 antes de migrarlos.
+El nombre histórico del exchange `suscripciones` también abarca alertas y los demás dominios de este catálogo.
+
 ### Publica `subscriptions`
 
 | Evento | Cuándo | Datos | Escucha |
@@ -123,3 +147,4 @@ a mano para probar un consumidor de forma aislada.
 Para la defensa: publicar un evento en vivo desde el panel y mostrar cómo el
 servicio reacciona es una demostración muy convincente de que la arquitectura
 funciona de verdad.
+
