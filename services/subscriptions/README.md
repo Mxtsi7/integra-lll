@@ -27,11 +27,48 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
 | `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
+| `GET` | `/api/suscripciones/<id>/cobros/` | Histórico de cobros reales por suscripción (VI-04 / RF-05) | `200 OK` / `404` |
+| `GET` | `/api/suscripciones/presupuesto/?mes=YYYY-MM&moneda=CLP` | Compara presupuesto mensual vs proyección y gasto real (VI-05) | `200 OK` / `400` / `403` |
+| `POST` | `/api/suscripciones/presupuesto/` | Define o actualiza presupuesto mensual (VI-05 / RF-13 / RF-19) | `200 OK` / `400` / `403` |
+| `GET` | `/api/suscripciones/resumen/?mes=YYYY-MM&moneda=CLP` | Resumen agregado del panel: gasto real, proyección y conteo (VI-06) | `200 OK` / `400` / `403` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
 
-> **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
+### Sub-lote A: Consultas, Listados, Presupuesto y Panel
+
+Esta entrega añade las capacidades de consulta, listados enriquecidos, gestión de presupuesto y panel resumen:
+
+#### 1. Búsqueda por nombre en listado (VI-01)
+`GET /api/suscripciones/?nombre=termino` (o alias `?search=termino`) filtra por coincidencia parcial insensible a mayúsculas sobre el nombre de la suscripción.
+- La entrada se limita a 100 caracteres.
+- Una cadena vacía o con solo espacios equivale a no filtrar y conserva intacta la paginación.
+- Se combina con filtros de `estado`, `fecha_cobro` y `orden`, manteniendo el aislamiento multi-tenant estricto.
+
+#### 2. Ordenamiento server-side (VI-02)
+`GET /api/suscripciones/?orden=campo` (o alias `?ordering=campo`) aplica ordenación en servidor antes de paginar:
+- **Allowlist de campos permitidos**: `nombre`, `monto`, `fecha_proximo_cobro` (y prefijo `-` para orden descendente; alias `fecha_cobro`).
+- El orden por `monto` se realiza numéricamente.
+- Incorpora desempate estable por `id`.
+- Parámetros fuera de la allowlist se rechazan con `400 Bad Request` indicando los campos válidos.
+
+#### 3. Histórico de cobros por suscripción (VI-04 / RF-05)
+`GET /api/suscripciones/<id>/cobros/` devuelve el histórico de cobros reales de la suscripción:
+- Ordenados descendentemente por fecha (`-fecha, -id`).
+- Admite filtros de rango opcionales: `?desde=YYYY-MM-DD&hasta=YYYY-MM-DD`.
+- Paginación estándar DRF.
+- Si el recurso pertenece a otro tenant, responde `404 Not Found`. Modificar el monto esperado de una suscripción no altera los cobros históricos existentes.
+
+#### 4. Presupuesto mensual y comparación de proyección (VI-05 / RF-13 / RF-19)
+- `POST /api/suscripciones/presupuesto/`: define o actualiza el presupuesto (`mes` en formato `YYYY-MM`, `moneda`, `monto` > 0).
+- `GET /api/suscripciones/presupuesto/?mes=YYYY-MM&moneda=CLP`: compara el presupuesto con el gasto real (suma de cobros del mes) y la proyección (suma de suscripciones activas del mes no canceladas y sin cobro confirmado).
+- Devuelve `diferencia`, `porcentaje_consumido` y `alerta_superado`. Si no hay presupuesto configurado, responde con `presupuesto: null` y no divide por cero. Aislamiento por moneda: nunca suma CLP y USD sin conversión.
+
+#### 5. Resumen agregado del panel (VI-06 / RF-11 / RF-09)
+`GET /api/suscripciones/resumen/?mes=YYYY-MM&moneda=CLP`:
+- Agrega en backend el `gasto_real`, `gasto_proyectado` (excluyendo canceladas) y `total_estimado`.
+- Provee desglose `conteo_estados` con el conteo de suscripciones por estado (`activo`, `prueba`, `por_confirmar`, `cancelado`, `fantasma`, `total`).
+- Un tenant en estado vacío (sin registros) devuelve ceros y las estructuras completas y estables.
 
 ### Calendario mensual de cobros
 

@@ -534,3 +534,47 @@ class TransicionEstado(ModeloTenant):
         ]
         verbose_name = "Transición de estado"
         verbose_name_plural = "Transiciones de estado"
+
+
+class Presupuesto(ModeloTenant):
+    """Presupuesto mensual definido por una organización para un periodo y moneda (RF-13 / RF-19)."""
+
+    mes = models.CharField(
+        max_length=7,
+        verbose_name="Mes presupuestado (YYYY-MM)",
+    )
+
+    moneda = models.CharField(
+        max_length=3,
+        # Usar literales en vez de Subscription.Moneda para no romperse
+        # cuando PR #77 elimine ese enum del modelo Subscription.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        default="CLP",
+        verbose_name="Moneda",
+    )
+
+    monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        verbose_name="Monto presupuestado",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "presupuesto"
+        ordering = ["-mes", "moneda"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "mes", "moneda"],
+                name="presupuesto_unico_tenant_mes_moneda",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(monto__gt=Decimal("0")),
+                name="presupuesto_monto_positivo",
+            ),
+        ]
+        verbose_name = "Presupuesto"
+        verbose_name_plural = "Presupuestos"
+
+    def __str__(self) -> str:
+        return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
