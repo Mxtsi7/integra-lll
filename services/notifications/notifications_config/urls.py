@@ -1,10 +1,15 @@
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from notifications.views import health_check
+from notifications.views import salud
 
 urlpatterns = [
-    path('health/', health_check, name='health'),
-    path('admin/', admin.site.urls),
-    path('api/notifications/', include('notifications.urls')),
+    path("health/", salud, name="health"),
+    path("admin/", admin.site.urls),
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
+    # Sin prefijo extra: el router ya registra "alertas", así que esto queda
+    # en /api/alertas/. El gateway reenvía esa ruta tal cual.
+    path("api/", include("notifications.urls")),
 ]

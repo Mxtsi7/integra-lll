@@ -2,7 +2,7 @@ import { formatearFecha, formatearMonto, type Suscripcion } from '@ojoalgasto/sh
 import { Ghost, Timer } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { diasHasta } from '../../utils/fechas';
-import { CATEGORIA_VISUAL, cuandoEnDias, sufijoFrecuencia } from '../subscriptions/presentacion';
+import { usePresentacionCategoria, cuandoEnDias, sufijoFrecuencia } from '../subscriptions/presentacion';
 import styles from './Tiles.module.css';
 
 /**
@@ -10,6 +10,7 @@ import styles from './Tiles.module.css';
  * sin actividad). El interruptor encendido dice justo eso: sigue cobrando.
  */
 export function TileFantasmas({ suscripciones }: { suscripciones: Suscripcion[] }) {
+  const categoriaVisual = usePresentacionCategoria();
   const fantasmas = suscripciones.filter((s) => s.estado === 'fantasma');
 
   return (
@@ -29,7 +30,7 @@ export function TileFantasmas({ suscripciones }: { suscripciones: Suscripcion[] 
       ) : (
         <ul className={styles.lista}>
           {fantasmas.map((s) => {
-            const { Icono, color } = CATEGORIA_VISUAL[s.categoria];
+            const { Icono, color } = categoriaVisual(s.categoria);
             return (
               <li key={s.id}>
                 <Link to={`/suscripciones/${s.id}`} className={styles.fila} title={s.nombre}>
@@ -59,6 +60,7 @@ export function TileFantasmas({ suscripciones }: { suscripciones: Suscripcion[] 
 
 /** Las pruebas gratis y cuándo se acaban (RN-NOT-004). */
 export function TilePruebas({ suscripciones }: { suscripciones: Suscripcion[] }) {
+  const categoriaVisual = usePresentacionCategoria();
   const pruebas = suscripciones
     .filter((s) => s.estado === 'prueba')
     .sort((a, b) => diasHasta(a.fin_prueba ?? a.fecha_proximo_cobro) - diasHasta(b.fin_prueba ?? b.fecha_proximo_cobro));
@@ -80,7 +82,7 @@ export function TilePruebas({ suscripciones }: { suscripciones: Suscripcion[] })
       ) : (
         <ul className={styles.lista}>
           {pruebas.map((s) => {
-            const { Icono, color } = CATEGORIA_VISUAL[s.categoria];
+            const { Icono, color } = categoriaVisual(s.categoria);
             const fin = s.fin_prueba ?? s.fecha_proximo_cobro;
             const dias = diasHasta(fin);
             const cobro = s.monto > 0 ? `${formatearMonto(s.monto, s.moneda)}${sufijoFrecuencia(s.frecuencia)}` : 'Gratis';

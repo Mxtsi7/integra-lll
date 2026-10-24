@@ -107,12 +107,34 @@ class CuentaConectada(ModeloTenant):
 
     # ── comportamiento ───────────────────────────────────────────────
 
+    # Los estados que por sí solos exigen volver a autorizar. Están acá y no
+    # repetidos en la vista porque la propiedad y el filtro del listado TIENEN
+    # que decir lo mismo: si no, una cuenta desaparece justo cuando se la busca.
+    ESTADOS_QUE_EXIGEN_REAUTORIZAR = (
+        Estado.REQUIERE_REAUTORIZACION,
+        Estado.ERROR,
+    )
+
+    @classmethod
+    def filtro_exigen_reautorizar(cls) -> models.Q:
+        """La parte de `necesita_reautorizacion` que SÍ se puede consultar en SQL.
+
+        El resto de la propiedad —que el token ya no descifre con las claves
+        vigentes— no es una columna: depende de las claves que tenga el proceso
+        en ese momento. No se puede expresar en un WHERE, y filtrar en Python
+        después de paginar devolvería páginas incompletas con un `count` que no
+        calza. Por eso, cuando se detecta un secreto ilegible, lo que
+        corresponde es dejarlo asentado con `marcar_para_reautorizar()`: ahí el
+        estado pasa a ser consultable y el filtro lo encuentra.
+        """
+        return models.Q(estado__in=cls.ESTADOS_QUE_EXIGEN_REAUTORIZAR)
+
     @property
     def necesita_reautorizacion(self) -> bool:
         """True si no se puede operar con esta cuenta sin que el usuario
         vuelva a autorizar: o el estado lo dice, o el token guardado ya no
         se puede descifrar con las claves vigentes."""
-        if self.estado in (self.Estado.REQUIERE_REAUTORIZACION, self.Estado.ERROR):
+        if self.estado in self.ESTADOS_QUE_EXIGEN_REAUTORIZAR:
             return True
         return self.access_token is SECRETO_ILEGIBLE or self.refresh_token is SECRETO_ILEGIBLE
 
