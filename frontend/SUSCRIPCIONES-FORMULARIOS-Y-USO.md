@@ -10,9 +10,13 @@
 | CH-15 | Mostrar historial de uso web por fecha | ✅ |
 
 **Dependencias:** CH-09 no tiene. CH-16 depende de CH-09 (está en esta misma rama). CH-14 y CH-15
-dependen de **VI-10** (Victor): `GET` y `POST /api/suscripciones/<id>/uso/` ya están en `main`
-(`services/subscriptions/app/views.py`, acción `uso`), con la validación de minutos y fecha en
-`RegistrarUsoSerializer`.
+dependían de **VI-10** (Victor), que ya entró a `main` (PR #67): `horas_uso_mes` se calcula con los
+usos del mes actual, así que al cambiar de mes vuelve a 0 sin tareas programadas.
+
+**Integración con los catálogos (PR #77 de Maxi).** Las monedas, categorías y frecuencias del formulario
+de creación ya no están escritas en el código: vienen de `GET /api/catalogos/suscripciones/`. La
+validación de CH-09 recibe esas opciones (`validarSuscripcion(datos, opciones)`), así que una moneda
+o categoría nueva del catálogo vale sin tocar el frontend.
 
 ## Dónde está cada tarea
 
@@ -71,7 +75,8 @@ export function esFechaReal(iso: string): boolean {
 **En el formulario**, si algo no cumple no se envía:
 
 ```tsx
-const locales = validarSuscripcion({ nombre, monto, moneda, frecuencia, fechaProximoCobro, enPrueba, finPrueba });
+// opciones = los códigos activos del catálogo (monedas, categorías y frecuencias)
+const locales = validarSuscripcion({ nombre, monto, moneda, categoria, frecuencia, fechaProximoCobro, enPrueba, finPrueba }, opciones);
 setErrores(locales);
 if (Object.keys(locales).length > 0) {
   enfocarPrimerError(locales);   // el foco va al primer campo con error
@@ -89,7 +94,8 @@ reparte:
 
 ```tsx
 const CAMPO_DESDE_API = { nombre: "nombre", monto: "monto", fecha_proximo_cobro: "fechaProximoCobro",
-                          fin_prueba: "finPrueba", moneda: "moneda", frecuencia: "frecuencia" };
+                          fin_prueba: "finPrueba", moneda: "moneda", frecuencia: "frecuencia",
+                          categoria: "categoria" };
 // …
 const { porCampo, general } = erroresDesdeServidor(erroresCampos, CAMPO_DESDE_API);
 setErrores(porCampo);          // bajo cada campo
@@ -103,8 +109,9 @@ setErroresGenerales(general);  // lo que no es de ningún campo, arriba
 **Detectar cambios.** Cada formulario compara con su valor inicial y avisa a `Homepage`:
 
 ```tsx
-// NuevaSuscripcionForm: contra el formulario vacío
-const hayCambios = !mismosDatos(formData, EMPTY_FORM(monedas, frecuencias));
+// NuevaSuscripcionForm: contra el formulario sin tocar, con los valores por defecto del catálogo.
+// Que el catálogo complete moneda/categoría/frecuencia al cargar NO cuenta como cambio.
+const hayCambios = !mismosDatos({ ...formData, moneda: formData.moneda || inicial.moneda, … }, inicial);
 useEffect(() => { onCambiosSinGuardar?.(hayCambios); }, [hayCambios, onCambiosSinGuardar]);
 
 // EditarSuscripcionForm: contra los datos con que se abrió
@@ -253,7 +260,16 @@ Manual (`npm run dev`, con backend):
 
 ## Pendiente
 
-- **Revisión por otra persona** (lo piden las cuatro tarjetas), y que Victor confirme que VI-10 está
-  cerrada: los endpoints están en `main`, pero su tarjeta sigue abierta en Trello.
-- **Siguientes:** CH-11 (filtros en el servidor) conviene hacerla junto con CH-12 y CH-13 cuando entre
-  VI-02 (orden en el servidor). CH-08 y CH-10 esperan MX-06 y VI-03.
+- **Revisión por otra persona** (lo piden las cuatro tarjetas).
+- **Siguientes:** VI-02 (orden en el servidor) ya entró a `main`, así que CH-11, CH-12 y CH-13 se pueden
+  hacer juntas después de esta PR.
+
+## Actualización con `main` (VI-10 y catálogos)
+
+- **Conflictos resueltos:** `shared/src/api/suscripciones.ts` (los dos agregaron `fecha` al registro de
+  uso; quedó una sola) y `NuevaSuscripcionForm.tsx` (catálogos de Maxi + validaciones por campo de CH-09
+  + cambios sin guardar de CH-16 + casilla de prueba).
+- **`horas_uso_mes` llega como texto desde VI-10** ("0.00", "0.50"). Antes no se convertía: "0.00" se
+  mostraba como "0.00 h" en vez de "Sin registrar". Ahora `desdeLaApi` lo pasa a número y se muestra con
+  coma ("0,5 h", `formatearHoras`).
+- Los tests montan los formularios dentro de `CatalogosProvider`, como en la app.
