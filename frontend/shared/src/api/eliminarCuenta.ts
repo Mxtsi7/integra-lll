@@ -1,6 +1,13 @@
 import { AuthError } from '../auth';
 import { ErrorDeApi, pedir } from './cliente';
 
+
+/**
+ * MX-07 (DELETE /usuarios/me/) aún no está integrado en main (PR #72 en draft, espera FE-05).
+ * Mientras sea false, la web muestra "Eliminar" deshabilitado. Al integrarse el backend: true.
+ */
+export const ELIMINAR_CUENTA_DISPONIBLE = false;
+
 /** Cuerpo de DELETE /usuarios/me/ (MX-07). */
 export interface DatosEliminacion {
   /** Contraseña actual: reautentica al usuario. */

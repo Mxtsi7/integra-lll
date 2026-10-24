@@ -1,19 +1,24 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
-import { AuthError, eliminarCuenta, type DatosEliminacion, type ResultadoEliminacion } from '@ojoalgasto/shared';
+import {
+  AuthError,
+  ELIMINAR_CUENTA_DISPONIBLE,
+  eliminarCuenta,
+  type DatosEliminacion,
+  type ResultadoEliminacion,
+} from '@ojoalgasto/shared';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { Boton } from '../ui/Boton';
 import { CampoContrasena, CampoTexto } from '../ui/Campo';
 import { Modal } from '../ui/Modal';
 import styles from './EliminarCuenta.module.css';
-import { createPortal } from 'react-dom';
 
 const PALABRA = 'ELIMINAR' as const;
 
-const MENSAJE_ELIMINADA =
-  'Tu cuenta fue eliminada. Tus datos personales se borrarán por completo en un máximo de 72 horas.';
+const MENSAJE_ELIMINADA = 'Tu cuenta fue eliminada y cerramos tu sesión.';
 const MENSAJE_PENDIENTE =
   'Cerramos tu sesión y estamos eliminando tu organización. Este proceso puede tardar y todavía no termina.';
 
@@ -22,6 +27,8 @@ export interface EliminarCuentaProps {
   className?: string;
   /** Por defecto eliminarCuenta() de shared → DELETE /api/usuarios/me/ (MX-07). Se inyecta en las pruebas. */
   onEliminar?: (datos: DatosEliminacion) => Promise<ResultadoEliminacion>;
+  /** false mientras MX-07 no esté integrado: el botón queda deshabilitado. Se inyecta en las pruebas. */
+  disponible?: boolean;
 }
 
 /**
@@ -29,7 +36,11 @@ export interface EliminarCuentaProps {
  * que se escriba ELIMINAR. Cancelar no llama a nada ni toca la sesión. La sesión local solo se
  * limpia después de que el backend acepta (204 o 202); nunca antes ni si falla.
  */
-export function EliminarCuenta({ className = '', onEliminar = eliminarCuenta }: EliminarCuentaProps) {
+export function EliminarCuenta({
+  className = '',
+  onEliminar = eliminarCuenta,
+  disponible = ELIMINAR_CUENTA_DISPONIBLE,
+}: EliminarCuentaProps) {
   const navigate = useNavigate();
   const toast = useToast();
   const { cerrarSesionLocal } = useAuth();
@@ -102,92 +113,102 @@ export function EliminarCuenta({ className = '', onEliminar = eliminarCuenta }: 
     }
   }
 
+  if (!disponible) {
+    return (
+      <span title="Disponible próximamente">
+        <Boton variante="sutil" tamano="s" className={className} disabled>
+          Eliminar
+        </Boton>
+      </span>
+    );
+  }
+
   return (
     <>
       <Boton variante="sutil" tamano="s" className={className} onClick={() => setAbierto(true)}>
         Eliminar
       </Boton>
 
-    {abierto &&
+      {abierto &&
         createPortal(
-        <Modal
-          titulo="¿Eliminar tu cuenta?"
-          descripcion="Esta acción es permanente y no se puede deshacer."
-          alCerrar={cerrar}
-          tipo="alerta"
-          ancho="medio"
+          <Modal
+            titulo="¿Eliminar tu cuenta?"
+            descripcion="Esta acción es permanente y no se puede deshacer."
+            alCerrar={cerrar}
+            tipo="alerta"
+            ancho="medio"
+          >
+            <form className={styles.formulario} onSubmit={confirmar} noValidate>
+              <div className={styles.efectos}>
+                <p className={styles.intro}>Antes de confirmar, esto es lo que va a pasar:</p>
+                <ul className={styles.lista}>
+                  <li>Tu sesión se cierra de inmediato.</li>
+                  <li>
+                    Se elimina tu cuenta. Si quedan otras personas titulares en tu organización, la
+                    organización y sus datos se conservan. Si eres la última persona titular, también se
+                    elimina la organización con todas sus suscripciones, cobros y cuentas conectadas.
+                  </li>
+                  <li>
+                    Se conservan separados de tu identidad, por un plazo limitado: el registro de tu consentimiento,
+                    los comprobantes de pago del plan Premium (si los hubo) y los registros de auditoría anonimizados.
+                  </li>
+                </ul>
+              </div>
 
-        >
-          <form className={styles.formulario} onSubmit={confirmar} noValidate>
-            <div className={styles.efectos}>
-              <p className={styles.intro}>Antes de confirmar, esto es lo que va a pasar:</p>
-              <ul className={styles.lista}>
-                <li>Tu sesión se cierra de inmediato.</li>
-                <li>
-                  Tu perfil, tus suscripciones, cobros, registros de uso y cuentas conectadas se eliminan
-                  definitivamente en un máximo de 72 horas.
-                </li>
-                <li>
-                  Se conservan separados de tu identidad, por un plazo limitado: el registro de tu consentimiento,
-                  los comprobantes de pago del plan Premium (si los hubo) y los registros de auditoría anonimizados.
-                </li>
-              </ul>
-            </div>
+              <CampoContrasena
+                id="eliminar-password"
+                etiqueta="Tu contraseña actual"
+                autoComplete="current-password"
+                icono={<Lock size={16} />}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setErrorPassword(null);
+                }}
+                error={errorPassword ?? undefined}
+                disabled={enviando}
+              />
 
-            <CampoContrasena
-              id="eliminar-password"
-              etiqueta="Tu contraseña actual"
-              autoComplete="current-password"
-              icono={<Lock size={16} />}
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setErrorPassword(null);
-              }}
-              error={errorPassword ?? undefined}
-              disabled={enviando}
-            />
+              <CampoTexto
+                id="eliminar-confirmacion"
+                etiqueta={`Escribe ${PALABRA} para confirmar`}
+                autoComplete="off"
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                disabled={enviando}
+              />
 
-            <CampoTexto
-              id="eliminar-confirmacion"
-              etiqueta={`Escribe ${PALABRA} para confirmar`}
-              autoComplete="off"
-              value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              disabled={enviando}
-            />
+              {requiereOrg && (
+                <label className={styles.organizacion}>
+                  <input
+                    type="checkbox"
+                    checked={orgConfirmada}
+                    onChange={(e) => setOrgConfirmada(e.target.checked)}
+                    disabled={enviando}
+                  />
+                  <span>Entiendo que también se eliminará mi organización y todos sus datos.</span>
+                </label>
+              )}
 
-            {requiereOrg && (
-              <label className={styles.organizacion}>
-                <input
-                  type="checkbox"
-                  checked={orgConfirmada}
-                  onChange={(e) => setOrgConfirmada(e.target.checked)}
-                  disabled={enviando}
-                />
-                <span>Entiendo que también se eliminará mi organización y todos sus datos.</span>
-              </label>
-            )}
+              {errorGeneral && (
+                <p className={styles.error} role="alert">
+                  {errorGeneral}
+                </p>
+              )}
 
-            {errorGeneral && (
-              <p className={styles.error} role="alert">
-                {errorGeneral}
-              </p>
-            )}
-
-            <div className={styles.acciones}>
-              <Boton variante="secundario" onClick={cerrar} disabled={enviando}>
-                Cancelar
-              </Boton>
-              <Boton type="submit" variante="peligro" cargando={enviando} disabled={!puedeConfirmar}>
-                Eliminar mi cuenta
-              </Boton>
-            </div>
-          </form>
-         </Modal>,
-         document.body,
-       )}
-     </>
+              <div className={styles.acciones}>
+                <Boton variante="secundario" onClick={cerrar} disabled={enviando}>
+                  Cancelar
+                </Boton>
+                <Boton type="submit" variante="peligro" cargando={enviando} disabled={!puedeConfirmar}>
+                  Eliminar mi cuenta
+                </Boton>
+              </div>
+            </form>
+          </Modal>,
+          document.body,
+        )}
+    </>
   );
 }
 
