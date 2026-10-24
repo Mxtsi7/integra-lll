@@ -263,6 +263,7 @@ class Subscription(ModeloTenant):
         *,
         actor_id=None,
         actor_rol: str = "sistema",
+        correlation_id=None,
     ) -> "TransicionEstado":
         """Valida y audita una transición de estado bajo bloqueo de fila."""
         try:
@@ -304,6 +305,14 @@ class Subscription(ModeloTenant):
                 actor_id=actor_id,
                 actor_rol=actor_rol,
             )
+            from events.outbox import registrar_estado_cambiado
+
+            registrar_estado_cambiado(
+                suscripcion,
+                estado_anterior=estado_anterior,
+                evento_estado=evento,
+                correlation_id=correlation_id,
+            )
 
         self.estado = estado_destino
         self.actualizado_en = suscripcion.actualizado_en
@@ -316,6 +325,7 @@ class Subscription(ModeloTenant):
         *,
         actor_id=None,
         actor_rol: str = "sistema",
+        correlation_id=None,
     ) -> "RegistroUso":
         """Persiste el uso y mantiene actualizados sus campos derivados.
 
@@ -341,6 +351,7 @@ class Subscription(ModeloTenant):
                     self.EventoEstado.USO_REGISTRADO,
                     actor_id=actor_id,
                     actor_rol=actor_rol,
+                    correlation_id=correlation_id,
                 )
 
             suscripcion.ultima_actividad = ahora
@@ -563,6 +574,30 @@ class TransicionEstado(ModeloTenant):
         verbose_name_plural = "Transiciones de estado"
 
 
+class OutboxEvento(ModeloTenant):
+    """Evento durable pendiente de publicación después del commit de dominio."""
+
+    evento = models.CharField(max_length=40)
+    version = models.PositiveSmallIntegerField(default=2)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+    correlation_id = models.UUIDField()
+    datos = models.JSONField()
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    siguiente_intento = models.DateTimeField(default=timezone.now)
+    ultimo_error = models.CharField(max_length=100, blank=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "subscription_event_outbox"
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(
+                fields=["publicado_en", "siguiente_intento"],
+                name="sub_outbox_pending_idx",
+            ),
+        ]
+        verbose_name = "Evento pendiente"
+        verbose_name_plural = "Eventos pendientes"
 class Presupuesto(ModeloTenant):
     """Presupuesto mensual definido por una organización para un periodo y moneda (RF-13 / RF-19)."""
 
