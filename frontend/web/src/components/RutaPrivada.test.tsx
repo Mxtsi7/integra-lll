@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -25,6 +25,27 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
   return { ...real, getUsuarioActual: vi.fn(), login: vi.fn(), revocarSesion: vi.fn() };
 });
+
+// Con la suite completa corriendo en paralelo, algunas esperas de este
+// archivo llegaban casi al segundo que dan por defecto waitFor/findBy. En
+// jsdom, renderizar y buscar por rol (con `name`) cuesta en proporción al
+// DOM: jsdom arma estilos por cada elemento y los calcula al buscar por rol.
+//
+// 1) Se quita el riel de navegación (BarraLateral): no tiene nada que ver
+//    con la sesión y es más de la mitad del DOM de AppLayout (ocho enlaces
+//    con íconos SVG). La barra superior (usuario, plan y "Cerrar sesión")
+//    sigue siendo la real, porque es lo que estos tests revisan. Medido con
+//    la suite completa en un notebook de 4 núcleos, la espera más larga
+//    bajó de 987 ms a 566 ms.
+vi.mock("./layout/BarraLateral", () => ({ BarraLateral: () => null }));
+
+// 2) Lo que queda (Login, barra superior, toasts) sí es lo que se prueba, y
+//    bajo carga igual pasa del medio segundo. Por eso el tiempo sube a 2 s,
+//    solo en este archivo (Vitest corre cada archivo en su propio proceso).
+//    Un test que pasa no espera de más; solo tarda más en reportar uno que
+//    falla. No más de 2 s, para que un test con dos esperas lentas no choque
+//    con los 5 s por test de Vitest.
+configure({ asyncUtilTimeout: 2_000 });
 
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const loginMock = vi.mocked(login);
