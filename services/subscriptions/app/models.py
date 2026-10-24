@@ -323,10 +323,6 @@ class Subscription(ModeloTenant):
         histórico de la BD (sum de minutos del mes local), no sobre el valor
         previo del campo. Esto garantiza correctitud bajo escrituras concurrentes
         (RF-04 / VI-10) y elimina el riesgo de perder minutos.
-
-        Si la suscripción estaba en FANTASMA, la transición a ACTIVO se hace
-        directamente dentro de esta misma transacción atómica para evitar
-        intentar adquirir un lock de fila ya sostenido (deadlock).
         """
         with transaction.atomic():
             suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
@@ -340,18 +336,9 @@ class Subscription(ModeloTenant):
             if fecha is None:
                 fecha = fecha_actual
 
-            # Si está en FANTASMA, transicionamos directamente en esta misma
-            # transacción sin volver a adquirir el lock (evita deadlock).
             if suscripcion.estado == self.Estado.FANTASMA:
-                estado_anterior = suscripcion.estado
-                suscripcion.estado = self.Estado.ACTIVO
-                suscripcion.save(update_fields=("estado", "actualizado_en"))
-                TransicionEstado.objects.create(
-                    organizacion_id=suscripcion.organizacion_id,
-                    suscripcion=suscripcion,
-                    evento=self.EventoEstado.USO_REGISTRADO,
-                    estado_anterior=estado_anterior,
-                    estado_nuevo=self.Estado.ACTIVO,
+                suscripcion.transicionar(
+                    self.EventoEstado.USO_REGISTRADO,
                     actor_id=actor_id,
                     actor_rol=actor_rol,
                 )

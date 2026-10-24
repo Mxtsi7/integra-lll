@@ -143,8 +143,10 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
             recomendacion["suscripciones_relacionadas"],
             [{"id": "s2", "nombre": "Servicio B"}],
         )
-        self.assertIn("Servicio A (s1)", recomendacion["motivo"])
-        self.assertIn("Servicio B (s2)", recomendacion["motivo"])
+        self.assertIn("Servicio A", recomendacion["motivo"])
+        self.assertIn("Servicio B", recomendacion["motivo"])
+        self.assertNotIn("(s1)", recomendacion["motivo"])
+        self.assertNotIn("(s2)", recomendacion["motivo"])
         self.assertIn("no afirma equivalencia", recomendacion["motivo"])
         self.assertIn("calculado como monto recurrente", recomendacion["motivo"])
         self.assertEqual(
@@ -388,6 +390,11 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
             "recomendacion.consolidacion_generada",
         )
         self.assertEqual(publicado["correlation_id"], CORRELACION_ID)
+        self.assertTrue(publicado["ocurrido_en"].endswith("Z"))
+        self.assertEqual(
+            canal.publicados[0]["properties"].message_id,
+            publicado["id"],
+        )
 
     def test_invalid_rabbit_message_is_dead_lettered(self):
         canal = CanalFalso()

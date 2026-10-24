@@ -240,12 +240,12 @@ def generar_recomendaciones_consolidacion(
                     f"{candidata['ultimo_uso'].isoformat()}"
                 )
             nombres_alternativas = ", ".join(
-                f"{alternativa['nombre']} ({alternativa['id']})"
+                alternativa["nombre"]
                 for alternativa in alternativas_usadas
             )
             motivo = (
                 f"Posible consolidación a revisar en {categoria}: "
-                f"{candidata['nombre']} ({candidata['id']}) tiene {uso} "
+                f"{candidata['nombre']} tiene {uso} "
                 f"durante más de {VENTANA_SIN_USO_DIAS} días; "
                 f"{nombres_alternativas} registra uso en el mismo período. "
                 "La recomendación se apoya en un solapamiento explícito y no "
@@ -373,7 +373,7 @@ def procesar_evento_solapamiento(evento: Mapping) -> list[dict]:
                 "evento": "recomendacion.consolidacion_generada",
                 "version": 1,
                 "id": str(salida_id),
-                "ocurrido_en": timezone.now().isoformat(),
+                "ocurrido_en": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "correlation_id": correlacion_id,
                 "organizacion_id": organizacion_id,
                 "datos": datos_salida,

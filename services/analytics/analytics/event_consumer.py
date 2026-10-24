@@ -34,6 +34,7 @@ def procesar_mensaje(
             properties=pika.BasicProperties(
                 content_type="application/json",
                 delivery_mode=2,
+                message_id=salida["id"],
                 correlation_id=salida["correlation_id"],
             ),
             mandatory=True,

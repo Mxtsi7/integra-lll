@@ -58,7 +58,15 @@ class Command(BaseCommand):
                 exchange=EXCHANGE,
                 routing_key="solapamiento.detectado.v2",
             )
-            canal.queue_declare(queue=COLA_SALIDA, durable=True)
+            canal.queue_declare(
+                queue=COLA_SALIDA,
+                durable=True,
+                arguments={
+                    # Límite de seguridad hasta que VI-17 las persista.
+                    # Los mensajes más viejos se descartan al llegar al tope.
+                    "x-max-length": 10000,
+                },
+            )
             canal.queue_bind(
                 queue=COLA_SALIDA,
                 exchange=EXCHANGE,
