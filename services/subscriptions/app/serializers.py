@@ -15,9 +15,14 @@ from app.models import (
 
 
 class CobroSerializer(serializers.ModelSerializer):
-    """Serializa el histórico de cobros reales de una suscripción (VI-04 / RF-05)."""
+    """Serializa el histórico de cobros reales de una suscripción (VI-04 / RF-05).
 
-    hubo_alza = serializers.BooleanField(read_only=True)
+    NOTA: hubo_alza se excluye intencionalmente. La property de Cobro compara
+    contra suscripcion.monto ACTUAL: si el usuario edita el monto, cambia la
+    marca de todos los cobros pasados (reescribe históricos). Además VI-19
+    define el alza como >5 % sobre el promedio de 3 meses; exponer ahora otra
+    definición deja dos verdades. Se incluirá en VI-19.
+    """
 
     class Meta:
         model = Cobro
@@ -27,7 +32,6 @@ class CobroSerializer(serializers.ModelSerializer):
             "monto",
             "moneda",
             "fecha",
-            "hubo_alza",
             "creado_en",
         )
         read_only_fields = fields

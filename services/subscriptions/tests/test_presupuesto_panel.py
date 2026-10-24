@@ -8,6 +8,7 @@ from decimal import Decimal
 import uuid
 
 import pytest
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -27,6 +28,14 @@ def org_principal() -> uuid.UUID:
 @pytest.fixture()
 def org_ajena() -> uuid.UUID:
     return uuid.uuid4()
+
+
+@pytest.fixture(autouse=True)
+def fijar_hoy(monkeypatch):
+    """Fija 'hoy' a 2026-10-01 para que _calcular_gasto_proyectado no descarte
+    fechas pasadas y los tests no dependan del día en que corren (Bloqueante 1).
+    """
+    monkeypatch.setattr("app.views.timezone.localdate", lambda: date(2026, 10, 1))
 
 
 def crear_suscripcion(
@@ -151,7 +160,6 @@ class TestPresupuestoMensualVI05:
         assert Decimal(data["diferencia"]) == Decimal("15000.00")
         assert data["porcentaje_consumido"] == 70.0
         assert data["alerta_superado"] is False
-
     def test_sin_presupuesto_no_divide_por_cero(
         self, client: APIClient, org_principal: uuid.UUID
     ) -> None:
@@ -219,14 +227,15 @@ class TestResumenPanelVI06:
             fecha=date(2026, 10, 10),
         )
 
-        # Suscripción activa proyectada sin cobro
+        # Suscripción activa proyectada sin cobro (cae el 25-10 > 01-10: proyectable)
         crear_suscripcion(
             org_principal, "Proyectada", monto="5000.00", estado="activo", fecha_cobro=date(2026, 10, 25)
         )
 
         # Suscripción en prueba
         crear_suscripcion(
-            org_principal, "Trial", monto="3000.00", estado="prueba"
+            org_principal, "Trial", monto="3000.00", estado="prueba",
+            fecha_cobro=date(2026, 10, 20),  # 20-10 > 01-10: proyectable pero en prueba
         )
 
         # Suscripción cancelada (no debe proyectarse en el futuro)
@@ -243,7 +252,10 @@ class TestResumenPanelVI06:
         assert data["periodo"] == "2026-10"
         assert data["moneda"] == "CLP"
         assert Decimal(data["gasto_real"]) == Decimal("10000.00")
-        assert Decimal(data["gasto_proyectado"]) >= Decimal("5000.00")
+        # Con fijar_hoy=2026-10-01, "Proyectada" (25-10, activo) y "Trial"
+        # (20-10, prueba) son proyectables — solo se excluye "cancelado".
+        # Total proyectado: 5000 + 3000 = 8000 CLP.
+        assert Decimal(data["gasto_proyectado"]) == Decimal("8000.00")
         assert Decimal(data["total_estimado"]) == Decimal(data["gasto_real"]) + Decimal(data["gasto_proyectado"])
 
         conteo = data["conteo_estados"]
@@ -288,3 +300,48 @@ class TestResumenPanelVI06:
         assert resp.status_code == status.HTTP_200_OK
         assert resp.data["conteo_estados"]["total"] == 0
         assert Decimal(resp.data["total_estimado"]) == Decimal("0.00")
+
+    def test_suscripcion_eliminada_no_cuenta_en_conteo(
+        self, client: APIClient, org_principal: uuid.UUID
+    ) -> None:
+        """Bloqueante 2: una suscripción con soft-delete (activo=False) no debe
+        aparecer en conteo_estados. TenantViewSet.get_queryset() no filtra activo=True.
+        """
+        headers = {"X-Organizacion-Id": str(org_principal)}
+        suscripcion = crear_suscripcion(org_principal, "Eliminada", estado="activo")
+
+        # Soft-delete vía API
+        del_resp = client.delete(
+            f"/api/suscripciones/{suscripcion.id}/",
+            headers=headers,
+        )
+        assert del_resp.status_code == status.HTTP_204_NO_CONTENT
+
+        resp = client.get(
+            "/api/suscripciones/resumen/?mes=2026-10&moneda=CLP",
+            headers=headers,
+        )
+        assert resp.status_code == status.HTTP_200_OK
+        conteo = resp.data["conteo_estados"]
+        assert conteo["activo"] == 0, (
+            "Una suscripción eliminada (activo=False) no debe contar en el conteo."
+        )
+        assert conteo["total"] == 0
+
+
+@pytest.mark.django_db
+class TestPresupuestoSinCabecera:
+    """Importante 3: POST /presupuesto/ sin X-Organizacion-Id debe retornar 403."""
+
+    def test_post_presupuesto_sin_organizacion_retorna_403(
+        self, client: APIClient
+    ) -> None:
+        resp = client.post(
+            "/api/suscripciones/presupuesto/",
+            {"mes": "2026-10", "monto": "50000.00", "moneda": "CLP"},
+            format="json",
+            # Sin cabecera X-Organizacion-Id
+        )
+        assert resp.status_code == status.HTTP_403_FORBIDDEN, (
+            "Sin X-Organizacion-Id debe responder 403, no 500 (IntegrityError)."
+        )

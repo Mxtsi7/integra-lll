@@ -261,9 +261,10 @@ class TestHistorialCobrosVI04:
         # Más reciente primero
         assert resp.data["results"][0]["id"] == str(c2.id)
         assert resp.data["results"][0]["monto"] == "12000.00"
-        assert resp.data["results"][0]["hubo_alza"] is True
+        # hubo_alza se excluye del contrato (se añadirá en VI-19 con la
+        # definición correcta: >5% sobre el promedio de 3 meses)
+        assert "hubo_alza" not in resp.data["results"][0]
         assert resp.data["results"][1]["id"] == str(c1.id)
-        assert resp.data["results"][1]["hubo_alza"] is False
 
     def test_aislamiento_tenant_retorna_404(
         self, client: APIClient, org_principal: uuid.UUID, org_ajena: uuid.UUID

@@ -546,8 +546,10 @@ class Presupuesto(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        choices=Subscription.Moneda.choices,
-        default=Subscription.Moneda.CLP,
+        # Usar literales en vez de Subscription.Moneda para no romperse
+        # cuando PR #77 elimine ese enum del modelo Subscription.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        default="CLP",
         verbose_name="Moneda",
     )
 

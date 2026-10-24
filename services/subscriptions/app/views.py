@@ -341,10 +341,16 @@ class SubscriptionViewSet(TenantViewSet):
     def presupuesto(self, request):
         """GET /api/suscripciones/presupuesto/ y POST /api/suscripciones/presupuesto/ (VI-05)."""
         if request.method == "POST":
+            # Validar que existe contexto de organización antes de persistir.
+            # Sin X-Organizacion-Id llegaría organizacion_id=None al
+            # update_or_create y lanzaría IntegrityError (500). El README
+            # promete 403.
+            if not getattr(request, "organizacion_id", None):
+                raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
             serializer = PresupuestoSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             mes = serializer.validated_data["mes"]
-            moneda = serializer.validated_data.get("moneda", Subscription.Moneda.CLP)
+            moneda = serializer.validated_data.get("moneda", "CLP")
             monto = serializer.validated_data["monto"]
 
             presupuesto_obj, _ = Presupuesto.objects.update_or_create(
@@ -357,8 +363,8 @@ class SubscriptionViewSet(TenantViewSet):
 
         # GET: Comparar presupuesto vs proyección
         mes_param = request.query_params.get("mes")
-        moneda = (request.query_params.get("moneda") or Subscription.Moneda.CLP).upper()
-        if moneda not in Subscription.Moneda.values:
+        moneda = (request.query_params.get("moneda") or "CLP").upper()
+        if moneda not in {"CLP", "USD"}:
             raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
 
         inicio, fin, mes = _resolver_rango_mes(mes_param)
@@ -427,8 +433,8 @@ class SubscriptionViewSet(TenantViewSet):
     def resumen(self, request):
         """GET /api/suscripciones/resumen/ (VI-06 / RF-11 / RF-09)."""
         mes_param = request.query_params.get("mes")
-        moneda = (request.query_params.get("moneda") or Subscription.Moneda.CLP).upper()
-        if moneda not in Subscription.Moneda.values:
+        moneda = (request.query_params.get("moneda") or "CLP").upper()
+        if moneda not in {"CLP", "USD"}:
             raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
 
         inicio, fin, periodo = _resolver_rango_mes(mes_param)
@@ -451,6 +457,9 @@ class SubscriptionViewSet(TenantViewSet):
         )
         total_estimado = gasto_real + gasto_proyectado
 
+        # Bloqueante 2: TenantViewSet.get_queryset(self) no filtra activo=True;
+        # una suscripción con DELETE (soft-delete) seguía sumando en el conteo.
+        suscripciones_tenant_activas = TenantViewSet.get_queryset(self).filter(activo=True)
         conteo_estados = {
             "activo": 0,
             "prueba": 0,
@@ -459,7 +468,7 @@ class SubscriptionViewSet(TenantViewSet):
             "fantasma": 0,
             "total": 0,
         }
-        for suscripcion in suscripciones_tenant:
+        for suscripcion in suscripciones_tenant_activas:
             estado = suscripcion.estado
             if estado in conteo_estados:
                 conteo_estados[estado] += 1
