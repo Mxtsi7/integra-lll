@@ -99,6 +99,19 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 
+# ── eventos de dominio (ADR-003) ────────────────────────────────────
+# El trabajo derivado de una acción —recalcular el resumen de la
+# organización— puede hacerse de dos formas, y la bandera elige cuál:
+#
+#   EVENTOS_ASINCRONOS=0  dentro del POST. El usuario espera.
+#   EVENTOS_ASINCRONOS=1  se publica en RabbitMQ y responde al tiro.
+#
+# Existe para poder MEDIR la diferencia con la misma carga y el mismo
+# trabajo (ver k8s/pruebas/comparar-cola.sh). No es un interruptor de
+# "modo debug": los dos caminos son código de producción.
+EVENTOS_ASINCRONOS = env.bool("EVENTOS_ASINCRONOS", default=False)
+RABBITMQ_URL = env("RABBITMQ_URL", default="amqp://guest:guest@rabbitmq:5672/")
+
 # ── regional ────────────────────────────────────────────────────────
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"

@@ -36,9 +36,11 @@ spec:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 100m, memory: 128Mi }
 ---
-# RabbitMQ: el bus de eventos entre servicios del ADR-003. Todavía ningún
-# servicio publica eventos, pero va en el despliegue porque es parte de la
-# arquitectura declarada y así está listo cuando se use.
+# RabbitMQ: el bus de eventos entre servicios del ADR-003.
+#
+# Lo usa el publicador de `subscriptions` cuando EVENTOS_ASINCRONOS=1; con la
+# bandera en 0 el mismo trabajo se hace dentro de la petición HTTP. Esa es la
+# comparación con y sin cola (ver k8s/pruebas/comparar-cola.sh).
 apiVersion: v1
 kind: Service
 metadata:

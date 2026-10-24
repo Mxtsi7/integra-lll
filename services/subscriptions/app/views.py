@@ -26,6 +26,7 @@ from app.serializers import (
     SubscriptionSerializer,
     TransicionEstadoSerializer,
 )
+from events.despacho import al_crear_suscripcion
 from shared.tenant.base import TenantViewSet
 
 
@@ -128,6 +129,24 @@ class SubscriptionViewSet(TenantViewSet):
             qs = qs.filter(fecha_proximo_cobro=fecha)
 
         return qs
+
+    def perform_create(self, serializer):
+        """Crea la suscripción y despacha el trabajo derivado (ADR-003).
+
+        El `super()` guarda asignando la organización de la cabecera. Recién
+        después se despacha, porque el evento lleva el id de la suscripción y
+        antes de guardar no existe.
+
+        Según `EVENTOS_ASINCRONOS`, `al_crear_suscripcion` recalcula el
+        resumen acá mismo (y el usuario espera) o publica el evento y vuelve
+        al tiro. La vista no sabe cuál de los dos: esa decisión vive en
+        events/despacho.py.
+        """
+        super().perform_create(serializer)
+        al_crear_suscripcion(
+            serializer.instance,
+            correlation_id=self.request.headers.get("X-Correlation-ID", ""),
+        )
 
     def perform_destroy(self, instance: Subscription) -> None:
         """Desactiva la suscripción y conserva el registro y sus cobros históricos."""

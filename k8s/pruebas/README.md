@@ -150,3 +150,34 @@ despliegue levante los suyos.
 El cluster es compartido con el resto del curso. Conviene avisar, y no dejar
 una prueba corriendo sola: el `Job` termina y se borra a los 10 minutos, pero
 el pod de diagnóstico hay que borrarlo a mano.
+
+## Comparar con cola y sin cola
+
+```bash
+./k8s/pruebas/comparar-cola.sh
+```
+
+Crear una suscripción dispara trabajo derivado: recalcular el resumen de gasto
+de la organización. El script corre la misma carga dos veces, cambiando solo
+`EVENTOS_ASINCRONOS`:
+
+| Bandera | Quién hace el trabajo | Quién espera |
+|---|---|---|
+| `0` | el propio POST | el usuario |
+| `1` | el consumidor, detrás de RabbitMQ | nadie |
+
+El trabajo es idéntico en los dos casos — hay una prueba que lo verifica
+(`test_los_dos_modos_terminan_en_el_mismo_estado`). Lo único que cambia es
+quién lo espera.
+
+Cada corrida usa una organización nueva y siembra la misma cantidad de filas,
+porque el recálculo cuesta más mientras más suscripciones hay: compartir
+organización haría que la segunda corrida partiera con lo que creó la primera.
+
+Ajustables por variable de entorno: `DURACION`, `CONEXIONES`, `QPS`,
+`SEMILLA`.
+
+**Lo que no mide:** el gateway. Le pega directo al Service de `subscriptions`.
+El gateway es un proxy síncrono y una cola no puede amortiguarlo sin romper la
+semántica — es lo que dice el ADR-003: si el usuario está esperando el dato,
+va por HTTP.
