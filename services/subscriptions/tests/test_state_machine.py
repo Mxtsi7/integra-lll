@@ -401,3 +401,83 @@ def test_api_rechaza_cambio_directo_a_un_estado_no_autorizado() -> None:
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.ACTIVO
     assert not TransicionEstado.objects.filter(suscripcion=suscripcion).exists()
+
+
+# ── Nuevas pruebas requeridas por PR #67 / VI-10 ───────────────────────────
+
+@pytest.mark.django_db
+def test_horas_uso_mes_no_cruza_cambio_de_mes() -> None:
+    """El agregado mensual no incluye registros de meses anteriores.
+
+    El campo horas_uso_mes debe reflejar solo el mes local actual.
+    Un uso registrado en el mes anterior no debe sumarse al total.
+    """
+    from app.models import RegistroUso
+
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    hoy = timezone.localdate()
+
+    # Crear un registro en el mes anterior directamente en BD (sin pasar
+    # por registrar_uso para no alterar el estado).
+    if hoy.month == 1:
+        mes_anterior = hoy.replace(year=hoy.year - 1, month=12, day=1)
+    else:
+        mes_anterior = hoy.replace(month=hoy.month - 1, day=1)
+
+    RegistroUso.objects.create(
+        organizacion_id=suscripcion.organizacion_id,
+        suscripcion=suscripcion,
+        fecha=mes_anterior,
+        minutos=120,  # 2 horas del mes pasado
+    )
+
+    # Registrar 30 minutos en el mes actual
+    suscripcion.registrar_uso(30)
+    suscripcion.refresh_from_db()
+
+    # Solo los 30 min del mes actual deben reflejarse
+    assert suscripcion.horas_uso_mes == Decimal("0.50"), (
+        "El agregado mensual no debe incluir registros de meses anteriores."
+    )
+    assert suscripcion.usos.count() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_registro_de_uso_concurrente_en_fantasma_no_duplica_transicion() -> None:
+    """Dos escrituras concurrentes de uso en una suscripción FANTASMA no
+    deben crear dos transiciones USO_REGISTRADO ni dejar el estado inconsistente.
+
+    El select_for_update garantiza que solo un hilo ejecuta la transición;
+    el segundo ya la encuentra en ACTIVO y solo añade el uso.
+    """
+    if not connection.features.has_select_for_update:
+        pytest.skip("La base de datos no soporta bloqueos de fila.")
+
+    suscripcion = crear_suscripcion(Subscription.Estado.FANTASMA)
+    inicio = Barrier(2)
+
+    def registrar_en_paralelo() -> None:
+        close_old_connections()
+        try:
+            instancia = Subscription.objects.get(pk=suscripcion.pk)
+            inicio.wait(timeout=5)
+            instancia.registrar_uso(30)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        tareas = [executor.submit(registrar_en_paralelo) for _ in range(2)]
+        for tarea in tareas:
+            tarea.result(timeout=15)
+
+    suscripcion.refresh_from_db()
+    assert suscripcion.estado == Subscription.Estado.ACTIVO
+    assert suscripcion.usos.count() == 2
+    assert suscripcion.horas_uso_mes == Decimal("1.00")
+    # Solo debe haber una transición USO_REGISTRADO
+    assert (
+        suscripcion.transiciones_estado.filter(
+            evento=Subscription.EventoEstado.USO_REGISTRADO
+        ).count()
+        == 1
+    ), "La transición FANTASMA→ACTIVO no debe duplicarse bajo concurrencia."

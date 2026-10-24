@@ -317,7 +317,17 @@ class Subscription(ModeloTenant):
         actor_id=None,
         actor_rol: str = "sistema",
     ) -> "RegistroUso":
-        """Persiste el uso y mantiene actualizados sus campos derivados."""
+        """Persiste el uso y mantiene actualizados sus campos derivados.
+
+        El agregado mensual (horas_uso_mes) se recalcula siempre desde el
+        histórico de la BD (sum de minutos del mes local), no sobre el valor
+        previo del campo. Esto garantiza correctitud bajo escrituras concurrentes
+        (RF-04 / VI-10) y elimina el riesgo de perder minutos.
+
+        Si la suscripción estaba en FANTASMA, la transición a ACTIVO se hace
+        directamente dentro de esta misma transacción atómica para evitar
+        intentar adquirir un lock de fila ya sostenido (deadlock).
+        """
         with transaction.atomic():
             suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
             if not suscripcion.activo:
@@ -330,14 +340,23 @@ class Subscription(ModeloTenant):
             if fecha is None:
                 fecha = fecha_actual
 
-            suscripcion.ultima_actividad = ahora
-
+            # Si está en FANTASMA, transicionamos directamente en esta misma
+            # transacción sin volver a adquirir el lock (evita deadlock).
             if suscripcion.estado == self.Estado.FANTASMA:
-                suscripcion.transicionar(
-                    self.EventoEstado.USO_REGISTRADO,
+                estado_anterior = suscripcion.estado
+                suscripcion.estado = self.Estado.ACTIVO
+                suscripcion.save(update_fields=("estado", "actualizado_en"))
+                TransicionEstado.objects.create(
+                    organizacion_id=suscripcion.organizacion_id,
+                    suscripcion=suscripcion,
+                    evento=self.EventoEstado.USO_REGISTRADO,
+                    estado_anterior=estado_anterior,
+                    estado_nuevo=self.Estado.ACTIVO,
                     actor_id=actor_id,
                     actor_rol=actor_rol,
                 )
+
+            suscripcion.ultima_actividad = ahora
 
             registro = RegistroUso.objects.create(
                 organizacion_id=suscripcion.organizacion_id,
@@ -345,6 +364,9 @@ class Subscription(ModeloTenant):
                 fecha=fecha,
                 minutos=int(minutos),
             )
+            # El agregado se recalcula desde el histórico de la BD en vez de
+            # acumular sobre el valor previo: garantiza idempotencia y que dos
+            # escrituras concurrentes no pierdan minutos (RF-04 / VI-10).
             primer_dia_mes = fecha_actual.replace(day=1)
             if fecha_actual.month == 12:
                 primer_dia_mes_siguiente = primer_dia_mes.replace(

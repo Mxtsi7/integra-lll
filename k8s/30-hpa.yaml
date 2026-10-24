@@ -1,0 +1,85 @@
+# HPA – Escalado automático horizontal (RF autoescalado)
+#
+# Escala cuando la CPU PROMEDIO de los pods supera el umbral. Se usa
+# AverageValue (milicores absolutos) en lugar de porcentaje para que el
+# umbral no dependa del límite del contenedor:
+#   - gateway: 1 → 3 réplicas cuando supera 120 m de CPU media
+#   - subscriptions: 1 → 2 réplicas cuando supera 120 m de CPU media
+#
+# La cuota del namespace (2 CPU) no permite escalar ambos al máximo a la
+# vez, pero sí garantiza que uno de los dos puede doblar réplicas.
+#
+# NOTA: en la prueba de carga (k8s/pruebas/) la cuota llegó al 100% antes
+# de que el HPA pudiera levantar el pod nuevo. Esto es un límite de
+# infraestructura (cuota del ramo), no un defecto del HPA. Documentado en
+# k8s/pruebas/README.md.
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway-hpa
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gateway
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: AverageValue
+          averageValue: 120m   # umbral absoluto; independiente del límite del contenedor
+  behavior:
+    scaleUp:
+      # Reacción inmediata ante picos de carga
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30
+    scaleDown:
+      # Espera 2 minutos antes de bajar para evitar flapping
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: subscriptions-hpa
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: subscriptions
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: AverageValue
+          averageValue: 120m   # umbral absoluto; independiente del límite del contenedor
+  behavior:
+    scaleUp:
+      # Reacción inmediata ante picos de carga
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30
+    scaleDown:
+      # Espera 2 minutos antes de bajar para evitar flapping
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
