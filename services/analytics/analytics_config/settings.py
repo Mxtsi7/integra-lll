@@ -38,6 +38,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
+    # el gateway (ADR-004). Es la misma pieza en todos los servicios.
+    "shared.tenant.base.ContextoTenantMiddleware",
 ]
 
 ROOT_URLCONF = "analytics_config.urls"
@@ -62,7 +65,8 @@ TEMPLATES = [
 
 ESQUEMA_BD = env("ESQUEMA_BD", default=SERVICE_NAME)
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+if "sqlite" not in DATABASES["default"]["ENGINE"]:
+    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -77,6 +81,8 @@ SPECTACULAR_SETTINGS = {
     "TITLE": f"Ojo al Gasto · {SERVICE_NAME}",
     "VERSION": "0.1.0",
 }
+
+RABBITMQ_URL = env("RABBITMQ_URL", default="")
 
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
