@@ -40,6 +40,9 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "shared.borrado.middleware.EscrituraOrganizacionMiddleware",
+    # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
+    # el gateway (ADR-004). Es la misma pieza en todos los servicios.
+    "shared.tenant.base.ContextoTenantMiddleware",
 ]
 
 ROOT_URLCONF = "analytics_config.urls"
@@ -81,6 +84,8 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
 }
 
+RABBITMQ_URL = env("RABBITMQ_URL", default="")
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
@@ -88,3 +93,4 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+

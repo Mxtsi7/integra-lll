@@ -19,9 +19,68 @@ El sistema completo corriendo en el cluster del ramo:
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
 | `gateway` | Deployment | Único punto de entrada (ADR-004) |
 | `web` | Deployment | SPA compilada + nginx, que además hace de proxy hacia el gateway |
+| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→3 y 1→2 (ver `30-autoescalado.yaml`) |
 
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
+
+## El presupuesto de recursos
+
+El namespace tiene una `ResourceQuota` (`student-provisioner-quota`) que no se
+puede subir. Los límites de cada pod están calculados para que **el HPA tenga
+espacio donde escalar**: si la cuota está llena, el autoescalado no sirve de
+nada, porque el pod nuevo recibe `exceeded quota` y nunca nace.
+
+| Recurso | Tope | En reposo (9 pods) | Peor caso (HPA al máximo, 12 pods) |
+|---|---|---|---|
+| `limits.memory` | 2752Mi | 1760Mi | 2496Mi |
+| `requests.memory` | 1152Mi | 648Mi | 888Mi |
+| `limits.cpu` | 2000m | 1150m | 1750m |
+| `requests.cpu` | 1000m | 375m | 525m |
+| `pods` | 12 | 9 | 12 |
+
+**Una `ResourceQuota` no mata los pods que ya están corriendo**, solo bloquea
+los nuevos. Por eso un despliegue puede venir funcionando semanas y reventar
+recién al siguiente `rollout`. Si ves `exceeded quota` en `kubectl get events`,
+es esto.
+
+Para recalcular el presupuesto después de tocar un límite, sin aplicar nada:
+
+```bash
+python k8s/pruebas/presupuesto.py k8s
+```
+
+### Los límites salen de medir
+
+`kubectl top` no está permitido para nuestro usuario (RBAC), así que se lee del
+cgroup de cada pod. El `MSYS_NO_PATHCONV` es obligatorio en Git Bash: sin él la
+ruta `/sys/...` se convierte en `C:/Program Files/Git/sys/...` y falla.
+
+```bash
+export MSYS_NO_PATHCONV=1
+for p in $(kubectl get pods -o jsonpath='{.items[*].metadata.name}'); do
+  usado=$(kubectl exec "$p" -- cat /sys/fs/cgroup/memory.current)
+  echo "$p -> $(( usado / 1048576 )) Mi"
+done
+```
+
+Medición del 2026-10-19, con los 9 pods arriba:
+
+| Pod | Uso real | Límite |
+|---|---|---|
+| `web` | 8Mi | 64Mi |
+| `redis` | 14Mi | 64Mi |
+| `postgres` | 69Mi | 192Mi |
+| `subscriptions-beat` | 77Mi | 160Mi |
+| `gateway` | 83Mi | 224Mi |
+| `auth` | 121Mi | 256Mi |
+| `subscriptions` | 128Mi | 288Mi |
+| `rabbitmq` | 136Mi | 256Mi |
+| `subscriptions-worker` | **359Mi** → ver abajo | 256Mi |
+
+El worker se salía del molde: `celery worker` sin `--concurrency` levanta un
+proceso hijo **por core del nodo**, y los nodos tienen 16. Eran 16 procesos
+peleándose 200m de CPU. Con `--concurrency=2` entra holgado.
 
 ## Desplegar
 
