@@ -444,30 +444,21 @@ def test_horas_uso_mes_no_cruza_cambio_de_mes() -> None:
 
 @pytest.mark.django_db
 def test_serializer_horas_uso_mes_se_recalcula_al_cambiar_de_mes(monkeypatch) -> None:
-    """El serializer recalcula horas_uso_mes desde el histórico del mes local.
-
-    Si se registra uso el 31-10 y se lee el 1-11, horas_uso_mes debe dar 0.00
-    porque el mes cambió y no hay registros en noviembre (VI-10 punto 3).
-    """
     from app.serializers import SubscriptionSerializer
+    from django.utils import timezone as tz
 
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
 
-    # Registrar uso el 31 de octubre (con fecha explícita)
+    # "Hoy" es 31-10: el uso cuenta en octubre.
+    monkeypatch.setattr(tz, "localdate", lambda *a, **k: date(2026, 10, 31))
     suscripcion.registrar_uso(60, fecha=date(2026, 10, 31))
     suscripcion.refresh_from_db()
-    # El campo guardado muestra el uso
     assert suscripcion.horas_uso_mes == Decimal("1.00")
+    assert Decimal(SubscriptionSerializer(suscripcion).data["horas_uso_mes"]) == Decimal("1.00")
 
-    # Simular que es 1 de noviembre: el serializer debe recalcular a 0
-    monkeypatch.setattr(
-        "app.serializers.timezone.localdate",
-        lambda: date(2026, 11, 1),
-    )
-    datos = SubscriptionSerializer(suscripcion).data
-    assert Decimal(datos["horas_uso_mes"]) == Decimal("0.00"), (
-        "Al cambiar de mes, horas_uso_mes debe reiniciarse a 0."
-    )
+    # "Hoy" pasa a ser 1-11: el serializer debe dar 0.
+    monkeypatch.setattr(tz, "localdate", lambda *a, **k: date(2026, 11, 1))
+    assert Decimal(SubscriptionSerializer(suscripcion).data["horas_uso_mes"]) == Decimal("0.00")
 
 
 @pytest.mark.django_db(transaction=True)
