@@ -11,7 +11,8 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 - **Herencia Multi-Tenant**: Hereda de `shared.tenant.base.ModeloTenant` (`id` UUID, `organizacion_id`, `creado_en`, `actualizado_en`). No posee clave foránea a `User` (cumpliendo ADR-002).
 - **Estados (RF-13)**: `prueba`, `activo`, `por_confirmar`, `cancelado`, `fantasma`.
 - **Alineación Frontend (`tipos.ts`)**: `nombre`, `monto`, `moneda` (CLP/USD), `frecuencia` (mensual/anual), `fecha_proximo_cobro`, `categoria` (RF-12), `fin_prueba`, `horas_uso_mes`.
-- **Modelo de uso (RF-16 / HU-13)**: `RegistroUso` es el modelo equivalente a `Uso` en la tarjeta. Relaciona la suscripción con la fecha del registro y los minutos; `fecha` es una fecha calendario y `minutos` debe ser al menos 1. `Subscription.registrar_uso()` crea el registro y actualiza los acumulados de la suscripción.
+- **Modelo de uso (RF-04 / RF-16 / HU-13)**: `RegistroUso` es la fuente única del histórico. Relaciona la suscripción con la fecha calendario del uso y los minutos; `minutos` debe ser al menos 1. `Subscription.registrar_uso()` crea el registro y recalcula `horas_uso_mes` sumando los registros del mes local actual, sin mezclar meses. El bloqueo de la suscripción y la escritura del registro/agregado ocurren en una transacción.
+- **Última actividad**: `ultima_actividad` refleja la fecha/hora en que se registra el uso (no la fecha retroactiva indicada en `fecha`).
 - **Borrado lógico**: El campo `activo` indica si la suscripción está disponible. `DELETE` la desactiva sin eliminar la fila, conservando el histórico asociado de `Cobro` y `RegistroUso`.
 
 ---
@@ -27,11 +28,98 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
 | `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
-| `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
+| `GET` | `/api/suscripciones/<id>/cobros/` | Histórico de cobros reales por suscripción (VI-04 / RF-05) | `200 OK` / `404` |
+| `GET` | `/api/suscripciones/presupuesto/?mes=YYYY-MM&moneda=CLP` | Compara presupuesto mensual vs proyección y gasto real (VI-05) | `200 OK` / `400` / `403` |
+| `POST` | `/api/suscripciones/presupuesto/` | Define o actualiza presupuesto mensual (VI-05 / RF-13 / RF-19) | `200 OK` / `400` / `403` |
+| `GET` | `/api/suscripciones/resumen/?mes=YYYY-MM&moneda=CLP` | Resumen agregado del panel: gasto real, proyección y conteo (VI-06) | `200 OK` / `400` / `403` |
+| `GET` | `/api/suscripciones/<id>/uso/` | Consulta el histórico de uso por fecha descendente (CU-23 / RF-04 / RF-15) | `200 OK` / `404` |
+| `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
 
-> **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
+### Sub-lote A: Consultas, Listados, Presupuesto y Panel
+
+Esta entrega añade las capacidades de consulta, listados enriquecidos, gestión de presupuesto y panel resumen:
+
+#### 1. Búsqueda por nombre en listado (VI-01)
+`GET /api/suscripciones/?nombre=termino` (o alias `?search=termino`) filtra por coincidencia parcial insensible a mayúsculas sobre el nombre de la suscripción.
+- La entrada se limita a 100 caracteres.
+- Una cadena vacía o con solo espacios equivale a no filtrar y conserva intacta la paginación.
+- Se combina con filtros de `estado`, `fecha_cobro` y `orden`, manteniendo el aislamiento multi-tenant estricto.
+
+#### 2. Ordenamiento server-side (VI-02)
+`GET /api/suscripciones/?orden=campo` (o alias `?ordering=campo`) aplica ordenación en servidor antes de paginar:
+- **Allowlist de campos permitidos**: `nombre`, `monto`, `fecha_proximo_cobro` (y prefijo `-` para orden descendente; alias `fecha_cobro`).
+- El orden por `monto` se realiza numéricamente.
+- Incorpora desempate estable por `id`.
+- Parámetros fuera de la allowlist se rechazan con `400 Bad Request` indicando los campos válidos.
+
+#### 3. Histórico de cobros por suscripción (VI-04 / RF-05)
+`GET /api/suscripciones/<id>/cobros/` devuelve el histórico de cobros reales de la suscripción:
+- Ordenados descendentemente por fecha (`-fecha, -id`).
+- Admite filtros de rango opcionales: `?desde=YYYY-MM-DD&hasta=YYYY-MM-DD`.
+- Paginación estándar DRF.
+- Si el recurso pertenece a otro tenant, responde `404 Not Found`. Modificar el monto esperado de una suscripción no altera los cobros históricos existentes.
+
+#### 4. Presupuesto mensual y comparación de proyección (VI-05 / RF-13 / RF-19)
+- `POST /api/suscripciones/presupuesto/`: define o actualiza el presupuesto (`mes` en formato `YYYY-MM`, `moneda`, `monto` > 0).
+- `GET /api/suscripciones/presupuesto/?mes=YYYY-MM&moneda=CLP`: compara el presupuesto con el gasto real (suma de cobros del mes) y la proyección (suma de suscripciones activas del mes no canceladas y sin cobro confirmado).
+- Devuelve `diferencia`, `porcentaje_consumido` y `alerta_superado`. Si no hay presupuesto configurado, responde con `presupuesto: null` y no divide por cero. Aislamiento por moneda: nunca suma CLP y USD sin conversión.
+
+#### 5. Resumen agregado del panel (VI-06 / RF-11 / RF-09)
+`GET /api/suscripciones/resumen/?mes=YYYY-MM&moneda=CLP`:
+- Agrega en backend el `gasto_real`, `gasto_proyectado` (excluyendo canceladas) y `total_estimado`.
+- Provee desglose `conteo_estados` con el conteo de suscripciones por estado (`activo`, `prueba`, `por_confirmar`, `cancelado`, `fantasma`, `total`).
+- Un tenant en estado vacío (sin registros) devuelve ceros y las estructuras completas y estables.
+
+### VI-10: Uso, agregado mensual y última actividad
+
+Esta entrega completa el contrato de uso existente. No crea otro modelo ni otro
+histórico: `RegistroUso` continúa siendo la fuente única de los minutos
+registrados.
+
+#### Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `services/subscriptions/app/models.py` | `Subscription.registrar_uso()` persiste el registro y recalcula `horas_uso_mes` desde los minutos históricos del mes local actual, dentro de una transacción y con bloqueo de la suscripción. |
+| `services/subscriptions/app/views.py` | Documenta el contrato GET/POST de uso y delega el registro al método de dominio existente. |
+| `services/subscriptions/tests/test_views.py` | Cubre fecha inválida, cambio de mes, uso retroactivo de otro mes, agregado mensual y redondeo. |
+| `services/subscriptions/tests/test_state_machine.py` | Incluye prueba de escrituras concurrentes y fixture `reloj_umbral` para DST; se omite en bases que no soportan `select_for_update`. |
+| `frontend/shared/src/api/suscripciones.ts` | Extiende `UsoPayload` con `fecha` opcional (`YYYY-MM-DD`). |
+| `services/subscriptions/README.md` | Registra el contrato, el flujo, los archivos y las verificaciones de VI-10. |
+
+#### Flujo de registro y lectura
+
+1. El cliente envía `POST /api/suscripciones/<id>/uso/` con `minutos` y,
+   opcionalmente, `fecha`; si no la envía, se usa la fecha local actual. La
+   petición requiere `X-Organizacion-Id` y el acceso se limita a esa
+   organización.
+2. `RegistrarUsoSerializer` valida que los minutos sean un entero entre 1 y
+   44.640 y que la fecha tenga formato válido y no sea futura. Si la validación
+   falla, la API responde `400` sin guardar el registro.
+3. `Subscription.registrar_uso()` abre una transacción y bloquea la fila de la
+   suscripción para serializar registros simultáneos. Una suscripción
+   desactivada no admite uso. Si estaba en estado `fantasma`, el uso dispara la
+   transición existente a `activo`.
+4. Se crea un único `RegistroUso`. Luego se suman los minutos de los registros
+   cuya fecha está dentro del mes local actual y se convierten a horas,
+   redondeando el total a dos decimales. Un uso fechado en otro mes queda en el
+   historial, pero no se suma al agregado del mes vigente.
+5. Se actualizan `horas_uso_mes` y `ultima_actividad`. Esta última contiene la
+   fecha/hora en que se ingresó el registro, no la fecha retroactiva del campo
+   `fecha`. La respuesta del POST incluye la suscripción actualizada.
+6. `GET /api/suscripciones/<id>/uso/` lee los mismos `RegistroUso` y devuelve
+   el historial completo de esa suscripción ordenado por fecha descendente.
+
+#### Verificación de VI-10
+
+En el entorno local disponible, la suite del servicio de suscripciones terminó
+con `188 passed, 1 skipped`; las 21 pruebas del paquete compartido y su
+`typecheck` también pasaron. La prueba concurrente se omitió porque SQLite no
+soporta bloqueos de fila; para ejecutarla se requiere una base compatible,
+como PostgreSQL. El daemon de Docker no estaba disponible durante esa
+verificación.
 
 ### Calendario mensual de cobros
 
@@ -316,7 +404,9 @@ curl "http://localhost:8002/api/suscripciones/?fecha_cobro=hola" -H "X-Organizac
 
 ### 5. Tarea: "Endpoint para registrar uso de una suscripción" y "Test para registrar uso y validación de costo"
 
-Esta tarea expone `POST /api/suscripciones/<id>/uso/` para registrar manualmente minutos de uso de un servicio (CU-23 / RF-15 / RF-16), actualizando el campo `ultima_actividad`, acumulando `horas_uso_mes`, y reactivando a `activo` aquellas suscripciones que se encontraban en estado `fantasma` (CU-27 / RF-13). Además, rechaza valores negativos o inválidos con `400 Bad Request`.
+`POST /api/suscripciones/<id>/uso/` recibe `minutos` (entero entre 1 y 44.640) y opcionalmente `fecha` (formato `YYYY-MM-DD`, no futura; por omisión, fecha local actual). Devuelve la suscripción actualizada. Guarda un solo `RegistroUso`, actualiza `ultima_actividad` al momento del registro y recalcula `horas_uso_mes` usando únicamente los minutos del mes local vigente. Registros retroactivos de otros meses quedan en el historial pero no contaminan ese agregado. Si estaba en estado `fantasma`, la suscripción vuelve a `activo` (CU-27 / RF-13). Minutos cero/negativos, fechas inválidas o futuras y valores fuera del rango responden `400 Bad Request`.
+
+`GET /api/suscripciones/<id>/uso/` devuelve el historial completo de esa suscripción como una lista ordenada por fecha descendente, con objetos `{"fecha": "YYYY-MM-DD", "minutos": 30}`. El `POST` devuelve la representación de la suscripción, incluidos `horas_uso_mes` y `ultima_actividad`.
 
 #### Cómo comprobarlo:
 
@@ -340,6 +430,14 @@ curl -X POST "http://localhost:8002/api/suscripciones/<id>/uso/" \
   -H "Content-Type: application/json" \
   -H "X-Organizacion-Id: <tu-uuid>" \
   -d '{"minutos": 30}'
+```
+
+Registrar minutos para una fecha pasada del mismo mes:
+```bash
+curl -X POST "http://localhost:8002/api/suscripciones/<id>/uso/" \
+  -H "Content-Type: application/json" \
+  -H "X-Organizacion-Id: <tu-uuid>" \
+  -d '{"minutos": 30, "fecha": "2026-10-10"}'
 ```
 
 Rechazar minutos negativos (devuelve `400 Bad Request`):

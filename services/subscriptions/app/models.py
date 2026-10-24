@@ -6,7 +6,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models, transaction
-from django.db.models import Max
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from shared.tenant.base import ModeloBase, ModeloTenant
@@ -317,7 +317,13 @@ class Subscription(ModeloTenant):
         actor_id=None,
         actor_rol: str = "sistema",
     ) -> "RegistroUso":
-        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
+        """Persiste el uso y mantiene actualizados sus campos derivados.
+
+        El agregado mensual (horas_uso_mes) se recalcula siempre desde el
+        histórico de la BD (sum de minutos del mes local), no sobre el valor
+        previo del campo. Esto garantiza correctitud bajo escrituras concurrentes
+        (RF-04 / VI-10) y elimina el riesgo de perder minutos.
+        """
         with transaction.atomic():
             suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
             if not suscripcion.activo:
@@ -325,16 +331,10 @@ class Subscription(ModeloTenant):
                     "Una suscripción desactivada no admite registros de uso."
                 )
 
+            ahora = timezone.now()
+            fecha_actual = timezone.localdate(ahora)
             if fecha is None:
-                fecha = timezone.localdate()
-
-            suscripcion.ultima_actividad = timezone.now()
-            fecha_actual = timezone.localdate()
-            if (fecha.year, fecha.month) == (fecha_actual.year, fecha_actual.month):
-                horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-                if suscripcion.horas_uso_mes is None:
-                    suscripcion.horas_uso_mes = Decimal("0.00")
-                suscripcion.horas_uso_mes += horas
+                fecha = fecha_actual
 
             if suscripcion.estado == self.Estado.FANTASMA:
                 suscripcion.transicionar(
@@ -343,6 +343,38 @@ class Subscription(ModeloTenant):
                     actor_rol=actor_rol,
                 )
 
+            suscripcion.ultima_actividad = ahora
+
+            registro = RegistroUso.objects.create(
+                organizacion_id=suscripcion.organizacion_id,
+                suscripcion=suscripcion,
+                fecha=fecha,
+                minutos=int(minutos),
+            )
+            # El agregado se recalcula desde el histórico de la BD en vez de
+            # acumular sobre el valor previo: garantiza idempotencia y que dos
+            # escrituras concurrentes no pierdan minutos (RF-04 / VI-10).
+            primer_dia_mes = fecha_actual.replace(day=1)
+            if fecha_actual.month == 12:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    year=fecha_actual.year + 1,
+                    month=1,
+                )
+            else:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    month=fecha_actual.month + 1,
+                )
+            total_minutos_mes = (
+                RegistroUso.objects.filter(
+                    suscripcion=suscripcion,
+                    fecha__gte=primer_dia_mes,
+                    fecha__lt=primer_dia_mes_siguiente,
+                ).aggregate(total=Sum("minutos"))["total"]
+                or 0
+            )
+            suscripcion.horas_uso_mes = (
+                Decimal(total_minutos_mes) / Decimal("60")
+            ).quantize(Decimal("0.01"))
             suscripcion.save(
                 update_fields=("ultima_actividad", "horas_uso_mes", "actualizado_en")
             )
@@ -352,12 +384,7 @@ class Subscription(ModeloTenant):
             self.horas_uso_mes = suscripcion.horas_uso_mes
             self.actualizado_en = suscripcion.actualizado_en
 
-            return RegistroUso.objects.create(
-                organizacion_id=suscripcion.organizacion_id,
-                suscripcion=suscripcion,
-                fecha=fecha,
-                minutos=int(minutos),
-            )
+            return registro
 
     # ── meta ─────────────────────────────────────────────────────────
 
@@ -534,3 +561,47 @@ class TransicionEstado(ModeloTenant):
         ]
         verbose_name = "Transición de estado"
         verbose_name_plural = "Transiciones de estado"
+
+
+class Presupuesto(ModeloTenant):
+    """Presupuesto mensual definido por una organización para un periodo y moneda (RF-13 / RF-19)."""
+
+    mes = models.CharField(
+        max_length=7,
+        verbose_name="Mes presupuestado (YYYY-MM)",
+    )
+
+    moneda = models.CharField(
+        max_length=3,
+        # Usar literales en vez de Subscription.Moneda para no romperse
+        # cuando PR #77 elimine ese enum del modelo Subscription.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        default="CLP",
+        verbose_name="Moneda",
+    )
+
+    monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        verbose_name="Monto presupuestado",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "presupuesto"
+        ordering = ["-mes", "moneda"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "mes", "moneda"],
+                name="presupuesto_unico_tenant_mes_moneda",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(monto__gt=Decimal("0")),
+                name="presupuesto_monto_positivo",
+            ),
+        ]
+        verbose_name = "Presupuesto"
+        verbose_name_plural = "Presupuestos"
+
+    def __str__(self) -> str:
+        return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
