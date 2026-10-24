@@ -104,6 +104,11 @@ ruta `solapamiento.detectado.v2` del exchange `suscripciones` y publica
 rechazan hacia la cola durable de mensajes inválidos. `RABBITMQ_URL` debe estar
 configurada.
 
+> **Nota:** Si la cola `analytics.recomendaciones.emitidas` ya existía previamente
+> en RabbitMQ sin el argumento `x-max-length`, hay que borrarla antes de levantar
+> el consumidor; de lo contrario, RabbitMQ rechazará la declaración con un error
+> `PRECONDITION_FAILED`.
+
 El productor que obtiene el snapshot verificado y la evidencia enlazada no
 existe aún en los servicios disponibles. El worker no inventa esos datos: hasta
 que un productor confiable publique el evento v2, no habrá recomendaciones. Los
