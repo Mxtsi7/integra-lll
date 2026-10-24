@@ -71,6 +71,21 @@ describe("getSuscripciones", () => {
     expect(Number.isNaN(total)).toBe(false);
   });
 
+  it("horas_uso_mes llega como texto (VI-10) y queda como número; \"0.00\" es cero, no 'hay uso'", async () => {
+    responder({
+      ...RESPUESTA_REAL,
+      results: [
+        { ...RESPUESTA_REAL.results[0], horas_uso_mes: "0.00" },
+        { ...RESPUESTA_REAL.results[1], horas_uso_mes: "12.50" },
+      ],
+    });
+
+    const [sinUso, conUso] = await getSuscripciones();
+
+    expect(sinUso.horas_uso_mes).toBe(0);
+    expect(conUso.horas_uso_mes).toBe(12.5);
+  });
+
   it("los nulos de la API quedan como undefined", async () => {
     responder(RESPUESTA_REAL);
 
@@ -190,7 +205,8 @@ describe("uso de una suscripción (CH-14 / CH-15)", () => {
   });
 
   it("registrarUso manda minutos y fecha, y devuelve la suscripción actualizada", async () => {
-    const fetchFalso = json(200, { ...RESPUESTA_REAL.results[0], horas_uso_mes: 0.75 });
+    // Desde VI-10 horas_uso_mes llega como texto (Decimal), igual que monto.
+    const fetchFalso = json(200, { ...RESPUESTA_REAL.results[0], horas_uso_mes: "0.75" });
     vi.stubGlobal("fetch", fetchFalso);
 
     const actualizada = await registrarUso("abc-123", { minutos: 45, fecha: "2026-10-18" });

@@ -3,6 +3,7 @@ import {
   equivalenteMensual,
   ErrorDeApi,
   formatearFecha,
+  formatearHoras,
   formatearMonto,
   getSuscripcion,
   getUsos,
@@ -194,7 +195,7 @@ function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
         </Dato>
         <Dato etiqueta="Se cobra">{etiquetaFrecuencia(suscripcion.frecuencia)}</Dato>
         <Dato etiqueta="Horas de uso este mes">
-          {suscripcion.horas_uso_mes ? `${suscripcion.horas_uso_mes} h` : 'Sin registrar'}
+          {suscripcion.horas_uso_mes ? formatearHoras(suscripcion.horas_uso_mes) : 'Sin registrar'}
         </Dato>
         <Dato etiqueta="Costo por hora de uso">
           {porHora !== null ? formatearMonto(porHora, suscripcion.moneda) : 'Sin uso este mes'}

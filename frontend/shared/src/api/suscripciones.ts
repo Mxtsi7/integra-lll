@@ -17,8 +17,12 @@ export const USAR_DATOS_DE_EJEMPLO = false;
  *   asi para no perder precision, pero el dominio lo declara `number` y lo
  *   suma. Sin convertirlo, `0 + "5990.00"` concatena en vez de sumar y el
  *   gasto proyectado del panel termina en $NaN.
- * - `fin_prueba` y `horas_uso_mes` llegan como `null`; el dominio los declara
- *   opcionales, o sea `undefined`.
+ * - `fin_prueba` puede llegar como `null`; el dominio lo declara opcional,
+ *   o sea `undefined`.
+ * - `horas_uso_mes` también es un Decimal: desde VI-10 llega siempre como
+ *   texto ("0.00", "0.50"), calculado con los usos del mes actual. Sin
+ *   convertirlo, "0.00" es un texto no vacío y la pantalla lo trataba como
+ *   uso registrado ("0.00 h" en vez de "Sin registrar").
  *
  * La traduccion vive aca, en el borde con la API, para que ninguna pantalla
  * tenga que saber estas diferencias.
@@ -26,7 +30,7 @@ export const USAR_DATOS_DE_EJEMPLO = false;
 type SuscripcionDeApi = Omit<Suscripcion, 'monto' | 'fin_prueba' | 'horas_uso_mes'> & {
   monto: string | number;
   fin_prueba?: string | null;
-  horas_uso_mes?: number | null;
+  horas_uso_mes?: string | number | null;
 };
 
 function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
@@ -34,7 +38,7 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
     ...s,
     monto: Number(s.monto),
     fin_prueba: s.fin_prueba ?? undefined,
-    horas_uso_mes: s.horas_uso_mes ?? undefined,
+    horas_uso_mes: s.horas_uso_mes == null ? undefined : Number(s.horas_uso_mes),
   };
 }
 

@@ -125,6 +125,17 @@ describe("Historial de uso (CH-15)", () => {
   });
 });
 
+describe("Horas de uso del mes con VI-10", () => {
+  it("con cero horas este mes (VI-10 reinicia el conteo al cambiar de mes) dice 'Sin registrar'", async () => {
+    getSuscripcionMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0 });
+    await montar();
+
+    const dato = screen.getByText("Horas de uso este mes").closest("div");
+    expect(dato).toHaveTextContent("Sin registrar");
+    expect(screen.getByText("Costo por hora de uso").closest("div")).toHaveTextContent("Sin uso este mes");
+  });
+});
+
 describe("Registrar minutos de uso (CH-14)", () => {
   it("un registro válido se envía una vez y se refleja una sola vez en el historial y el detalle", async () => {
     registrarUsoMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0.75 });
@@ -138,7 +149,7 @@ describe("Registrar minutos de uso (CH-14)", () => {
     expect(registrarUsoMock).toHaveBeenCalledWith("a", { minutos: 45, fecha: hoyLocalIso() });
     expect(filas()).toHaveLength(4); // la fila nueva, una sola vez
     expect(filas().filter((f) => f?.endsWith("45 min"))).toHaveLength(2); // la nueva + la del 18 oct
-    expect(screen.getByText("0.75 h")).toBeInTheDocument(); // horas del mes, desde la respuesta
+    expect(screen.getByText("0,75 h")).toBeInTheDocument(); // horas del mes, desde la respuesta (coma de Chile)
     expect(screen.getByRole("status")).toHaveTextContent("Registraste 45 minutos.");
     expect(minutos()).toHaveValue("");
   });
@@ -154,7 +165,7 @@ describe("Registrar minutos de uso (CH-14)", () => {
     await act(async () => responder({ ...SPOTIFY, horas_uso_mes: 9.5 })); // llega tarde, de Spotify
 
     expect(screen.getByRole("heading", { name: "Netflix", level: 1 })).toBeInTheDocument();
-    expect(screen.queryByText("9.5 h")).not.toBeInTheDocument();
+    expect(screen.queryByText("9,5 h")).not.toBeInTheDocument();
   });
 
   it("si se borra el Día, se registra sin la propiedad fecha (el backend usa hoy)", async () => {
