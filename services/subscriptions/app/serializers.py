@@ -1,9 +1,11 @@
 """Serializers del servicio de suscripciones."""
 
 from decimal import Decimal
-from rest_framework import serializers
-
 import re
+
+from django.db.models import Sum
+from django.utils import timezone
+from rest_framework import serializers
 
 from app.models import (
     Cobro,
@@ -38,7 +40,14 @@ class CobroSerializer(serializers.ModelSerializer):
 
 
 class SubscriptionSerializer(serializers.ModelSerializer):
-    """Serializa y valida datos de :model:`app.Subscription`."""
+    """Serializa y valida datos de :model:`app.Subscription`.
+
+    ``horas_uso_mes`` se calcula al leer desde el histórico de registros de
+    uso del mes local actual (Sum filtrada). Así, al cambiar de mes el valor
+    baja a 0 automáticamente sin necesitar una tarea de beat (VI-10).
+    """
+
+    horas_uso_mes = serializers.SerializerMethodField()
 
     class Meta:
         model = Subscription
@@ -51,6 +60,29 @@ class SubscriptionSerializer(serializers.ModelSerializer):
             "horas_uso_mes",
             "ultima_actividad",
             "activo",
+        )
+
+    def get_horas_uso_mes(self, obj: Subscription) -> str:
+        """Recalcula las horas de uso del mes local actual desde el histórico."""
+        hoy = timezone.localdate()
+        primer_dia = hoy.replace(day=1)
+        if hoy.month == 12:
+            primer_dia_siguiente = primer_dia.replace(
+                year=hoy.year + 1, month=1
+            )
+        else:
+            primer_dia_siguiente = primer_dia.replace(month=hoy.month + 1)
+
+        total_minutos = (
+            RegistroUso.objects.filter(
+                suscripcion=obj,
+                fecha__gte=primer_dia,
+                fecha__lt=primer_dia_siguiente,
+            ).aggregate(total=Sum("minutos"))["total"]
+            or 0
+        )
+        return str(
+            (Decimal(total_minutos) / Decimal("60")).quantize(Decimal("0.01"))
         )
 
     # ── normalización pre-validación ────────────────────────────────
