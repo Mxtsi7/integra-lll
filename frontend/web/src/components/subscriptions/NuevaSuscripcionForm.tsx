@@ -4,14 +4,16 @@ import {
   parsearMonto,
   validarSuscripcion,
   type CampoSuscripcion,
+  type CatalogosSuscripciones,
   type ErroresSuscripcion,
   type Frecuencia,
   type Moneda,
+  type OpcionesSuscripcion,
   type Suscripcion,
 } from "@ojoalgasto/shared";
 import { CampoSelect, CampoTexto } from "../ui/Campo";
 import { Boton } from "../ui/Boton";
-import { CATEGORIAS, etiquetaFrecuencia } from "./presentacion";
+import { EstadoCargaCatalogos, useCatalogos } from "../../context/CatalogosContext";
 import styles from "./SusForm.module.css";
 
 export interface NuevaSuscripcionFormData {
@@ -36,8 +38,6 @@ interface NuevaSuscripcionFormProps {
    */
   onAdd?: (suscripcion: Omit<Suscripcion, "id">) => Promise<boolean> | boolean;
   onCancel?: () => void;
-  monedas?: Moneda[];
-  frecuencias?: Frecuencia[];
   /** true mientras el POST está en vuelo: deshabilita el botón de enviar. */
   isSaving?: boolean;
   /** Mensaje general si el guardado falló (sin red, 500…). */
@@ -55,20 +55,33 @@ interface NuevaSuscripcionFormProps {
   onCambiosSinGuardar?: (hayCambios: boolean) => void;
 }
 
-const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
-// Solo 'mensual' | 'anual': son los únicos valores que acepta el backend.
-const DEFAULT_FRECUENCIAS: Frecuencia[] = ["mensual", "anual"];
-
-const EMPTY_FORM = (monedas: Moneda[], frecuencias: Frecuencia[]): NuevaSuscripcionFormData => ({
+const EMPTY_FORM = (): NuevaSuscripcionFormData => ({
   nombre: "",
   monto: "",
-  moneda: monedas[0],
-  frecuencia: frecuencias[0],
-  categoria: "otro",
+  moneda: "",
+  frecuencia: "" as Frecuencia,
+  categoria: "",
   fechaDeCobro: "",
   enPrueba: false,
   finPrueba: "",
 });
+
+/**
+ * El formulario "sin tocar": vacío, pero con la moneda, la categoría y la
+ * frecuencia que propone el catálogo. Es con lo que se compara para saber
+ * si hay cambios sin guardar (CH-16): que el catálogo complete esos campos
+ * al cargar no cuenta como un cambio del usuario.
+ */
+function formularioInicial(
+  predeterminados?: CatalogosSuscripciones["predeterminados"],
+): NuevaSuscripcionFormData {
+  return {
+    ...EMPTY_FORM(),
+    moneda: predeterminados?.moneda ?? "",
+    categoria: predeterminados?.categoria ?? "",
+    frecuencia: predeterminados?.frecuencia ?? ("" as Frecuencia),
+  };
+}
 
 // id de cada control: para llevar el foco al primer campo con error.
 const ID_CAMPO: Record<CampoSuscripcion, string> = {
@@ -76,6 +89,7 @@ const ID_CAMPO: Record<CampoSuscripcion, string> = {
   monto: "sus-monto",
   moneda: "sus-moneda",
   frecuencia: "sus-frecuencia",
+  categoria: "sus-categoria",
   fechaProximoCobro: "sus-fecha-cobro",
   finPrueba: "sus-fin-prueba",
 };
@@ -87,8 +101,22 @@ const CAMPO_DESDE_API: Record<string, CampoSuscripcion> = {
   monto: "monto",
   moneda: "moneda",
   frecuencia: "frecuencia",
+  categoria: "categoria",
   fecha_proximo_cobro: "fechaProximoCobro",
   fin_prueba: "finPrueba",
+};
+
+// Campo del formulario → campo cuyo error se borra al editarlo.
+const CAMPO_DEL_ERROR: Record<keyof NuevaSuscripcionFormData, CampoSuscripcion> = {
+  nombre: "nombre",
+  monto: "monto",
+  moneda: "moneda",
+  frecuencia: "frecuencia",
+  categoria: "categoria",
+  fechaDeCobro: "fechaProximoCobro",
+  // Desmarcar la casilla también borra el error de "fin de prueba".
+  enPrueba: "finPrueba",
+  finPrueba: "finPrueba",
 };
 
 function mismosDatos(a: NuevaSuscripcionFormData, b: NuevaSuscripcionFormData): boolean {
@@ -103,21 +131,59 @@ function enfocarPrimerError(errores: ErroresSuscripcion) {
 export function NuevaSuscripcionForm({
   onAdd,
   onCancel,
-  monedas = DEFAULT_MONEDAS,
-  frecuencias = DEFAULT_FRECUENCIAS,
   isSaving = false,
   error = null,
   erroresCampos = null,
   onCambiosSinGuardar,
 }: NuevaSuscripcionFormProps) {
-  const [formData, setFormData] = useState<NuevaSuscripcionFormData>(EMPTY_FORM(monedas, frecuencias));
+  const [formData, setFormData] = useState<NuevaSuscripcionFormData>(EMPTY_FORM());
 
-  // CH-16: hay cambios si algo difiere del formulario vacío. Volver a dejar
-  // un campo como estaba cuenta como "sin cambios".
-  const hayCambios = !mismosDatos(formData, EMPTY_FORM(monedas, frecuencias));
+  // Monedas, categorías y frecuencias vienen del catálogo del backend.
+  const { datos, cargando, error: errorCatalogo } = useCatalogos();
+  const monedas = datos?.monedas ?? [];
+  const categorias = datos?.categorias ?? [];
+  const frecuencias = datos?.frecuencias ?? [];
+  // Lo que hoy se puede elegir: solo opciones activas.
+  const opciones: OpcionesSuscripcion = {
+    monedas: monedas.filter((o) => o.activo).map((o) => o.codigo),
+    categorias: categorias.filter((o) => o.activo).map((o) => o.codigo),
+    frecuencias: frecuencias.map((o) => o.codigo),
+  };
+  const listo = !!datos && !cargando && !errorCatalogo
+    && opciones.monedas.length > 0 && opciones.categorias.length > 0 && opciones.frecuencias.length > 0;
+  const seleccionValida = opciones.monedas.includes(formData.moneda)
+    && opciones.categorias.includes(formData.categoria)
+    && opciones.frecuencias.includes(formData.frecuencia);
+
+  // Al llegar el catálogo se completan sus valores por defecto, sin pisar lo
+  // que el usuario ya eligió.
+  useEffect(() => {
+    if (!datos) return;
+    setFormData((actual) => ({ ...actual,
+      moneda: actual.moneda || datos.predeterminados.moneda || '',
+      categoria: actual.categoria || datos.predeterminados.categoria || '',
+      frecuencia: actual.frecuencia || datos.predeterminados.frecuencia,
+    }));
+  }, [datos]);
+
+  // CH-16: hay cambios si algo difiere del formulario sin tocar. Volver a
+  // dejar un campo como estaba cuenta como "sin cambios". Mientras el efecto
+  // de arriba no completa los valores por defecto, un campo vacío se toma
+  // como su valor por defecto: así ni por un render parece que hay cambios.
+  const inicial = formularioInicial(datos?.predeterminados);
+  const hayCambios = !mismosDatos(
+    {
+      ...formData,
+      moneda: formData.moneda || inicial.moneda,
+      categoria: formData.categoria || inicial.categoria,
+      frecuencia: formData.frecuencia || inicial.frecuencia,
+    },
+    inicial,
+  );
   useEffect(() => {
     onCambiosSinGuardar?.(hayCambios);
   }, [hayCambios, onCambiosSinGuardar]);
+
   // CH-09: antes había un solo mensaje para todo ("Revisa el nombre y el
   // monto…"). Ahora cada error va junto a su campo.
   const [errores, setErrores] = useState<ErroresSuscripcion>({});
@@ -138,13 +204,10 @@ export function NuevaSuscripcionForm({
 
   const handleChange = <K extends keyof NuevaSuscripcionFormData>(field: K, value: NuevaSuscripcionFormData[K]) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    // Al corregir un campo se borra su error (el de "fin de prueba" también
-    // cuando se desmarca la casilla).
-    const campo = (field === "fechaDeCobro" ? "fechaProximoCobro" : field === "enPrueba" ? "finPrueba" : field) as
-      | CampoSuscripcion
-      | "categoria";
+    // Al corregir un campo se borra su error.
+    const campo = CAMPO_DEL_ERROR[field];
     setErrores((prev) => {
-      if (campo === "categoria" || !prev[campo]) return prev;
+      if (!prev[campo]) return prev;
       const { [campo]: _, ...resto } = prev;
       return resto;
     });
@@ -152,17 +215,22 @@ export function NuevaSuscripcionForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSaving) return;
+    // Sin catálogo no hay opciones con qué validar ni enviar.
+    if (!listo || isSaving) return;
 
-    const locales = validarSuscripcion({
-      nombre: formData.nombre,
-      monto: formData.monto,
-      moneda: formData.moneda,
-      frecuencia: formData.frecuencia,
-      fechaProximoCobro: formData.fechaDeCobro,
-      enPrueba: formData.enPrueba,
-      finPrueba: formData.finPrueba,
-    });
+    const locales = validarSuscripcion(
+      {
+        nombre: formData.nombre,
+        monto: formData.monto,
+        moneda: formData.moneda,
+        categoria: formData.categoria,
+        frecuencia: formData.frecuencia,
+        fechaProximoCobro: formData.fechaDeCobro,
+        enPrueba: formData.enPrueba,
+        finPrueba: formData.finPrueba,
+      },
+      opciones,
+    );
     setErrores(locales);
     setErroresGenerales([]);
     // Si algo no cumple (fecha imposible, monto cero o negativo…) no se envía.
@@ -189,7 +257,7 @@ export function NuevaSuscripcionForm({
     // Solo se limpia si el guardado salió bien; si falló, el usuario no
     // pierde lo que ya había escrito.
     if (exito) {
-      setFormData(EMPTY_FORM(monedas, frecuencias));
+      setFormData(formularioInicial(datos?.predeterminados));
       setErrores({});
     }
   };
@@ -204,114 +272,122 @@ export function NuevaSuscripcionForm({
         </p>
       )}
 
-      <CampoTexto
-        id={ID_CAMPO.nombre}
-        etiqueta="Servicio"
-        type="text"
-        placeholder="Netflix, Spotify, el gimnasio…"
-        value={formData.nombre}
-        onChange={(e) => handleChange("nombre", e.target.value)}
-        error={errores.nombre}
-        autoFocus
-        required
-      />
-
-      <div className={styles.filaDoble}>
-        {/* Texto con teclado decimal en vez de type="number": acepta la coma
-            que se usa en Chile y deja explicar qué está mal (con number el
-            navegador vacía el valor y solo se sabría que "falta"). */}
+      <EstadoCargaCatalogos sinOpciones={!!datos && !listo} />
+      <fieldset disabled={isSaving || !listo} className={styles.campos}>
         <CampoTexto
-          id={ID_CAMPO.monto}
-          etiqueta="Monto"
+          id={ID_CAMPO.nombre}
+          etiqueta="Servicio"
           type="text"
-          inputMode="decimal"
-          autoComplete="off"
-          placeholder="0"
-          value={formData.monto}
-          onChange={(e) => handleChange("monto", e.target.value)}
-          error={errores.monto}
+          placeholder="Netflix, Spotify, el gimnasio…"
+          value={formData.nombre}
+          onChange={(e) => handleChange("nombre", e.target.value)}
+          error={errores.nombre}
+          autoFocus
           required
         />
-        <CampoSelect
-          id={ID_CAMPO.moneda}
-          etiqueta="Moneda"
-          className={styles.moneda}
-          value={formData.moneda}
-          onChange={(e) => handleChange("moneda", e.target.value as Moneda)}
-          error={errores.moneda}
-        >
-          {monedas.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
 
-      <div className={styles.filaDoble}>
-        <CampoSelect
-          id={ID_CAMPO.frecuencia}
-          etiqueta="Se cobra"
-          value={formData.frecuencia}
-          onChange={(e) => handleChange("frecuencia", e.target.value as Frecuencia)}
-          error={errores.frecuencia}
-        >
-          {frecuencias.map((f) => (
-            <option key={f} value={f}>
-              {etiquetaFrecuencia(f)}
-            </option>
-          ))}
-        </CampoSelect>
-        <CampoSelect
-          etiqueta="Categoría"
-          value={formData.categoria}
-          onChange={(e) => handleChange("categoria", e.target.value as Suscripcion["categoria"])}
-        >
-          {CATEGORIAS.map((c) => (
-            <option key={c.valor} value={c.valor}>
-              {c.etiqueta}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
+        <div className={styles.filaDoble}>
+          {/* Texto con teclado decimal en vez de type="number": acepta la coma
+              que se usa en Chile y deja explicar qué está mal (con number el
+              navegador vacía el valor y solo se sabría que "falta"). */}
+          <CampoTexto
+            id={ID_CAMPO.monto}
+            etiqueta="Monto"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="0"
+            value={formData.monto}
+            onChange={(e) => handleChange("monto", e.target.value)}
+            error={errores.monto}
+            required
+          />
+          <CampoSelect
+            id={ID_CAMPO.moneda}
+            etiqueta="Moneda"
+            className={styles.moneda}
+            value={formData.moneda}
+            onChange={(e) => handleChange("moneda", e.target.value)}
+            error={errores.moneda}
+          >
+            {!opciones.monedas.includes(formData.moneda) && <option value={formData.moneda}>Selecciona una moneda</option>}
+            {monedas.filter((o) => o.activo).map((m) => (
+              <option key={m.codigo} value={m.codigo}>
+                {m.nombre} ({m.codigo})
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
-      <CampoTexto
-        id={ID_CAMPO.fechaProximoCobro}
-        etiqueta="Próximo cobro"
-        type="date"
-        value={formData.fechaDeCobro}
-        onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
-        error={errores.fechaProximoCobro}
-        required
-      />
+        <div className={styles.filaDoble}>
+          <CampoSelect
+            id={ID_CAMPO.frecuencia}
+            etiqueta="Se cobra"
+            value={formData.frecuencia}
+            onChange={(e) => handleChange("frecuencia", e.target.value as Frecuencia)}
+            error={errores.frecuencia}
+          >
+            {!formData.frecuencia && <option value="">Selecciona frecuencia</option>}
+            {frecuencias.map((f) => (
+              <option key={f.codigo} value={f.codigo}>
+                {f.nombre}
+              </option>
+            ))}
+          </CampoSelect>
+          <CampoSelect
+            id={ID_CAMPO.categoria}
+            etiqueta="Categoría"
+            value={formData.categoria}
+            onChange={(e) => handleChange("categoria", e.target.value)}
+            error={errores.categoria}
+          >
+            {!opciones.categorias.includes(formData.categoria) && <option value={formData.categoria}>Selecciona una categoría</option>}
+            {categorias.filter((o) => o.activo).map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.nombre}
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
-      <label className={styles.casilla}>
-        <input
-          type="checkbox"
-          checked={formData.enPrueba}
-          onChange={(e) => handleChange("enPrueba", e.target.checked)}
-        />
-        <span>Está en período de prueba gratis</span>
-      </label>
-
-      {formData.enPrueba && (
         <CampoTexto
-          id={ID_CAMPO.finPrueba}
-          etiqueta="Termina la prueba"
+          id={ID_CAMPO.fechaProximoCobro}
+          etiqueta="Próximo cobro"
           type="date"
-          ayuda="Te avisamos antes de que empiece a cobrar."
-          value={formData.finPrueba}
-          onChange={(e) => handleChange("finPrueba", e.target.value)}
-          error={errores.finPrueba}
+          value={formData.fechaDeCobro}
+          onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
+          error={errores.fechaProximoCobro}
           required
         />
-      )}
+
+        <label className={styles.casilla}>
+          <input
+            type="checkbox"
+            checked={formData.enPrueba}
+            onChange={(e) => handleChange("enPrueba", e.target.checked)}
+          />
+          <span>Está en período de prueba gratis</span>
+        </label>
+
+        {formData.enPrueba && (
+          <CampoTexto
+            id={ID_CAMPO.finPrueba}
+            etiqueta="Termina la prueba"
+            type="date"
+            ayuda="Te avisamos antes de que empiece a cobrar."
+            value={formData.finPrueba}
+            onChange={(e) => handleChange("finPrueba", e.target.value)}
+            error={errores.finPrueba}
+            required
+          />
+        )}
+      </fieldset>
 
       <div className={styles.acciones}>
         <Boton variante="secundario" onClick={onCancel} disabled={isSaving}>
           Cancelar
         </Boton>
-        <Boton type="submit" cargando={isSaving}>
+        <Boton type="submit" cargando={isSaving} disabled={!listo || !seleccionValida}>
           {isSaving ? "Guardando…" : "Guardar suscripción"}
         </Boton>
       </div>

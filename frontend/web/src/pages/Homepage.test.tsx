@@ -8,9 +8,12 @@ import {
   actualizarSuscripcion,
   crearSuscripcion,
   ErrorDeApi,
+  getCatalogosSuscripciones,
   getSuscripciones,
+  type CatalogosSuscripciones,
   type Suscripcion,
 } from "@ojoalgasto/shared";
+import { CatalogosProvider } from "../context/CatalogosContext";
 import { ToastProvider } from "../context/ToastContext";
 import { AuthProvider } from "../context/AuthContext";
 import Homepage from "./Homepage";
@@ -21,6 +24,7 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   return {
     ...real,
     getSuscripciones: vi.fn(),
+    getCatalogosSuscripciones: vi.fn(),
     crearSuscripcion: vi.fn(),
     actualizarSuscripcion: vi.fn(),
   };
@@ -35,6 +39,15 @@ const SPOTIFY: Suscripcion = {
   fecha_proximo_cobro: "2026-11-10",
   categoria: "musica",
   estado: "activo",
+};
+
+// Las opciones de los formularios vienen del catálogo del backend (como en la app).
+const opcion = (codigo: string, nombre: string) => ({ codigo, nombre, activo: true, orden: 1 });
+const CATALOGO: CatalogosSuscripciones = {
+  monedas: [opcion("CLP", "Peso chileno"), opcion("USD", "Dólar")],
+  categorias: [opcion("otro", "Otro"), opcion("musica", "Música")],
+  frecuencias: [{ codigo: "mensual", nombre: "Mensual" }, { codigo: "anual", nombre: "Anual" }],
+  predeterminados: { moneda: "CLP", categoria: "otro", frecuencia: "mensual" },
 };
 
 function Pagina({ titulo }: { titulo: string }) {
@@ -62,7 +75,10 @@ async function montar(entradas = ["/dashboard", "/home"], indice = entradas.leng
     <StrictMode>
       <ToastProvider>
         <AuthProvider>
-          <RouterProvider router={router} />
+          {/* En la app, CatalogosLayout envuelve las rutas privadas. */}
+          <CatalogosProvider>
+            <RouterProvider router={router} />
+          </CatalogosProvider>
         </AuthProvider>
       </ToastProvider>
     </StrictMode>,
@@ -94,6 +110,7 @@ function abrirEdicion() {
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(getSuscripciones).mockReset().mockResolvedValue([SPOTIFY]);
+  vi.mocked(getCatalogosSuscripciones).mockReset().mockResolvedValue(structuredClone(CATALOGO));
   vi.mocked(crearSuscripcion).mockReset();
   vi.mocked(actualizarSuscripcion).mockReset();
 });

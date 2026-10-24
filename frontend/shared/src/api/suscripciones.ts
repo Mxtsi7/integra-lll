@@ -131,8 +131,8 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
 export interface UsoPayload {
   minutos: number;
   /**
-   * Día del uso, ISO (YYYY-MM-DD). Opcional: sin fecha el backend usa hoy.
-   * No puede ser futura (RegistrarUsoSerializer.validate_fecha).
+   * Fecha calendario del uso (YYYY-MM-DD). Opcional: sin fecha el backend usa
+   * la fecha local de hoy. No puede ser futura (RegistrarUsoSerializer.validate_fecha).
    */
   fecha?: string;
 }
@@ -155,7 +155,8 @@ export async function getUsos(id: string): Promise<RegistroUso[]> {
 
 /**
  * POST /suscripciones/<id>/uso/ -> 200 OK / 400 / 404.
- * Registra minutos de uso manual (CU-23 / RF-15 / RF-16).
+ * Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16).
+ * Opcionalmente acepta la fecha calendario del uso; no puede ser futura.
  */
 export async function registrarUso(
   id: string,

@@ -7,6 +7,15 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ## Qué va en cada carpeta
 
+- [MX-24: timeout y cuotas IA](flujos/maximiliano-saez/24-limites-ia.md).
+
+### `flujos/`
+
+- [MX-22: matriz de las 174 tareas y brechas](investigacion/MX-22-matriz-requisitos.md).
+- [MX-01: registro de revisión y decisiones](revisiones/MX-01-revision-2026-10-21.md).
+
+- [Verificación y cambio de correo (MX-28)](flujos/maximiliano-saez/28-verificacion-correo.md).
+
 ### `investigacion/`
 
 - Estado del arte y marco teórico
@@ -39,6 +48,9 @@ Overleaf), no seis Word que se pegan al final — la costura se nota siempre.
 ---
 
 ## Registro de decisiones
+
+- [ADR-007: catálogos de referencia](arquitectura/ADR-007-catalogos-de-referencia.md):
+  monedas, categorías y países en PostgreSQL; API, comandos y despliegue.
 
 Cada decisión técnica relevante se documenta en `arquitectura/` con esta
 estructura:
@@ -85,3 +97,10 @@ usaron Rust, la respuesta ya está escrita y fechada.
 4. **Plazos internos 3 días antes del real**
 5. **Las limitaciones se declaran.** Nombrar un sesgo metodológico suma;
    esconderlo, resta
+
+## Flujos de Maximiliano Sáez
+
+- [MX-15/MX-08 — Planes, contratación y perfil](flujos/maximiliano-saez/15-08-planes-perfil.md).
+- [MX-09/MX-16 — Permisos y catálogo](flujos/maximiliano-saez/09-16-permisos-catalogo.md).
+- [MX-17/MX-18 — Checkout y webhook mock](flujos/maximiliano-saez/17-18-contratacion-mock.md).
+- [MX-19/MX-20 — Sincronización y pruebas de planes](flujos/maximiliano-saez/19-20-sincronizacion-pruebas-planes.md).

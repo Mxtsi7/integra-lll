@@ -20,4 +20,9 @@ export {
 } from './api/suscripciones';
 export * from './api/usuarios';
 export * from './auth';
+export * from './api/catalogos';
+
+export * from './api/conectores';
 export * from './validaciones';
+export * from './api/planes';
+export * from './api/verificacionCorreo';

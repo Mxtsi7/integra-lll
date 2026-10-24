@@ -48,7 +48,7 @@ def test_no_se_repite_un_proveedor():
 @pytest.mark.django_db
 def test_el_proveedor_usa_las_mismas_categorias_que_la_suscripcion():
     proveedor = Proveedor.objects.create(
-        nombre="Netflix", categoria=Subscription.Categoria.STREAMING
+        nombre="Netflix", categoria="streaming"
     )
 
     assert proveedor.categoria == "streaming"

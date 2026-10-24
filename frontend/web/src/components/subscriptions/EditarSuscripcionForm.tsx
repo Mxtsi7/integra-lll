@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import type { Frecuencia, Moneda, Suscripcion } from "@ojoalgasto/shared";
 import { CampoSelect, CampoTexto } from "../ui/Campo";
 import { Boton } from "../ui/Boton";
-import { CATEGORIAS, etiquetaFrecuencia } from "./presentacion";
+import { EstadoCargaCatalogos, useCatalogos } from "../../context/CatalogosContext";
 import styles from "./SusForm.module.css";
 
 export interface EditarSuscripcionFormData {
@@ -18,8 +18,6 @@ interface EditarSuscripcionFormProps {
   suscripcion?: EditarSuscripcionFormData;
   onSubmit?: (data: EditarSuscripcionFormData) => void;
   onCancel?: () => void;
-  monedas?: Moneda[];
-  frecuencias?: Frecuencia[];
   /** true mientras el PATCH está en vuelo: deshabilita el botón de guardar. */
   isSaving?: boolean;
   /** Mensaje si el guardado falló. Se muestra dentro del formulario. */
@@ -31,17 +29,13 @@ interface EditarSuscripcionFormProps {
   onCambiosSinGuardar?: (hayCambios: boolean) => void;
 }
 
-const DEFAULT_MONEDAS: Moneda[] = ["CLP", "USD"];
-// Solo 'mensual' | 'anual': el modelo del backend acepta solo estos dos.
-const DEFAULT_FRECUENCIAS: Frecuencia[] = ["mensual", "anual"];
-
 const DEFAULT_SUSCRIPCION: EditarSuscripcionFormData = {
   id: "",
   nombre: "",
   monto: "",
-  moneda: "CLP",
-  frecuencia: "mensual",
-  categoria: "otro",
+  moneda: "",
+  frecuencia: "" as Frecuencia,
+  categoria: "",
 };
 
 /** Pasa una suscripción del dominio al formulario. */
@@ -60,8 +54,6 @@ export function EditarSuscripcionForm({
   suscripcion = DEFAULT_SUSCRIPCION,
   onSubmit,
   onCancel,
-  monedas = DEFAULT_MONEDAS,
-  frecuencias = DEFAULT_FRECUENCIAS,
   isSaving = false,
   error = null,
   onCambiosSinGuardar,
@@ -76,12 +68,25 @@ export function EditarSuscripcionForm({
     onCambiosSinGuardar?.(hayCambios);
   }, [hayCambios, onCambiosSinGuardar]);
 
+  const { datos, cargando, error: errorCatalogo } = useCatalogos();
+  const monedas = datos?.monedas ?? [];
+  const categorias = datos?.categorias ?? [];
+  const frecuencias = datos?.frecuencias ?? [];
+  const monedasPermitidas = monedas.filter((o) => o.activo || o.codigo === suscripcion.moneda);
+  const categoriasPermitidas = categorias.filter((o) => o.activo || o.codigo === suscripcion.categoria);
+  const listo = !!datos && !cargando && !errorCatalogo
+    && monedasPermitidas.length > 0 && categoriasPermitidas.length > 0 && frecuencias.length > 0;
+  const seleccionValida = monedasPermitidas.some((o) => o.codigo === formData.moneda)
+    && categoriasPermitidas.some((o) => o.codigo === formData.categoria)
+    && frecuencias.some((o) => o.codigo === formData.frecuencia);
+
   const handleChange = (field: keyof EditarSuscripcionFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }) as EditarSuscripcionFormData);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!listo || !seleccionValida || isSaving) return;
     onSubmit?.(formData);
   };
 
@@ -93,70 +98,76 @@ export function EditarSuscripcionForm({
         </p>
       )}
 
-      <CampoTexto
-        etiqueta="Servicio"
-        type="text"
-        value={formData.nombre}
-        onChange={(e) => handleChange("nombre", e.target.value)}
-        autoFocus
-      />
-
-      <div className={styles.filaDoble}>
+      <EstadoCargaCatalogos sinOpciones={!!datos && !listo} />
+      <fieldset disabled={isSaving || !listo} className={styles.campos}>
         <CampoTexto
-          etiqueta="Monto"
-          type="number"
-          inputMode="decimal"
-          step="0.01"
-          min="0"
-          value={formData.monto}
-          onChange={(e) => handleChange("monto", e.target.value)}
+          etiqueta="Servicio"
+          type="text"
+          value={formData.nombre}
+          onChange={(e) => handleChange("nombre", e.target.value)}
+          autoFocus
         />
-        <CampoSelect
-          etiqueta="Moneda"
-          className={styles.moneda}
-          value={formData.moneda}
-          onChange={(e) => handleChange("moneda", e.target.value)}
-        >
-          {monedas.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
 
-      <div className={styles.filaDoble}>
-        <CampoSelect
-          etiqueta="Se cobra"
-          value={formData.frecuencia}
-          onChange={(e) => handleChange("frecuencia", e.target.value)}
-        >
-          {frecuencias.map((f) => (
-            <option key={f} value={f}>
-              {etiquetaFrecuencia(f)}
-            </option>
-          ))}
-        </CampoSelect>
-        <CampoSelect
-          etiqueta="Categoría"
-          value={formData.categoria}
-          onChange={(e) => handleChange("categoria", e.target.value)}
-        >
-          {CATEGORIAS.map((c) => (
-            <option key={c.valor} value={c.valor}>
-              {c.etiqueta}
-            </option>
-          ))}
-        </CampoSelect>
-      </div>
+        <div className={styles.filaDoble}>
+          <CampoTexto
+            etiqueta="Monto"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0"
+            value={formData.monto}
+            onChange={(e) => handleChange("monto", e.target.value)}
+          />
+          <CampoSelect
+            etiqueta="Moneda"
+            className={styles.moneda}
+            value={formData.moneda}
+            onChange={(e) => handleChange("moneda", e.target.value)}
+          >
+            {!formData.moneda && <option value="">Selecciona una moneda</option>}
+            {monedasPermitidas.map((m) => (
+              <option key={m.codigo} value={m.codigo}>
+                {m.nombre} ({m.codigo}){!m.activo && " (inactiva)"}
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
-      <p className={styles.nota}>Los cambios no tocan los cobros que ya pasaron.</p>
+        <div className={styles.filaDoble}>
+          <CampoSelect
+            etiqueta="Se cobra"
+            value={formData.frecuencia}
+            onChange={(e) => handleChange("frecuencia", e.target.value)}
+          >
+            {!formData.frecuencia && <option value="">Selecciona frecuencia</option>}
+            {frecuencias.map((f) => (
+              <option key={f.codigo} value={f.codigo}>
+                {f.nombre}
+              </option>
+            ))}
+          </CampoSelect>
+          <CampoSelect
+            etiqueta="Categoría"
+            value={formData.categoria}
+            onChange={(e) => handleChange("categoria", e.target.value)}
+          >
+            {!formData.categoria && <option value="">Selecciona una categoría</option>}
+            {categoriasPermitidas.map((c) => (
+              <option key={c.codigo} value={c.codigo}>
+                {c.nombre}{!c.activo && " (inactiva)"}
+              </option>
+            ))}
+          </CampoSelect>
+        </div>
 
+        <p className={styles.nota}>Los cambios no tocan los cobros que ya pasaron.</p>
+
+      </fieldset>
       <div className={styles.acciones}>
         <Boton variante="secundario" onClick={onCancel} disabled={isSaving}>
           Cancelar
         </Boton>
-        <Boton type="submit" cargando={isSaving}>
+        <Boton type="submit" cargando={isSaving} disabled={!listo || !seleccionValida}>
           {isSaving ? "Guardando…" : "Guardar cambios"}
         </Boton>
       </div>

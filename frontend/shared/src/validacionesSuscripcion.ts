@@ -4,17 +4,15 @@
 // sigue siendo la validación definitiva y sus errores se muestran igual
 // (ver erroresDesdeServidor). Fuente de cada regla en services/subscriptions:
 // - Subscription (app/models.py): nombre máx. 100, monto DecimalField(10, 2)
-//   y > 0, moneda CLP/USD, frecuencia mensual/anual, fechas DateField.
+//   y > 0, fechas DateField.
+// - Moneda, categoría y frecuencia: las opciones válidas vienen del catálogo
+//   del backend (GET /catalogos/suscripciones/), no de una lista escrita acá.
 // - SubscriptionSerializer.validate_monto: "El monto debe ser mayor a 0."
 // - RegistrarUsoSerializer: minutos enteros entre 1 y 44.640, fecha no futura.
-
-import type { Frecuencia, Moneda } from './tipos';
 
 export const LARGO_MAXIMO_NOMBRE_SUSCRIPCION = 100;
 /** DecimalField(max_digits=10, decimal_places=2): 8 enteros y 2 decimales. */
 export const MONTO_MAXIMO = 99_999_999.99;
-export const MONEDAS_SOPORTADAS: readonly Moneda[] = ['CLP', 'USD'];
-export const FRECUENCIAS_SOPORTADAS: readonly Frecuencia[] = ['mensual', 'anual'];
 /** 24 h × 60 min × 31 días, el tope del backend. */
 export const MINUTOS_MAXIMOS_USO = 44_640;
 
@@ -64,6 +62,7 @@ export type DatosSuscripcion = {
   nombre: string;
   monto: string;
   moneda: string;
+  categoria: string;
   frecuencia: string;
   fechaProximoCobro: string;
   /** Si está en período de prueba, la fecha de fin es obligatoria. */
@@ -71,11 +70,29 @@ export type DatosSuscripcion = {
   finPrueba: string;
 };
 
-export type CampoSuscripcion = 'nombre' | 'monto' | 'moneda' | 'frecuencia' | 'fechaProximoCobro' | 'finPrueba';
+export type CampoSuscripcion =
+  | 'nombre'
+  | 'monto'
+  | 'moneda'
+  | 'frecuencia'
+  | 'categoria'
+  | 'fechaProximoCobro'
+  | 'finPrueba';
 export type ErroresSuscripcion = Partial<Record<CampoSuscripcion, string>>;
 
+/**
+ * Códigos que hoy se pueden elegir, sacados del catálogo del backend (las
+ * opciones activas). Si el catálogo agrega una moneda o una categoría, vale
+ * sin tocar este archivo.
+ */
+export type OpcionesSuscripcion = {
+  monedas: readonly string[];
+  categorias: readonly string[];
+  frecuencias: readonly string[];
+};
+
 /** Valida el formulario de creación (CH-09). Objeto vacío = se puede enviar. */
-export function validarSuscripcion(datos: DatosSuscripcion): ErroresSuscripcion {
+export function validarSuscripcion(datos: DatosSuscripcion, opciones: OpcionesSuscripcion): ErroresSuscripcion {
   const errores: ErroresSuscripcion = {};
 
   const nombre = datos.nombre.trim();
@@ -87,12 +104,11 @@ export function validarSuscripcion(datos: DatosSuscripcion): ErroresSuscripcion 
   const monto = parsearMonto(datos.monto);
   if ('error' in monto) errores.monto = monto.error;
 
-  if (!(MONEDAS_SOPORTADAS as readonly string[]).includes(datos.moneda)) {
-    errores.moneda = 'Elige una moneda soportada (CLP o USD).';
-  }
-  if (!(FRECUENCIAS_SOPORTADAS as readonly string[]).includes(datos.frecuencia)) {
-    errores.frecuencia = 'Elige una frecuencia soportada (mensual o anual).';
-  }
+  // Vacío o una opción que el catálogo ya no ofrece (p. ej. se desactivó
+  // mientras el formulario estaba abierto).
+  if (!opciones.monedas.includes(datos.moneda)) errores.moneda = 'Elige una moneda de la lista.';
+  if (!opciones.categorias.includes(datos.categoria)) errores.categoria = 'Elige una categoría de la lista.';
+  if (!opciones.frecuencias.includes(datos.frecuencia)) errores.frecuencia = 'Elige cada cuánto se cobra.';
 
   if (!datos.fechaProximoCobro) errores.fechaProximoCobro = 'Ingresa la fecha del próximo cobro.';
   else if (!esFechaReal(datos.fechaProximoCobro)) errores.fechaProximoCobro = 'Esa fecha no existe.';

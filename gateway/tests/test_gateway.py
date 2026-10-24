@@ -72,6 +72,18 @@ def con_token(t):
 cliente = Client()
 
 
+@pytest.mark.parametrize("ruta,servicio", [
+    ("/api/catalogos/suscripciones/", "subscriptions"),
+    ("/api/catalogos/paises/", "auth"),
+])
+def test_catalogos_exigen_token_y_conservan_consulta(upstream, ruta, servicio):
+    assert cliente.get(ruta).status_code == 401
+    respuesta = cliente.get(ruta + "?incluir_inactivos=true", **con_token(token()))
+    assert respuesta.status_code == 200
+    assert upstream.llamadas[-1]["url"] == settings.SERVICIOS[servicio] + ruta + "?incluir_inactivos=true"
+    assert upstream.llamadas[-1]["headers"]["X-Usuario-Id"] == "7f3a1b"
+
+
 # ── /health/ ────────────────────────────────────────────────────────
 
 def test_health_responde_sin_base_de_datos():
@@ -217,7 +229,12 @@ def test_toda_respuesta_lleva_correlation_id_y_lo_respeta_si_viene(upstream):
     assert upstream.llamadas[-1]["headers"]["X-Correlation-ID"] == "abc123"
 
     r = cliente.get("/api/suscripciones/")           # incluso un 401
-    assert len(r["X-Correlation-ID"]) == 32
+    generado = r["X-Correlation-ID"]
+    # No se comprueba el largo sino que sea un UUID canónico: el contrato de
+    # eventos lo valida con `format: uuid`, y una cadena de 32 caracteres sin
+    # guiones pasa el largo pero falla el contrato.
+    assert uuid.UUID(generado)
+    assert str(uuid.UUID(generado)) == generado, "debe venir con guiones"
 
 
 def test_reset_revoca_el_access_anterior_sin_afectar_otro_usuario(upstream):
@@ -280,13 +297,52 @@ def test_sesion_revocada_no_reenvia_y_otra_sigue_activa(upstream):
     assert cliente.get("/api/usuarios/me/", **con_token(segunda)).status_code == 200
 
 
-@pytest.mark.parametrize("ruta", ["/api/auth/logout/otra/", "/api/auth/change-password/", "/api/auth/email-verification/request/", "/api/auth/email-verification/confirm/", "/api/auth/login/otra/"])
+@pytest.mark.parametrize("ruta", ["/api/auth/logout/otra/", "/api/auth/change-password/", "/api/auth/email-verification/request/", "/api/auth/email-verification/confirm/otra/", "/api/auth/login/otra/"])
 def test_solo_rutas_publicas_exactas_son_anonimas(upstream, ruta):
     assert cliente.post(ruta).status_code == 401
     assert not upstream.llamadas
 
 
-@pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm"])
+@pytest.mark.parametrize("ruta", ["/api/auth/google/nonce/", "/api/auth/google/"])
+def test_google_solo_expone_las_dos_rutas_exactas(upstream, ruta):
+    respuesta = cliente.get(ruta) if ruta.endswith("nonce/") else cliente.post(ruta)
+    assert respuesta.status_code == 200
+    assert upstream.llamadas[-1]["url"] == settings.SERVICIOS["auth"] + ruta
+    assert "X-Usuario-Id" not in upstream.llamadas[-1]["headers"]
+
+
+@pytest.mark.parametrize("ruta", ["/api/auth/google/otra/", "/api/auth/google/nonce/otra/"])
+def test_subrutas_google_siguen_protegidas(upstream, ruta):
+    assert cliente.post(ruta).status_code == 401
+    assert not upstream.llamadas
+
+
+def test_google_reenvia_cookie_y_permite_cors_con_credenciales_solo_a_origen_configurado(upstream):
+    cookie = "google_login_nonce=secreto-prueba; HttpOnly; Max-Age=300; Path=/api/auth/google/; SameSite=Lax"
+    upstream.respuesta = RespuestaFalsa(cabeceras={"Set-Cookie": cookie})
+    origen = settings.CORS_ALLOWED_ORIGINS[0]
+    respuesta = cliente.get("/api/auth/google/nonce/", HTTP_ORIGIN=origen)
+    assert respuesta["Set-Cookie"] == cookie
+    assert respuesta["Access-Control-Allow-Origin"] == origen
+    assert respuesta["Access-Control-Allow-Credentials"] == "true"
+    cliente.post("/api/auth/google/", HTTP_COOKIE="google_login_nonce=secreto-prueba", HTTP_ORIGIN=origen)
+    assert upstream.llamadas[-1]["headers"]["Cookie"] == "google_login_nonce=secreto-prueba"
+    ajena = cliente.get("/api/auth/google/nonce/", HTTP_ORIGIN="https://ajeno.example")
+    assert "Access-Control-Allow-Origin" not in ajena
+    assert "Access-Control-Allow-Credentials" not in ajena
+
+
+def test_preflight_google_admite_post_json_con_credenciales(upstream):
+    respuesta = cliente.options("/api/auth/google/", HTTP_ORIGIN=settings.CORS_ALLOWED_ORIGINS[0],
+                                HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+                                HTTP_ACCESS_CONTROL_REQUEST_HEADERS="content-type")
+    assert respuesta.status_code == 200
+    assert respuesta["Access-Control-Allow-Credentials"] == "true"
+    assert "content-type" in respuesta["Access-Control-Allow-Headers"]
+    assert not upstream.llamadas
+
+
+@pytest.mark.parametrize("ruta", ["register", "login", "refresh", "logout", "password-reset", "password-reset/confirm", "email-verification/confirm"])
 def test_contrato_de_rutas_publicas_exactas_de_main(upstream, ruta):
     respuesta = cliente.post(f"/api/auth/{ruta}/", data={}, content_type="application/json")
     assert respuesta.status_code == 200

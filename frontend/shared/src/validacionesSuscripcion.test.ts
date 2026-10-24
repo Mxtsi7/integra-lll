@@ -7,6 +7,7 @@ import {
   validarSuscripcion,
   validarUso,
   type DatosSuscripcion,
+  type OpcionesSuscripcion,
 } from "./validacionesSuscripcion";
 
 // Resultado REAL de los serializers de services/subscriptions para cada caso
@@ -52,10 +53,18 @@ const MINUTOS: Array<[string, boolean]> = [
   ["", false],
 ];
 
+// Opciones de un catálogo de prueba (en la app vienen de GET /catalogos/suscripciones/).
+const OPCIONES: OpcionesSuscripcion = {
+  monedas: ["CLP", "USD"],
+  categorias: ["streaming", "otro"],
+  frecuencias: ["mensual", "anual"],
+};
+
 const base: DatosSuscripcion = {
   nombre: "Netflix",
   monto: "5990",
   moneda: "CLP",
+  categoria: "streaming",
   frecuencia: "mensual",
   fechaProximoCobro: "2026-11-05",
   enPrueba: false,
@@ -64,17 +73,17 @@ const base: DatosSuscripcion = {
 
 describe("validarSuscripcion: mismas reglas que el backend (CH-09)", () => {
   it.each(MONTOS)("monto %j → backend acepta: %s", (monto, aceptaBackend) => {
-    expect(validarSuscripcion({ ...base, monto }).monto === undefined).toBe(aceptaBackend);
+    expect(validarSuscripcion({ ...base, monto }, OPCIONES).monto === undefined).toBe(aceptaBackend);
   });
 
   it.each(FECHAS)("fecha de cobro %j → backend acepta: %s", (fecha, aceptaBackend) => {
-    expect(validarSuscripcion({ ...base, fechaProximoCobro: fecha }).fechaProximoCobro === undefined).toBe(
+    expect(validarSuscripcion({ ...base, fechaProximoCobro: fecha }, OPCIONES).fechaProximoCobro === undefined).toBe(
       aceptaBackend,
     );
   });
 
   it("un formulario correcto no tiene errores", () => {
-    expect(validarSuscripcion(base)).toEqual({});
+    expect(validarSuscripcion(base, OPCIONES)).toEqual({});
   });
 
   it("marca cada campo con su propio mensaje", () => {
@@ -83,34 +92,41 @@ describe("validarSuscripcion: mismas reglas que el backend (CH-09)", () => {
         nombre: " ",
         monto: "0",
         moneda: "EUR",
+        categoria: "",
         frecuencia: "semanal",
         fechaProximoCobro: "2026-02-30",
         enPrueba: true,
         finPrueba: "",
-      }),
+      }, OPCIONES),
     ).toEqual({
       nombre: "Ingresa el nombre del servicio.",
       monto: "El monto debe ser mayor a 0.",
-      moneda: "Elige una moneda soportada (CLP o USD).",
-      frecuencia: "Elige una frecuencia soportada (mensual o anual).",
+      moneda: "Elige una moneda de la lista.",
+      categoria: "Elige una categoría de la lista.",
+      frecuencia: "Elige cada cuánto se cobra.",
       fechaProximoCobro: "Esa fecha no existe.",
       finPrueba: "Ingresa cuándo termina la prueba.",
     });
   });
 
+  it("una moneda o categoría que el catálogo agrega vale sin cambiar el código", () => {
+    const conEuro = { ...OPCIONES, monedas: [...OPCIONES.monedas, "EUR"], categorias: [...OPCIONES.categorias, "hogar"] };
+    expect(validarSuscripcion({ ...base, moneda: "EUR", categoria: "hogar" }, conEuro)).toEqual({});
+  });
+
   it("nombre de más de 100 caracteres (límite del modelo)", () => {
-    expect(validarSuscripcion({ ...base, nombre: "a".repeat(101) }).nombre).toBe(
+    expect(validarSuscripcion({ ...base, nombre: "a".repeat(101) }, OPCIONES).nombre).toBe(
       "El nombre puede tener hasta 100 caracteres.",
     );
-    expect(validarSuscripcion({ ...base, nombre: "a".repeat(100) })).toEqual({});
+    expect(validarSuscripcion({ ...base, nombre: "a".repeat(100) }, OPCIONES)).toEqual({});
   });
 
   it("el fin de prueba solo se exige si está en prueba, y tiene que existir", () => {
-    expect(validarSuscripcion({ ...base, enPrueba: false, finPrueba: "" }).finPrueba).toBeUndefined();
-    expect(validarSuscripcion({ ...base, enPrueba: true, finPrueba: "2026-11-31" }).finPrueba).toBe(
+    expect(validarSuscripcion({ ...base, enPrueba: false, finPrueba: "" }, OPCIONES).finPrueba).toBeUndefined();
+    expect(validarSuscripcion({ ...base, enPrueba: true, finPrueba: "2026-11-31" }, OPCIONES).finPrueba).toBe(
       "Esa fecha no existe.",
     );
-    expect(validarSuscripcion({ ...base, enPrueba: true, finPrueba: "2026-11-20" })).toEqual({});
+    expect(validarSuscripcion({ ...base, enPrueba: true, finPrueba: "2026-11-20" }, OPCIONES)).toEqual({});
   });
 });
 

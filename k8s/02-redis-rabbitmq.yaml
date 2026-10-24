@@ -33,12 +33,14 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
-            requests: { cpu: 25m, memory: 64Mi }
-            limits: { cpu: 100m, memory: 128Mi }
+            requests: { cpu: 25m,  memory: 16Mi }
+            limits:   { cpu: 50m,  memory: 64Mi }
 ---
-# RabbitMQ: el bus de eventos entre servicios del ADR-003. Todavía ningún
-# servicio publica eventos, pero va en el despliegue porque es parte de la
-# arquitectura declarada y así está listo cuando se use.
+# RabbitMQ: el bus de eventos entre servicios del ADR-003.
+#
+# Mide 136Mi en reposo (medido 2026-10-19), de ahí el límite de 256Mi.
+# Todavía ningún servicio publica eventos, pero va en el despliegue porque es
+# parte de la arquitectura declarada y así está listo cuando se use.
 apiVersion: v1
 kind: Service
 metadata:
@@ -78,5 +80,5 @@ spec:
             timeoutSeconds: 25
             failureThreshold: 6
           resources:
-            requests: { cpu: 50m, memory: 192Mi }
-            limits: { cpu: 150m, memory: 384Mi }
+            requests: { cpu: 50m,  memory: 112Mi }
+            limits:   { cpu: 100m, memory: 256Mi }
