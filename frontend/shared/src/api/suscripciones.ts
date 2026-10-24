@@ -130,11 +130,14 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
+  /** Fecha calendario del uso (YYYY-MM-DD); por defecto, la fecha local actual. */
+  fecha?: string;
 }
 
 /**
  * POST /suscripciones/<id>/uso/ -> 200 OK / 400 / 404.
- * Registra minutos de uso manual (CU-23 / RF-15 / RF-16).
+ * Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16).
+ * Opcionalmente acepta la fecha calendario del uso; no puede ser futura.
  */
 export async function registrarUso(
   id: string,

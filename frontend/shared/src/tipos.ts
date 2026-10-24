@@ -17,19 +17,11 @@ export type EstadoSuscripcion =
 
 export type Frecuencia = 'mensual' | 'anual';
 
-export type Moneda = 'CLP' | 'USD';
+/** Código de moneda validado contra el catálogo del backend. */
+export type Moneda = string;
 
-export type Categoria =
-  | 'streaming'
-  | 'musica'
-  | 'productividad'
-  | 'nube'
-  | 'juegos'
-  | 'educacion'
-  | 'salud'
-  | 'noticias'
-  | 'ia'
-  | 'otro';
+/** Código estable de categoría; sus etiquetas se obtienen por API. */
+export type Categoria = string;
 
 export interface Suscripcion {
   id: string;

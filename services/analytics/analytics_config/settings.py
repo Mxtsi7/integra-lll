@@ -13,6 +13,10 @@ env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(REPO_ROOT / ".env")
 
 SERVICE_NAME = "analytics"
+IA_TIMEOUT_SEGUNDOS = env.float("IA_TIMEOUT_SEGUNDOS", default=3.5)
+IA_MAX_LLAMADAS_MES = env.int("IA_MAX_LLAMADAS_MES", default=200)
+IA_MAX_INTENTOS_PDF_DIA = env.int("IA_MAX_INTENTOS_PDF_DIA", default=3)
+IA_MAX_LLAMADAS_SIMULTANEAS = env.int("IA_MAX_LLAMADAS_SIMULTANEAS", default=4)
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
@@ -38,6 +42,9 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
+    # el gateway (ADR-004). Es la misma pieza en todos los servicios.
+    "shared.tenant.base.ContextoTenantMiddleware",
 ]
 
 ROOT_URLCONF = "analytics_config.urls"
@@ -62,7 +69,8 @@ TEMPLATES = [
 
 ESQUEMA_BD = env("ESQUEMA_BD", default=SERVICE_NAME)
 DATABASES = {"default": env.db("DATABASE_URL")}
-DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
+if "sqlite" not in DATABASES["default"]["ENGINE"]:
+    DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -78,6 +86,8 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
 }
 
+RABBITMQ_URL = env("RABBITMQ_URL", default="")
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
@@ -85,3 +95,4 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+

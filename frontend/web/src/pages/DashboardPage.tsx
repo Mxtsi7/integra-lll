@@ -8,6 +8,7 @@ import { TileProximo } from '../components/Dashboard/TileProximo';
 import { TileResumen } from '../components/Dashboard/TileResumen';
 import { TileSalud } from '../components/Dashboard/TileSalud';
 import { useAuth } from '../context/AuthContext';
+import { useCatalogos } from '../context/CatalogosContext';
 import { diasHasta } from '../utils/fechas';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
 import styles from './DashboardPage.module.css';
@@ -27,6 +28,7 @@ export function contarAvisos(suscripciones: Suscripcion[]): number {
 }
 
 export function DashboardPage() {
+  const { datos: catalogos } = useCatalogos();
   const { usuario } = useAuth();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
 
@@ -72,7 +74,7 @@ export function DashboardPage() {
           <div className={styles.columnaDerecha}>
             <TileHub
               suscripciones={estado.suscripciones}
-              alExportar={() => descargarSuscripcionesCsv(estado.suscripciones)}
+              alExportar={() => descargarSuscripcionesCsv(estado.suscripciones, 'suscripciones.csv', catalogos ?? undefined)}
             />
             <div className={styles.filaInferior}>
               <TileFantasmas suscripciones={estado.suscripciones} />

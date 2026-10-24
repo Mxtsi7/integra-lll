@@ -32,7 +32,11 @@ def inicio(request):
     return HttpResponse("Servicio Auth activo")
 
 
+from app.catalogos_api import PaisesView
+
 urlpatterns = [
+    path("api/catalogos/paises/", PaisesView.as_view()),
+
     path("api/contrataciones/", ContratacionesView.as_view(), name="contrataciones"),
     path("api/contrataciones/<uuid:pk>/", ContratacionDetalleView.as_view(), name="contratacion-detalle"),
     path("api/contrataciones/<uuid:pk>/cancelar/", CancelarContratacionView.as_view(), name="contratacion-cancelar"),

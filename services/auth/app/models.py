@@ -3,6 +3,8 @@ import uuid
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import BaseUserManager, PermissionsMixin
 from django.db import models
+from django.core.validators import RegexValidator
+from shared.catalogos.models import OpcionCatalogo
 from django.db.models.functions import Lower
 
 from shared.tenant.base import ModeloBase
@@ -96,6 +98,13 @@ class TokenRecuperacionUsado(models.Model):
 
     class Meta:
         db_table = "token_recuperacion_usado"
+
+
+class Pais(OpcionCatalogo):
+    codigo = models.CharField(max_length=2, unique=True, validators=[RegexValidator(r"^[A-Z]{2}$")])
+
+    class Meta(OpcionCatalogo.Meta):
+        db_table = "pais"
 
 
 class Sesion(models.Model):
