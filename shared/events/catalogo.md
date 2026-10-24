@@ -62,7 +62,7 @@ Todo evento tiene la misma envoltura. Sin excepciones.
 |---|---|---|---|
 | `recomendacion.generada` | El puntaje supera el umbral | `suscripcion_id`, `puntaje`, `motivo`, `ahorro_estimado` | notifications |
 | `solapamiento.detectado` v1 | Dos servicios cubren lo mismo | `suscripcion_ids`, `categoria` | notifications |
-| `solapamiento.detectado` v2 *(pendiente: VI-28)* | Una fuente explícita documenta que dos o más servicios comparten funciones | `suscripcion_ids`, `categoria`, `evidencia_id`, `evidencia_url`, `evidencia_descripcion`, `suscripciones` (snapshot verificado) | analytics, notifications |
+
 | `recomendacion.consolidacion_generada` v1 | Un solapamiento explícito y evidencia reciente de uso/costo habilitan una revisión de consolidación | `tipo`, `categoria`, `suscripcion_candidata`, `suscripciones_relacionadas`, `motivo`, `ahorro_potencial`, `evidencia`, `evento_origen_id` | notifications |
 
 Para `solapamiento.detectado` v2, el routing key es
@@ -71,7 +71,7 @@ grupo y cada registro lleva `id`, `organizacion_id`, `nombre`, `categoria`,
 `estado`, `activa`, `moneda`, `monto`, `frecuencia`, `uso_observado_desde` y
 `ultimo_uso`.
 > **Nota de integración (VI-20):** La emisión de `solapamiento.detectado` v2 con
-> evidencia estructurada queda asignada a la tarjeta derivada **VI-28: Detección
+
 > de solapamientos con catálogo de evidencias**, encargada de emitir dicho evento.
 > Por su parte, `analytics` (VI-20) implementa el consumidor (`consumir_solapamientos`)
 > para procesar dicho contrato. A su vez, las recomendaciones emitidas a la cola

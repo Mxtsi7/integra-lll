@@ -253,7 +253,7 @@ un requisito nuevo. La matriz expresa cobertura prevista, no prueba de cumplimie
 | DERIVADA | [MX-29: Revocar sesión en backend al cerrar sesión](https://trello.com/c/LKvkdcZ9) | Maximiliano Sáez | RF-01.6; RF-20 | API compartida |
 | DERIVADA | [MX-30: Alinear política de contraseña del backend](https://trello.com/c/fSEc3EdJ) | Maximiliano Sáez | RF-01.1; RF-01.4; RF-01.5 | API compartida |
 | DERIVADA | [VI-27: Crear bases ejecutables de Connectors, Analytics y Notifications](https://trello.com/c/c6WkBP1E) | Victor Gonzales | TRANSVERSAL | API / operación compartida |
-| DERIVADA | [VI-28: Detección de solapamientos con catálogo de evidencias](https://trello.com/c/zGMe27Ed) | Victor Gonzales | RF-18 | Emisión de solapamiento.detectado v2 |
+
 
 ## Entregas de Maximiliano y bloqueos comprobados
 
