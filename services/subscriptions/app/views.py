@@ -314,6 +314,62 @@ class SubscriptionViewSet(TenantViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @extend_schema(
+        responses=SubscriptionSerializer,
+        description="Cancela una suscripción propia sin hacer soft-delete (VI-03 / RF-10).",
+    )
+    @action(detail=True, methods=["post"], url_path="cancelar")
+    def cancelar(self, request, pk=None):
+        """POST /api/suscripciones/<id>/cancelar/ (VI-03 / RF-10)."""
+        suscripcion = self.get_object()
+        actor_rol = getattr(request, "rol", None)
+        if actor_rol not in ("titular", "integrante"):
+            raise PermissionDenied("El actor no tiene un rol válido para solicitar la cancelación.")
+
+        # Idempotencia: si ya está cancelada, no falla ni genera transiciones duplicadas
+        if suscripcion.estado == Subscription.Estado.CANCELADO:
+            return Response(SubscriptionSerializer(suscripcion).data, status=status.HTTP_200_OK)
+
+        actor_id = self._actor_id(request, required=True)
+        try:
+            suscripcion.transicionar(
+                Subscription.EventoEstado.CANCELACION_USUARIO,
+                actor_id=actor_id,
+                actor_rol=actor_rol,
+            )
+        except DjangoValidationError as exc:
+            raise self._convertir_error_transicion(exc) from exc
+
+        return Response(SubscriptionSerializer(suscripcion).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        responses=SubscriptionSerializer,
+        description="Reactiva o confirma cobro detectado para una suscripción (VI-09).",
+    )
+    @action(detail=True, methods=["post"], url_path="reactivar")
+    def reactivar(self, request, pk=None):
+        """POST /api/suscripciones/<id>/reactivar/ (VI-09)."""
+        suscripcion = self.get_object()
+        actor_rol = getattr(request, "rol", None)
+        if actor_rol not in ("titular", "integrante"):
+            raise PermissionDenied("El actor no tiene un rol válido para reactivar la suscripción.")
+
+        # Idempotencia: si ya está activa, devuelve 200 sin duplicar auditoría
+        if suscripcion.estado == Subscription.Estado.ACTIVO:
+            return Response(SubscriptionSerializer(suscripcion).data, status=status.HTTP_200_OK)
+
+        actor_id = self._actor_id(request, required=True)
+        try:
+            suscripcion.transicionar(
+                Subscription.EventoEstado.COBRO_NUEVO_DETECTADO,
+                actor_id=actor_id,
+                actor_rol=actor_rol,
+            )
+        except DjangoValidationError as exc:
+            raise self._convertir_error_transicion(exc) from exc
+
+        return Response(SubscriptionSerializer(suscripcion).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
         """

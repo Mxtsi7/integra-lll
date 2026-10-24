@@ -26,10 +26,12 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `PUT` | `/api/suscripciones/<id>/` | Actualiza por completo una suscripción propia | `200 OK` / `404` |
 | `PATCH` | `/api/suscripciones/<id>/` | Actualiza datos; conserva compatibilidad para solicitar cancelación | `200 OK` / `400` / `403` / `404` |
 | `DELETE` | `/api/suscripciones/<id>/` | Desactiva una suscripción propia sin borrar su histórico | `204 No Content` / `404` |
+| `POST` | `/api/suscripciones/<id>/cancelar/` | Cancela suscripción sin hacer soft-delete; idempotente (VI-03 / RF-10) | `200 OK` / `403` / `404` |
+| `POST` | `/api/suscripciones/<id>/reactivar/` | Reactiva o confirma cobro detectado; idempotente (VI-09) | `200 OK` / `403` / `404` |
 | `GET` | `/api/suscripciones/calendario-cobros/?mes=YYYY-MM` | Lista los cobros confirmados y proyectados del mes | `200 OK` / `400` / `403` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
-| `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia o solicita cancelación | `200 OK` / `400` / `403` / `404` |
+| `POST` | `/api/suscripciones/<id>/transiciones/` | Confirma vigencia, cobro nuevo o solicita cancelación | `200 OK` / `400` / `403` / `404` |
 
 > **Aislamiento de cuenta**: Toda petición debe incluir la cabecera `X-Organizacion-Id`. Si falta, responde `403 Forbidden`. Si se intenta acceder, modificar o eliminar una suscripción de otra organización, responde `404 Not Found` sin revelar su existencia.
 
@@ -79,17 +81,15 @@ cancelación; ambas rutas de cancelación requieren un `X-Usuario-Id` y `X-Rol`
 válidos (`titular` o `integrante`). Otros cambios directos de estado responden
 `400 Bad Request`.
 
-El `POST /api/suscripciones/<id>/transiciones/` acepta:
+El `POST /api/suscripciones/<id>/transiciones/` acepta los siguientes eventos manuales:
+- `{"evento": "cancelacion_usuario"}`: cancela la suscripción conservando `activo=true` (VI-03).
+- `{"evento": "confirmacion_usuario"}`: confirma vigencia pasando de `por_confirmar` a `activo`.
+- `{"evento": "cobro_nuevo_detectado"}`: reactiva o confirma cobro pasando a `activo` (VI-09).
+- `{"evento": "cobro_regularizado"}`: confirma regularización pasando a `activo` (VI-09).
 
-```json
-{"evento": "confirmacion_usuario"}
-```
-
-o:
-
-```json
-{"evento": "cancelacion_usuario"}
-```
+Además, se exponen acciones dedicadas de alto nivel e idempotentes:
+- `POST /api/suscripciones/<id>/cancelar/`: cancela la suscripción sin hacer soft-delete; repetir la petición es idempotente y no genera eventos duplicados (VI-03).
+- `POST /api/suscripciones/<id>/reactivar/`: reactiva una suscripción pasando a `activo`; si ya está activa, responde 200 sin duplicar auditoría ni inventar cobros sin evidencia (VI-09).
 
 Debe incluir `X-Usuario-Id` y `X-Rol` (`titular` o `integrante`), además de
 `X-Organizacion-Id`. Un evento no permitido para el estado actual responde

@@ -147,6 +147,14 @@ class SolicitarTransicionSerializer(serializers.Serializer):
                 Subscription.EventoEstado.CONFIRMACION_USUARIO,
                 Subscription.EventoEstado.CONFIRMACION_USUARIO.label,
             ),
+            (
+                Subscription.EventoEstado.COBRO_NUEVO_DETECTADO,
+                Subscription.EventoEstado.COBRO_NUEVO_DETECTADO.label,
+            ),
+            (
+                Subscription.EventoEstado.COBRO_REGULARIZADO,
+                Subscription.EventoEstado.COBRO_REGULARIZADO.label,
+            ),
         )
     )
 
