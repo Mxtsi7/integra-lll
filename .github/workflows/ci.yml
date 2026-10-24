@@ -71,7 +71,7 @@ jobs:
   # No pertenece a ningún servicio, así que tiene su propio trabajo. Corre
   # con sqlite en memoria; no necesita Postgres ni variables.
   shared:
-    name: shared · cifrado
+    name: shared · cifrado y tenant
     runs-on: ubuntu-latest
 
     steps:
