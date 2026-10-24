@@ -1,6 +1,14 @@
-from django.urls import path
-from . import views
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from .views import CuentaConectadaViewSet
+
+router = DefaultRouter()
+# "conectores", en español: el gateway enruta /api/conectores/ y reenvía la
+# ruta intacta (ADR-004). Si acá dijera "connectors", la petición llegaría al
+# servicio y moriría en un 404 que no se ve desde afuera.
+router.register(r"conectores", CuentaConectadaViewSet, basename="cuenta-conectada")
 
 urlpatterns = [
-    path('health/', views.health_check, name='health_check'),
+    path("", include(router.urls)),
 ]

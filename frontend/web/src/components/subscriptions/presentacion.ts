@@ -2,11 +2,11 @@
  * Lo visual de una suscripción, derivado del dato del dominio.
  *
  * `Suscripcion` (de shared) es lo que devuelve la API y con lo que trabajan
- * los cálculos. El icono, el color, la alerta y las etiquetas NO son datos:
- * son decisiones de cómo dibujar, así que se calculan acá en vez de viajar
- * por la red.
+ * los cálculos. Los iconos y colores se deciden acá. Las etiquetas del
+ * catálogo se consultan en la API y se comparten desde el contexto.
  */
 
+import { useCatalogos } from '../../context/CatalogosContext';
 import type { Suscripcion } from '@ojoalgasto/shared';
 import {
   Bot,
@@ -33,20 +33,20 @@ export function inicialDe(nombre: string): string {
  * si algo está bien o mal: eso lo dice el estado. Solo ayuda a reconocer
  * la categoría de un vistazo, como los dispositivos de una casa.
  */
-export const CATEGORIA_VISUAL: Record<
+const CATEGORIA_VISUAL: Record<
   Suscripcion['categoria'],
-  { etiqueta: string; Icono: typeof Tv; color: string; suave: string }
+  { Icono: typeof Tv; color: string; suave: string }
 > = {
-  streaming: { etiqueta: 'Streaming', Icono: Tv, color: 'var(--morado)', suave: 'var(--morado-suave)' },
-  musica: { etiqueta: 'Música', Icono: Music, color: 'var(--verde)', suave: 'var(--verde-suave)' },
-  productividad: { etiqueta: 'Productividad', Icono: Briefcase, color: 'var(--azul)', suave: 'var(--azul-suave)' },
-  nube: { etiqueta: 'Nube', Icono: Cloud, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
-  juegos: { etiqueta: 'Juegos', Icono: Gamepad2, color: 'var(--acento)', suave: 'var(--acento-suave)' },
-  educacion: { etiqueta: 'Educación', Icono: GraduationCap, color: 'var(--azul)', suave: 'var(--azul-suave)' },
-  salud: { etiqueta: 'Salud', Icono: HeartPulse, color: 'var(--verde)', suave: 'var(--verde-suave)' },
-  noticias: { etiqueta: 'Noticias', Icono: Newspaper, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
-  ia: { etiqueta: 'IA', Icono: Bot, color: 'var(--morado)', suave: 'var(--morado-suave)' },
-  otro: { etiqueta: 'Otro', Icono: Package, color: 'var(--tinta-2)', suave: 'var(--vidrio-2)' },
+  streaming: { Icono: Tv, color: 'var(--morado)', suave: 'var(--morado-suave)' },
+  musica: { Icono: Music, color: 'var(--verde)', suave: 'var(--verde-suave)' },
+  productividad: { Icono: Briefcase, color: 'var(--azul)', suave: 'var(--azul-suave)' },
+  nube: { Icono: Cloud, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
+  juegos: { Icono: Gamepad2, color: 'var(--acento)', suave: 'var(--acento-suave)' },
+  educacion: { Icono: GraduationCap, color: 'var(--azul)', suave: 'var(--azul-suave)' },
+  salud: { Icono: HeartPulse, color: 'var(--verde)', suave: 'var(--verde-suave)' },
+  noticias: { Icono: Newspaper, color: 'var(--turquesa)', suave: 'var(--turquesa-suave)' },
+  ia: { Icono: Bot, color: 'var(--morado)', suave: 'var(--morado-suave)' },
+  otro: { Icono: Package, color: 'var(--tinta-2)', suave: 'var(--vidrio-2)' },
 };
 
 /** Días de anticipación con los que se avisa. RN-NOT-004 usa 48 h. */
@@ -85,14 +85,14 @@ export function sufijoFrecuencia(frecuencia: Suscripcion['frecuencia']): string 
   return frecuencia === 'anual' ? '/año' : '/mes';
 }
 
-/** Las 10 categorías del dominio, listas para poblar un `<select>` o pestañas. */
-export const CATEGORIAS: { valor: Suscripcion['categoria']; etiqueta: string }[] = (
-  Object.keys(CATEGORIA_VISUAL) as Suscripcion['categoria'][]
-).map((valor) => ({ valor, etiqueta: CATEGORIA_VISUAL[valor].etiqueta }));
-
-/** 'streaming' -> 'Streaming'. */
-export function etiquetaCategoria(categoria: Suscripcion['categoria']): string {
-  return CATEGORIA_VISUAL[categoria].etiqueta;
+/** Las etiquetas vienen de BD; un código nuevo usa el icono genérico. */
+export function usePresentacionCategoria() {
+  const { datos } = useCatalogos();
+  return (codigo: string) => {
+    const visual = Object.prototype.hasOwnProperty.call(CATEGORIA_VISUAL, codigo)
+      ? CATEGORIA_VISUAL[codigo] : CATEGORIA_VISUAL.otro;
+    return { ...visual, etiqueta: datos?.categorias.find((c) => c.codigo === codigo)?.nombre ?? codigo };
+  };
 }
 
 /** Cómo se llama cada estado delante del usuario, y de qué color es su insignia. */
