@@ -1,16 +1,16 @@
 from rest_framework.response import Response
 
 from shared.eliminacion import LimpiezaOrganizacionView
-from .models import Cobro, RegistroUso, Subscription, TransicionEstado
+from .models import Cobro, OutboxEvento, Presupuesto, RegistroUso, Subscription, TransicionEstado
 
 
 class LimpiezaSubscriptionsView(LimpiezaOrganizacionView):
     servicio = "subscriptions"
-    modelos = (Cobro, RegistroUso, TransicionEstado, Subscription)
+    modelos = (OutboxEvento, Presupuesto, Cobro, RegistroUso, TransicionEstado, Subscription)
 
     def validar_limpieza(self, organizacion_id):
         # Una FK local inconsistente no autoriza borrar registros de otro tenant.
-        for modelo in self.modelos[:-1]:
+        for modelo in (Cobro, RegistroUso, TransicionEstado):
             if modelo.objects.filter(suscripcion__organizacion_id=organizacion_id).exclude(
                 organizacion_id=organizacion_id,
             ).exists():

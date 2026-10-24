@@ -35,6 +35,13 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
+    # el gateway (ADR-004). Es la misma pieza en los cinco servicios.
+    #
+    # Sin esto, `ModeloTenant` no tiene de dónde sacar la organización y
+    # cualquier ViewSet responde 403: el servicio queda inalcanzable aunque
+    # los modelos y las rutas estén bien.
+    "shared.tenant.base.ContextoTenantMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -64,6 +71,10 @@ TEMPLATES = [
 
 ESQUEMA_BD = env("ESQUEMA_BD", default=SERVICE_NAME)
 DATABASES = {"default": env.db("DATABASE_URL")}
+# `-c search_path=` es sintaxis de Postgres: pasárselo a sqlite revienta con
+# "Connection() got an unexpected keyword argument 'options'". Las pruebas
+# locales caen a sqlite en memoria cuando no hay Postgres (ver conftest.py),
+# así que la guarda tiene que estar. Igual que en connectors y subscriptions.
 if "sqlite" not in DATABASES["default"]["ENGINE"]:
     DATABASES["default"]["OPTIONS"] = {"options": f"-c search_path={ESQUEMA_BD}"}
 DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
@@ -88,3 +99,4 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+

@@ -85,9 +85,9 @@ class ContextoTenantMiddleware:
 # VIEWSETS
 # ═══════════════════════════════════════════════════════════════════
 
-class TenantViewSet(viewsets.ModelViewSet):
+class MezclaTenant:
     """
-    ViewSet con aislamiento por organización.
+    El aislamiento por organización, suelto de los verbos que se exponen.
 
         class SuscripcionViewSet(TenantViewSet):
             serializer_class = SuscripcionSerializer
@@ -118,7 +118,17 @@ class TenantViewSet(viewsets.ModelViewSet):
         serializer.save(organizacion_id=org)
 
 
-class SoloLecturaTenantViewSet(TenantViewSet, viewsets.ReadOnlyModelViewSet):
-    """Igual que TenantViewSet pero sin escritura. Para reportes y consultas."""
+class TenantViewSet(MezclaTenant, viewsets.ModelViewSet):
+    """ViewSet con aislamiento por organización y las cinco operaciones REST."""
 
-    pass
+
+class SoloLecturaTenantViewSet(MezclaTenant, viewsets.ReadOnlyModelViewSet):
+    """Igual que TenantViewSet pero sin escritura. Para reportes y consultas.
+
+    El aislamiento va en `MezclaTenant` y no en `TenantViewSet` a propósito.
+    Heredar de los dos (`TenantViewSet, ReadOnlyModelViewSet`) parece lo
+    natural y NO funciona: `TenantViewSet` es un `ModelViewSet`, así que
+    `CreateModelMixin` queda primero en el MRO y el router sigue aceptando
+    POST, PUT y DELETE. Quedaba una clase que se llamaba "solo lectura" y
+    dejaba escribir, que es peor que no tenerla.
+    """

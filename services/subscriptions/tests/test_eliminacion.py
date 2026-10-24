@@ -6,6 +6,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from app.models import Cobro, Proveedor, RegistroUso, Subscription, TransicionEstado
+from app.models import OutboxEvento, Presupuesto
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -69,6 +70,22 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
     cobro.save(update_fields=["organizacion_id"])
     assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
     assert EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+
+
+def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    for tenant in (org, otra):
+        Presupuesto.objects.create(organizacion_id=tenant, mes="2026-10", moneda="CLP", monto=1000)
+        OutboxEvento.objects.create(
+            organizacion_id=tenant, evento="suscripcion.creada",
+            correlation_id=uuid.uuid4(), datos={"nombre": "Dato privado"},
+        )
+    for _ in range(2):
+        assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+    for modelo in (Presupuesto, OutboxEvento):
+        assert not modelo.objects.filter(organizacion_id=org).exists()
+        assert modelo.objects.filter(organizacion_id=otra).count() == 1
 
 
 def transicion(org, sub):

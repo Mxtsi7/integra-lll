@@ -1,6 +1,7 @@
 from shared.eliminacion import LimpiezaOrganizacionView
+from .models import Alerta
 
 
 class LimpiezaNotificationsView(LimpiezaOrganizacionView):
-    # Este servicio todavía no contiene modelos de dominio (notifications/models.py).
     servicio = "notifications"
+    modelos = (Alerta,)
