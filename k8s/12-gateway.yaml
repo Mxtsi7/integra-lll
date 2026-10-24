@@ -51,5 +51,5 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 20
           resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 200m, memory: 320Mi }
+            requests: { cpu: 50m,  memory: 64Mi }
+            limits:   { cpu: 200m, memory: 224Mi }
