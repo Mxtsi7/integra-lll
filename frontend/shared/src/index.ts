@@ -23,3 +23,4 @@ export * from './api/conectores';
 export * from './validaciones';
 export * from './api/planes';
 export * from './api/verificacionCorreo';
+export * from './estadoCarga';
