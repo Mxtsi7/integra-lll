@@ -576,7 +576,7 @@ class TransicionEstado(ModeloTenant):
         choices=Subscription.Estado.choices,
         verbose_name="Estado nuevo",
     )
-    actor_id = models.UUIDField(null=True, blank=True, verbose_name="Actor")
+    actor_id = models.BigIntegerField(null=True, blank=True, verbose_name="Actor")
     actor_rol = models.CharField(max_length=20, blank=True, verbose_name="Rol del actor")
     ocurrido_en = models.DateTimeField(auto_now_add=True, verbose_name="Ocurrido en")
 

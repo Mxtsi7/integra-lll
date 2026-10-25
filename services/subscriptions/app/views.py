@@ -513,7 +513,10 @@ class SubscriptionViewSet(TenantViewSet):
                 raise PermissionDenied("Falta el contexto de usuario para auditar el evento.")
             return None
         try:
-            return uuid.UUID(str(actor_id))
+            val = int(actor_id)
+            if val <= 0:
+                raise ValueError
+            return val
         except (TypeError, ValueError, AttributeError) as exc:
             raise ValidationError({"actor_id": "El identificador de usuario no es válido."}) from exc
 
@@ -628,6 +631,80 @@ class SubscriptionViewSet(TenantViewSet):
             TransicionEstadoSerializer(transicion).data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        responses=SubscriptionSerializer,
+        description="Cancela una suscripción propia sin hacer soft-delete (VI-03 / RF-10).",
+    )
+    @action(detail=True, methods=["post"], url_path="cancelar")
+    def cancelar(self, request, pk=None):
+        """POST /api/suscripciones/<id>/cancelar/ (VI-03 / RF-10)."""
+        suscripcion = self.get_object()
+        actor_rol = getattr(request, "rol", None)
+        if actor_rol not in ("titular", "integrante"):
+            raise PermissionDenied("El actor no tiene un rol válido para solicitar la cancelación.")
+
+        actor_id = self._actor_id(request, required=True)
+        correlation_id = self._correlation_id(request)
+
+        with transaction.atomic():
+            suscripcion_bloqueada = (
+                type(suscripcion)
+                .objects.select_for_update()
+                .get(pk=suscripcion.pk)
+            )
+            # Idempotencia bajo bloqueo: si ya está cancelada, responde 200 sin duplicar transiciones ni outbox
+            if suscripcion_bloqueada.estado == Subscription.Estado.CANCELADO:
+                return Response(SubscriptionSerializer(suscripcion_bloqueada).data, status=status.HTTP_200_OK)
+
+            try:
+                suscripcion_bloqueada.transicionar(
+                    Subscription.EventoEstado.CANCELACION_USUARIO,
+                    actor_id=actor_id,
+                    actor_rol=actor_rol,
+                    correlation_id=correlation_id,
+                )
+            except DjangoValidationError as exc:
+                raise self._convertir_error_transicion(exc) from exc
+
+        return Response(SubscriptionSerializer(suscripcion_bloqueada).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        responses=SubscriptionSerializer,
+        description="Reactiva o confirma cobro detectado para una suscripción (VI-09).",
+    )
+    @action(detail=True, methods=["post"], url_path="reactivar")
+    def reactivar(self, request, pk=None):
+        """POST /api/suscripciones/<id>/reactivar/ (VI-09)."""
+        suscripcion = self.get_object()
+        actor_rol = getattr(request, "rol", None)
+        if actor_rol not in ("titular", "integrante"):
+            raise PermissionDenied("El actor no tiene un rol válido para reactivar la suscripción.")
+
+        actor_id = self._actor_id(request, required=True)
+        correlation_id = self._correlation_id(request)
+
+        with transaction.atomic():
+            suscripcion_bloqueada = (
+                type(suscripcion)
+                .objects.select_for_update()
+                .get(pk=suscripcion.pk)
+            )
+            # Idempotencia bajo bloqueo: si ya está activa, responde 200 sin duplicar auditoría ni outbox
+            if suscripcion_bloqueada.estado == Subscription.Estado.ACTIVO:
+                return Response(SubscriptionSerializer(suscripcion_bloqueada).data, status=status.HTTP_200_OK)
+
+            try:
+                suscripcion_bloqueada.transicionar(
+                    Subscription.EventoEstado.COBRO_NUEVO_DETECTADO,
+                    actor_id=actor_id,
+                    actor_rol=actor_rol,
+                    correlation_id=correlation_id,
+                )
+            except DjangoValidationError as exc:
+                raise self._convertir_error_transicion(exc) from exc
+
+        return Response(SubscriptionSerializer(suscripcion_bloqueada).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):

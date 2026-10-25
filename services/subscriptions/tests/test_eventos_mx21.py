@@ -102,7 +102,7 @@ def test_actualizacion_y_transicion_publican_hechos_separados_con_misma_correlac
         headers={
             "X-Organizacion-Id": str(organizacion),
             "X-Correlation-ID": str(correlation_id),
-            "X-Usuario-Id": str(uuid.uuid4()),
+            "X-Usuario-Id": "42",
             "X-Rol": "titular",
         },
     )

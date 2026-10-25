@@ -441,13 +441,15 @@ class TestReactivarConfirmarCobroVI09:
 # ══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.django_db(transaction=True)
+@pytest.mark.django_db
 class TestConcurrenciaTransiciones:
     """Verifica exclusión mutua e idempotencia concurrente bajo select_for_update."""
 
     def test_concurrencia_cancelar_simultaneo(
         self, org_principal: uuid.UUID, actor_id: int
     ) -> None:
+        if connection.vendor != "postgresql":
+            pytest.skip("La concurrencia real entre hilos requiere PostgreSQL")
         suscripcion = crear_suscripcion(org_principal, "Concurrente Cancelar")
         barrera = Barrier(2)
 
@@ -486,6 +488,8 @@ class TestConcurrenciaTransiciones:
     def test_concurrencia_reactivar_simultaneo(
         self, org_principal: uuid.UUID, actor_id: int
     ) -> None:
+        if connection.vendor != "postgresql":
+            pytest.skip("La concurrencia real entre hilos requiere PostgreSQL")
         suscripcion = crear_suscripcion(
             org_principal, "Concurrente Reactivar", estado=Subscription.Estado.CANCELADO
         )
