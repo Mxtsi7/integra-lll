@@ -3,14 +3,8 @@
 from django.db import migrations, models
 
 
-def limpiar_historial_actor_id(apps, schema_editor):
-    """Tratamiento explícito del historial previo de actor_id.
-
-    Los registros históricos anteriores utilizaban UUIDs. Al migrar al modelo
-    de identidad de Auth (enteros/BigAutoField), los identificadores previos
-    no corresponden al rango numérico de Auth y se normalizan a NULL para
-    evitar inconsistencias y permitir la coerción limpia de la columna.
-    """
+def migrar_actor_id_a_bigint(apps, schema_editor):
+    """Normaliza el historial previo a NULL y altera el tipo a bigint en PostgreSQL o SQLite."""
     schema_editor.execute(
         "UPDATE subscription_state_transition SET actor_id = NULL WHERE actor_id IS NOT NULL;"
     )
@@ -18,6 +12,29 @@ def limpiar_historial_actor_id(apps, schema_editor):
         schema_editor.execute(
             "ALTER TABLE subscription_state_transition ALTER COLUMN actor_id TYPE bigint USING NULL;"
         )
+    else:
+        model = apps.get_model("app", "TransicionEstado")
+        old_field = model._meta.get_field("actor_id")
+        new_field = models.BigIntegerField(blank=True, null=True, verbose_name="Actor")
+        new_field.set_attributes_from_name("actor_id")
+        schema_editor.alter_field(model, old_field, new_field)
+
+
+def revertir_actor_id_a_uuid(apps, schema_editor):
+    """Permite rollback limpio: normaliza a NULL y altera el tipo de vuelta a uuid en PostgreSQL o SQLite."""
+    schema_editor.execute(
+        "UPDATE subscription_state_transition SET actor_id = NULL WHERE actor_id IS NOT NULL;"
+    )
+    if schema_editor.connection.vendor == "postgresql":
+        schema_editor.execute(
+            "ALTER TABLE subscription_state_transition ALTER COLUMN actor_id TYPE uuid USING NULL;"
+        )
+    else:
+        model = apps.get_model("app", "TransicionEstado")
+        old_field = model._meta.get_field("actor_id")
+        new_field = models.UUIDField(blank=True, null=True, verbose_name="Actor")
+        new_field.set_attributes_from_name("actor_id")
+        schema_editor.alter_field(model, old_field, new_field)
 
 
 class Migration(migrations.Migration):
@@ -27,13 +44,19 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(
-            limpiar_historial_actor_id,
-            reverse_code=migrations.RunPython.noop,
-        ),
-        migrations.AlterField(
-            model_name='transicionestado',
-            name='actor_id',
-            field=models.BigIntegerField(blank=True, null=True, verbose_name='Actor'),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    migrar_actor_id_a_bigint,
+                    reverse_code=revertir_actor_id_a_uuid,
+                ),
+            ],
+            state_operations=[
+                migrations.AlterField(
+                    model_name='transicionestado',
+                    name='actor_id',
+                    field=models.BigIntegerField(blank=True, null=True, verbose_name='Actor'),
+                ),
+            ],
         ),
     ]

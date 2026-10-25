@@ -55,6 +55,7 @@ class Subscription(ReferenciasCatalogo, ModeloTenant):
         SIN_USO_45_DIAS = "sin_uso_45_dias", "Más de 45 días sin uso"
         USO_REGISTRADO = "uso_registrado", "Uso registrado"
         COBRO_NUEVO_DETECTADO = "cobro_nuevo_detectado", "Cobro nuevo detectado"
+        REACTIVACION_USUARIO = "reactivacion_usuario", "Reactivación solicitada"
 
     # ── campos ───────────────────────────────────────────────────────
 
@@ -189,6 +190,10 @@ class Subscription(ReferenciasCatalogo, ModeloTenant):
         ),
         EventoEstado.COBRO_NUEVO_DETECTADO: (
             tuple(Estado.values),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.REACTIVACION_USUARIO: (
+            (Estado.CANCELADO,),
             Estado.ACTIVO,
         ),
     }

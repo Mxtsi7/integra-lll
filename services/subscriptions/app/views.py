@@ -671,7 +671,7 @@ class SubscriptionViewSet(TenantViewSet):
 
     @extend_schema(
         responses=SubscriptionSerializer,
-        description="Reactiva o confirma cobro detectado para una suscripción (VI-09).",
+        description="Reactiva una suscripción cancelada a activo a solicitud del usuario (VI-09).",
     )
     @action(detail=True, methods=["post"], url_path="reactivar")
     def reactivar(self, request, pk=None):
@@ -696,7 +696,7 @@ class SubscriptionViewSet(TenantViewSet):
 
             try:
                 suscripcion_bloqueada.transicionar(
-                    Subscription.EventoEstado.COBRO_NUEVO_DETECTADO,
+                    Subscription.EventoEstado.REACTIVACION_USUARIO,
                     actor_id=actor_id,
                     actor_rol=actor_rol,
                     correlation_id=correlation_id,

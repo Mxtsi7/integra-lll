@@ -321,7 +321,7 @@ class TestReactivarConfirmarCobroVI09:
         assert auditoria.count() == 1
         transicion = auditoria.first()
         assert transicion.actor_id == actor_id
-        assert transicion.evento == Subscription.EventoEstado.COBRO_NUEVO_DETECTADO
+        assert transicion.evento == Subscription.EventoEstado.REACTIVACION_USUARIO
         assert transicion.estado_anterior == Subscription.Estado.CANCELADO
         assert transicion.estado_nuevo == Subscription.Estado.ACTIVO
 
@@ -435,6 +435,28 @@ class TestReactivarConfirmarCobroVI09:
         assert TransicionEstado.objects.filter(suscripcion=suscripcion).count() == 0
         assert OutboxEvento.objects.filter(datos__suscripcion_id=str(suscripcion.id)).count() == 0
 
+    def test_reactivar_desde_estado_invalido_responde_400(
+        self, client: APIClient, org_principal: uuid.UUID, actor_id: int
+    ) -> None:
+        """VI-09: /reactivar/ solo permite transición desde CANCELADO; desde PRUEBA o FANTASMA responde 400."""
+        suscripcion = crear_suscripcion(
+            org_principal, "En Prueba", estado=Subscription.Estado.PRUEBA
+        )
+        headers = {
+            "X-Organizacion-Id": str(org_principal),
+            "X-Usuario-Id": str(actor_id),
+            "X-Rol": "titular",
+        }
+        resp = client.post(
+            f"/api/suscripciones/{suscripcion.id}/reactivar/",
+            headers=headers,
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        suscripcion.refresh_from_db()
+        assert suscripcion.estado == Subscription.Estado.PRUEBA
+        assert TransicionEstado.objects.filter(suscripcion=suscripcion).count() == 0
+        assert OutboxEvento.objects.filter(datos__suscripcion_id=str(suscripcion.id)).count() == 0
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Concurrencia real bajo hilos y PostgreSQL
@@ -528,13 +550,13 @@ class TestConcurrenciaTransiciones:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Simulación de Gateway con JWT real de Auth
+# Contrato de cabeceras inyectadas por Gateway con identidad de Auth
 # ══════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.django_db
-class TestIntegracionGatewayJWT:
-    """Verifica que el flujo desde Gateway con identidad de Auth (ID entero) opere de extremo a extremo."""
+class TestContratoCabecerasGateway:
+    """Verifica el contrato de cabeceras downstream que el Gateway inyecta tras decodificar el JWT de Auth."""
 
     def test_flujo_cancelar_y_reactivar_con_cabeceras_inyectadas_por_gateway(
         self, client: APIClient, org_principal: uuid.UUID
@@ -587,7 +609,7 @@ class TestIntegracionGatewayJWT:
         assert transiciones.count() == 2
         transicion_react = transiciones.last()
         assert transicion_react.actor_id == 42
-        assert transicion_react.evento == Subscription.EventoEstado.COBRO_NUEVO_DETECTADO
+        assert transicion_react.evento == Subscription.EventoEstado.REACTIVACION_USUARIO
 
         outbox_eventos = OutboxEvento.objects.filter(datos__suscripcion_id=str(suscripcion.id)).order_by("ocurrido_en")
         assert outbox_eventos.count() == 2
