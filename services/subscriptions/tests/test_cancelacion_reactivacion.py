@@ -441,7 +441,7 @@ class TestReactivarConfirmarCobroVI09:
 # ══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db(transaction=True)
 class TestConcurrenciaTransiciones:
     """Verifica exclusión mutua e idempotencia concurrente bajo select_for_update."""
 
