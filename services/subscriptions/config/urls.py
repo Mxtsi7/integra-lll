@@ -5,10 +5,11 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from app.views import SubscriptionViewSet
+from app.views import RecommendationViewSet, SubscriptionViewSet
 
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
+router.register(r"recommendations", RecommendationViewSet, basename="recommendation")
 
 def salud(request):
     """
