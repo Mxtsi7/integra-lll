@@ -1,6 +1,9 @@
 from shared.eliminacion import LimpiezaOrganizacionView
+from .models import CupoIngesta
 
 
 class LimpiezaAnalyticsView(LimpiezaOrganizacionView):
-    # Este servicio todavía no contiene modelos de dominio (analytics/models.py).
     servicio = "analytics"
+    # Las FK locales eliminan documentos, intentos y consumos del mismo cupo.
+    modelos = (CupoIngesta,)
+

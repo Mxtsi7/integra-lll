@@ -1,7 +1,7 @@
 import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Zap } from 'lucide-react';
 import { useConteo } from '../../hooks/useConteo';
-import { CATEGORIA_VISUAL } from '../subscriptions/presentacion';
+import { usePresentacionCategoria } from '../subscriptions/presentacion';
 import styles from './Tiles.module.css';
 
 interface TileCategoriasProps {
@@ -13,6 +13,7 @@ interface TileCategoriasProps {
  * barras verticales con la más alta en naranjo y su valor encima.
  */
 export function TileCategorias({ suscripciones }: TileCategoriasProps) {
+  const categoriaVisual = usePresentacionCategoria();
   // Solo las que efectivamente pesan en el gasto mensual: mismo criterio
   // que gastoProyectado() en shared/calculos.ts (activo + fantasma).
   const relevantes = suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma');
@@ -53,7 +54,7 @@ export function TileCategorias({ suscripciones }: TileCategoriasProps) {
       {datos.length === 0 ? (
         <p className={styles.vacio}>Todavía no hay suscripciones activas para comparar.</p>
       ) : (
-        <div className={styles.categoriasGrafico} role="img" aria-label={datos.map((d) => `${CATEGORIA_VISUAL[d.categoria].etiqueta} ${formatearMonto(d.monto)}`).join(', ')}>
+        <div className={styles.categoriasGrafico} role="img" aria-label={datos.map((d) => `${categoriaVisual(d.categoria).etiqueta} ${formatearMonto(d.monto)}`).join(', ')}>
           {datos.map((d, i) => (
             <div key={d.categoria} className={styles.categoriasColumna}>
               <span
@@ -62,7 +63,7 @@ export function TileCategorias({ suscripciones }: TileCategoriasProps) {
               >
                 {i === 0 && <span className={styles.categoriasBurbuja}>{formatearMonto(d.monto)}</span>}
               </span>
-              <span className={styles.categoriasEje}>{CATEGORIA_VISUAL[d.categoria].etiqueta}</span>
+              <span className={styles.categoriasEje}>{categoriaVisual(d.categoria).etiqueta}</span>
             </div>
           ))}
         </div>

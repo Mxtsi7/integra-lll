@@ -6,7 +6,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
 import styles from './PerfilPage.module.css';
-
+import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 type EstadoCarga =
   | { tipo: 'cargando' }
   | { tipo: 'error'; mensaje: string }
@@ -113,9 +113,7 @@ function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
             </Boton>
           </Fila>
           <Fila etiqueta="Eliminar cuenta" detalle="Borra tu cuenta y tus suscripciones.">
-            <Boton variante="sutil" tamano="s" className={styles.peligro} disabled title="Próximamente">
-              Eliminar
-            </Boton>
+              <EliminarCuenta className={styles.peligro} />
           </Fila>
         </Seccion>
       </div>

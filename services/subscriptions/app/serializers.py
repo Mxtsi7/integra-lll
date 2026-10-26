@@ -8,12 +8,16 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from app.models import (
+    CategoriaSuscripcion,
+    Moneda,
     Cobro,
     Presupuesto,
     RegistroUso,
     Subscription,
     TransicionEstado,
 )
+from django.core.exceptions import ValidationError as ErrorModelo
+from shared.catalogos.models import validar_asignacion
 
 
 class CobroSerializer(serializers.ModelSerializer):
@@ -118,18 +122,20 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                 data["estado"] = "cancelado"
         return super().to_internal_value(data)
 
-    # ── validaciones de campo ───────────────────────────────────────
-
-    def validate_monto(self, value: Decimal) -> Decimal:
-        """El monto debe ser estrictamente mayor a 0."""
-        if value <= 0:
-            raise serializers.ValidationError(
-                "El monto debe ser mayor a 0."
-            )
-        return value
-
-    def validate(self, attrs: dict) -> dict:
+    def validate(self, attrs):
         attrs = super().validate(attrs)
+        errores = {}
+        for campo, modelo in (("moneda", Moneda), ("categoria", CategoriaSuscripcion)):
+            if campo not in attrs and self.instance is not None:
+                continue
+            codigo = attrs.get(campo, Subscription._meta.get_field(campo).get_default())
+            anterior = getattr(self.instance, campo, None)
+            try:
+                validar_asignacion(modelo, codigo, anterior)
+            except ErrorModelo as error:
+                errores[campo] = error.messages
+        if errores:
+            raise serializers.ValidationError(errores)
         if self.instance is None:
             estado = attrs.get("estado", Subscription.Estado.ACTIVO)
             if estado not in (Subscription.Estado.PRUEBA, Subscription.Estado.ACTIVO):
@@ -149,6 +155,28 @@ class SubscriptionSerializer(serializers.ModelSerializer):
                     {"fin_prueba": "Es obligatorio para una suscripción en prueba."}
                 )
         return attrs
+
+    def create(self, validated_data):
+        try:
+            return super().create(validated_data)
+        except ErrorModelo as error:
+            raise serializers.ValidationError(error.message_dict) from error
+
+    def update(self, instance, validated_data):
+        try:
+            return super().update(instance, validated_data)
+        except ErrorModelo as error:
+            raise serializers.ValidationError(error.message_dict) from error
+
+    # ── validaciones de campo ───────────────────────────────────────
+
+    def validate_monto(self, value: Decimal) -> Decimal:
+        """El monto debe ser estrictamente mayor a 0."""
+        if value <= 0:
+            raise serializers.ValidationError(
+                "El monto debe ser mayor a 0."
+            )
+        return value
 
 
 class RegistrarUsoSerializer(serializers.Serializer):
@@ -284,3 +312,4 @@ class ResumenPanelSerializer(serializers.Serializer):
     gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
     conteo_estados = ConteoEstadosSerializer()
+

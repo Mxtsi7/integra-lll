@@ -4,15 +4,30 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models, transaction
 from django.db.models import Max, Sum
 from django.utils import timezone
 
 from shared.tenant.base import ModeloBase, ModeloTenant
+from shared.catalogos.models import OpcionCatalogo, ReferenciasCatalogo
 
 
-class Subscription(ModeloTenant):
+class Moneda(OpcionCatalogo):
+    codigo = models.CharField(max_length=3, unique=True, validators=[RegexValidator(r"^[A-Z]{3}$")])
+
+    class Meta(OpcionCatalogo.Meta):
+        db_table = "moneda"
+
+
+class CategoriaSuscripcion(OpcionCatalogo):
+    codigo = models.CharField(max_length=20, unique=True, validators=[RegexValidator(r"^[a-z][a-z0-9_]*$")])
+
+    class Meta(OpcionCatalogo.Meta):
+        db_table = "categoria_suscripcion"
+
+
+class Subscription(ReferenciasCatalogo, ModeloTenant):
     """Suscripción recurrente perteneciente a una organización (ADR-002 / RF-06 / RF-13)."""
 
     # ── choices ──────────────────────────────────────────────────────
@@ -41,22 +56,6 @@ class Subscription(ModeloTenant):
         USO_REGISTRADO = "uso_registrado", "Uso registrado"
         COBRO_NUEVO_DETECTADO = "cobro_nuevo_detectado", "Cobro nuevo detectado"
 
-    class Moneda(models.TextChoices):
-        CLP = "CLP", "Peso chileno"
-        USD = "USD", "Dólar estadounidense"
-
-    class Categoria(models.TextChoices):
-        STREAMING = "streaming", "Streaming"
-        MUSICA = "musica", "Música"
-        PRODUCTIVIDAD = "productividad", "Productividad"
-        NUBE = "nube", "Nube"
-        JUEGOS = "juegos", "Juegos"
-        EDUCACION = "educacion", "Educación"
-        SALUD = "salud", "Salud"
-        NOTICIAS = "noticias", "Noticias"
-        IA = "ia", "Inteligencia Artificial"
-        OTRO = "otro", "Otro"
-
     # ── campos ───────────────────────────────────────────────────────
 
     nombre = models.CharField(
@@ -73,8 +72,7 @@ class Subscription(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        choices=Moneda.choices,
-        default=Moneda.CLP,
+        default="CLP",
         verbose_name="Moneda",
     )
 
@@ -90,8 +88,7 @@ class Subscription(ModeloTenant):
 
     categoria = models.CharField(
         max_length=20,
-        choices=Categoria.choices,
-        default=Categoria.OTRO,
+        default="otro",
         verbose_name="Categoría",
     )
 
@@ -139,6 +136,15 @@ class Subscription(ModeloTenant):
         blank=True,
         verbose_name="Última actividad",
     )
+
+    def catalogos(self):
+        return {"moneda": Moneda, "categoria": CategoriaSuscripcion}
+
+    def get_moneda_display(self):
+        return Moneda.objects.get(codigo=self.moneda).nombre
+
+    def get_categoria_display(self):
+        return CategoriaSuscripcion.objects.get(codigo=self.categoria).nombre
 
     TRANSICIONES_ESTADO = {
         EventoEstado.FIN_PRUEBA: (
@@ -415,7 +421,7 @@ class Subscription(ModeloTenant):
         return f"{self.nombre} ({self.get_frecuencia_display()}) – {self.monto} {self.moneda}"
 
 
-class Proveedor(ModeloBase):
+class Proveedor(ReferenciasCatalogo, ModeloBase):
     """Empresa que presta un servicio por suscripción: Netflix, Spotify, un gimnasio.
 
     Es un **catálogo global**: Netflix es Netflix para todas las organizaciones.
@@ -431,10 +437,15 @@ class Proveedor(ModeloBase):
 
     categoria = models.CharField(
         max_length=20,
-        choices=Subscription.Categoria.choices,
-        default=Subscription.Categoria.OTRO,
+        default="otro",
         verbose_name="Categoría",
     )
+
+    def catalogos(self):
+        return {"categoria": CategoriaSuscripcion}
+
+    def get_categoria_display(self):
+        return CategoriaSuscripcion.objects.get(codigo=self.categoria).nombre
 
     sitio_web = models.URLField(blank=True, verbose_name="Sitio web")
 
@@ -448,7 +459,7 @@ class Proveedor(ModeloBase):
         return self.nombre
 
 
-class Cobro(ModeloTenant):
+class Cobro(ReferenciasCatalogo, ModeloTenant):
     """Un pago concreto y YA OCURRIDO de una suscripción.
 
     No confundir con el `monto` de la suscripción, que es el valor *esperado*
@@ -473,10 +484,15 @@ class Cobro(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        choices=Subscription.Moneda.choices,
-        default=Subscription.Moneda.CLP,
+        default="CLP",
         verbose_name="Moneda",
     )
+
+    def catalogos(self):
+        return {"moneda": Moneda}
+
+    def get_moneda_display(self):
+        return Moneda.objects.get(codigo=self.moneda).nombre
 
     fecha = models.DateField(verbose_name="Fecha del cobro")
 
@@ -640,3 +656,4 @@ class Presupuesto(ModeloTenant):
 
     def __str__(self) -> str:
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
+
