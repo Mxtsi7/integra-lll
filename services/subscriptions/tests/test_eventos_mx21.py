@@ -245,3 +245,89 @@ def test_transicion_de_estado_publica_su_causa(organizacion):
     assert evento.datos["estado"] == Subscription.Estado.ACTIVO
     assert evento.datos["evento_estado"] == Subscription.EventoEstado.FIN_PRUEBA
     _validar_contrato(evento)
+
+
+@pytest.mark.django_db
+def test_reactivacion_usuario_cumple_contrato_mx21_completo(api_client, organizacion):
+    """Regresión P1 (VI-03/VI-09): reactivacion_usuario debe pasar la validación del esquema MX-21.
+
+    Flujo completo:
+    1. Cancelar la suscripción → valida el evento cancelacion_usuario contra MX-21.
+    2. Reactivar la suscripción → toma el OutboxEvento real del outbox (no un ejemplo
+       construido a mano) y lo valida contra MX-21 con FormatChecker.
+    3. Verifica correlation_id por cada transición y ausencia de duplicados (idempotencia).
+    """
+    correlation_cancelar = uuid.uuid4()
+    correlation_reactivar = uuid.uuid4()
+
+    # 1. Crear y cancelar la suscripción
+    resp_crear = api_client.post(
+        "/api/suscripciones/",
+        CUERPO,
+        format="json",
+        headers={"X-Organizacion-Id": str(organizacion)},
+    )
+    assert resp_crear.status_code == status.HTTP_201_CREATED
+    suscripcion_id = resp_crear.data["id"]
+    # Limpiar el evento de creación para aislar la prueba de transiciones de estado
+    OutboxEvento.objects.filter(evento="suscripcion.creada").delete()
+
+    resp_cancelar = api_client.post(
+        f"/api/suscripciones/{suscripcion_id}/cancelar/",
+        headers={
+            "X-Organizacion-Id": str(organizacion),
+            "X-Usuario-Id": "42",
+            "X-Rol": "titular",
+            "X-Correlation-ID": str(correlation_cancelar),
+        },
+    )
+    assert resp_cancelar.status_code == status.HTTP_200_OK
+    assert resp_cancelar.data["estado"] == Subscription.Estado.CANCELADO
+
+    evento_cancelar = OutboxEvento.objects.get(
+        evento="suscripcion.estado_cambiado",
+        datos__evento_estado=Subscription.EventoEstado.CANCELACION_USUARIO,
+    )
+    # Validar contrato MX-21 completo para cancelacion_usuario
+    payload_cancelar = _validar_contrato(evento_cancelar)
+    assert payload_cancelar["datos"]["evento_estado"] == Subscription.EventoEstado.CANCELACION_USUARIO
+    assert payload_cancelar["datos"]["estado"] == Subscription.Estado.CANCELADO
+    assert payload_cancelar["datos"]["estado_anterior"] == Subscription.Estado.ACTIVO
+    assert evento_cancelar.correlation_id == correlation_cancelar
+
+    # 2. Reactivar: este es el punto exacto del fallo P1 — reactivacion_usuario
+    #    generaba un payload rechazado por el enum de evento_estado del esquema MX-21.
+    resp_reactivar = api_client.post(
+        f"/api/suscripciones/{suscripcion_id}/reactivar/",
+        headers={
+            "X-Organizacion-Id": str(organizacion),
+            "X-Usuario-Id": "42",
+            "X-Rol": "titular",
+            "X-Correlation-ID": str(correlation_reactivar),
+        },
+    )
+    assert resp_reactivar.status_code == status.HTTP_200_OK
+    assert resp_reactivar.data["estado"] == Subscription.Estado.ACTIVO
+
+    evento_reactivar = OutboxEvento.objects.get(
+        evento="suscripcion.estado_cambiado",
+        datos__evento_estado=Subscription.EventoEstado.REACTIVACION_USUARIO,
+    )
+    # Punto crítico P1: debe pasar la validación del esquema MX-21 sin errores
+    payload_reactivar = _validar_contrato(evento_reactivar)
+    assert payload_reactivar["datos"]["evento_estado"] == Subscription.EventoEstado.REACTIVACION_USUARIO
+    assert payload_reactivar["datos"]["estado"] == Subscription.Estado.ACTIVO
+    assert payload_reactivar["datos"]["estado_anterior"] == Subscription.Estado.CANCELADO
+    assert evento_reactivar.correlation_id == correlation_reactivar
+
+    # 3. Correlation_id distinto por acción; idempotencia: exactamente 2 eventos de estado
+    assert evento_cancelar.correlation_id != evento_reactivar.correlation_id
+    assert evento_cancelar.id != evento_reactivar.id
+    total_estado_cambiado = OutboxEvento.objects.filter(
+        evento="suscripcion.estado_cambiado",
+        datos__suscripcion_id=suscripcion_id,
+    ).count()
+    assert total_estado_cambiado == 2, (
+        "Se esperan exactamente 2 eventos estado_cambiado (cancelar + reactivar); "
+        f"se encontraron {total_estado_cambiado}."
+    )
