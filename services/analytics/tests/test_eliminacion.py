@@ -61,5 +61,3 @@ def test_limpieza_cupos_ia_es_idempotente_y_conserva_otro_tenant(monkeypatch):
         for modelo, pk in ajenos.items():
             assert modelo.objects.count() == 1
             assert modelo.objects.filter(pk=pk).exists()
-
-

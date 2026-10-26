@@ -227,4 +227,3 @@ class ConsentimientoDisociado(models.Model):
 
     class Meta:
         db_table = "consentimiento_disociado"
-
