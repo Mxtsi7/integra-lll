@@ -1,16 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { pedir } from '../../../shared/src/api/cliente';
-
-export interface Recomendacion {
-  id: string;
-  suscripcion_id?: string;
-  nombre?: string;
-  titulo?: string;
-  motivo?: string;
-  ahorro_estimado?: number;
-  moneda?: string;
-  total?: number;
-}
+import { getRecomendaciones, Recomendacion } from '@ojoalgasto/shared';
 
 export type EstadoRecomendaciones =
   | { tipo: 'cargando' }
@@ -34,7 +23,7 @@ export function useRecomendaciones() {
     setEstado({ tipo: 'cargando' });
     try {
 
-      const data = await pedir<unknown>('/recomendaciones/');
+      const data = await getRecomendaciones();
       const items = extraerItems(data);
       if (items === null) {
         setEstado({ tipo: 'error', mensaje: 'El servicio respondió en un formato inesperado.' });
