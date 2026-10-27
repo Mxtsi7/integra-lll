@@ -4,10 +4,15 @@
   "main": "index.ts",
   "dependencies": {
     "@ojoalgasto/shared": "0.1.0",
+    "@react-navigation/bottom-tabs": "^7.21.0",
+    "@react-navigation/native": "^7.5.1",
+    "@react-navigation/native-stack": "^7.21.0",
     "expo": "~57.0.30",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "^5.10.1",
+    "react-native-screens": "^4.30.0"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

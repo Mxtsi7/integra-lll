@@ -1,44 +1,30 @@
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { BackHandler } from 'react-native';
-import { useEffect } from 'react';
-import { configurarApi } from '@ojoalgasto/shared';
-import { NavigationProvider, useNavigation } from './context/NavigationContext';
-import { HomeScreen, LoginScreen, ProfileScreen, SettingsScreen } from './screens';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NavigationContainer } from '@react-navigation/native';
+import { configurarApi, type Usuario } from '@ojoalgasto/shared';
+import { AuthProvider, type EstadoAuth } from './context/AuthContext';
+import { RootNavigator } from './src/navigation/RootNavigator';
 
 configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api' });
 
-function Router() {
-  const { screen, goBack, canGoBack } = useNavigation();
+export type AppProps = {
+  initialUsuario?: Usuario | null;
+  initialEstado?: EstadoAuth;
+  [key: string]: unknown;
+};
 
-  // Botón físico "atrás" en Android.
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (canGoBack) {
-        goBack();
-        return true; // evento manejado
-      }
-      return false; // deja que Android cierre la app
-    });
-    return () => sub.remove();
-  }, [canGoBack, goBack]);
-
-  switch (screen) {
-    case 'login':
-      return <LoginScreen />;
-    case 'home':
-      return <HomeScreen />;
-    case 'profile':
-      return <ProfileScreen />;
-    case 'settings':
-      return <SettingsScreen />;
-  }
-}
-
-export default function App() {
+export function App({ initialUsuario, initialEstado }: AppProps = {}) {
   return (
-    <NavigationProvider initial="login">
-      <Router />
-      <StatusBar style="auto" />
-    </NavigationProvider>
+    <SafeAreaProvider>
+      <AuthProvider initialUsuario={initialUsuario} initialEstado={initialEstado}>
+        <NavigationContainer>
+          <RootNavigator />
+          <StatusBar style="auto" />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
+
+export default App;
