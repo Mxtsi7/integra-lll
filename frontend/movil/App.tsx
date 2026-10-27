@@ -1,22 +1,44 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { BackHandler } from 'react-native';
+import { useEffect } from 'react';
 import { configurarApi } from '@ojoalgasto/shared';
+import { NavigationProvider, useNavigation } from './context/NavigationContext';
+import { HomeScreen, LoginScreen, ProfileScreen, SettingsScreen } from './screens';
+
 configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api' });
+
+function Router() {
+  const { screen, goBack, canGoBack } = useNavigation();
+
+  // Botón físico "atrás" en Android.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (canGoBack) {
+        goBack();
+        return true; // evento manejado
+      }
+      return false; // deja que Android cierre la app
+    });
+    return () => sub.remove();
+  }, [canGoBack, goBack]);
+
+  switch (screen) {
+    case 'login':
+      return <LoginScreen />;
+    case 'home':
+      return <HomeScreen />;
+    case 'profile':
+      return <ProfileScreen />;
+    case 'settings':
+      return <SettingsScreen />;
+  }
+}
 
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
+    <NavigationProvider initial="login">
+      <Router />
       <StatusBar style="auto" />
-    </View>
+    </NavigationProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
