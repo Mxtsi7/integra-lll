@@ -658,6 +658,29 @@ class Presupuesto(ModeloTenant):
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
 
 
+class RecomendacionDescartada(ModeloTenant):
+    """Preferencia persistente: una recomendación descartada no reaparece al recalcular."""
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="recomendaciones_descartadas",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "recomendacion_descartada"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "suscripcion"],
+                name="recomendacion_descartada_unica_tenant_sub",
+            ),
+        ]
+        verbose_name = "Recomendación descartada"
+
+    def __str__(self) -> str:
+        return f"Recomendación descartada: {self.suscripcion_id}"
+
+
 class UmbralAhorro(ModeloBase):
     """Umbral mínimo de ahorro estimado por moneda (VI-21 / RN-REC-001).
 

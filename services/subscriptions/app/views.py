@@ -20,7 +20,7 @@ from rest_framework.response import Response
 from events.outbox import registrar_actualizada, registrar_creada
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from app.models import Cobro, Presupuesto, RegistroUso, Subscription, umbral_minimo
+from app.models import Cobro, Presupuesto, RecomendacionDescartada, RegistroUso, Subscription, umbral_minimo
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,
@@ -842,6 +842,10 @@ class RecommendationViewSet(viewsets.ViewSet):
                 moneda=moneda,
             ).exclude(estado=Subscription.Estado.CANCELADO)
         )
+        descartadas = set(
+            RecomendacionDescartada.objects.filter(organizacion_id=org_id)
+            .values_list("suscripcion_id", flat=True)
+        )
 
         recomendaciones = []
         motivo_sin_sugerencias = None
@@ -852,6 +856,10 @@ class RecommendationViewSet(viewsets.ViewSet):
             recomendaciones = _generar_recomendaciones(
                 suscripciones, umbral=umbral, moneda=moneda
             )
+            recomendaciones = [
+                rec for rec in recomendaciones
+                if rec["suscripcion_id"] not in descartadas
+            ]
             if not recomendaciones:
                 motivo_sin_sugerencias = (
                     "No se encontraron recomendaciones que superen el umbral "
@@ -870,3 +878,20 @@ class RecommendationViewSet(viewsets.ViewSet):
             ListaRecomendacionesSerializer(datos).data,
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="dismiss")
+    def dismiss(self, request, pk=None):
+        """POST /api/recommendations/{id}/dismiss/; persistente e idempotente."""
+        org_id = getattr(request, "organizacion_id", None)
+        if not org_id:
+            raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
+        suscripcion = Subscription.objects.filter(
+            pk=pk, organizacion_id=org_id
+        ).first()
+        if suscripcion is None:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("No se encontró la recomendación.")
+        RecomendacionDescartada.objects.get_or_create(
+            organizacion_id=org_id, suscripcion=suscripcion
+        )
+        return Response({"suscripcion_id": str(suscripcion.pk), "descartada": True}, status=status.HTTP_200_OK)
