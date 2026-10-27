@@ -91,6 +91,10 @@ RUTAS = {
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
     "/api/recomendaciones/": "analytics",
+    # FE-28 y FE-29: uso por periodo y puntaje de bajo uso. No va bajo
+    # "/api/usos/" (que es de subscriptions) porque son cosas distintas:
+    # allá están los registros, acá el agregado y la señal.
+    "/api/analitica/": "analytics",
     "/api/asistente/": "analytics",
     "/api/alertas/": "notifications",
 }
