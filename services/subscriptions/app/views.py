@@ -1,13 +1,13 @@
 """Vistas del servicio de suscripciones."""
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 import re
 import uuid
 
 from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -20,16 +20,26 @@ from rest_framework.response import Response
 from events.outbox import registrar_actualizada, registrar_creada
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from app.models import Cobro, Presupuesto, RegistroUso, Subscription, umbral_minimo
+from app.models import (
+    Cobro,
+    DIAS_VIGENCIA_DESCARTE_DEFAULT,
+    Presupuesto,
+    RecomendacionDescartada,
+    RegistroUso,
+    Subscription,
+    umbral_minimo,
+)
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,
+    DescarteRecomendacionSerializer,
     ListaRecomendacionesSerializer,
     PresupuestoComparacionSerializer,
     PresupuestoSerializer,
     RegistrarUsoSerializer,
     RegistroUsoSerializer,
     ResumenPanelSerializer,
+    SolicitarDescarteSerializer,
     SolicitarTransicionSerializer,
     SubscriptionSerializer,
     TransicionEstadoSerializer,
@@ -734,6 +744,7 @@ def _generar_recomendaciones(
         if ahorro < umbral:
             continue
         recomendaciones.append({
+            "id": sub.id,
             "suscripcion_id": sub.id,
             "nombre": sub.nombre,
             "motivo": _MOTIVO_USO_BAJO,
@@ -770,6 +781,7 @@ def _generar_recomendaciones(
             if sub.id in vistas:
                 continue
             recomendaciones.append({
+                "id": sub.id,
                 "suscripcion_id": sub.id,
                 "nombre": sub.nombre,
                 "motivo": _MOTIVO_DUPLICADO_CATEGORIA,
@@ -792,18 +804,20 @@ def _generar_recomendaciones(
 
 
 class RecommendationViewSet(viewsets.ViewSet):
-    """Motor de recomendaciones de optimización de gasto (VI-17 / VI-20 / VI-21).
+    """Motor de recomendaciones de optimización de gasto (VI-17 / VI-18 / VI-20 / VI-21).
 
     ``GET /api/recommendations/``
+    ``POST /api/recommendations/{id}/dismiss/``
 
-    Parámetros de query opcionales:
+    Parámetros de query opcionales para GET:
     - ``moneda`` (str, default «CLP»): filtra suscripciones por moneda y aplica
       el umbral mínimo de ahorro correspondiente (RN-REC-001).
 
-    Respuesta:
+    Respuesta de GET:
     - Siempre 200 OK con estructura válida (nunca 500).
     - Si no hay sugerencias que superen el umbral, ``recomendaciones`` es []
       y ``motivo_sin_sugerencias`` explica por qué.
+    - Excluye recomendaciones descartadas vigentes para la organización (VI-18).
     - Requiere cabecera ``X-Organizacion-Id`` (403 si falta).
     """
 
@@ -821,26 +835,40 @@ class RecommendationViewSet(viewsets.ViewSet):
         description=(
             "Devuelve recomendaciones de optimización de gasto para la organización. "
             "Solo incluye sugerencias cuyo ahorro estimado supere el umbral configurado "
-            "para la moneda (RN-REC-001 / VI-21). Nunca devuelve 500."
+            "para la moneda (RN-REC-001 / VI-21). Excluye las descartadas (VI-18). "
+            "Nunca devuelve 500."
         ),
     )
     def list(self, request):
         """GET /api/recommendations/"""
-        from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
-
         org_id = getattr(request, "organizacion_id", None)
         if not org_id:
-            raise DRFPermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
+            raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
 
         moneda = (request.query_params.get("moneda") or "CLP").upper()
         umbral = umbral_minimo(moneda)
+
+        # Excluir suscripciones con descarte vigente para esta organización (VI-18)
+        ahora = timezone.now()
+        descartes_vigentes_ids = set(
+            RecomendacionDescartada.objects.filter(
+                organizacion_id=org_id,
+            )
+            .filter(
+                models.Q(vigente_hasta__isnull=True)
+                | models.Q(vigente_hasta__gt=ahora)
+            )
+            .values_list("suscripcion_id", flat=True)
+        )
 
         suscripciones = list(
             Subscription.objects.filter(
                 organizacion_id=org_id,
                 activo=True,
                 moneda=moneda,
-            ).exclude(estado=Subscription.Estado.CANCELADO)
+            )
+            .exclude(estado=Subscription.Estado.CANCELADO)
+            .exclude(id__in=descartes_vigentes_ids)
         )
 
         recomendaciones = []
@@ -870,3 +898,65 @@ class RecommendationViewSet(viewsets.ViewSet):
             ListaRecomendacionesSerializer(datos).data,
             status=status.HTTP_200_OK,
         )
+
+    @extend_schema(
+        request=SolicitarDescarteSerializer,
+        responses=DescarteRecomendacionSerializer,
+        description="Descarta una recomendación de optimización de forma idempotente con vigencia temporal (VI-18).",
+    )
+    @action(detail=True, methods=["post"], url_path="dismiss")
+    def dismiss(self, request, pk=None):
+        """POST /api/recommendations/{id}/dismiss/ (VI-18).
+
+        Idempotente: volver a descartar la misma recomendación no falla
+        ni reaparece inmediatamente. Aplica ownership real por tenant.
+        """
+        org_id = getattr(request, "organizacion_id", None)
+        if not org_id:
+            raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
+
+        # Ownership real: la suscripción debe pertenecer a la organización
+        try:
+            suscripcion = Subscription.objects.get(pk=pk, organizacion_id=org_id)
+        except (Subscription.DoesNotExist, ValueError):
+            return Response(
+                {
+                    "detail": (
+                        "Recomendación o suscripción no encontrada "
+                        "para la organización autenticada."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer_in = SolicitarDescarteSerializer(data=request.data or {})
+        serializer_in.is_valid(raise_exception=True)
+        dias_vigencia = serializer_in.validated_data.get(
+            "dias_vigencia", DIAS_VIGENCIA_DESCARTE_DEFAULT
+        )
+        motivo = serializer_in.validated_data.get("motivo", "")
+
+        actor_id = getattr(request, "usuario_id", None)
+        actor_id_val = None
+        if actor_id:
+            try:
+                actor_id_val = int(actor_id)
+            except (ValueError, TypeError):
+                pass
+
+        vigente_hasta = timezone.now() + timedelta(days=dias_vigencia)
+
+        # Idempotente: update_or_create actualiza vigencia sin fallar ni duplicar registros
+        descarte, _ = RecomendacionDescartada.objects.update_or_create(
+            organizacion_id=org_id,
+            suscripcion=suscripcion,
+            defaults={
+                "motivo": motivo,
+                "descartado_por": actor_id_val,
+                "vigente_hasta": vigente_hasta,
+            },
+        )
+
+        serializer_out = DescarteRecomendacionSerializer(descarte)
+        return Response(serializer_out.data, status=status.HTTP_200_OK)
+

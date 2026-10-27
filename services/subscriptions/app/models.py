@@ -727,3 +727,56 @@ def umbral_minimo(moneda: str) -> Decimal:
         return fila.monto
     except UmbralAhorro.DoesNotExist:
         return UMBRAL_AHORRO_DEFAULT
+
+
+# ── VI-18: Descarte de recomendaciones ──────────────────────────────
+
+DIAS_VIGENCIA_DESCARTE_DEFAULT = 30
+
+
+class RecomendacionDescartada(ModeloTenant):
+    """Preferencia de descarte de recomendación por organización (VI-18).
+
+    Registra que una organización ha descartado una sugerencia de optimización
+    asociada a una suscripción. Define una vigencia temporal para que la
+    recomendación no vuelva a aparecer en recalculaciones mientras esté vigente.
+    """
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="descartes_recomendacion",
+        verbose_name="Suscripción",
+    )
+    motivo = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="Motivo del descarte",
+    )
+    descartado_por = models.BigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Usuario que descartó",
+    )
+    vigente_hasta = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Vigente hasta",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "recomendacion_descartada"
+        ordering = ["-creado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "suscripcion"],
+                name="recomendacion_descartada_unica_org_sub",
+            ),
+        ]
+        verbose_name = "Recomendación descartada"
+        verbose_name_plural = "Recomendaciones descartadas"
+
+    def __str__(self) -> str:
+        return f"Descarte de {self.suscripcion.nombre} (Org: {self.organizacion_id})"
+
