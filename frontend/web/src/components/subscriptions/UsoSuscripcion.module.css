@@ -1,0 +1,83 @@
+/* Registro de minutos (CH-14) e historial de uso (CH-15) del detalle. */
+
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filaCampos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.pieFormulario {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.confirmacion {
+  font-size: 13.5px;
+  color: var(--verde);
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13.5px;
+}
+
+.estadoLista {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 14px 0;
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+.lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fila {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--vidrio-borde);
+  font-size: 14px;
+}
+
+.fila:last-child {
+  border-bottom: none;
+}
+
+.filaFecha {
+  color: var(--tinta-2);
+}
+
+.filaMinutos {
+  font-weight: 700;
+  color: var(--tinta);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 420px) {
+  .filaCampos {
+    grid-template-columns: 1fr;
+  }
+
+  .pieFormulario {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+}

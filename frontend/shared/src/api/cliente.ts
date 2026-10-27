@@ -8,9 +8,16 @@ export function configurarApi(config: { urlBase: string }) {
 
 export class ErrorDeApi extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /**
+   * Errores de validación por campo tal como los manda DRF:
+   * { campo: ["mensaje", …] }. Los formularios los usan para mostrar cada
+   * error junto a su campo (CH-09, CH-14); antes solo llegaba el primero.
+   */
+  campos?: Record<string, string[]>;
+  constructor(message: string, status: number, campos?: Record<string, string[]>) {
     super(message);
     this.status = status;
+    this.campos = campos;
   }
 }
 
@@ -42,6 +49,23 @@ function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
   }
   if (typeof primero === "string") return primero;
   return "Ocurrió un error inesperado";
+}
+
+// Claves de control que no son campos del formulario.
+const CLAVES_NO_CAMPO = new Set(["detail", "code"]);
+
+function camposDesdeCuerpo(data: Record<string, unknown>): Record<string, string[]> | undefined {
+  const campos: Record<string, string[]> = {};
+  for (const [clave, valor] of Object.entries(data)) {
+    if (CLAVES_NO_CAMPO.has(clave)) continue;
+    if (Array.isArray(valor)) {
+      const mensajes = valor.filter((m): m is string => typeof m === "string");
+      if (mensajes.length > 0) campos[clave] = mensajes;
+    } else if (typeof valor === "string") {
+      campos[clave] = [valor];
+    }
+  }
+  return Object.keys(campos).length > 0 ? campos : undefined;
 }
 
 export async function pedir<T>(
@@ -81,14 +105,15 @@ export async function pedir<T>(
 
   if (!res.ok) {
     let message = "Ocurrió un error inesperado";
+    let campos: Record<string, string[]> | undefined;
     try {
-      message = mensajeDesdeCuerpo(
-        (await res.json()) as Record<string, unknown>,
-      );
+      const data = (await res.json()) as Record<string, unknown>;
+      message = mensajeDesdeCuerpo(data);
+      campos = camposDesdeCuerpo(data);
     } catch {
       // el cuerpo no era JSON
     }
-    throw new ErrorDeApi(message, res.status);
+    throw new ErrorDeApi(message, res.status, campos);
   }
 
   if (res.status === 204) return undefined as T;
