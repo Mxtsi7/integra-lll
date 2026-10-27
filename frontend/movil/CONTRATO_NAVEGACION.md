@@ -2,6 +2,9 @@
 
 Este documento define la arquitectura, contrato de tipos y reglas de integración de la navegación móvil para el equipo (**Sebastian Mena** y **Andrea Travola**).
 
+> [!NOTE]
+> **Diseño temporal:** Las pantallas actuales son stubs/placeholders con estilos temporales generados por IA exclusivamente para probar rutas y contratos. Cada integrante sustituirá la interfaz con el diseño definitivo en su respectiva tarea.
+
 ---
 
 ## 1. Regla de Oro de Contenedores
