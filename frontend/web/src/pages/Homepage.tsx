@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useBlocker, useNavigate, useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import TarjetaSuscripcion from "../components/subscriptions/TarjetaSuscripcion";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
@@ -10,6 +10,8 @@ import EditarSuscripcionForm, {
   type EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
+import AvisoCambiosSinGuardar from "../components/subscriptions/AvisoCambiosSinGuardar";
+import { useAvisoAlSalir } from "../hooks/useAvisoAlSalir";
 import { Modal } from "../components/ui/Modal";
 import { Boton } from "../components/ui/Boton";
 import { contarAvisos } from "./DashboardPage";
@@ -69,6 +71,9 @@ export const Homepage: React.FC = () => {
 
   // error propio de cada acción (no pisa el error de carga de la lista)
   const [addError, setAddError] = useState<string | null>(null);
+  // Errores por campo del backend al crear (CH-09): el formulario los
+  // muestra junto a cada campo en vez de un solo mensaje.
+  const [addErroresCampos, setAddErroresCampos] = useState<Record<string, string[]> | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -84,6 +89,46 @@ export const Homepage: React.FC = () => {
   const [eliminando, setEliminando] = useState<Suscripcion | null>(null);
   // id de la suscripción que está haciendo fade-out ahora mismo
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // CH-16: si el formulario abierto (crear o editar; nunca hay dos a la vez)
+  // tiene cambios sin guardar. Es una ref y no estado a propósito: el Modal
+  // re-enfoca su primer campo cada vez que cambia su `alCerrar`, y si este
+  // dependiera de un estado, la primera tecla movería el cursor.
+  const hayCambiosSinGuardar = useRef(false);
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false);
+  const marcarCambios = useCallback((hayCambios: boolean) => {
+    hayCambiosSinGuardar.current = hayCambios;
+  }, []);
+  // Cerrar o recargar la pestaña con cambios pide confirmación al navegador.
+  useAvisoAlSalir(hayCambiosSinGuardar);
+
+  // Navegar dentro de la app (Atrás/Adelante, un enlace, navigate()) con
+  // cambios sin guardar: el router RETIENE la navegación hasta que se elige
+  // en el aviso. "Seguir editando" la cancela y "Descartar" la deja seguir.
+  // Antes solo se cubría cerrar/recargar la pestaña (revisión PR #80).
+  const navegacion = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hayCambiosSinGuardar.current &&
+      (currentLocation.pathname !== nextLocation.pathname || currentLocation.search !== nextLocation.search),
+  );
+  // Los handlers async (guardar) terminan varios renders después: leen el
+  // estado del bloqueo desde acá para no usar uno viejo.
+  const navegacionActual = useRef(navegacion);
+  useEffect(() => {
+    navegacionActual.current = navegacion;
+  });
+  const mostrarAviso = confirmandoDescarte || navegacion.state === "blocked";
+
+  const seguirEditando = () => {
+    setConfirmandoDescarte(false);
+    if (navegacion.state === "blocked") navegacion.reset(); // cancela la navegación retenida
+  };
+  // Se usa al descartar y al guardar: si había una navegación retenida, ya
+  // no hay nada que perder y se completa.
+  const continuarNavegacionPendiente = () => {
+    const actual = navegacionActual.current;
+    if (actual.state === "blocked") actual.proceed();
+  };
 
   useEffect(() => {
     let cancelado = false;
@@ -151,16 +196,26 @@ export const Homepage: React.FC = () => {
 
   const handleAdd = async (nueva: Omit<Suscripcion, "id">): Promise<boolean> => {
     setAddError(null);
+    setAddErroresCampos(null);
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
       setSuscripciones((prev) => [...prev, creada]);
       setFiltro("todas");
       setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
+      // Guardado: ya no hay nada que perder. También se quita el aviso, por si
+      // se guardó con él visible (antes quedaba pendiente al reabrir).
+      hayCambiosSinGuardar.current = false;
+      setConfirmandoDescarte(false);
+      continuarNavegacionPendiente();
       setIsAdding(false);
       return true;
     } catch (e) {
-      setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+      if (e instanceof ErrorDeApi && e.campos) {
+        setAddErroresCampos(e.campos);
+      } else {
+        setAddError(mensajeDeError(e, "No pudimos crear la suscripción. Intenta de nuevo."));
+      }
       return false;
     } finally {
       setIsSavingAdd(false);
@@ -188,6 +243,9 @@ export const Homepage: React.FC = () => {
         categoria: data.categoria,
       });
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
+      hayCambiosSinGuardar.current = false;
+      setConfirmandoDescarte(false);
+      continuarNavegacionPendiente();
       setEditando(null);
     } catch (e) {
       setEditError(mensajeDeError(e, "No pudimos guardar los cambios. Intenta de nuevo."));
@@ -225,12 +283,27 @@ export const Homepage: React.FC = () => {
 
   const cerrarAgregar = useCallback(() => {
     setAddError(null);
+    setAddErroresCampos(null);
+    hayCambiosSinGuardar.current = false;
+    setConfirmandoDescarte(false);
     setIsAdding(false);
   }, []);
   const cerrarEditar = useCallback(() => {
     setEditError(null);
+    hayCambiosSinGuardar.current = false;
+    setConfirmandoDescarte(false);
     setEditando(null);
   }, []);
+  // Cancelar, la X, Escape o el fondo pasan por acá: con cambios sin guardar
+  // se pregunta antes; con el formulario limpio se cierra sin aviso.
+  const intentarCerrarAgregar = useCallback(() => {
+    if (hayCambiosSinGuardar.current) setConfirmandoDescarte(true);
+    else cerrarAgregar();
+  }, [cerrarAgregar]);
+  const intentarCerrarEditar = useCallback(() => {
+    if (hayCambiosSinGuardar.current) setConfirmandoDescarte(true);
+    else cerrarEditar();
+  }, [cerrarEditar]);
   const cerrarEliminar = useCallback(() => {
     setDeleteError(null);
     setEliminando(null);
@@ -352,17 +425,43 @@ export const Homepage: React.FC = () => {
       )}
 
       {isAdding && (
-        <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={cerrarAgregar}>
-          <AddSubscriptionForm onAdd={handleAdd} onCancel={cerrarAgregar} isSaving={isSavingAdd} error={addError} />
+        <Modal titulo="Nueva suscripción" descripcion="Lo que pagas y cuándo." alCerrar={intentarCerrarAgregar}>
+          {mostrarAviso && (
+            <AvisoCambiosSinGuardar
+              onSeguirEditando={seguirEditando}
+              onDescartar={() => {
+                cerrarAgregar();
+                continuarNavegacionPendiente();
+              }}
+            />
+          )}
+          <AddSubscriptionForm
+            onAdd={handleAdd}
+            onCancel={intentarCerrarAgregar}
+            onCambiosSinGuardar={marcarCambios}
+            isSaving={isSavingAdd}
+            error={addError}
+            erroresCampos={addErroresCampos}
+          />
         </Modal>
       )}
 
       {editando && (
-        <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={cerrarEditar}>
+        <Modal titulo="Editar suscripción" descripcion={editando.nombre} alCerrar={intentarCerrarEditar}>
+          {mostrarAviso && (
+            <AvisoCambiosSinGuardar
+              onSeguirEditando={seguirEditando}
+              onDescartar={() => {
+                cerrarEditar();
+                continuarNavegacionPendiente();
+              }}
+            />
+          )}
           <EditarSuscripcionForm
             suscripcion={aFormulario(editando)}
             onSubmit={handleEditSubmit}
-            onCancel={cerrarEditar}
+            onCancel={intentarCerrarEditar}
+            onCambiosSinGuardar={marcarCambios}
             isSaving={isSavingEdit}
             error={editError}
           />

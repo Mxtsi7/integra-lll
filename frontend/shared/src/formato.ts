@@ -5,6 +5,11 @@
 
 import type { Moneda } from './tipos';
 
+/** 0.5 → "0,5 h" · 12 → "12 h". Hasta dos decimales, con coma como en Chile. */
+export function formatearHoras(horas: number): string {
+  return `${new Intl.NumberFormat('es-CL', { maximumFractionDigits: 2 }).format(horas)} h`;
+}
+
 /** 9900 → "$9.900" · 4.5 USD → "US$4,50" */
 export function formatearMonto(monto: number, moneda: Moneda = 'CLP'): string {
   return new Intl.NumberFormat('es-CL', {
