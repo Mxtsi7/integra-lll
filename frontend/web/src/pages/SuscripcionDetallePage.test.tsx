@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  cancelarSuscripcion,
   ErrorDeApi,
   getSuscripcion,
   getUsos,
@@ -20,11 +21,18 @@ import { SuscripcionDetallePage } from "./SuscripcionDetallePage";
 // Solo se simula la red; la página y sus componentes son reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getSuscripcion: vi.fn(), getUsos: vi.fn(), registrarUso: vi.fn() };
+  return {
+    ...real,
+    getSuscripcion: vi.fn(),
+    getUsos: vi.fn(),
+    registrarUso: vi.fn(),
+    cancelarSuscripcion: vi.fn(),
+  };
 });
 const getSuscripcionMock = vi.mocked(getSuscripcion);
 const getUsosMock = vi.mocked(getUsos);
 const registrarUsoMock = vi.mocked(registrarUso);
+const cancelarSuscripcionMock = vi.mocked(cancelarSuscripcion);
 
 const SPOTIFY: Suscripcion = {
   id: "a",
@@ -70,6 +78,7 @@ beforeEach(() => {
   getSuscripcionMock.mockReset().mockImplementation(async (id) => (id === "b" ? NETFLIX : SPOTIFY));
   getUsosMock.mockReset().mockResolvedValue(USOS_A);
   registrarUsoMock.mockReset();
+  cancelarSuscripcionMock.mockReset();
 });
 
 afterEach(() => {
@@ -271,5 +280,124 @@ describe("Registrar minutos de uso (CH-14)", () => {
 
     await registrar();
     expect(registrarUsoMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Cancelar suscripción sin borrarla (CH-10)", () => {
+  const CANCELADA: Suscripcion = { ...SPOTIFY, estado: "cancelado" };
+  const dialogo = () => screen.getByRole("alertdialog", { name: "¿Cancelar Spotify?" });
+  const abrir = () => fireEvent.click(screen.getByRole("button", { name: "Cancelar suscripción" }));
+  const confirmar = () =>
+    act(async () => fireEvent.click(within(dialogo()).getByRole("button", { name: /Cancelar suscripción|Cancelando/ })));
+  const proximoCobro = () => screen.getByText("Próximo cobro").closest("div");
+
+  /** Promesa que el test resuelve cuando quiere. */
+  function diferida<T>() {
+    let resolver!: (v: T) => void;
+    const promesa = new Promise<T>((res) => (resolver = res));
+    return { promesa, resolver };
+  }
+
+  it("confirmar usa la transición cancelar y muestra la suscripción cancelada, sin cobros pendientes", async () => {
+    cancelarSuscripcionMock.mockResolvedValue(CANCELADA);
+    await montar();
+    expect(screen.getByText("Activa")).toBeInTheDocument();
+
+    abrir();
+    // Explica que no es eliminar y el foco empieza en la opción que no cambia nada.
+    expect(dialogo()).toHaveTextContent("Su historial de cobros y de uso se conserva.");
+    expect(dialogo()).toHaveTextContent("Esto no la elimina");
+    expect(within(dialogo()).getByRole("button", { name: "Volver" })).toHaveFocus();
+    await confirmar();
+
+    expect(cancelarSuscripcionMock).toHaveBeenCalledTimes(1);
+    expect(cancelarSuscripcionMock).toHaveBeenCalledWith("a");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent("Sin cobros pendientes");
+    expect(proximoCobro()).not.toHaveTextContent(formatearFecha(SPOTIFY.fecha_proximo_cobro));
+    expect(screen.getByText(/La cancelaste/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancelar suscripción" })).not.toBeInTheDocument();
+    expect(screen.getByText("Cancelaste Spotify. Ya no contamos sus próximos cobros.")).toBeInTheDocument();
+    // El historial de uso sigue ahí: cancelar no lo borra.
+    expect(filas()).toHaveLength(3);
+  });
+
+  it.each([
+    ["Volver", () => fireEvent.click(within(dialogo()).getByRole("button", { name: "Volver" }))],
+    ["la X", () => fireEvent.click(within(dialogo()).getByRole("button", { name: "Cerrar" }))],
+    ["Escape", () => fireEvent.keyDown(document, { key: "Escape" })],
+  ])("cerrar con %s no llama a la API ni cambia la suscripción", async (_, cerrar) => {
+    await montar();
+    abrir();
+    cerrar();
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(cancelarSuscripcionMock).not.toHaveBeenCalled();
+    expect(screen.getByText("Activa")).toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent(formatearFecha(SPOTIFY.fecha_proximo_cobro));
+  });
+
+  it("mientras se cancela no se puede cerrar ni confirmar dos veces", async () => {
+    const respuesta = diferida<Suscripcion>();
+    cancelarSuscripcionMock.mockReturnValue(respuesta.promesa);
+    await montar();
+    abrir();
+    await confirmar();
+    await confirmar();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(cancelarSuscripcionMock).toHaveBeenCalledTimes(1);
+    expect(dialogo()).toBeInTheDocument();
+    expect(within(dialogo()).getByRole("button", { name: "Volver" })).toBeDisabled();
+
+    await act(async () => respuesta.resolver(CANCELADA));
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+  });
+
+  it.each([
+    [new ErrorDeApi("El actor no tiene un rol válido para solicitar la cancelación.", 403), "No tienes permiso para cancelar esta suscripción."],
+    [new ErrorDeApi("No encontrado.", 404), "Esta suscripción ya no existe."],
+    [new ErrorDeApi("No se permite la transición.", 400), "No se permite la transición."],
+    [new TypeError("Failed to fetch"), "No pudimos conectar con el servidor."],
+  ])("si falla (%s), avisa dentro del diálogo y la suscripción no cambia", async (error, mensaje) => {
+    cancelarSuscripcionMock.mockRejectedValueOnce(error).mockResolvedValueOnce(CANCELADA);
+    await montar();
+    abrir();
+    await confirmar();
+
+    expect(within(dialogo()).getByRole("alert")).toHaveTextContent(mensaje);
+    expect(screen.getByText("Activa")).toBeInTheDocument();
+    expect(screen.queryByText(/Cancelaste/)).not.toBeInTheDocument();
+
+    // Se puede reintentar desde el mismo diálogo.
+    await confirmar();
+    expect(cancelarSuscripcionMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+  });
+
+  it("una suscripción ya cancelada no ofrece cancelarla otra vez", async () => {
+    getSuscripcionMock.mockResolvedValue(CANCELADA);
+    await montar();
+
+    expect(screen.queryByRole("button", { name: "Cancelar suscripción" })).not.toBeInTheDocument();
+    expect(screen.getByText(/La cancelaste/)).toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent("Sin cobros pendientes");
+  });
+
+  it("si se pasa a otra suscripción mientras se cancela, la respuesta no se muestra en la nueva", async () => {
+    const respuesta = diferida<Suscripcion>();
+    cancelarSuscripcionMock.mockReturnValue(respuesta.promesa);
+    await montar("/suscripciones/a");
+    abrir();
+    await confirmar();
+
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Ir a Netflix" })));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await act(async () => respuesta.resolver(CANCELADA)); // llega tarde, de Spotify
+
+    expect(screen.getByRole("heading", { name: "Netflix", level: 1 })).toBeInTheDocument();
+    expect(screen.getByText("Activa")).toBeInTheDocument();
+    expect(screen.queryByText(/Cancelaste/)).not.toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import { configurarApi, ErrorDeApi } from "./cliente";
 import { crearSuscripcion, getSuscripcion, getSuscripciones, getUsos, registrarUso } from "./suscripciones";
 import { gastoProyectado } from "../calculos";
 import { validarUso } from "../validacionesSuscripcion";
+import { cancelarSuscripcion } from "./suscripciones";
 
 beforeEach(() => {
   configurarApi({ urlBase: "http://api.test/api" });
@@ -231,6 +232,42 @@ describe("registrarUso con la fecha vacía (revisión PR #80)", () => {
     const [, init] = fetchFalso.mock.calls[0] as [string, { body: string }];
     expect(JSON.parse(init.body)).toEqual({ minutos: 30 });
     expect(init.body).not.toContain("fecha");
+  });
+});
+
+describe("cancelarSuscripcion (CH-10, sobre VI-03)", () => {
+  it("usa la acción cancelar del backend (no DELETE ni PATCH) y devuelve la suscripción cancelada", async () => {
+    const fetchFalso = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...RESPUESTA_REAL.results[0], estado: "cancelado" }),
+    });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const cancelada = await cancelarSuscripcion("abc-123");
+
+    const [url, init] = fetchFalso.mock.calls[0] as [string, { method: string; body?: string }];
+    expect(url).toBe("http://api.test/api/suscripciones/abc-123/cancelar/");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+    expect(cancelada.estado).toBe("cancelado");
+    expect(cancelada.monto).toBe(5990); // se traduce igual que el resto
+  });
+
+  it("un rechazo del backend llega como ErrorDeApi con su estado", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ detail: "El actor no tiene un rol válido para solicitar la cancelación." }),
+      }),
+    );
+
+    const error = (await cancelarSuscripcion("abc-123").catch((e: unknown) => e)) as ErrorDeApi;
+
+    expect(error).toBeInstanceOf(ErrorDeApi);
+    expect(error.status).toBe(403);
   });
 });
 

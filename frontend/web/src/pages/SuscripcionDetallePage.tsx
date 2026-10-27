@@ -1,4 +1,5 @@
 import {
+  cancelarSuscripcion,
   costoPorHora,
   equivalenteMensual,
   ErrorDeApi,
@@ -14,7 +15,11 @@ import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
+import { Boton } from '../components/ui/Boton';
 import { Insignia } from '../components/ui/Insignia';
+import { Modal } from '../components/ui/Modal';
+import CancelarSuscripcionDialog from '../components/subscriptions/CancelarSus';
+import { useToast } from '../context/ToastContext';
 import {
   usePresentacionCategoria,
   cuandoEnDias,
@@ -33,6 +38,19 @@ type EstadoCarga =
   | { tipo: 'no-encontrada' }
   | { tipo: 'listo'; suscripcion: Suscripcion };
 
+/** Qué decir si la cancelación no se pudo hacer (CH-10). La suscripción no cambió. */
+function mensajeErrorCancelacion(err: unknown): string {
+  if (err instanceof TypeError) {
+    return 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+  }
+  if (err instanceof ErrorDeApi) {
+    if (err.status === 403) return 'No tienes permiso para cancelar esta suscripción.';
+    if (err.status === 404) return 'Esta suscripción ya no existe. Puede que la hayan eliminado.';
+    if (err.message) return err.message;
+  }
+  return 'No pudimos cancelar la suscripción. Intenta de nuevo.';
+}
+
 export function SuscripcionDetallePage() {
   const categoriaVisual = usePresentacionCategoria();
   const { id } = useParams<{ id: string }>();
@@ -48,8 +66,19 @@ export function SuscripcionDetallePage() {
   // recargarlo no se vuelve a "Cargando…" (la lista no parpadea).
   const historialDe = useRef<string | undefined>(undefined);
 
+  // CH-10: confirmación de cancelar. Mientras la petición viaja el diálogo
+  // no se puede cerrar: el resultado decide qué se muestra.
+  const toast = useToast();
+  const [confirmandoCancelacion, setConfirmandoCancelacion] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const cancelandoRef = useRef(false);
+  const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null);
+
   useEffect(() => {
     idActual.current = id;
+    // Al pasar a otra suscripción no queda abierta la confirmación de la anterior.
+    setConfirmandoCancelacion(false);
+    setErrorCancelacion(null);
     if (!id) return;
     let cancelado = false;
     setEstado({ tipo: 'cargando' });
@@ -112,6 +141,40 @@ export function SuscripcionDetallePage() {
     [id, recargarHistorial],
   );
 
+  const abrirCancelacion = useCallback(() => {
+    setErrorCancelacion(null);
+    setConfirmandoCancelacion(true);
+  }, []);
+
+  // "Volver", la X y Escape: no se llama a la API ni cambia nada.
+  const cerrarCancelacion = useCallback(() => {
+    if (cancelandoRef.current) return;
+    setErrorCancelacion(null);
+    setConfirmandoCancelacion(false);
+  }, []);
+
+  // Usa la transición del backend (POST .../cancelar/, VI-03), no DELETE: la
+  // suscripción se queda con su historial y deja de proyectar cobros.
+  const confirmarCancelacion = async () => {
+    if (!id || estado.tipo !== 'listo' || cancelandoRef.current) return;
+    const nombre = estado.suscripcion.nombre;
+    cancelandoRef.current = true;
+    setCancelando(true);
+    setErrorCancelacion(null);
+    try {
+      const cancelada = await cancelarSuscripcion(id);
+      if (idActual.current !== id) return; // se navegó a otra suscripción
+      setEstado({ tipo: 'listo', suscripcion: cancelada });
+      setConfirmandoCancelacion(false);
+      toast.exito(`Cancelaste ${nombre}. Ya no contamos sus próximos cobros.`);
+    } catch (err: unknown) {
+      if (idActual.current === id) setErrorCancelacion(mensajeErrorCancelacion(err));
+    } finally {
+      cancelandoRef.current = false;
+      setCancelando(false);
+    }
+  };
+
   return (
     <AppLayout
       headerTitulo={estado.tipo === 'listo' ? estado.suscripcion.nombre : 'Suscripción'}
@@ -130,7 +193,7 @@ export function SuscripcionDetallePage() {
       )}
       {estado.tipo === 'listo' && (
         <>
-          <ContenidoDetalle suscripcion={estado.suscripcion} />
+          <ContenidoDetalle suscripcion={estado.suscripcion} onCancelar={abrirCancelacion} />
 
           <section className={`tile ${styles.seccionUso}`} aria-labelledby="titulo-uso">
             <h2 id="titulo-uso" className={styles.seccionTitulo}>
@@ -145,19 +208,32 @@ export function SuscripcionDetallePage() {
             <h3 className={styles.subtitulo}>Historial</h3>
             <HistorialUso estado={historial} onReintentar={recargarHistorial} />
           </section>
+
+          {confirmandoCancelacion && (
+            <Modal titulo={`¿Cancelar ${estado.suscripcion.nombre}?`} alCerrar={cerrarCancelacion} tipo="alerta">
+              <CancelarSuscripcionDialog
+                nombreSuscripcion={estado.suscripcion.nombre}
+                onConfirm={confirmarCancelacion}
+                onVolver={cerrarCancelacion}
+                isCancelling={cancelando}
+                error={errorCancelacion}
+              />
+            </Modal>
+          )}
         </>
       )}
     </AppLayout>
   );
 }
 
-function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
+function ContenidoDetalle({ suscripcion, onCancelar }: { suscripcion: Suscripcion; onCancelar: () => void }) {
   const categoriaVisual = usePresentacionCategoria();
   const montoMensual = equivalenteMensual(suscripcion.monto, suscripcion.frecuencia);
   const porHora = costoPorHora(montoMensual, suscripcion.horas_uso_mes ?? 0);
   const info = ESTADOS[suscripcion.estado];
   const { Icono, color, suave } = categoriaVisual(suscripcion.categoria);
   const dias = diasHasta(suscripcion.fecha_proximo_cobro);
+  const cancelada = suscripcion.estado === 'cancelado';
 
   return (
     <div className={`tile ${styles.tarjeta}`} style={{ '--tinte': suave } as React.CSSProperties}>
@@ -190,8 +266,15 @@ function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
 
       <dl className={styles.grid}>
         <Dato etiqueta="Próximo cobro">
-          {formatearFecha(suscripcion.fecha_proximo_cobro)}
-          {dias >= 0 && dias <= 7 && <span className={styles.datoNota}>{cuandoEnDias(dias).toLowerCase()}</span>}
+          {/* Cancelada ya no proyecta cobros: igual que en la tarjeta de Inicio. */}
+          {cancelada ? (
+            'Sin cobros pendientes'
+          ) : (
+            <>
+              {formatearFecha(suscripcion.fecha_proximo_cobro)}
+              {dias >= 0 && dias <= 7 && <span className={styles.datoNota}>{cuandoEnDias(dias).toLowerCase()}</span>}
+            </>
+          )}
         </Dato>
         <Dato etiqueta="Se cobra">{etiquetaFrecuencia(suscripcion.frecuencia)}</Dato>
         <Dato etiqueta="Horas de uso este mes">
@@ -204,6 +287,18 @@ function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
           <Dato etiqueta="Termina la prueba gratis">{formatearFecha(suscripcion.fin_prueba)}</Dato>
         )}
       </dl>
+
+      <div className={styles.acciones}>
+        {cancelada ? (
+          <p className={styles.notaCancelada}>
+            La cancelaste: ya no contamos sus próximos cobros. Su historial se conserva.
+          </p>
+        ) : (
+          <Boton variante="secundario" tamano="s" onClick={onCancelar}>
+            Cancelar suscripción
+          </Boton>
+        )}
+      </div>
     </div>
   );
 }
