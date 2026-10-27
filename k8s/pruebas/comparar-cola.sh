@@ -97,9 +97,28 @@ echo "Semilla por organización: $SEMILLA suscripciones"
 uuid() {
   if [ -r /proc/sys/kernel/random/uuid ]; then
     cat /proc/sys/kernel/random/uuid
-  else
-    openssl rand -hex 16 | sed -E 's/^(.{8})(.{4})(.{3})(.{3})(.{12}).*$/--4-a-/'
+    return
   fi
+  # Git Bash en Windows no tiene /proc ni uuidgen; openssl si (lo usa
+  # desplegar.sh). Se arma el UUID v4 con expansion de parametros y printf,
+  # NO con sed: la version anterior llevaba bytes de control 0x01..0x05
+  # incrustados donde debian ir las referencias .., y devolvia basura
+  # que no era un UUID. `bash -n` no lo detecta: la sintaxis era valida.
+  local h
+  h=$(openssl rand -hex 16) || return 1
+  local salida
+  salida=$(printf '%s-%s-4%s-a%s-%s' \
+    "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}")
+  # Se comprueba antes de devolverlo: sembrar la base con un id invalido
+  # rompe la comparacion mucho mas lejos y cuesta encontrar por que.
+  case "$salida" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-a[0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
+      printf '%s
+' "$salida" ;;
+    *)
+      echo "uuid(): no se pudo generar un UUID valido ('$salida')" >&2
+      return 1 ;;
+  esac
 }
 
 ORG_SIN="$(uuid)"

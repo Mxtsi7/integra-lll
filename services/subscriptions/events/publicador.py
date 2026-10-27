@@ -6,7 +6,8 @@ from datetime import timezone as datetime_timezone
 import pika
 from django.conf import settings
 
-from events.topologia import EXCHANGE, declarar
+from events.contrato import EXCHANGE, routing_key
+from events.topologia import declarar
 
 
 def crear_payload(evento) -> dict:
@@ -47,7 +48,7 @@ def publicar(evento) -> None:
         canal.confirm_delivery()
         canal.basic_publish(
             exchange=EXCHANGE,
-            routing_key=f"{evento.evento}.v{evento.version}",
+            routing_key=routing_key(evento),
             body=json.dumps(crear_payload(evento), separators=(",", ":")).encode(
                 "utf-8"
             ),

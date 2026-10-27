@@ -191,9 +191,19 @@ def test_publicador_envia_routing_v2_durable_y_obligatorio(organizacion):
     with patch("events.publicador.pika.BlockingConnection", return_value=conexion):
         publicar(evento)
 
-    canal.exchange_declare.assert_called_once_with(
+    # `assert_any_call` y no `assert_called_once_with`: desde que la cola del
+    # resumen tiene dead-letter exchange, `topologia.declarar` declara DOS
+    # exchanges (el de eventos y `suscripciones.fallidos`). Lo que esta
+    # prueba fija sigue siendo lo mismo: que el de eventos se declare topic
+    # y durable.
+    canal.exchange_declare.assert_any_call(
         exchange="suscripciones",
         exchange_type="topic",
+        durable=True,
+    )
+    canal.exchange_declare.assert_any_call(
+        exchange="suscripciones.fallidos",
+        exchange_type="fanout",
         durable=True,
     )
     canal.confirm_delivery.assert_called_once_with()

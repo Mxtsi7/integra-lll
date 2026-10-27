@@ -5,6 +5,7 @@ exactamente el mismo trabajo. Si eso no se cumple, la comparación con y sin
 cola no mide arquitectura: mide dos programas distintos.
 """
 
+import json
 import uuid
 from datetime import date
 from decimal import Decimal
@@ -14,7 +15,9 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from app.models import OutboxEvento, ResumenOrganizacion, Subscription
+from app.management.commands.consumir_eventos import SobreInvalido, validar
 from events import publicador, topologia
+from events.contrato import routing_key
 from events.trabajo import recalcular_resumen
 
 
@@ -299,33 +302,86 @@ class CanalFalso:
         self.llamadas.append(("enlace", kw))
 
 
-class TestTopologia:
-    """Regresión de un bug encontrado probando contra un RabbitMQ real.
+class _EventoFalso:
+    def __init__(self, evento, version):
+        self.evento = evento
+        self.version = version
 
-    Un exchange topic descarta los mensajes que no tienen cola enlazada. Con
-    `mandatory=True` el publicador se entera (UnroutableError) en vez de
-    perderlos en silencio, pero igual no llegan: el outbox reintenta hasta los
-    900 s. Declarando la cola en el publicador, los eventos esperan en ella
-    aunque el consumidor todavía no haya arrancado.
+
+class TestTopologia:
+    """Regresión de dos bugs encontrados contra un RabbitMQ real.
+
+    **1. El enlace no calzaba con la clave publicada.** `PATRONES_RESUMEN`
+    decía `suscripcion.creada` mientras el publicador mandaba a
+    `suscripcion.creada.v2`. En un exchange topic ese enlace exacto no
+    coincide con esa clave: la publicación fallaba por no enrutable y el
+    resumen no llegaba nunca.
+
+    La versión anterior de estas pruebas NO lo vio, y vale la pena decir por
+    qué: comparaba la constante de `topologia` contra el enlace que arma
+    `topologia`. Una prueba que se da la razón sola. Ahora se compara contra
+    `contrato.routing_key`, que es la MISMA función con que se publica.
+
+    **2. Un mensaje rechazado se borraba.** La cola no tenía dead-letter
+    exchange, así que un `reject(requeue=False)` —o un `nack`— lo hacía
+    desaparecer, incluso por una caída pasajera de la base.
+
+    El recorrido completo contra un broker de verdad está en
+    `tests/test_eventos_extremo_a_extremo.py`. Estas son las comprobaciones
+    baratas; esa es la que de verdad lo caza.
     """
 
-    def test_declara_exchange_cola_y_enlace(self):
+    def test_el_enlace_usa_la_clave_CON_VERSION_que_publica_el_publicador(self):
+        """La regresión del bug 1.
+
+        Si alguien vuelve a escribir el patrón a mano sin la versión, esto
+        falla, porque la clave se le pregunta al contrato.
+        """
+        esperada = routing_key(_EventoFalso("suscripcion.creada", 2))
+        assert esperada == "suscripcion.creada.v2"
+        assert esperada in topologia.PATRONES_RESUMEN
+
+    def test_los_patrones_se_derivan_del_contrato_no_de_literales(self):
+        """Cada evento declarado tiene que producir su clave versionada."""
+        derivadas = tuple(
+            routing_key(_EventoFalso(nombre, version))
+            for nombre, version in topologia.EVENTOS_DEL_RESUMEN
+        )
+        assert topologia.PATRONES_RESUMEN == derivadas
+
+    def test_se_enlaza_la_version_exacta_y_no_un_comodin(self):
+        """Una v3 es, por el catálogo, un cambio que rompe el esquema.
+        Consumirla en silencio con el código de v2 sería peor que no
+        recibirla, así que el enlace NO lleva comodín."""
+        for patron in topologia.PATRONES_RESUMEN:
+            assert "*" not in patron
+            assert "#" not in patron
+
+    def test_declara_las_dos_colas_y_sus_enlaces(self):
         canal = CanalFalso()
         topologia.declarar(canal)
-        assert [tipo for tipo, _ in canal.llamadas] == ["exchange", "cola", "enlace"]
+        tipos = [tipo for tipo, _ in canal.llamadas]
+        assert tipos.count("exchange") == 2  # el de eventos y el de fallos
+        assert tipos.count("cola") == 2      # resumen y fallidos
+        assert tipos.count("enlace") == 2
 
-    def test_la_cola_y_el_exchange_son_durables(self):
+    def test_la_cola_del_resumen_manda_sus_rechazos_a_la_cola_de_fallos(self):
+        """La regresión del bug 2, en la declaración."""
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        resumen = next(
+            kw for tipo, kw in canal.llamadas
+            if tipo == "cola" and kw["queue"] == topologia.COLA_RESUMEN
+        )
+        assert resumen["arguments"]["x-dead-letter-exchange"] == topologia.EXCHANGE_FALLIDOS
+
+    def test_todo_es_durable(self):
         """Sin durable, un reinicio del broker se lleva los eventos pendientes."""
         canal = CanalFalso()
         topologia.declarar(canal)
-        for _, kw in canal.llamadas[:2]:
-            assert kw["durable"] is True
-
-    def test_el_enlace_cubre_el_evento_que_publicamos(self):
-        canal = CanalFalso()
-        topologia.declarar(canal)
-        claves = {kw["routing_key"] for tipo, kw in canal.llamadas if tipo == "enlace"}
-        assert EVENTO_CREADA in claves
+        for tipo, kw in canal.llamadas:
+            if tipo in ("exchange", "cola"):
+                assert kw["durable"] is True, kw
 
     def test_el_publicador_declara_la_topologia_completa(self):
         """Si alguien vuelve a dejar solo el exchange, esto falla."""
@@ -335,6 +391,95 @@ class TestTopologia:
         assert "declarar(canal)" in fuente
         assert "exchange_declare" not in fuente
 
+    def test_el_publicador_usa_la_clave_del_contrato(self):
+        """Si la clave se vuelve a escribir en línea, esta prueba y la de
+        arriba dejan de estar atadas y el bug puede volver."""
+        import inspect
+
+        fuente = inspect.getsource(publicador.publicar)
+        assert "routing_key(evento)" in fuente
+
     def test_el_exchange_tiene_una_sola_definicion(self):
         """Dos constantes con el mismo nombre se desincronizan calladas."""
         assert publicador.EXCHANGE is topologia.EXCHANGE
+
+
+# ── el sobre que entra al consumidor ─────────────────────────────────
+
+
+class TestValidarSobre:
+    """`validar()` decide si un mensaje se procesa o se aparta.
+
+    Antes esto no existía: el consumidor hacía `sobre["organizacion_id"]`
+    dentro de un `except (ValueError, KeyError)`. Un cuerpo `[]` reventaba
+    con `TypeError` —"list indices must be integers"—, que no estaba
+    capturado, y **mataba el proceso entero**. Y un objeto con tenant válido
+    pero `evento="no.admitido"` pasaba derecho al recálculo y recibía ACK.
+    """
+
+    @staticmethod
+    def sobre(**cambios):
+        base = {
+            "evento": "suscripcion.creada",
+            "version": 2,
+            "id": str(uuid.uuid4()),
+            "organizacion_id": str(uuid.uuid4()),
+            "datos": {},
+        }
+        base.update(cambios)
+        return json.dumps(base).encode()
+
+    def test_un_sobre_bueno_devuelve_la_organizacion(self):
+        org = str(uuid.uuid4())
+        assert validar(self.sobre(organizacion_id=org)) == org
+
+    @pytest.mark.parametrize(
+        "cuerpo",
+        [
+            pytest.param(b"[]", id="lista-vacia"),
+            pytest.param(b"null", id="null"),
+            pytest.param(b'"texto"', id="string"),
+            pytest.param(b"42", id="numero"),
+            pytest.param(b"[1,2,3]", id="lista-con-cosas"),
+        ],
+    )
+    def test_un_json_que_no_es_objeto_se_aparta_sin_matar_el_proceso(self, cuerpo):
+        """`[]` es el caso exacto que tumbaba el consumidor."""
+        with pytest.raises(SobreInvalido):
+            validar(cuerpo)
+
+    def test_algo_que_no_es_json_se_aparta(self):
+        with pytest.raises(SobreInvalido):
+            validar(b"{ esto no cierra")
+
+    def test_sin_organizacion_se_aparta(self):
+        """Regla 4 del catálogo: el contexto multi-tenant viaja en el evento."""
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(organizacion_id=None))
+
+    def test_una_organizacion_que_no_es_uuid_se_aparta(self):
+        """Recalcular la organización equivocada es peor que apartar el mensaje."""
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(organizacion_id="la-organizacion"))
+
+    def test_un_evento_no_admitido_se_aparta_aunque_el_tenant_sea_valido(self):
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(evento="no.admitido"))
+
+    def test_una_version_distinta_se_aparta(self):
+        """Una v999 no se procesa con el código de v2."""
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(version=999))
+
+    def test_el_mensaje_siguiente_sigue_funcionando(self):
+        """Lo que importa de apartar en vez de reventar: el proceso sigue."""
+        with pytest.raises(SobreInvalido):
+            validar(b"[]")
+        org = str(uuid.uuid4())
+        assert validar(self.sobre(organizacion_id=org)) == org
+
+    def test_el_motivo_no_queda_vacio(self):
+        """Va al log y a la cola de fallos: sin motivo no se puede diagnosticar."""
+        with pytest.raises(SobreInvalido) as caso:
+            validar(self.sobre(version=999))
+        assert str(caso.value)
