@@ -5,6 +5,10 @@ export * from './validacionesSuscripcion';
 export { configurarApi, configurarManejador401, ErrorDeApi, type Paginado} from './api/cliente';
 export {
   getSuscripciones,
+  esOrdenSuscripciones,
+  ORDENES_SUSCRIPCIONES,
+  type ConsultaSuscripciones,
+  type OrdenSuscripciones,
   USAR_DATOS_DE_EJEMPLO,
   crearSuscripcion,
   getSuscripcion,
