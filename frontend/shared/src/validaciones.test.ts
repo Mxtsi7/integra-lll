@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   MENSAJE_POLITICA_PASSWORD,
+  erroresCambioContrasenaDesdeServidor,
   erroresRegistroDesdeServidor,
+  validarCambioContrasena,
   validarCorreo,
+  validarNombre,
   validarPassword,
   validarRegistro,
+  type DatosCambioContrasena,
   type DatosRegistro,
 } from "./validaciones";
 
@@ -129,5 +133,91 @@ describe("erroresRegistroDesdeServidor", () => {
       porCampo: {},
       general: ["Algo salió mal.", "El código de organización no es válido."],
     });
+  });
+});
+
+// Resultado REAL de CambioPerfilSerializer (services/auth/app/perfil.py) con
+// estos mismos textos (true = el backend lo acepta). DRF recorta espacios
+// antes de medir, y mide en caracteres: 150 emojis valen 150, no 300.
+const NOMBRES_BACKEND: Array<[string, boolean, string]> = [
+  ["Ana", true, "nombre común"],
+  ["  Ana  ", true, "con espacios alrededor (se recortan)"],
+  ["", false, "vacío"],
+  ["   ", false, "solo espacios"],
+  ["a".repeat(150), true, "exactamente 150"],
+  ["a".repeat(151), false, "151"],
+  ["😀".repeat(150), true, "150 emojis (.length de JS diría 300)"],
+  ["😀".repeat(151), false, "151 emojis"],
+  ["  " + "a".repeat(150) + "  ", true, "150 + espacios que se recortan"],
+];
+
+describe("validarNombre: mismas reglas que el backend (MX-06, CH-08)", () => {
+  it.each(NOMBRES_BACKEND)("%j → backend acepta=%s (%s)", (nombre, aceptaBackend) => {
+    expect(validarNombre(nombre) === null).toBe(aceptaBackend);
+  });
+
+  it("mensajes", () => {
+    expect(validarNombre("  ")).toBe("Ingresa tu nombre.");
+    expect(validarNombre("a".repeat(151))).toBe("El nombre puede tener hasta 150 caracteres.");
+  });
+});
+
+describe("validarCambioContrasena (CH-29)", () => {
+  const valido: DatosCambioContrasena = { actual: "vieja1234", nueva: "nueva1234", confirmacion: "nueva1234" };
+
+  it("un formulario correcto no tiene errores", () => {
+    expect(validarCambioContrasena(valido)).toEqual({});
+  });
+
+  it("todo vacío: marca cada campo", () => {
+    expect(validarCambioContrasena({ actual: "", nueva: "", confirmacion: "" })).toEqual({
+      actual: "Ingresa tu contraseña actual.",
+      nueva: MENSAJE_POLITICA_PASSWORD,
+      confirmacion: "Repite la contraseña nueva.",
+    });
+  });
+
+  it("confirmación distinta de la nueva: no se puede enviar", () => {
+    expect(validarCambioContrasena({ ...valido, confirmacion: "nueva12345" })).toEqual({
+      confirmacion: "Las contraseñas no coinciden.",
+    });
+  });
+
+  it("la nueva usa la misma política que el registro", () => {
+    expect(validarCambioContrasena({ ...valido, nueva: "corta1", confirmacion: "corta1" }).nueva).toBe(
+      MENSAJE_POLITICA_PASSWORD,
+    );
+  });
+
+  it("no recorta espacios (trim_whitespace=False): ' abc1234 ' es válida y debe repetirse igual", () => {
+    expect(validarCambioContrasena({ actual: "x", nueva: " abc1234 ", confirmacion: " abc1234 " })).toEqual({});
+    expect(validarCambioContrasena({ actual: "x", nueva: " abc1234 ", confirmacion: "abc1234" }).confirmacion).toBe(
+      "Las contraseñas no coinciden.",
+    );
+  });
+});
+
+describe("erroresCambioContrasenaDesdeServidor", () => {
+  it("lleva cada error de CambioClaveSerializer a su campo", () => {
+    expect(
+      erroresCambioContrasenaDesdeServidor({
+        password_actual: ["La contraseña actual no es válida."],
+        password: [MENSAJE_POLITICA_PASSWORD],
+        password_confirmacion: ["Las contraseñas no coinciden."],
+      }),
+    ).toEqual({
+      porCampo: {
+        actual: "La contraseña actual no es válida.",
+        nueva: MENSAJE_POLITICA_PASSWORD,
+        confirmacion: "Las contraseñas no coinciden.",
+      },
+      general: [],
+    });
+  });
+
+  it("lo que no es de un campo va a general, también una clave como 'constructor'", () => {
+    expect(
+      erroresCambioContrasenaDesdeServidor({ non_field_errors: ["Algo falló."], constructor: ["raro"] }),
+    ).toEqual({ porCampo: {}, general: ["Algo falló.", "raro"] });
   });
 });
