@@ -111,6 +111,24 @@ class CuentaConectada(ModeloTenant):
         verbose_name="Detalle del estado",
     )
 
+    # ⚠️ MISMO NOMBRE Y MISMO SIGNIFICADO que el campo que agrega #72
+    # (migración `0002_cuenta_revocada`). Está así a propósito: dos campos
+    # distintos para la misma idea serían un lío silencioso para siempre,
+    # mientras que dos `AddField` con el mismo nombre son UN conflicto
+    # visible que se resuelve borrando una línea al integrar. Si #72 entra
+    # primero, se borra esta declaración y su AddField de acá.
+    revocado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Revocación confirmada por el proveedor",
+        help_text=(
+            "Se llena SOLO cuando el proveedor confirmó la revocación. "
+            "Que no haya tokens guardados no demuestra que el acceso se "
+            "haya revocado del otro lado: el token pudo seguir vivo hasta "
+            "vencer. La limpieza coordinada de #72 exige este dato."
+        ),
+    )
+
     # ── comportamiento ───────────────────────────────────────────────
 
     # Los estados que por sí solos exigen volver a autorizar. Están acá y no
@@ -224,6 +242,19 @@ class AutorizacionPendiente(ModeloTenant):
         verbose_name="Proveedor",
     )
 
+    # Quién inició el flujo. FE-03 pide el state "vinculado a sesión", y sin
+    # esto no lo estaba: bastaba con ser del mismo tenant para cerrar un
+    # flujo ajeno. El state aleatorio y PKCE prueban que el flujo es
+    # legítimo, no que vuelva la MISMA persona que lo abrió.
+    #
+    # Se guarda el valor crudo de la cabecera `X-Usuario-Id` que inyecta el
+    # gateway, como texto: el id vive en el esquema de `auth` y acá no se
+    # interpreta, solo se compara.
+    usuario_id = models.CharField(
+        max_length=64,
+        verbose_name="Usuario que inició el flujo",
+    )
+
     # Secreto: va cifrado igual que los tokens (FE-06).
     verificador_pkce = CampoCifrado(
         verbose_name="Verificador PKCE",
@@ -264,8 +295,8 @@ class AutorizacionPendiente(ModeloTenant):
     MINUTOS_DE_VIDA = 10
 
     @classmethod
-    def abrir(cls, *, organizacion_id, proveedor: str, redirect_uri: str,
-              retorno: str = "") -> tuple["AutorizacionPendiente", str]:
+    def abrir(cls, *, organizacion_id, usuario_id, proveedor: str,
+              redirect_uri: str, retorno: str = "") -> tuple["AutorizacionPendiente", str]:
         """Crea el flujo y devuelve (fila, desafio_pkce).
 
         El verificador queda guardado cifrado; el desafío es lo único que sale
@@ -279,6 +310,7 @@ class AutorizacionPendiente(ModeloTenant):
         )
         fila = cls.objects.create(
             organizacion_id=organizacion_id,
+            usuario_id=str(usuario_id),
             proveedor=proveedor,
             estado_oauth=secrets.token_urlsafe(32),
             verificador_pkce=verificador,

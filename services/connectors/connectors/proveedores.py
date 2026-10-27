@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import time
 from urllib.parse import urlencode
 
 import requests
@@ -39,6 +40,10 @@ from .models import CuentaConectada
 # espera para siempre: un proveedor lento dejaría el worker tomado y el
 # gateway cortaría la petición mucho antes, sin liberar nada de este lado.
 TIEMPO_LIMITE = 10
+
+# Tolerancia de reloj al comprobar `exp` del id_token. Chica a proposito:
+# un margen grande vuelve a aceptar tokens vencidos.
+MARGEN_RELOJ = 60
 
 
 class ProveedorNoSoportado(Exception):
@@ -57,6 +62,9 @@ class ConfiguracionOAuth:
     url_canje: str
     url_revocacion: str
     scopes: tuple[str, ...]
+    #: Los `iss` que aceptamos en el id_token de este proveedor. Google
+    #: emite con y sin esquema segun el flujo, y los dos son validos.
+    emisores: tuple[str, ...] = ()
     # Google quiere access_type=offline + prompt=consent para entregar el
     # refresh token; Microsoft lo entrega con el scope offline_access.
     extra_autorizacion: tuple[tuple[str, str], ...] = ()
@@ -76,6 +84,7 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
             "openid",
             "email",
         ),
+        emisores=("https://accounts.google.com", "accounts.google.com"),
         extra_autorizacion=(
             ("access_type", "offline"),
             # Sin esto Google solo manda el refresh token la PRIMERA vez que
@@ -96,6 +105,9 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
             "openid",
             "email",
         ),
+        # Microsoft emite por tenant: https://login.microsoftonline.com/{tid}/v2.0
+        # El prefijo se comprueba aparte, en `_emisor_aceptado`.
+        emisores=("https://login.microsoftonline.com/",),
     ),
 }
 
@@ -227,38 +239,96 @@ def revocar(proveedor: str, *, access_token: str) -> bool:
     return respuesta.status_code in (200, 204)
 
 
+def _emisor_aceptado(config: ConfiguracionOAuth, iss: str) -> bool:
+    """¿El `iss` del token es uno de los de este proveedor?
+
+    Microsoft emite por tenant (`.../{tenant}/v2.0`), así que para los
+    emisores que terminan en `/` se acepta por prefijo. Google emite un valor
+    fijo y se compara completo.
+    """
+    for esperado in config.emisores:
+        if esperado.endswith("/"):
+            if iss.startswith(esperado):
+                return True
+        elif iss == esperado:
+            return True
+    return False
+
+
 def correo_autorizado(proveedor: str, respuesta_del_canje: dict) -> str:
-    """Qué cuenta autorizó, sacado de la respuesta del canje.
+    """Qué cuenta autorizó, según el `id_token` de la respuesta del canje.
 
-    Primero mira un campo `email` suelto (algunos proveedores lo mandan así);
-    si no, lee el `id_token`, que viene porque pedimos los scopes `openid` y
-    `email`.
+    ── Qué se valida y qué no ───────────────────────────────────────────────
+    Se validan **`iss`, `aud` y `exp`**, que es lo que pide
+    OIDC Core §3.1.3.7, y además que haya `email`.
 
-    ── Sobre leer el id_token sin verificar la firma ────────────────────────
-    Se decodifica el payload y se confía en él. No es un descuido: el token
-    llegó como respuesta DIRECTA del endpoint de canje del proveedor, por una
-    conexión TLS que nosotros iniciamos contra su dominio. Lo que la firma
-    probaría —que lo emitió el proveedor— ya lo prueba el canal. Google lo
-    dice explícitamente en su documentación para este caso.
+    La **firma** no se verifica, y eso sí es una excepción deliberada: el
+    token llegó como respuesta DIRECTA del endpoint de canje del proveedor,
+    por una conexión TLS que nosotros iniciamos contra su dominio. Lo que la
+    firma probaría —que lo emitió el proveedor— ya lo prueba el canal, y
+    Google lo documenta explícitamente para este caso.
+
+    **Pero la excepción de la firma no cubre el resto.** Saltarse `iss`, `aud`
+    y `exp` dejaba pasar un token con emisor ajeno, audiencia de otro cliente
+    y vencido en 1970: lo reprodujo la revisión de la PR y era cierto. Que el
+    canal autentique al emisor no dice nada sobre *para quién* se emitió el
+    token ni sobre si sigue vigente.
 
     Donde la firma SÍ es obligatoria es cuando el id_token llega por otro
     lado: desde el navegador, desde el cliente, desde cualquier sitio que no
-    sea esta misma llamada. Si alguna vez se recibe un id_token así, hay que
-    verificarlo con las claves públicas del proveedor. **No reutilizar esta
-    función para eso.**
+    sea esta misma llamada. **No reutilizar esta función para eso.**
+
+    ── Por qué ya no se acepta un campo `email` suelto ──────────────────────
+    Antes, si la respuesta traía `email` fuera del token, se usaba sin más.
+    Un campo suelto no es una identidad verificada: no tiene emisor ni
+    audiencia ni vencimiento. Ahora solo se usa como *complemento* cuando el
+    id_token es válido pero no trae `email`.
     """
-    correo = respuesta_del_canje.get("email")
-    if correo:
-        return str(correo).strip().lower()
+    config = configuracion_de(proveedor)
+    client_id, _ = credenciales_de(proveedor)
 
     id_token = respuesta_del_canje.get("id_token")
     if not id_token:
-        return ""
+        raise ErrorDelProveedor(
+            f"{proveedor} no devolvió id_token: no hay identidad que verificar."
+        )
+
     try:
         payload = id_token.split(".")[1]
         # base64url sin relleno: hay que devolvérselo antes de decodificar.
         payload += "=" * (-len(payload) % 4)
-        datos = json.loads(base64.urlsafe_b64decode(payload))
-    except (IndexError, ValueError, TypeError):
-        return ""
-    return str(datos.get("email", "")).strip().lower()
+        claims = json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, ValueError, TypeError) as exc:
+        raise ErrorDelProveedor(f"el id_token de {proveedor} no se pudo leer.") from exc
+
+    if not isinstance(claims, dict):
+        raise ErrorDelProveedor(f"el id_token de {proveedor} no trae un objeto.")
+
+    iss = str(claims.get("iss", ""))
+    if not _emisor_aceptado(config, iss):
+        raise ErrorDelProveedor(
+            f"el id_token no lo emitió {proveedor} (iss={iss[:60]!r})."
+        )
+
+    # `aud` puede venir como texto o como lista (OIDC lo permite).
+    crudo_aud = claims.get("aud")
+    audiencias = crudo_aud if isinstance(crudo_aud, list) else [crudo_aud]
+    if not client_id or client_id not in [str(a) for a in audiencias]:
+        raise ErrorDelProveedor(
+            "el id_token no fue emitido para esta aplicación."
+        )
+
+    exp = claims.get("exp")
+    if not isinstance(exp, (int, float)) or isinstance(exp, bool):
+        raise ErrorDelProveedor("el id_token no dice cuándo vence.")
+    # MARGEN segundos de tolerancia por relojes desfasados, no más: un margen
+    # grande vuelve a aceptar tokens vencidos.
+    if exp + MARGEN_RELOJ < time.time():
+        raise ErrorDelProveedor("el id_token está vencido.")
+
+    correo = claims.get("email") or respuesta_del_canje.get("email")
+    if not correo:
+        raise ErrorDelProveedor(
+            f"{proveedor} no dijo qué cuenta se autorizó (sin `email`)."
+        )
+    return str(correo).strip().lower()

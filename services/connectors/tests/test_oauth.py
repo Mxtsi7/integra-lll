@@ -21,6 +21,9 @@ reemplazan por dobles. Lo que se prueba es NUESTRA lógica —el state, el uso
 librería de HTTP.
 """
 
+import base64
+import json
+import time
 import uuid
 from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
@@ -47,12 +50,51 @@ RETORNO_OK = "https://ojoalgasto-forellana.dev.censei.cl/conectores"
 # validación usara `startswith` en vez del origen completo, esto pasaría.
 RETORNO_TRAMPA = "https://ojoalgasto-forellana.dev.censei.cl.malo.com/roba"
 
-RESPUESTA_DEL_CANJE = {
-    "access_token": "ya29.token-de-acceso-de-prueba",
-    "refresh_token": "1//refresh-de-prueba",
-    "expires_in": 3599,
-    "email": "Persona@Gmail.com",
-}
+CLIENTE_GMAIL = "cliente-de-prueba"
+EMISOR_GOOGLE = "https://accounts.google.com"
+
+
+def id_token(**cambios) -> str:
+    """Un id_token con los claims que el proveedor manda de verdad.
+
+    La firma es inventada y da igual: no se verifica, y está documentado por
+    qué (llega como respuesta directa del endpoint de canje, por TLS contra
+    el dominio del proveedor). Lo que SÍ se valida son `iss`, `aud` y `exp`,
+    y para eso este helper sirve: cada prueba cambia un claim y comprueba
+    que se rechace.
+    """
+    claims = {
+        "iss": EMISOR_GOOGLE,
+        "aud": CLIENTE_GMAIL,
+        "exp": int(time.time()) + 3600,
+        "email": "Persona@Gmail.com",
+    }
+    claims.update(cambios)
+    claims = {k: v for k, v in claims.items() if v is not _QUITAR}
+    cabeza = base64.urlsafe_b64encode(b'{"alg":"RS256"}').decode().rstrip("=")
+    cuerpo = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"{cabeza}.{cuerpo}.firma-que-no-se-verifica"
+
+
+class _Quitar:
+    """Centinela para pedirle a `id_token` que OMITA un claim."""
+
+
+_QUITAR = _Quitar()
+
+
+def respuesta_del_canje(**cambios) -> dict:
+    base = {
+        "access_token": "ya29.token-de-acceso-de-prueba",
+        "refresh_token": "1//refresh-de-prueba",
+        "expires_in": 3599,
+        "id_token": id_token(),
+    }
+    base.update(cambios)
+    return base
+
+
+RESPUESTA_DEL_CANJE = respuesta_del_canje()
 
 
 @pytest.fixture
@@ -75,13 +117,21 @@ def entorno_oauth(settings, claves):
     }
 
 
-def cabecera(org=ORG_A):
-    return {"X-Organizacion-Id": str(org)}
+USUARIO_A = "42"
+USUARIO_B = "99"
 
 
-def iniciar(cliente, org=ORG_A, proveedor="gmail", **extra):
+def cabecera(org=ORG_A, usuario=USUARIO_A):
+    """Las dos cabeceras que inyecta el gateway. El usuario importa desde
+    que el state va vinculado a quien abrió el flujo (FE-03)."""
+    return {"X-Organizacion-Id": str(org), "X-Usuario-Id": str(usuario)}
+
+
+def iniciar(cliente, org=ORG_A, proveedor="gmail", usuario=USUARIO_A, **extra):
     cuerpo = {"proveedor": proveedor, **extra}
-    return cliente.post(INICIAR, cuerpo, format="json", headers=cabecera(org))
+    return cliente.post(
+        INICIAR, cuerpo, format="json", headers=cabecera(org, usuario)
+    )
 
 
 def canje_falso(monkeypatch, respuesta=None, error=None):
@@ -211,20 +261,32 @@ class TestIniciar:
 
 
 class TestCallback:
-    def _flujo(self, cliente, org=ORG_A, proveedor="gmail"):
-        iniciar(cliente, org=org, proveedor=proveedor)
-        return AutorizacionPendiente.objects.get()
+    def _flujo(self, cliente, org=ORG_A, proveedor="gmail", usuario=USUARIO_A):
+        iniciar(cliente, org=org, proveedor=proveedor, usuario=usuario)
+        return AutorizacionPendiente.objects.filter(usada_en__isnull=True).latest(
+            "creado_en"
+        )
+
+    def _volver(self, cliente, flujo, *, org=ORG_A, usuario=USUARIO_A, **cuerpo):
+        """El POST del callback, con las cabeceras que inyecta el gateway.
+
+        Las manda siempre: `/api/conectores/` no está en `RUTAS_PUBLICAS`, así
+        que el gateway exige JWT y la identidad llega. Una versión anterior de
+        estas pruebas no las mandaba, y pasaban igual — porque la vista
+        comprobaba la organización solo "si venía".
+        """
+        datos = {"estado_oauth": flujo.estado_oauth}
+        datos.update(cuerpo)
+        return cliente.post(
+            CALLBACK, datos, format="json", headers=cabecera(org, usuario)
+        )
 
     def test_el_exito_deja_la_cuenta_en_el_tenant_correcto(self, cliente, monkeypatch):
         """Criterio: éxito deja cuenta conectada del tenant correcto."""
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
 
-        respuesta = cliente.post(
-            CALLBACK,
-            {"estado_oauth": flujo.estado_oauth, "codigo": "codigo-de-un-uso"},
-            format="json",
-        )
+        respuesta = self._volver(cliente, flujo, codigo="codigo-de-un-uso")
         assert respuesta.status_code == status.HTTP_200_OK
 
         cuenta = CuentaConectada.objects.get()
@@ -240,11 +302,7 @@ class TestCallback:
         canje_falso(monkeypatch)
         antes = timezone.now()
 
-        cliente.post(
-            CALLBACK,
-            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
-            format="json",
-        )
+        self._volver(cliente, flujo, codigo="c")
         cuenta = CuentaConectada.objects.get()
         assert str(cuenta.access_token) == RESPUESTA_DEL_CANJE["access_token"]
         assert str(cuenta.refresh_token) == RESPUESTA_DEL_CANJE["refresh_token"]
@@ -256,9 +314,7 @@ class TestCallback:
 
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
-        cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        self._volver(cliente, flujo, codigo="c")
 
         with connection.cursor() as cursor:
             cursor.execute("SELECT access_token FROM cuenta_conectada")
@@ -268,9 +324,7 @@ class TestCallback:
     def test_la_respuesta_no_devuelve_los_tokens(self, cliente, monkeypatch):
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
-        respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        respuesta = self._volver(cliente, flujo, codigo="c")
         cuerpo = str(respuesta.data)
         assert RESPUESTA_DEL_CANJE["access_token"] not in cuerpo
         assert RESPUESTA_DEL_CANJE["refresh_token"] not in cuerpo
@@ -278,9 +332,7 @@ class TestCallback:
     def test_el_canje_recibe_el_verificador_que_nunca_salio(self, cliente, monkeypatch):
         flujo = self._flujo(cliente)
         llamadas = canje_falso(monkeypatch)
-        cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        self._volver(cliente, flujo, codigo="c")
         assert llamadas[0]["verificador_pkce"] == str(flujo.verificador_pkce)
         # La misma redirect_uri del inicio: si no calza, el proveedor rechaza.
         assert llamadas[0]["redirect_uri"] == flujo.redirect_uri
@@ -291,7 +343,10 @@ class TestCallback:
         """Criterio: state inválido no vincula ni expone tokens."""
         llamadas = canje_falso(monkeypatch)
         respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": "inventado", "codigo": "c"}, format="json"
+            CALLBACK,
+            {"estado_oauth": "inventado", "codigo": "c"},
+            format="json",
+            headers=cabecera(),
         )
         assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
         assert not CuentaConectada.objects.exists()
@@ -304,9 +359,7 @@ class TestCallback:
             expira_en=timezone.now() - timedelta(seconds=1)
         )
         canje_falso(monkeypatch)
-        respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        respuesta = self._volver(cliente, flujo, codigo="c")
         assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
         assert not CuentaConectada.objects.exists()
 
@@ -314,10 +367,9 @@ class TestCallback:
         """Criterio: código repetido no vincula. El state es de un solo uso."""
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
-        cuerpo = {"estado_oauth": flujo.estado_oauth, "codigo": "mismo-codigo"}
 
-        primera = cliente.post(CALLBACK, cuerpo, format="json")
-        segunda = cliente.post(CALLBACK, cuerpo, format="json")
+        primera = self._volver(cliente, flujo, codigo="mismo-codigo")
+        segunda = self._volver(cliente, flujo, codigo="mismo-codigo")
 
         assert primera.status_code == status.HTTP_200_OK
         assert segunda.status_code == status.HTTP_400_BAD_REQUEST
@@ -328,9 +380,7 @@ class TestCallback:
         reintentar con el mismo fallaría igual. Hay que empezar de nuevo."""
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch, error=proveedores.ErrorDelProveedor("rechazado"))
-        cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        self._volver(cliente, flujo, codigo="c")
         flujo.refresh_from_db()
         assert flujo.usada_en is not None
         assert not flujo.vigente
@@ -349,11 +399,7 @@ class TestCallback:
         """Criterio de FE-03, verificado desde el callback."""
         flujo = self._flujo(cliente)
         llamadas = canje_falso(monkeypatch)
-        respuesta = cliente.post(
-            CALLBACK,
-            {"estado_oauth": flujo.estado_oauth, "error": "access_denied"},
-            format="json",
-        )
+        respuesta = self._volver(cliente, flujo, error="access_denied")
         assert respuesta.status_code == status.HTTP_200_OK
         assert respuesta.data["resultado"] == "cancelada"
         assert not CuentaConectada.objects.exists()
@@ -361,64 +407,150 @@ class TestCallback:
 
     def test_cancelar_tambien_quema_el_state(self, cliente):
         flujo = self._flujo(cliente)
-        cliente.post(
-            CALLBACK,
-            {"estado_oauth": flujo.estado_oauth, "error": "access_denied"},
-            format="json",
-        )
+        self._volver(cliente, flujo, error="access_denied")
         flujo.refresh_from_db()
         assert flujo.usada_en is not None
 
     def test_sin_codigo_ni_error_es_una_peticion_mal_armada(self, cliente):
         flujo = self._flujo(cliente)
-        respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth}, format="json"
-        )
+        respuesta = self._volver(cliente, flujo)
         assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
         # No se quemó: la petición no llegó a ser un desenlace del flujo.
         flujo.refresh_from_db()
         assert flujo.usada_en is None
 
-    # ── aislamiento ──────────────────────────────────────────────────
+    # ── quién puede cerrar el flujo ──────────────────────────────────
 
-    def test_una_cabecera_de_otra_organizacion_se_rechaza(self, cliente, monkeypatch):
+    def test_otra_organizacion_no_puede_cerrarlo(self, cliente, monkeypatch):
         flujo = self._flujo(cliente, org=ORG_A)
+        canje_falso(monkeypatch)
+        respuesta = self._volver(cliente, flujo, org=ORG_B, codigo="c")
+        assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+        assert not CuentaConectada.objects.exists()
+
+    def test_OTRO_USUARIO_DEL_MISMO_TENANT_no_puede_cerrarlo(
+        self, cliente, monkeypatch
+    ):
+        """FE-03 pide el state "vinculado a sesión".
+
+        Sin el vínculo, cualquiera del mismo tenant cerraba el flujo de otro y
+        se quedaba con la cuenta conectada a su nombre. El state aleatorio y
+        PKCE prueban que el flujo es legítimo, **no** que vuelva quien lo
+        abrió. Lo reprodujo la revisión de la PR y era cierto.
+        """
+        flujo = self._flujo(cliente, usuario=USUARIO_A)
+        llamadas = canje_falso(monkeypatch)
+        respuesta = self._volver(cliente, flujo, usuario=USUARIO_B, codigo="c")
+        assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+        assert not CuentaConectada.objects.exists()
+        # Ni siquiera se canjeó el código.
+        assert llamadas == []
+
+    def test_el_mismo_usuario_si_puede_cerrarlo(self, cliente, monkeypatch):
+        """El control no puede romper el caso normal."""
+        flujo = self._flujo(cliente, usuario=USUARIO_A)
+        canje_falso(monkeypatch)
+        respuesta = self._volver(cliente, flujo, usuario=USUARIO_A, codigo="c")
+        assert respuesta.status_code == status.HTTP_200_OK
+
+    def test_sin_cabecera_de_usuario_se_rechaza(self, cliente, monkeypatch):
+        flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
         respuesta = cliente.post(
             CALLBACK,
             {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
             format="json",
-            headers=cabecera(ORG_B),
+            headers={"X-Organizacion-Id": str(ORG_A)},
         )
         assert respuesta.status_code == status.HTTP_403_FORBIDDEN
         assert not CuentaConectada.objects.exists()
 
-    def test_la_organizacion_sale_del_flujo_no_de_la_cabecera(self, cliente, monkeypatch):
-        """El callback llega sin cabecera: así funciona una redirección."""
-        flujo = self._flujo(cliente, org=ORG_B)
+    def test_sin_ninguna_cabecera_se_rechaza(self, cliente, monkeypatch):
+        """Antes pasaba derecho: la organización se comprobaba solo "si venía"."""
+        flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
-        cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
+        respuesta = cliente.post(
+            CALLBACK,
+            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
+            format="json",
         )
-        assert CuentaConectada.objects.get().organizacion_id == ORG_B
+        assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+        assert not CuentaConectada.objects.exists()
+
+    def test_el_flujo_guarda_quien_lo_abrio(self, cliente):
+        flujo = self._flujo(cliente, usuario=USUARIO_A)
+        assert flujo.usuario_id == USUARIO_A
+
+    # ── los claims del id_token ──────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "cambio, porque",
+        [
+            ({"iss": "https://atacante.example"}, "emisor ajeno"),
+            ({"aud": "cliente-de-OTRO"}, "audiencia de otro cliente"),
+            ({"exp": 1}, "vencido en 1970"),
+            ({"exp": _QUITAR}, "sin exp"),
+            ({"email": _QUITAR}, "sin email"),
+        ],
+    )
+    def test_un_id_token_con_claims_malos_no_vincula_la_cuenta(
+        self, cliente, monkeypatch, cambio, porque
+    ):
+        """OIDC Core §3.1.3.7.
+
+        No verificar la **firma** es una excepción documentada: el token llegó
+        como respuesta directa del endpoint de canje, por TLS contra el
+        dominio del proveedor. Pero esa excepción **no cubre el resto**: que el
+        canal autentique al emisor no dice para quién se emitió el token ni si
+        sigue vigente. Saltarse iss/aud/exp dejaba pasar un token con emisor
+        ajeno, audiencia de otro y vencido en 1970.
+        """
+        flujo = self._flujo(cliente)
+        canje_falso(monkeypatch, respuesta=respuesta_del_canje(id_token=id_token(**cambio)))
+        respuesta = self._volver(cliente, flujo, codigo="c")
+        assert respuesta.status_code == status.HTTP_400_BAD_REQUEST, porque
+        assert not CuentaConectada.objects.exists(), porque
+
+    def test_sin_id_token_no_se_vincula_nada(self, cliente, monkeypatch):
+        """Un campo `email` suelto no es una identidad verificada: no tiene
+        emisor, ni audiencia, ni vencimiento."""
+        flujo = self._flujo(cliente)
+        canje_falso(
+            monkeypatch,
+            respuesta={
+                "access_token": "t",
+                "expires_in": 60,
+                "email": "suelto@gmail.com",
+            },
+        )
+        respuesta = self._volver(cliente, flujo, codigo="c")
+        assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
+        assert not CuentaConectada.objects.exists()
+
+    def test_un_id_token_valido_si_vincula(self, cliente, monkeypatch):
+        flujo = self._flujo(cliente)
+        canje_falso(monkeypatch, respuesta=respuesta_del_canje())
+        respuesta = self._volver(cliente, flujo, codigo="c")
+        assert respuesta.status_code == status.HTTP_200_OK
+        assert CuentaConectada.objects.get().cuenta_externa == "persona@gmail.com"
+
+    def test_una_audiencia_en_lista_tambien_vale(self, cliente, monkeypatch):
+        """OIDC permite `aud` como lista."""
+        flujo = self._flujo(cliente)
+        canje_falso(
+            monkeypatch,
+            respuesta=respuesta_del_canje(
+                id_token=id_token(aud=["otro-cliente", CLIENTE_GMAIL])
+            ),
+        )
+        assert self._volver(cliente, flujo, codigo="c").status_code == 200
 
     # ── errores del proveedor ────────────────────────────────────────
 
     def test_si_el_proveedor_falla_no_queda_cuenta_a_medias(self, cliente, monkeypatch):
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch, error=proveedores.ErrorDelProveedor("rechazó el canje"))
-        respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
-        assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
-        assert not CuentaConectada.objects.exists()
-
-    def test_sin_correo_no_se_puede_saber_que_cuenta_es(self, cliente, monkeypatch):
-        flujo = self._flujo(cliente)
-        canje_falso(monkeypatch, respuesta={"access_token": "t", "expires_in": 60})
-        respuesta = cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        respuesta = self._volver(cliente, flujo, codigo="c")
         assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
         assert not CuentaConectada.objects.exists()
 
@@ -427,31 +559,20 @@ class TestCallback:
         él, pisarlo dejaría la cuenta sin poder refrescarse."""
         flujo = self._flujo(cliente)
         canje_falso(monkeypatch)
-        cliente.post(
-            CALLBACK, {"estado_oauth": flujo.estado_oauth, "codigo": "c"}, format="json"
-        )
+        self._volver(cliente, flujo, codigo="c")
 
-        otro = self._reiniciar(cliente)
+        otro = self._flujo(cliente)
         canje_falso(
             monkeypatch,
-            respuesta={
-                "access_token": "ya29.token-nuevo",
-                "expires_in": 3599,
-                "email": "persona@gmail.com",
-            },
+            respuesta=respuesta_del_canje(
+                access_token="ya29.token-nuevo", refresh_token=None
+            ),
         )
-        cliente.post(
-            CALLBACK, {"estado_oauth": otro.estado_oauth, "codigo": "c2"}, format="json"
-        )
+        self._volver(cliente, otro, codigo="c2")
 
         cuenta = CuentaConectada.objects.get()
         assert str(cuenta.access_token) == "ya29.token-nuevo"
         assert str(cuenta.refresh_token) == RESPUESTA_DEL_CANJE["refresh_token"]
-
-    def _reiniciar(self, cliente):
-        """Abre un segundo flujo y devuelve el nuevo (el primero ya se usó)."""
-        iniciar(cliente)
-        return AutorizacionPendiente.objects.filter(usada_en__isnull=True).get()
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -483,10 +604,10 @@ def cuenta(claves):
 
 
 class TestDesconectar:
-    def test_desconectar_revoca_y_borra_las_credenciales(
+    def test_cuando_el_proveedor_confirma_se_borran_las_credenciales(
         self, cliente, cuenta, monkeypatch
     ):
-        llamadas = revocacion_falsa(monkeypatch)
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
         respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
 
         assert respuesta.status_code == status.HTTP_200_OK
@@ -497,6 +618,46 @@ class TestDesconectar:
         assert cuenta.access_token is None
         assert cuenta.refresh_token is None
         assert cuenta.token_expira_en is None
+        # La evidencia que consume la limpieza coordinada de #72.
+        assert cuenta.revocado_en is not None
+
+    def test_cuando_NO_confirma_el_token_se_conserva_para_reintentar(
+        self, cliente, cuenta, monkeypatch
+    ):
+        """El hallazgo de la revisión: borrar la única credencial de reintento
+        convierte la revocación en imposible, no en pendiente."""
+        revocacion_falsa(monkeypatch, confirma=False)
+        respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        cuenta.refresh_from_db()
+        # Desconectada igual: dejar de leer no depende del proveedor.
+        assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
+        # Pero el token sigue, cifrado, para poder reintentar.
+        assert str(cuenta.access_token) == "ya29.token-vivo"
+        # Y NO se da por revocada.
+        assert cuenta.revocado_en is None
+        assert "no confirmó" in cuenta.detalle_del_estado
+
+    def test_con_access_vencido_se_intenta_con_el_refresh(
+        self, cliente, claves, monkeypatch
+    ):
+        """Antes no se intentaba siquiera: solo miraba el access_token, así que
+        las cuentas más viejas —las que ya tenían el access vencido— se
+        quedaban sin revocar y encima perdían el refresh."""
+        sin_access = CuentaConectada.objects.create(
+            organizacion_id=ORG_A,
+            proveedor="gmail",
+            cuenta_externa="vieja@gmail.com",
+            refresh_token="1//solo-refresh",
+        )
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        respuesta = cliente.delete(f"{LISTA}{sin_access.id}/", headers=cabecera(ORG_A))
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        assert llamadas and llamadas[0]["access_token"] == "1//solo-refresh"
+        sin_access.refresh_from_db()
+        assert sin_access.revocado_en is not None
 
     def test_la_fila_no_se_borra(self, cliente, cuenta, monkeypatch):
         """Los cobros ya importados apuntan acá; borrarla los dejaría huérfanos."""
@@ -508,10 +669,10 @@ class TestDesconectar:
         """Criterio: desconectar impide nuevas lecturas.
 
         FE-13 leerá el correo de las cuentas en estado `conectada`. Al pasar a
-        `desconectada` deja de entrar en esa selección. Si alguien cambia esa
-        selección, esta prueba se entera.
+        `desconectada` deja de entrar en esa selección — incluso cuando el
+        token se conserva para reintentar la revocación.
         """
-        revocacion_falsa(monkeypatch)
+        revocacion_falsa(monkeypatch, confirma=False)
         cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
 
         legibles = CuentaConectada.objects.filter(
@@ -541,21 +702,6 @@ class TestDesconectar:
         cuenta.refresh_from_db()
         assert cuenta.estado == CuentaConectada.Estado.CONECTADA
 
-    def test_si_el_proveedor_no_confirma_igual_queda_desconectada(
-        self, cliente, cuenta, monkeypatch
-    ):
-        """Lo que el usuario pidió fue dejar de darnos acceso. Eso se cumple de
-        este lado borrando las credenciales, conteste el proveedor o no."""
-        revocacion_falsa(monkeypatch, confirma=False)
-        respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
-
-        assert respuesta.status_code == status.HTTP_200_OK
-        cuenta.refresh_from_db()
-        assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
-        assert cuenta.access_token is None
-        # Y queda escrito que el token podría seguir vivo allá.
-        assert "no confirmó" in cuenta.detalle_del_estado
-
     def test_una_cuenta_sin_token_se_desconecta_sin_llamar_al_proveedor(
         self, cliente, claves, monkeypatch
     ):
@@ -569,6 +715,8 @@ class TestDesconectar:
         assert llamadas == []
         sin_token.refresh_from_db()
         assert sin_token.estado == CuentaConectada.Estado.DESCONECTADA
+        # Sin token no hubo nada que revocar, así que NO se acredita revocación.
+        assert sin_token.revocado_en is None
 
     def test_desconectar_dos_veces_no_falla(self, cliente, cuenta, monkeypatch):
         revocacion_falsa(monkeypatch)
@@ -582,3 +730,84 @@ class TestDesconectar:
         assert cliente.put(
             f"{LISTA}{cuenta.id}/", {}, format="json", headers=cabecera()
         ).status_code == 405
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FE-05 — el reintento de las revocaciones pendientes
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestReintento:
+    """Sin esto, "pendiente" sería un estado del que no se sale nunca."""
+
+    def _desconectar_sin_confirmar(self, cliente, cuenta, monkeypatch):
+        revocacion_falsa(monkeypatch, confirma=False)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+        cuenta.refresh_from_db()
+        return cuenta
+
+    def test_la_cuenta_sin_confirmar_queda_en_la_lista_de_pendientes(
+        self, cliente, cuenta, monkeypatch
+    ):
+        from connectors.revocacion import pendientes_de_revocar
+
+        self._desconectar_sin_confirmar(cliente, cuenta, monkeypatch)
+        assert list(pendientes_de_revocar()) == [cuenta]
+
+    def test_la_confirmada_no_queda_pendiente(self, cliente, cuenta, monkeypatch):
+        from connectors.revocacion import pendientes_de_revocar
+
+        revocacion_falsa(monkeypatch, confirma=True)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+        assert list(pendientes_de_revocar()) == []
+
+    def test_en_seco_no_toca_nada(self, cliente, cuenta, monkeypatch):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        self._desconectar_sin_confirmar(cliente, cuenta, monkeypatch)
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        salida = StringIO()
+        call_command("reintentar_revocaciones", stdout=salida)
+
+        assert "Modo ensayo" in salida.getvalue()
+        assert llamadas == []
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is None
+
+    def test_con_aplicar_reintenta_y_confirma(self, cliente, cuenta, monkeypatch):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        self._desconectar_sin_confirmar(cliente, cuenta, monkeypatch)
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        call_command("reintentar_revocaciones", aplicar=True, stdout=StringIO())
+
+        assert llamadas and llamadas[0]["access_token"] == "ya29.token-vivo"
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is not None
+        assert cuenta.access_token is None
+
+    def test_si_sigue_sin_confirmar_conserva_el_token(
+        self, cliente, cuenta, monkeypatch
+    ):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        self._desconectar_sin_confirmar(cliente, cuenta, monkeypatch)
+        revocacion_falsa(monkeypatch, confirma=False)
+        call_command("reintentar_revocaciones", aplicar=True, stdout=StringIO())
+
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is None
+        assert str(cuenta.access_token) == "ya29.token-vivo"
+
+    def test_no_toca_las_cuentas_conectadas(self, cliente, cuenta, monkeypatch):
+        """Solo mira las desconectadas sin confirmar."""
+        from connectors.revocacion import pendientes_de_revocar
+
+        assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+        assert list(pendientes_de_revocar()) == []

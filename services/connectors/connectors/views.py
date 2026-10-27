@@ -13,10 +13,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from shared.cifrado import SECRETO_ILEGIBLE
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from . import proveedores
+from . import proveedores, revocacion
 from .models import AutorizacionPendiente, CuentaConectada
 from .serializers import (
     AutorizacionIniciadaSerializer,
@@ -144,8 +143,13 @@ class CuentaConectadaViewSet(mixins.DestroyModelMixin, SoloLecturaTenantViewSet)
         La tarjeta dice "revocar tokens, borrar credenciales, detener jobs y
         actualizar estado": nada de eso es borrar el registro.
 
-        Lo que sí desaparece son los tokens: quedan en NULL, no en una cadena
-        vacía ni pisados con basura.
+        Los tokens solo se borran si el proveedor **confirmó** la
+        revocación. Si no la confirmó, se conservan cifrados: son la
+        única credencial con que reintentar, y borrarlos convierte la
+        revocación en imposible, no en pendiente. La cuenta igual queda
+        desconectada, así que no se lee más de ella.
+
+        El detalle de cómo se decide está en `revocacion.py`.
 
         ── Qué significa "detener jobs" ────────────────────────────────────
         No hay un job corriendo que matar: la lectura de correo (FE-13) toma
@@ -165,48 +169,7 @@ class CuentaConectadaViewSet(mixins.DestroyModelMixin, SoloLecturaTenantViewSet)
         organización no puede revocar ni consultar esa cuenta".
         """
         cuenta = self.get_object()
-
-        # El token se lee ANTES de borrarlo, obviamente, y solo para mandarlo
-        # a revocar. No se escribe en ningún log.
-        token = cuenta.access_token
-        revocado = False
-        if token and token is not SECRETO_ILEGIBLE:
-            try:
-                revocado = proveedores.revocar(
-                    cuenta.proveedor, access_token=str(token)
-                )
-            except proveedores.ProveedorNoSoportado:
-                # Una cuenta CSV no tiene nada que revocar: no hubo OAuth.
-                revocado = False
-
-        if revocado:
-            detalle = "Desconectada por el usuario; el proveedor confirmó la revocación."
-        elif not token:
-            detalle = "Desconectada por el usuario; no había token que revocar."
-        else:
-            # Importa que quede escrito: el token podría seguir vivo del lado
-            # del proveedor hasta que expire solo. De este lado ya no está.
-            detalle = (
-                "Desconectada por el usuario; el proveedor no confirmó la "
-                "revocación y el token puede seguir vigente hasta que expire."
-            )
-
-        with transaction.atomic():
-            cuenta.access_token = None
-            cuenta.refresh_token = None
-            cuenta.token_expira_en = None
-            cuenta.estado = CuentaConectada.Estado.DESCONECTADA
-            cuenta.detalle_del_estado = detalle[:200]
-            cuenta.save(
-                update_fields=[
-                    "access_token",
-                    "refresh_token",
-                    "token_expira_en",
-                    "estado",
-                    "detalle_del_estado",
-                    "actualizado_en",
-                ]
-            )
+        revocacion.revocar_y_desconectar(cuenta)
 
         salida = self.get_serializer(cuenta)
         return Response(salida.data, status=status.HTTP_200_OK)
@@ -223,6 +186,19 @@ def _organizacion_de(request):
     if not org:
         raise PermissionDenied("Falta el contexto de organización")
     return org
+
+
+def _usuario_de(request):
+    """El usuario de la cabecera, o 403. La pone el gateway (ADR-004).
+
+    FE-03 pide el state "vinculado a sesión": sin saber QUIÉN abrió el flujo
+    no se puede comprobar que vuelva la misma persona, y bastaba con ser del
+    mismo tenant para cerrar un flujo ajeno.
+    """
+    usuario = getattr(request, "usuario_id", None)
+    if not usuario:
+        raise PermissionDenied("Falta el contexto de usuario")
+    return str(usuario)
 
 
 @extend_schema(
@@ -247,6 +223,7 @@ class IniciarAutorizacionView(APIView):
 
     def post(self, request):
         org = _organizacion_de(request)
+        usuario = _usuario_de(request)
         entrada = IniciarAutorizacionSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
 
@@ -261,6 +238,7 @@ class IniciarAutorizacionView(APIView):
 
         autorizacion, desafio = AutorizacionPendiente.abrir(
             organizacion_id=org,
+            usuario_id=usuario,
             proveedor=proveedor,
             redirect_uri=redirect_uri,
             retorno=entrada.validated_data.get("retorno", ""),
@@ -292,17 +270,27 @@ class CallbackAutorizacionView(APIView):
         { "estado_oauth": "...", "codigo": "..." }            el usuario aceptó
         { "estado_oauth": "...", "error": "access_denied" }   canceló
 
-    ── Por qué acá NO se exige la cabecera de organización ─────────────────
-    El callback llega como una redirección del navegador desde Google. No hay
-    sesión ni cabecera que valga: el gateway no tiene a quién preguntarle. La
-    organización sale de la fila de `AutorizacionPendiente`, que se creó en
-    FE-03 cuando sí había contexto.
+    ── Quién puede cerrar un flujo ───────────────────────────────
+    **Solo la misma persona que lo abrió.** Se exigen las dos cabeceras y las
+    dos tienen que calzar con la fila de `AutorizacionPendiente`.
 
-    Lo que autentica la petición, entonces, no es una cabecera sino tres
-    cosas juntas: el `state` (43 caracteres de CSPRNG, imposible de adivinar),
-    que sea de **un solo uso**, y PKCE (hay que mostrar el verificador que
-    nunca salió del servidor). Si además viene la cabecera y dice otra
-    organización, se rechaza: no debería pasar nunca y si pasa, algo está mal.
+    Una versión anterior de este comentario decía que el callback llega "sin
+    sesión ni cabecera que valga" porque es una redirección del navegador.
+    **Eso era falso en este sistema**: `/api/conectores/` no está en
+    `RUTAS_PUBLICAS`, así que el gateway exige JWT y la identidad SÍ llega. El
+    frontend recibe el `code` y el `state` en la URL y los reenvía por POST
+    con su token, que es como está cableado hoy.
+
+    El `state` (43 caracteres de CSPRNG, de un solo uso) y PKCE prueban que el
+    flujo es legítimo; **no** prueban que vuelva quien lo abrió. Sin el vínculo
+    al usuario, cualquiera del mismo tenant podía cerrar el flujo de otro y
+    quedarse con la cuenta conectada a su nombre. Lo reprodujo la revisión de
+    la PR con dos usuarios del mismo tenant, y era cierto.
+
+    Si algún día el callback se hace público (redirección directa del
+    proveedor, sin pasar por el frontend), este vínculo hay que moverlo a una
+    cookie efímera. Lo que NO corresponde es abrir todo el prefijo de
+    conectores para resolverlo.
 
     ── Por qué el state se quema ANTES de canjear ──────────────────────────
     Si se canjeara primero, dos callbacks simultáneos con el mismo código
@@ -326,9 +314,14 @@ class CallbackAutorizacionView(APIView):
             # diría a quien prueba states al azar cuándo acertó uno.
             raise ValidationError({"estado_oauth": "El flujo no es válido o ya venció."})
 
-        org_cabecera = getattr(request, "organizacion_id", None)
-        if org_cabecera and str(org_cabecera) != str(autorizacion.organizacion_id):
+        # Las dos son obligatorias. Antes la organización se comprobaba solo
+        # "si venía", o sea que no comprobaba nada: una petición sin cabeceras
+        # pasaba derecho.
+        if str(_organizacion_de(request)) != str(autorizacion.organizacion_id):
             raise PermissionDenied("El flujo pertenece a otra organización.")
+        if _usuario_de(request) != autorizacion.usuario_id:
+            # Mismo tenant, otra persona. No se dice de quién es el flujo.
+            raise PermissionDenied("El flujo lo inició otro usuario.")
 
         if not autorizacion.vigente:
             raise ValidationError({"estado_oauth": "El flujo no es válido o ya venció."})
@@ -356,12 +349,17 @@ class CallbackAutorizacionView(APIView):
                 verificador_pkce=str(autorizacion.verificador_pkce),
                 redirect_uri=autorizacion.redirect_uri,
             )
+            correo = proveedores.correo_autorizado(
+                autorizacion.proveedor, respuesta
+            )
         except proveedores.ErrorDelProveedor as exc:
-            # El mensaje de ErrorDelProveedor está construido para no llevar
-            # tokens (ver proveedores.py). Igual se acota.
+            # Cubre el canje Y la validación de los claims del id_token:
+            # las dos cosas son "el proveedor no entregó algo que sirva",
+            # y las dos tienen que salir como 400 y no como 500.
+            # El mensaje está construido para no llevar tokens (ver
+            # proveedores.py). Igual se acota.
             raise ValidationError({"detalle": str(exc)[:200]}) from exc
 
-        correo = proveedores.correo_autorizado(autorizacion.proveedor, respuesta)
         if not correo:
             raise ValidationError(
                 {"detalle": "El proveedor no identificó qué cuenta se autorizó."}
