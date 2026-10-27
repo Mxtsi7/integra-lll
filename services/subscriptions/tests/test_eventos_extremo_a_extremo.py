@@ -231,6 +231,28 @@ class TestRecorridoCompleto:
         assert json.loads(cuerpo2)["organizacion_id"] == str(org)
 
 
+@pytest.fixture
+def sin_reciclar_conexiones(monkeypatch):
+    """Neutraliza `close_old_connections()` mientras corre el comando.
+
+    El consumidor la llama en cada mensaje, y con razón: es un proceso largo
+    sin peticiones HTTP, así que tiene que soltar las conexiones muertas a
+    mano o se queda con conexiones zombi después de un corte de la base.
+
+    Pero corriéndolo DENTRO de pytest, esa llamada cierra justamente la
+    conexión que sostiene la transacción de la prueba, y todo lo que viene
+    después muere con "the connection is closed".
+
+    No se vio en SQLite en memoria —cerrar y reabrir no cuesta nada ahí— y sí
+    en la CI, que corre contra PostgreSQL. Lo que estas pruebas comprueban es
+    el camino del mensaje, no el reciclaje de conexiones, así que se
+    neutraliza y queda dicho por qué.
+    """
+    from app.management.commands import consumir_eventos as comando
+
+    monkeypatch.setattr(comando, "close_old_connections", lambda: None)
+
+
 class TestRecorridoReal:
     """El camino entero, con las piezas REALES de cada tramo.
 
@@ -253,7 +275,7 @@ class TestRecorridoReal:
     """
 
     def test_del_POST_al_resumen_sin_saltarse_ningun_tramo(
-        self, canal, cliente, settings
+        self, canal, cliente, settings, sin_reciclar_conexiones
     ):
         settings.EVENTOS_ASINCRONOS = True
         org = uuid.uuid4()
@@ -284,7 +306,7 @@ class TestRecorridoReal:
         assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
 
     def test_un_sobre_que_no_cumple_el_contrato_termina_en_la_cola_de_fallos(
-        self, canal
+        self, canal, sin_reciclar_conexiones
     ):
         """Publicado a mano, saltándose el productor: es lo que haría otro
         servicio mal implementado. Tiene que apartarse, no morir ni perderse."""
@@ -300,7 +322,9 @@ class TestRecorridoReal:
         assert caido is not None, "el sobre inválido se perdió en vez de apartarse"
         assert json.loads(caido)["evento"] == "suscripcion.creada"
 
-    def test_un_cuerpo_que_no_es_json_no_mata_el_consumidor(self, canal):
+    def test_un_cuerpo_que_no_es_json_no_mata_el_consumidor(
+        self, canal, sin_reciclar_conexiones
+    ):
         """El caso que antes tumbaba el proceso entero."""
         canal.basic_publish(
             exchange=topologia.EXCHANGE,
@@ -313,7 +337,7 @@ class TestRecorridoReal:
         assert esperar_mensaje(canal, topologia.COLA_FALLIDOS) is not None
 
     def test_un_fallo_pasajero_de_la_base_se_reintenta_y_se_recupera(
-        self, canal, cliente, settings, monkeypatch
+        self, canal, cliente, settings, monkeypatch, sin_reciclar_conexiones
     ):
         """La base se cae en el primer intento y vuelve en el segundo.
 
@@ -351,7 +375,7 @@ class TestRecorridoReal:
         assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
 
     def test_si_la_base_no_vuelve_el_evento_va_a_la_cola_de_fallos(
-        self, canal, cliente, settings, monkeypatch
+        self, canal, cliente, settings, monkeypatch, sin_reciclar_conexiones
     ):
         """Agotados los intentos, se aparta con motivo. No se borra."""
         settings.EVENTOS_ASINCRONOS = True
