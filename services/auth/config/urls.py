@@ -16,6 +16,8 @@ from app.views import (
 )
 from app.sesiones import LogoutView, RefreshView
 from app.perfil import CambioClaveView
+from app.permisos_plan import PermisosPlanView, PlanesView
+from app.contrataciones import ContratacionesView, ContratacionDetalleView, CancelarContratacionView, WebhookPagoView, CheckoutMockView
 from app.verificacion_correo_api import ConfirmacionVerificacionView, SolicitudVerificacionView
 
 
@@ -30,7 +32,18 @@ def inicio(request):
     return HttpResponse("Servicio Auth activo")
 
 
+from app.catalogos_api import PaisesView
+
 urlpatterns = [
+    path("api/catalogos/paises/", PaisesView.as_view()),
+
+    path("api/contrataciones/", ContratacionesView.as_view(), name="contrataciones"),
+    path("api/contrataciones/<uuid:pk>/", ContratacionDetalleView.as_view(), name="contratacion-detalle"),
+    path("api/contrataciones/<uuid:pk>/cancelar/", CancelarContratacionView.as_view(), name="contratacion-cancelar"),
+    path("api/pagos/webhook/", WebhookPagoView.as_view(), name="webhook-pago"),
+    path("api/pagos/mock/", CheckoutMockView.as_view(), name="checkout-mock"),
+    path("api/planes/", PlanesView.as_view(), name="planes"),
+    path("api/usuarios/me/permisos/", PermisosPlanView.as_view(), name="permisos-plan"),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),

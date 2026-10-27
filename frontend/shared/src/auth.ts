@@ -31,6 +31,7 @@ let endpoints = {
   // Recuperación de contraseña (MX-02 / MX-04). Rutas públicas del gateway.
   passwordReset: "/auth/password-reset/",
   passwordResetConfirm: "/auth/password-reset/confirm/",
+  emailVerificationConfirm: "/auth/email-verification/confirm/",
 };
 
 export function configureAuthApi(config: {
@@ -338,4 +339,12 @@ export type CodigoErrorEnlace = "token_invalido" | "token_expirado" | "token_usa
  */
 export async function restablecerContrasena(token: string, password: string): Promise<void> {
   await postJSON<{ detail: string }>(endpoints.passwordResetConfirm, { token, password });
+}
+  /**
+   * POST /auth/email-verification/confirm/ (MX-28). Ruta pública. Errores (AuthError):
+   * - 400 code=token_invalido | correo_no_disponible · 410 code=token_expirado | token_usado
+   * - 503: el aviso falló y el enlace sigue siendo reutilizable
+   */
+export async function confirmarCorreo(token: string): Promise<void> {
+  await postJSON<{ detail: string }>(endpoints.emailVerificationConfirm, { token });
 }

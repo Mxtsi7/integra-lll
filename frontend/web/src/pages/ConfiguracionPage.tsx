@@ -6,7 +6,7 @@ import { Insignia } from '../components/ui/Insignia';
 import { Fila, Seccion } from '../components/ui/Seccion';
 import { useTema } from '../hooks/useTema';
 import styles from './ConfiguracionPage.module.css';
-
+import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 // TODO: cuando exista un endpoint de preferencias, estos estados se cargan
 // con un GET al montar la página y se guardan con un PATCH al cambiar,
 // igual que hicimos con getUsuarioActual() en Perfil.
@@ -116,9 +116,7 @@ export function ConfiguracionPage() {
               </Boton>
             </Fila>
             <Fila etiqueta="Eliminar cuenta" detalle="Borra tu cuenta y tus suscripciones.">
-              <Boton variante="sutil" tamano="s" className={styles.peligro} disabled title="Próximamente">
-                Eliminar
-              </Boton>
+              <EliminarCuenta className={styles.peligro} />
             </Fila>
           </Seccion>
 

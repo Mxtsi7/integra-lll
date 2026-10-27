@@ -1,15 +1,20 @@
 """Pruebas de transiciones autorizadas, umbrales y auditoría de RF-03."""
 
-from datetime import date, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from threading import Barrier
+from types import SimpleNamespace
 import uuid
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from app.models import Cobro, Subscription, TransicionEstado
 from app.serializers import SubscriptionSerializer
+from app.views import SubscriptionViewSet
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -19,6 +24,23 @@ TRANSICIONES_PERMITIDAS = [
     for evento, (estados, _) in Subscription.TRANSICIONES_ESTADO.items()
     for estado in estados
 ]
+
+
+@pytest.fixture(params=[
+    datetime(2026, 10, 21, 3, 30, tzinfo=UTC),
+    datetime(2026, 10, 21, 15, 0, tzinfo=UTC),
+], ids=['madrugada_santiago', 'mediodia_santiago'])
+def reloj_umbral(request, monkeypatch):
+    # La ventana cruza el cambio de hora de septiembre en ambos casos.
+    monkeypatch.setattr(timezone, 'now', lambda: request.param)
+    with timezone.override('America/Santiago'):
+        yield
+
+
+def fecha_local_hace(dias: int) -> datetime:
+    # El dominio cuenta fechas locales, no bloques de 24 horas en UTC.
+    fecha = timezone.localdate() - timedelta(days=dias)
+    return timezone.make_aware(datetime.combine(fecha, time(12)))
 
 
 def crear_suscripcion(estado: str) -> Subscription:
@@ -144,9 +166,9 @@ def test_fin_prueba_no_puede_transicionar_antes_de_la_fecha() -> None:
 
 
 @pytest.mark.django_db
-def test_sin_cobros_requiere_60_dias_completos() -> None:
+def test_sin_cobros_requiere_60_dias_completos(reloj_umbral) -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
-    fecha_creacion = timezone.now() - timedelta(days=59)
+    fecha_creacion = fecha_local_hace(59)
     Subscription.objects.filter(pk=suscripcion.pk).update(creado_en=fecha_creacion)
     suscripcion.refresh_from_db()
 
@@ -154,7 +176,7 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
         suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
 
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=60)
+        creado_en=fecha_local_hace(60)
     )
     suscripcion.refresh_from_db()
     suscripcion.transicionar(Subscription.EventoEstado.SIN_COBROS_60_DIAS)
@@ -164,10 +186,10 @@ def test_sin_cobros_requiere_60_dias_completos() -> None:
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("dias_sin_uso", [45, 46])
-def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int) -> None:
+def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int, reloj_umbral) -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
     Subscription.objects.filter(pk=suscripcion.pk).update(
-        creado_en=timezone.now() - timedelta(days=dias_sin_uso)
+        creado_en=fecha_local_hace(dias_sin_uso)
     )
     suscripcion.refresh_from_db()
 
@@ -179,6 +201,42 @@ def test_fantasma_requiere_mas_de_45_dias_sin_uso(dias_sin_uso: int) -> None:
         suscripcion.transicionar(Subscription.EventoEstado.SIN_USO_45_DIAS)
         suscripcion.refresh_from_db()
         assert suscripcion.estado == Subscription.Estado.FANTASMA
+
+
+@pytest.mark.django_db
+def test_patch_obsoleto_conserva_transicion_y_campos_de_uso_concurrentes() -> None:
+    original = crear_suscripcion(Subscription.Estado.ACTIVO)
+    instancia_obsoleta = Subscription.objects.get(pk=original.pk)
+    serializer = SubscriptionSerializer(
+        instance=instancia_obsoleta,
+        data={"nombre": "Servicio actualizado"},
+        partial=True,
+    )
+    assert serializer.is_valid()
+
+    instancia_uso = Subscription.objects.get(pk=original.pk)
+    instancia_uso.registrar_uso(60)
+    instancia_transicion = Subscription.objects.get(pk=original.pk)
+    instancia_transicion.transicionar(
+        Subscription.EventoEstado.CANCELACION_USUARIO,
+        actor_id=uuid.uuid4(),
+        actor_rol="titular",
+    )
+
+    view = SubscriptionViewSet()
+    view.request = SimpleNamespace(rol=None, usuario_id=None)
+    view.perform_update(serializer)
+
+    actualizada = Subscription.objects.get(pk=original.pk)
+    assert actualizada.nombre == "Servicio actualizado"
+    assert actualizada.estado == Subscription.Estado.CANCELADO
+    assert actualizada.horas_uso_mes == Decimal("1.00")
+    assert actualizada.ultima_actividad is not None
+    assert actualizada.transiciones_estado.count() == 1
+    assert (
+        actualizada.transiciones_estado.get().evento
+        == Subscription.EventoEstado.CANCELACION_USUARIO
+    )
 
 
 @pytest.mark.django_db
@@ -204,6 +262,33 @@ def test_registro_de_uso_no_sobrescribe_estado_cambiado_tras_cargar_instancia() 
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.POR_CONFIRMAR
     assert suscripcion.horas_uso_mes == Decimal("0.50")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_registros_de_uso_concurrentes_conservan_el_agregado_mensual() -> None:
+    if not connection.features.has_select_for_update:
+        pytest.skip("La base de datos no soporta bloqueos de fila.")
+
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    inicio = Barrier(2)
+
+    def registrar_en_paralelo() -> None:
+        close_old_connections()
+        try:
+            instancia = Subscription.objects.get(pk=suscripcion.pk)
+            inicio.wait(timeout=5)
+            instancia.registrar_uso(30)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        tareas = [executor.submit(registrar_en_paralelo) for _ in range(2)]
+        for tarea in tareas:
+            tarea.result(timeout=15)
+
+    suscripcion.refresh_from_db()
+    assert suscripcion.usos.count() == 2
+    assert suscripcion.horas_uso_mes == Decimal("1.00")
 
 
 @pytest.mark.django_db
@@ -316,3 +401,102 @@ def test_api_rechaza_cambio_directo_a_un_estado_no_autorizado() -> None:
     suscripcion.refresh_from_db()
     assert suscripcion.estado == Subscription.Estado.ACTIVO
     assert not TransicionEstado.objects.filter(suscripcion=suscripcion).exists()
+
+
+# ── Nuevas pruebas requeridas por PR #67 / VI-10 ───────────────────────────
+
+@pytest.mark.django_db
+def test_horas_uso_mes_no_cruza_cambio_de_mes() -> None:
+    """El agregado mensual no incluye registros de meses anteriores.
+
+    El campo horas_uso_mes debe reflejar solo el mes local actual.
+    Un uso registrado en el mes anterior no debe sumarse al total.
+    """
+    from app.models import RegistroUso
+
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+    hoy = timezone.localdate()
+
+    # Crear un registro en el mes anterior directamente en BD (sin pasar
+    # por registrar_uso para no alterar el estado).
+    if hoy.month == 1:
+        mes_anterior = hoy.replace(year=hoy.year - 1, month=12, day=1)
+    else:
+        mes_anterior = hoy.replace(month=hoy.month - 1, day=1)
+
+    RegistroUso.objects.create(
+        organizacion_id=suscripcion.organizacion_id,
+        suscripcion=suscripcion,
+        fecha=mes_anterior,
+        minutos=120,  # 2 horas del mes pasado
+    )
+
+    # Registrar 30 minutos en el mes actual
+    suscripcion.registrar_uso(30)
+    suscripcion.refresh_from_db()
+
+    # Solo los 30 min del mes actual deben reflejarse
+    assert suscripcion.horas_uso_mes == Decimal("0.50"), (
+        "El agregado mensual no debe incluir registros de meses anteriores."
+    )
+    assert suscripcion.usos.count() == 2
+
+
+@pytest.mark.django_db
+def test_serializer_horas_uso_mes_se_recalcula_al_cambiar_de_mes(monkeypatch) -> None:
+    from app.serializers import SubscriptionSerializer
+    from django.utils import timezone as tz
+
+    suscripcion = crear_suscripcion(Subscription.Estado.ACTIVO)
+
+    # "Hoy" es 31-10: el uso cuenta en octubre.
+    monkeypatch.setattr(tz, "localdate", lambda *a, **k: date(2026, 10, 31))
+    suscripcion.registrar_uso(60, fecha=date(2026, 10, 31))
+    suscripcion.refresh_from_db()
+    assert suscripcion.horas_uso_mes == Decimal("1.00")
+    assert Decimal(SubscriptionSerializer(suscripcion).data["horas_uso_mes"]) == Decimal("1.00")
+
+    # "Hoy" pasa a ser 1-11: el serializer debe dar 0.
+    monkeypatch.setattr(tz, "localdate", lambda *a, **k: date(2026, 11, 1))
+    assert Decimal(SubscriptionSerializer(suscripcion).data["horas_uso_mes"]) == Decimal("0.00")
+
+
+@pytest.mark.django_db(transaction=True)
+def test_registro_de_uso_concurrente_en_fantasma_no_duplica_transicion() -> None:
+    """Dos escrituras concurrentes de uso en una suscripción FANTASMA no
+    deben crear dos transiciones USO_REGISTRADO ni dejar el estado inconsistente.
+
+    El select_for_update garantiza que solo un hilo ejecuta la transición;
+    el segundo ya la encuentra en ACTIVO y solo añade el uso.
+    """
+    if not connection.features.has_select_for_update:
+        pytest.skip("La base de datos no soporta bloqueos de fila.")
+
+    suscripcion = crear_suscripcion(Subscription.Estado.FANTASMA)
+    inicio = Barrier(2)
+
+    def registrar_en_paralelo() -> None:
+        close_old_connections()
+        try:
+            instancia = Subscription.objects.get(pk=suscripcion.pk)
+            inicio.wait(timeout=5)
+            instancia.registrar_uso(30)
+        finally:
+            close_old_connections()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        tareas = [executor.submit(registrar_en_paralelo) for _ in range(2)]
+        for tarea in tareas:
+            tarea.result(timeout=15)
+
+    suscripcion.refresh_from_db()
+    assert suscripcion.estado == Subscription.Estado.ACTIVO
+    assert suscripcion.usos.count() == 2
+    assert suscripcion.horas_uso_mes == Decimal("1.00")
+    # Solo debe haber una transición USO_REGISTRADO
+    assert (
+        suscripcion.transiciones_estado.filter(
+            evento=Subscription.EventoEstado.USO_REGISTRADO
+        ).count()
+        == 1
+    ), "La transición FANTASMA→ACTIVO no debe duplicarse bajo concurrencia."

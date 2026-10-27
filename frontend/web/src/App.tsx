@@ -1,11 +1,12 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { restablecerContrasena, solicitarRecuperacion } from '@ojoalgasto/shared';
+import { restablecerContrasena, solicitarRecuperacion, RECOMENDACIONES_DISPONIBLES } from '@ojoalgasto/shared';
 import { DashboardPage } from './pages/DashboardPage';
 import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { ToastProvider } from './context/ToastContext';
+import { CatalogosLayout } from './context/CatalogosContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
@@ -14,7 +15,8 @@ import { RecomendacionesPage } from './pages/RecomendacionesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
-
+import VerificarCorreoPage from './pages/VerificarCorreoPage';
+import { confirmarCorreo, reenviarVerificacion, haySesionParaReenvio } from '@ojoalgasto/shared';
 // CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
 // La respuesta del backend es neutra (no dice si el correo existe), así que
 // la pantalla no la necesita: solo importa si la solicitud falló.
@@ -55,23 +57,38 @@ export function App() {
             path="/restablecer-contrasena"
             element={<RestablecerContrasenaPage onSubmitNewPassword={cambiarContrasena} />}
           />
+          <Route
+            path="/verificar-correo"
+            element={<VerificarCorreoPage onConfirmar={confirmarCorreo}  onReenviar={reenviarVerificacion} haySesion={haySesionParaReenvio}/>}
+          />
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
-                no distingue mayúsculas por defecto, se deja igual al enlace. */}
-            <Route path="/home" element={<Homepage />} />
-            <Route path="/perfil" element={<PerfilPage />} />
-            <Route path="/configuracion" element={<ConfiguracionPage />} />
-            <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+            <Route element={<CatalogosLayout />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
+                  no distingue mayúsculas por defecto, se deja igual al enlace. */}
+              <Route path="/home" element={<Homepage />} />
+              <Route path="/perfil" element={<PerfilPage />} />
+              <Route path="/configuracion" element={<ConfiguracionPage />} />
+              <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
 
-            {/* Secciones del menú que todavía no tienen backend. Antes caían
-                al comodín y devolvían al Panel en silencio. */}
-            <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
-            <Route path="/recomendaciones" element={<RecomendacionesPage />} />
-            <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
-            <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* Secciones del menú que todavía no tienen backend. Antes caían
+                  al comodín y devolvían al Panel en silencio. */}
+              <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
+              <Route
+                path="/recomendaciones"
+                element={
+                  RECOMENDACIONES_DISPONIBLES ? (
+                    <RecomendacionesPage />
+                  ) : (
+                    <ProximamentePage seccion="recomendaciones" />
+                  )
+                }
+              />
+              <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
+              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

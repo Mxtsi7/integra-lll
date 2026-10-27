@@ -1,0 +1,78 @@
+# Autoescalado horizontal.
+#
+# Qué resuelve: cuando la carga sube, Kubernetes agrega réplicas ANTES de que
+# el pod se sature, en vez de dejar que se degrade o se caiga.
+#
+# ── Por qué AverageValue y no Utilization ──────────────────────────────────
+# `Utilization` se calcula como porcentaje del *request*, no del *limit*.
+# Nuestros requests son chicos a propósito (el namespace tiene una cuota
+# apretada, ver k8s/README.md): el gateway pide 50m. Con un objetivo del 60%
+# escalaría al pasar los 30m, que es casi en reposo, y el HPA quedaría
+# subiendo réplicas sin que haya carga real.
+#
+# `AverageValue` fija el umbral en milicores absolutos. Es explícito, no
+# depende del request y se explica en una frase: "escala cuando el promedio
+# por pod pasa los 120m".
+#
+# ── Por qué maxReplicas 3 y 2 ──────────────────────────────────────────────
+# La cuota permite 12 pods y la base son 9. Quedan 3: dos para el gateway
+# (es el que recibe la prueba de estrés) y uno para subscriptions. Pedir más
+# no serviría: el ReplicaSet recibiría `exceeded quota` y el pod nunca
+# nacería. El presupuesto de memoria y CPU también está calculado para que
+# esas 3 réplicas extra quepan.
+#
+# ── Ojo con `replicas:` en los Deployments ─────────────────────────────────
+# Los Deployments declaran `replicas: 1`. Si el HPA escaló a 3 y alguien
+# corre `desplegar.sh`, el apply las baja a 1 y el HPA vuelve a subirlas.
+# No rompe nada, pero durante la demo conviene no re-aplicar.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gateway
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: gateway }
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: AverageValue, averageValue: 120m }
+  behavior:
+    # Sube rápido: sin ventana de estabilización, hasta 2 pods cada 15s. Es
+    # lo que hace que el profe VEA la reacción durante la prueba de estrés.
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - { type: Pods, value: 2, periodSeconds: 15 }
+    # Baja lento: 2 minutos de ventana para no entrar en vaivén si la carga
+    # oscila. Un HPA que sube y baja cada 15s es peor que no tenerlo.
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: subscriptions
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: subscriptions }
+  minReplicas: 1
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: AverageValue, averageValue: 120m }
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 15 }
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 60 }
