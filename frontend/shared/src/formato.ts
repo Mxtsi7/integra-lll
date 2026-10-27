@@ -10,7 +10,6 @@ export function formatearMonto(monto: number, moneda: Moneda = 'CLP'): string {
   return new Intl.NumberFormat('es-CL', {
     style: 'currency',
     currency: moneda,
-    maximumFractionDigits: moneda === 'CLP' ? 0 : 2,
   }).format(monto);
 }
 

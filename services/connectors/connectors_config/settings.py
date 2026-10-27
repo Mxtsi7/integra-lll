@@ -34,6 +34,13 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
+    # el gateway (ADR-004). Es la misma pieza en los cinco servicios.
+    #
+    # Sin esto, `ModeloTenant` no tiene de dónde sacar la organización y
+    # TenantViewSet responde 403 a todo: el servicio queda inalcanzable
+    # aunque los modelos y las rutas estén bien.
+    "shared.tenant.base.ContextoTenantMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",

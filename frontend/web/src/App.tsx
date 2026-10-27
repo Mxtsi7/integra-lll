@@ -10,6 +10,7 @@ import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
+import { CatalogosLayout } from './context/CatalogosContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
@@ -66,25 +67,27 @@ export function App() {
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
-                no distingue mayúsculas por defecto, se deja igual al enlace. */}
-            <Route path="/home" element={<Homepage />} />
-            <Route path="/perfil" element={<PerfilPage />} />
-            <Route path="/configuracion" element={<ConfiguracionPage />} />
-            <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+            <Route element={<CatalogosLayout />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
+                  no distingue mayúsculas por defecto, se deja igual al enlace. */}
+              <Route path="/home" element={<Homepage />} />
+              <Route path="/perfil" element={<PerfilPage />} />
+              <Route path="/configuracion" element={<ConfiguracionPage />} />
+              <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
 
-            {/* Secciones del menú. Las que todavía no tienen backend muestran
-                ProximamentePage; antes caían al comodín y devolvían al Panel
-                en silencio. */}
-            <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
-            <Route path={RUTA_AGENDA} element={<AgendaPage />} />
-            <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
-            {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
-                accionConectar (ConectarCorreo). Sin ellas, la página dice
-                que todavía no está disponible. */}
-            <Route path="/cuentas" element={<CuentasConectadasPage />} />
-            <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* Secciones del menú. Las que todavía no tienen backend muestran
+                  ProximamentePage; antes caían al comodín y devolvían al Panel
+                  en silencio. */}
+              <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
+              <Route path={RUTA_AGENDA} element={<AgendaPage />} />
+              <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
+              {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
+                  accionConectar (ConectarCorreo). Sin ellas, la página dice
+                  que todavía no está disponible. */}
+              <Route path="/cuentas" element={<CuentasConectadasPage />} />
+              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
