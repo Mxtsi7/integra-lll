@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado } from './calculos';
+import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado, generaCobro } from './calculos';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './api/ejemplo';
 
 describe('equivalenteMensual', () => {
@@ -29,6 +29,16 @@ describe('gastoProyectado', () => {
   it('una prueba sin fecha de término no entra', () => {
     const sinFecha = { ...SUSCRIPCIONES_DE_EJEMPLO[4], fin_prueba: undefined };
     expect(gastoProyectado([sinFecha])).toBe(0);
+  });
+});
+
+describe('generaCobro (lo comparten el Panel y el Calendario)', () => {
+  it('activas, fantasmas y pruebas con monto y término sí; por confirmar y canceladas no', () => {
+    const porEstado = Object.fromEntries(SUSCRIPCIONES_DE_EJEMPLO.map((s) => [s.estado, generaCobro(s)]));
+    expect(porEstado).toEqual({ activo: true, fantasma: true, prueba: true, por_confirmar: false, cancelado: false });
+  });
+  it('una prueba sin monto no genera cobro', () => {
+    expect(generaCobro({ ...SUSCRIPCIONES_DE_EJEMPLO[4], monto: 0 })).toBe(false);
   });
 });
 
