@@ -6,6 +6,7 @@ import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { ToastProvider } from './context/ToastContext';
+import { CatalogosLayout } from './context/CatalogosContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
@@ -62,20 +63,22 @@ export function App() {
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
-                no distingue mayúsculas por defecto, se deja igual al enlace. */}
-            <Route path="/home" element={<Homepage />} />
-            <Route path="/perfil" element={<PerfilPage />} />
-            <Route path="/configuracion" element={<ConfiguracionPage />} />
-            <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+            <Route element={<CatalogosLayout />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
+                  no distingue mayúsculas por defecto, se deja igual al enlace. */}
+              <Route path="/home" element={<Homepage />} />
+              <Route path="/perfil" element={<PerfilPage />} />
+              <Route path="/configuracion" element={<ConfiguracionPage />} />
+              <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
 
-            {/* Secciones del menú que todavía no tienen backend. Antes caían
-                al comodín y devolvían al Panel en silencio. */}
-            <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
-            <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
-            <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
-            <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* Secciones del menú que todavía no tienen backend. Antes caían
+                  al comodín y devolvían al Panel en silencio. */}
+              <Route path="/calendario" element={<ProximamentePage seccion="calendario" />} />
+              <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
+              <Route path="/cuentas" element={<ProximamentePage seccion="cuentas" />} />
+              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />

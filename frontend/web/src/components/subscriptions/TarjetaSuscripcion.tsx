@@ -8,7 +8,7 @@ import {
   type Suscripcion,
 } from "@ojoalgasto/shared";
 import { diasHasta } from "../../utils/fechas";
-import { CATEGORIA_VISUAL, cuandoEnDias, ESTADOS, sufijoFrecuencia, tieneAlerta } from "./presentacion";
+import { usePresentacionCategoria, cuandoEnDias, ESTADOS, sufijoFrecuencia, tieneAlerta } from "./presentacion";
 import styles from "./TarjetaSuscripcion.module.css";
 
 interface TarjetaSuscripcionProps {
@@ -43,6 +43,7 @@ const TarjetaSuscripcion: React.FC<TarjetaSuscripcionProps> = ({
   isLoading = false,
   isRemoving = false,
 }) => {
+  const categoriaVisual = usePresentacionCategoria();
   if (isLoading || !suscripcion) {
     return (
       <li className={`tile ${styles.tarjeta} ${styles.cargando}`} aria-hidden="true">
@@ -55,7 +56,7 @@ const TarjetaSuscripcion: React.FC<TarjetaSuscripcionProps> = ({
   }
 
   const { nombre, monto, moneda, frecuencia, horas_uso_mes, estado, categoria } = suscripcion;
-  const { Icono, color, suave, etiqueta: etiquetaCategoria } = CATEGORIA_VISUAL[categoria];
+  const { Icono, color, suave, etiqueta: etiquetaCategoria } = categoriaVisual(categoria);
   const montoMensual = equivalenteMensual(monto, frecuencia);
   const porHora = costoPorHora(montoMensual, horas_uso_mes ?? 0);
   const alerta = tieneAlerta(suscripcion);
