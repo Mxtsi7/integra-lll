@@ -7,6 +7,7 @@ import {
   ErrorDeApi,
   getSuscripcion,
   getUsos,
+  formatearFecha,
   hoyLocalIso,
   registrarUso,
   type RegistroUso,
@@ -183,6 +184,23 @@ describe("Registrar minutos de uso (CH-14)", () => {
     expect(Object.keys(cuerpo)).toEqual(["minutos"]); // sin "fecha", ni vacía ni null
     expect(cuerpo).toEqual({ minutos: 30 });
     expect(screen.getByRole("status")).toHaveTextContent("Registraste 30 minutos.");
+  });
+
+  it("un día de otro mes se registra y avisa que no suma a las horas de este mes (VI-10)", async () => {
+    // Último día del mes anterior, calculado desde hoy (sin pasar por UTC).
+    const [anio, mes] = hoyLocalIso().split("-").map(Number);
+    const fin = new Date(anio, mes - 1, 0);
+    const diaMesAnterior = `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, "0")}-${String(fin.getDate()).padStart(2, "0")}`;
+    registrarUsoMock.mockResolvedValue(SPOTIFY); // VI-10: las horas del mes no cambian
+    await montar();
+    fireEvent.change(minutos(), { target: { value: "90" } });
+    fireEvent.change(screen.getByLabelText("Día"), { target: { value: diaMesAnterior } });
+    await registrar();
+
+    expect(registrarUsoMock).toHaveBeenCalledWith("a", { minutos: 90, fecha: diaMesAnterior });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `Registraste 90 minutos el ${formatearFecha(diaMesAnterior)}. No suma a las horas de este mes.`,
+    );
   });
 
   it("dos envíos seguidos registran una sola vez", async () => {

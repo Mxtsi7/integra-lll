@@ -3,6 +3,7 @@ import { Clock } from "lucide-react";
 import {
   ErrorDeApi,
   erroresDesdeServidor,
+  formatearFecha,
   hoyLocalIso,
   validarUso,
   type CampoUso,
@@ -26,6 +27,16 @@ const CAMPO_DESDE_API: Record<string, CampoUso> = { minutos: "minutos", fecha: "
 
 function formatoMinutos(minutos: number): string {
   return minutos === 1 ? "1 minuto" : `${minutos.toLocaleString("es-CL")} minutos`;
+}
+
+/**
+ * Lo que se confirma al registrar. Si el día es de otro mes, VI-10 lo guarda
+ * en el historial pero no lo suma a las horas de este mes: se dice, para que
+ * no parezca que el registro no hizo nada.
+ */
+function textoConfirmacion(minutos: number, fecha: string | undefined, hoy: string): string {
+  if (!fecha || fecha.slice(0, 7) === hoy.slice(0, 7)) return `Registraste ${formatoMinutos(minutos)}.`;
+  return `Registraste ${formatoMinutos(minutos)} el ${formatearFecha(fecha)}. No suma a las horas de este mes.`;
 }
 
 /**
@@ -65,7 +76,7 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
       // omite y el backend usa hoy (revisión PR #80).
       await onRegistrar(cantidad, fecha || undefined);
       setMinutos("");
-      setConfirmacion(`Registraste ${formatoMinutos(cantidad)}.`);
+      setConfirmacion(textoConfirmacion(cantidad, fecha || undefined, hoy));
     } catch (err: unknown) {
       if (err instanceof ErrorDeApi && err.campos) {
         const { porCampo, general } = erroresDesdeServidor(err.campos, CAMPO_DESDE_API);
