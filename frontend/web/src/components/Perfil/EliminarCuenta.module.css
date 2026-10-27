@@ -1,0 +1,12 @@
+.formulario { display: flex; flex-direction: column; gap: 16px; }
+
+.efectos { display: flex; flex-direction: column; gap: 8px; }
+.intro { margin: 0; font-size: 14px; font-weight: 600; color: var(--tinta); }
+.lista { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; color: var(--tinta-2); }
+
+.organizacion { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: var(--radio-m); background: var(--coral-suave); border: 1px solid var(--coral); font-size: 13px; line-height: 1.5; color: var(--tinta); cursor: pointer; }
+.organizacion input { margin-top: 3px; accent-color: var(--coral); }
+
+.error { margin: 0; padding: 10px 12px; border-radius: var(--radio-s); background: var(--coral-suave); color: var(--coral); font-size: 13px; line-height: 1.5; }
+
+.acciones { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }

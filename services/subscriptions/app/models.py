@@ -4,15 +4,30 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models, transaction
-from django.db.models import Max
+from django.db.models import Max, Sum
 from django.utils import timezone
 
 from shared.tenant.base import ModeloBase, ModeloTenant
+from shared.catalogos.models import OpcionCatalogo, ReferenciasCatalogo
 
 
-class Subscription(ModeloTenant):
+class Moneda(OpcionCatalogo):
+    codigo = models.CharField(max_length=3, unique=True, validators=[RegexValidator(r"^[A-Z]{3}$")])
+
+    class Meta(OpcionCatalogo.Meta):
+        db_table = "moneda"
+
+
+class CategoriaSuscripcion(OpcionCatalogo):
+    codigo = models.CharField(max_length=20, unique=True, validators=[RegexValidator(r"^[a-z][a-z0-9_]*$")])
+
+    class Meta(OpcionCatalogo.Meta):
+        db_table = "categoria_suscripcion"
+
+
+class Subscription(ReferenciasCatalogo, ModeloTenant):
     """Suscripción recurrente perteneciente a una organización (ADR-002 / RF-06 / RF-13)."""
 
     # ── choices ──────────────────────────────────────────────────────
@@ -40,22 +55,7 @@ class Subscription(ModeloTenant):
         SIN_USO_45_DIAS = "sin_uso_45_dias", "Más de 45 días sin uso"
         USO_REGISTRADO = "uso_registrado", "Uso registrado"
         COBRO_NUEVO_DETECTADO = "cobro_nuevo_detectado", "Cobro nuevo detectado"
-
-    class Moneda(models.TextChoices):
-        CLP = "CLP", "Peso chileno"
-        USD = "USD", "Dólar estadounidense"
-
-    class Categoria(models.TextChoices):
-        STREAMING = "streaming", "Streaming"
-        MUSICA = "musica", "Música"
-        PRODUCTIVIDAD = "productividad", "Productividad"
-        NUBE = "nube", "Nube"
-        JUEGOS = "juegos", "Juegos"
-        EDUCACION = "educacion", "Educación"
-        SALUD = "salud", "Salud"
-        NOTICIAS = "noticias", "Noticias"
-        IA = "ia", "Inteligencia Artificial"
-        OTRO = "otro", "Otro"
+        REACTIVACION_USUARIO = "reactivacion_usuario", "Reactivación solicitada"
 
     # ── campos ───────────────────────────────────────────────────────
 
@@ -73,8 +73,7 @@ class Subscription(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        choices=Moneda.choices,
-        default=Moneda.CLP,
+        default="CLP",
         verbose_name="Moneda",
     )
 
@@ -90,8 +89,7 @@ class Subscription(ModeloTenant):
 
     categoria = models.CharField(
         max_length=20,
-        choices=Categoria.choices,
-        default=Categoria.OTRO,
+        default="otro",
         verbose_name="Categoría",
     )
 
@@ -140,6 +138,15 @@ class Subscription(ModeloTenant):
         verbose_name="Última actividad",
     )
 
+    def catalogos(self):
+        return {"moneda": Moneda, "categoria": CategoriaSuscripcion}
+
+    def get_moneda_display(self):
+        return Moneda.objects.get(codigo=self.moneda).nombre
+
+    def get_categoria_display(self):
+        return CategoriaSuscripcion.objects.get(codigo=self.categoria).nombre
+
     TRANSICIONES_ESTADO = {
         EventoEstado.FIN_PRUEBA: (
             (Estado.PRUEBA,),
@@ -183,6 +190,10 @@ class Subscription(ModeloTenant):
         ),
         EventoEstado.COBRO_NUEVO_DETECTADO: (
             tuple(Estado.values),
+            Estado.ACTIVO,
+        ),
+        EventoEstado.REACTIVACION_USUARIO: (
+            (Estado.CANCELADO,),
             Estado.ACTIVO,
         ),
     }
@@ -263,6 +274,7 @@ class Subscription(ModeloTenant):
         *,
         actor_id=None,
         actor_rol: str = "sistema",
+        correlation_id=None,
     ) -> "TransicionEstado":
         """Valida y audita una transición de estado bajo bloqueo de fila."""
         try:
@@ -304,6 +316,14 @@ class Subscription(ModeloTenant):
                 actor_id=actor_id,
                 actor_rol=actor_rol,
             )
+            from events.outbox import registrar_estado_cambiado
+
+            registrar_estado_cambiado(
+                suscripcion,
+                estado_anterior=estado_anterior,
+                evento_estado=evento,
+                correlation_id=correlation_id,
+            )
 
         self.estado = estado_destino
         self.actualizado_en = suscripcion.actualizado_en
@@ -316,8 +336,15 @@ class Subscription(ModeloTenant):
         *,
         actor_id=None,
         actor_rol: str = "sistema",
+        correlation_id=None,
     ) -> "RegistroUso":
-        """Registra minutos de uso, actualiza ultima_actividad, horas_uso_mes, reactiva estado si era fantasma y persiste el registro histórico."""
+        """Persiste el uso y mantiene actualizados sus campos derivados.
+
+        El agregado mensual (horas_uso_mes) se recalcula siempre desde el
+        histórico de la BD (sum de minutos del mes local), no sobre el valor
+        previo del campo. Esto garantiza correctitud bajo escrituras concurrentes
+        (RF-04 / VI-10) y elimina el riesgo de perder minutos.
+        """
         with transaction.atomic():
             suscripcion = type(self).objects.select_for_update().get(pk=self.pk)
             if not suscripcion.activo:
@@ -325,24 +352,51 @@ class Subscription(ModeloTenant):
                     "Una suscripción desactivada no admite registros de uso."
                 )
 
+            ahora = timezone.now()
+            fecha_actual = timezone.localdate(ahora)
             if fecha is None:
-                fecha = timezone.localdate()
-
-            suscripcion.ultima_actividad = timezone.now()
-            fecha_actual = timezone.localdate()
-            if (fecha.year, fecha.month) == (fecha_actual.year, fecha_actual.month):
-                horas = (Decimal(str(minutos)) / Decimal("60")).quantize(Decimal("0.01"))
-                if suscripcion.horas_uso_mes is None:
-                    suscripcion.horas_uso_mes = Decimal("0.00")
-                suscripcion.horas_uso_mes += horas
+                fecha = fecha_actual
 
             if suscripcion.estado == self.Estado.FANTASMA:
                 suscripcion.transicionar(
                     self.EventoEstado.USO_REGISTRADO,
                     actor_id=actor_id,
                     actor_rol=actor_rol,
+                    correlation_id=correlation_id,
                 )
 
+            suscripcion.ultima_actividad = ahora
+
+            registro = RegistroUso.objects.create(
+                organizacion_id=suscripcion.organizacion_id,
+                suscripcion=suscripcion,
+                fecha=fecha,
+                minutos=int(minutos),
+            )
+            # El agregado se recalcula desde el histórico de la BD en vez de
+            # acumular sobre el valor previo: garantiza idempotencia y que dos
+            # escrituras concurrentes no pierdan minutos (RF-04 / VI-10).
+            primer_dia_mes = fecha_actual.replace(day=1)
+            if fecha_actual.month == 12:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    year=fecha_actual.year + 1,
+                    month=1,
+                )
+            else:
+                primer_dia_mes_siguiente = primer_dia_mes.replace(
+                    month=fecha_actual.month + 1,
+                )
+            total_minutos_mes = (
+                RegistroUso.objects.filter(
+                    suscripcion=suscripcion,
+                    fecha__gte=primer_dia_mes,
+                    fecha__lt=primer_dia_mes_siguiente,
+                ).aggregate(total=Sum("minutos"))["total"]
+                or 0
+            )
+            suscripcion.horas_uso_mes = (
+                Decimal(total_minutos_mes) / Decimal("60")
+            ).quantize(Decimal("0.01"))
             suscripcion.save(
                 update_fields=("ultima_actividad", "horas_uso_mes", "actualizado_en")
             )
@@ -352,12 +406,7 @@ class Subscription(ModeloTenant):
             self.horas_uso_mes = suscripcion.horas_uso_mes
             self.actualizado_en = suscripcion.actualizado_en
 
-            return RegistroUso.objects.create(
-                organizacion_id=suscripcion.organizacion_id,
-                suscripcion=suscripcion,
-                fecha=fecha,
-                minutos=int(minutos),
-            )
+            return registro
 
     # ── meta ─────────────────────────────────────────────────────────
 
@@ -377,7 +426,7 @@ class Subscription(ModeloTenant):
         return f"{self.nombre} ({self.get_frecuencia_display()}) – {self.monto} {self.moneda}"
 
 
-class Proveedor(ModeloBase):
+class Proveedor(ReferenciasCatalogo, ModeloBase):
     """Empresa que presta un servicio por suscripción: Netflix, Spotify, un gimnasio.
 
     Es un **catálogo global**: Netflix es Netflix para todas las organizaciones.
@@ -393,10 +442,15 @@ class Proveedor(ModeloBase):
 
     categoria = models.CharField(
         max_length=20,
-        choices=Subscription.Categoria.choices,
-        default=Subscription.Categoria.OTRO,
+        default="otro",
         verbose_name="Categoría",
     )
+
+    def catalogos(self):
+        return {"categoria": CategoriaSuscripcion}
+
+    def get_categoria_display(self):
+        return CategoriaSuscripcion.objects.get(codigo=self.categoria).nombre
 
     sitio_web = models.URLField(blank=True, verbose_name="Sitio web")
 
@@ -410,7 +464,7 @@ class Proveedor(ModeloBase):
         return self.nombre
 
 
-class Cobro(ModeloTenant):
+class Cobro(ReferenciasCatalogo, ModeloTenant):
     """Un pago concreto y YA OCURRIDO de una suscripción.
 
     No confundir con el `monto` de la suscripción, que es el valor *esperado*
@@ -435,10 +489,15 @@ class Cobro(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        choices=Subscription.Moneda.choices,
-        default=Subscription.Moneda.CLP,
+        default="CLP",
         verbose_name="Moneda",
     )
+
+    def catalogos(self):
+        return {"moneda": Moneda}
+
+    def get_moneda_display(self):
+        return Moneda.objects.get(codigo=self.moneda).nombre
 
     fecha = models.DateField(verbose_name="Fecha del cobro")
 
@@ -498,63 +557,6 @@ class RegistroUso(ModeloTenant):
         return f"{self.suscripcion.nombre} - {self.fecha}: {self.minutos} min"
 
 
-class ResumenOrganizacion(ModeloTenant):
-    """Agregado del gasto mensual de una organización.
-
-    Esto es *trabajo derivado*: nace de que algo pasó (se creó o cambió una
-    suscripción), no de que alguien lo haya pedido. Según el ADR-003 ese tipo
-    de trabajo va por evento, no dentro de la petición HTTP.
-
-    Existe justamente para poder medir esa diferencia: con
-    `EVENTOS_ASINCRONOS=0` se recalcula dentro del POST y el usuario espera;
-    con `=1` se publica `suscripcion.creada` en RabbitMQ y lo recalcula el
-    consumidor. Ver `events/` y `k8s/pruebas/comparar-cola.sh`.
-    """
-
-    moneda = models.CharField(
-        max_length=3,
-        choices=Subscription.Moneda.choices,
-        verbose_name="Moneda",
-        help_text=(
-            "Hay una fila por moneda, no una sola con el total. Sumar CLP y "
-            "USD da un número que no es plata de ninguna divisa: 10.000 CLP "
-            "más 10 USD no son 10.010 de nada. Convertir exigiría una fuente "
-            "de tipos de cambio que el sistema no tiene, así que se informa "
-            "cada divisa por separado y quien muestre el panel decide cómo "
-            "presentarlas."
-        ),
-    )
-    total_mensual = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        default=Decimal("0"),
-        verbose_name="Gasto mensual en esta moneda",
-        help_text="Las anuales se dividen por 12 para dejarlas comparables.",
-    )
-    cantidad_activas = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Suscripciones activas",
-    )
-
-    class Meta:
-        db_table = "resumen_organizacion"
-        constraints = [
-            # Una fila por organización: el resumen se reemplaza, no se apila.
-            models.UniqueConstraint(
-                fields=["organizacion_id", "moneda"],
-                name="resumen_unico_por_organizacion_y_moneda",
-            ),
-        ]
-        verbose_name = "Resumen de organización"
-        verbose_name_plural = "Resúmenes de organización"
-
-    def __str__(self) -> str:
-        return (
-            f"{self.organizacion_id}: {self.total_mensual} {self.moneda} "
-            f"en {self.cantidad_activas} activas"
-        )
-
-
 class TransicionEstado(ModeloTenant):
     """Registro inmutable de cada evento que cambia el estado de una suscripción."""
 
@@ -579,7 +581,7 @@ class TransicionEstado(ModeloTenant):
         choices=Subscription.Estado.choices,
         verbose_name="Estado nuevo",
     )
-    actor_id = models.UUIDField(null=True, blank=True, verbose_name="Actor")
+    actor_id = models.BigIntegerField(null=True, blank=True, verbose_name="Actor")
     actor_rol = models.CharField(max_length=20, blank=True, verbose_name="Rol del actor")
     ocurrido_en = models.DateTimeField(auto_now_add=True, verbose_name="Ocurrido en")
 
@@ -591,3 +593,72 @@ class TransicionEstado(ModeloTenant):
         ]
         verbose_name = "Transición de estado"
         verbose_name_plural = "Transiciones de estado"
+
+
+class OutboxEvento(ModeloTenant):
+    """Evento durable pendiente de publicación después del commit de dominio."""
+
+    evento = models.CharField(max_length=40)
+    version = models.PositiveSmallIntegerField(default=2)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+    correlation_id = models.UUIDField()
+    datos = models.JSONField()
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    siguiente_intento = models.DateTimeField(default=timezone.now)
+    ultimo_error = models.CharField(max_length=100, blank=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "subscription_event_outbox"
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(
+                fields=["publicado_en", "siguiente_intento"],
+                name="sub_outbox_pending_idx",
+            ),
+        ]
+        verbose_name = "Evento pendiente"
+        verbose_name_plural = "Eventos pendientes"
+class Presupuesto(ModeloTenant):
+    """Presupuesto mensual definido por una organización para un periodo y moneda (RF-13 / RF-19)."""
+
+    mes = models.CharField(
+        max_length=7,
+        verbose_name="Mes presupuestado (YYYY-MM)",
+    )
+
+    moneda = models.CharField(
+        max_length=3,
+        # Usar literales en vez de Subscription.Moneda para no romperse
+        # cuando PR #77 elimine ese enum del modelo Subscription.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        default="CLP",
+        verbose_name="Moneda",
+    )
+
+    monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+        verbose_name="Monto presupuestado",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "presupuesto"
+        ordering = ["-mes", "moneda"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "mes", "moneda"],
+                name="presupuesto_unico_tenant_mes_moneda",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(monto__gt=Decimal("0")),
+                name="presupuesto_monto_positivo",
+            ),
+        ]
+        verbose_name = "Presupuesto"
+        verbose_name_plural = "Presupuestos"
+
+    def __str__(self) -> str:
+        return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
+

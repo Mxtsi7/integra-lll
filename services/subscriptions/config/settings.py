@@ -90,7 +90,15 @@ CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_TIMEZONE = "America/Santiago"
 CELERY_TASK_TRACK_STARTED = True
+RABBITMQ_URL = env(
+    "RABBITMQ_URL",
+    default="amqp://guest:guest@rabbitmq:5672/",
+)
 CELERY_BEAT_SCHEDULE = {
+    "despachar-eventos-pendientes": {
+        "task": "app.tasks.despachar_eventos_pendientes",
+        "schedule": 10.0,
+    },
     # Tarea de prueba: cada minuto deja constancia de que el Temporizador
     # vive. Las tareas reales del ciclo de vida se agregan aquí.
     "latido-del-temporizador": {
@@ -98,19 +106,6 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0,
     },
 }
-
-# ── eventos de dominio (ADR-003) ────────────────────────────────────
-# El trabajo derivado de una acción —recalcular el resumen de la
-# organización— puede hacerse de dos formas, y la bandera elige cuál:
-#
-#   EVENTOS_ASINCRONOS=0  dentro del POST. El usuario espera.
-#   EVENTOS_ASINCRONOS=1  se publica en RabbitMQ y responde al tiro.
-#
-# Existe para poder MEDIR la diferencia con la misma carga y el mismo
-# trabajo (ver k8s/pruebas/comparar-cola.sh). No es un interruptor de
-# "modo debug": los dos caminos son código de producción.
-EVENTOS_ASINCRONOS = env.bool("EVENTOS_ASINCRONOS", default=False)
-RABBITMQ_URL = env("RABBITMQ_URL", default="amqp://guest:guest@rabbitmq:5672/")
 
 # ── regional ────────────────────────────────────────────────────────
 LANGUAGE_CODE = "es-cl"

@@ -13,7 +13,7 @@ El sistema completo corriendo en el cluster del ramo:
 |---|---|---|
 | `postgres` | StatefulSet + PVC 2Gi | Un esquema por servicio, creado al primer arranque (ADR-002) |
 | `redis` | Deployment | Broker de Celery |
-| `rabbitmq` | Deployment | Bus de eventos del ADR-003; lo usa el publicador cuando `EVENTOS_ASINCRONOS=1` |
+| `rabbitmq` | Deployment | Bus de eventos del ADR-003; todavía nadie publica en él |
 | `auth` | Deployment | Migra y siembra en un initContainer, después gunicorn |
 | `subscriptions` | Deployment | Ídem |
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
@@ -74,7 +74,7 @@ nada, porque el pod nuevo recibe `exceeded quota` y nunca nace.
 |---|---|---|---|
 | `limits.memory` | 2752Mi | 1760Mi | 2496Mi |
 | `requests.memory` | 1152Mi | 648Mi | 888Mi |
-| `limits.cpu` | 2000m | 1200m | 1800m |
+| `limits.cpu` | 2000m | 1150m | 1750m |
 | `requests.cpu` | 1000m | 375m | 525m |
 | `pods` | 12 | 9 | 12 |
 

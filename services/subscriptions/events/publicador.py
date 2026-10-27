@@ -1,99 +1,65 @@
-"""Publicador de eventos de dominio en RabbitMQ (ADR-003).
-
-El sobre es el de shared/events/catalogo.md, sin inventar campos: un cambio
-acá es un cambio de contrato para todo el equipo.
-
-── Por qué la conexión se reutiliza ──────────────────────────────────────────
-Abrir una BlockingConnection cuesta un handshake TCP más el de AMQP: decenas
-de milisegundos. Si se abriera una por petición, publicar saldría MÁS CARO que
-el trabajo que estamos sacando del camino crítico, y la comparación con y sin
-cola daría al revés por un detalle de implementación, no por la arquitectura.
-
-Se guarda una conexión por proceso. gunicorn corre con --workers 2, que son
-procesos separados, así que cada uno tiene la suya y no se comparte entre
-hilos (pika.BlockingConnection no es segura entre hilos).
-"""
+"""Publicador RabbitMQ para el contrato de eventos MX-21 v2."""
 
 import json
-import logging
-import uuid
-from datetime import datetime, timezone
+from datetime import timezone as datetime_timezone
 
 import pika
 from django.conf import settings
 
-from events.topologia import EXCHANGE, declarar
 
-registro = logging.getLogger(__name__)
-
-_conexion = None
-_canal = None
+EXCHANGE = "suscripciones"
 
 
-def _ahora() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def sobre(evento: str, datos: dict, organizacion_id, correlation_id: str = "") -> dict:
-    """Arma el sobre común del catálogo. Separado para poder probarlo solo."""
+def crear_payload(evento) -> dict:
+    """Convierte un registro de outbox al sobre común de MX-21."""
     return {
-        "evento": evento,
-        "version": 1,
-        "id": str(uuid.uuid4()),
-        "ocurrido_en": _ahora(),
-        # Nunca vacío. El contrato lo valida con `format: uuid` (MX-21), y
-        # una cadena vacía lo incumple. Si la petición no trajo la cabecera
-        # —una tarea de fondo, por ejemplo— se genera uno: el evento igual
-        # necesita algo con qué seguirle el rastro.
-        "correlation_id": correlation_id or str(uuid.uuid4()),
-        "organizacion_id": str(organizacion_id),
-        "datos": datos,
+        "evento": evento.evento,
+        "version": evento.version,
+        "id": str(evento.id),
+        "ocurrido_en": (
+            evento.ocurrido_en.astimezone(datetime_timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        ),
+        "correlation_id": str(evento.correlation_id),
+        "organizacion_id": str(evento.organizacion_id),
+        "datos": evento.datos,
     }
 
 
-def _canal_vivo():
-    """Devuelve un canal abierto, reconectando si se cayó."""
-    global _conexion, _canal
-    if _conexion is not None and _conexion.is_open and _canal is not None and _canal.is_open:
-        return _canal
-    _conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
-    _canal = _conexion.channel()
-    # La topología completa, no solo el exchange: si la cola no está enlazada
-    # al publicar, el mensaje se descarta en silencio. Ver events/topologia.py.
-    declarar(_canal)
-    return _canal
+def publicar(evento) -> None:
+    """Publica de forma durable y confirma el mensaje antes de completar.
 
-
-def cerrar() -> None:
-    """Cierra la conexión. Para los tests y para un apagado ordenado."""
-    global _conexion, _canal
+    NOTA pika 1.x: con confirm_delivery() activo, basic_publish devuelve None
+    (no True/False). Un rechazo del broker lanza NackError o UnroutableError
+    directamente, ambos subclases de AMQPError, que el llamador ya captura.
+    No se debe chequear el valor de retorno: si no lanza, la publicación fue exitosa.
+    """
+    conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     try:
-        if _conexion is not None and _conexion.is_open:
-            _conexion.close()
+        canal = conexion.channel()
+        canal.exchange_declare(
+            exchange=EXCHANGE,
+            exchange_type="topic",
+            durable=True,
+        )
+        canal.confirm_delivery()
+        canal.basic_publish(
+            exchange=EXCHANGE,
+            routing_key=f"{evento.evento}.v{evento.version}",
+            body=json.dumps(crear_payload(evento), separators=(",", ":")).encode(
+                "utf-8"
+            ),
+            properties=pika.BasicProperties(
+                delivery_mode=pika.DeliveryMode.Persistent,
+                content_type="application/json",
+                message_id=str(evento.id),
+                correlation_id=str(evento.correlation_id),
+                type=evento.evento,
+                headers={"version": evento.version},
+            ),
+            mandatory=True,
+        )
     finally:
-        _conexion = None
-        _canal = None
-
-
-def publicar(evento: str, datos: dict, organizacion_id, correlation_id: str = "") -> dict:
-    """Publica un evento. Reintenta una vez si la conexión estaba muerta."""
-    cuerpo = sobre(evento, datos, organizacion_id, correlation_id)
-    crudo = json.dumps(cuerpo).encode("utf-8")
-    for intento in (1, 2):
-        try:
-            _canal_vivo().basic_publish(
-                exchange=EXCHANGE,
-                routing_key=evento,
-                body=crudo,
-                properties=pika.BasicProperties(
-                    delivery_mode=2,          # persistente: sobrevive al reinicio
-                    content_type="application/json",
-                ),
-            )
-            return cuerpo
-        except (pika.exceptions.AMQPError, OSError):
-            cerrar()
-            if intento == 2:
-                raise
-            registro.warning("RabbitMQ se cayó al publicar %s; reconectando", evento)
-    return cuerpo
+        if conexion.is_open:
+            conexion.close()
