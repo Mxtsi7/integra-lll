@@ -17,8 +17,12 @@ export const USAR_DATOS_DE_EJEMPLO = false;
  *   asi para no perder precision, pero el dominio lo declara `number` y lo
  *   suma. Sin convertirlo, `0 + "5990.00"` concatena en vez de sumar y el
  *   gasto proyectado del panel termina en $NaN.
- * - `fin_prueba` y `horas_uso_mes` llegan como `null`; el dominio los declara
- *   opcionales, o sea `undefined`.
+ * - `fin_prueba` puede llegar como `null`; el dominio lo declara opcional,
+ *   o sea `undefined`.
+ * - `horas_uso_mes` también es un Decimal: desde VI-10 llega siempre como
+ *   texto ("0.00", "0.50"), calculado con los usos del mes actual. Sin
+ *   convertirlo, "0.00" es un texto no vacío y la pantalla lo trataba como
+ *   uso registrado ("0.00 h" en vez de "Sin registrar").
  *
  * La traduccion vive aca, en el borde con la API, para que ninguna pantalla
  * tenga que saber estas diferencias.
@@ -26,7 +30,7 @@ export const USAR_DATOS_DE_EJEMPLO = false;
 type SuscripcionDeApi = Omit<Suscripcion, 'monto' | 'fin_prueba' | 'horas_uso_mes'> & {
   monto: string | number;
   fin_prueba?: string | null;
-  horas_uso_mes?: number | null;
+  horas_uso_mes?: string | number | null;
 };
 
 function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
@@ -34,7 +38,7 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
     ...s,
     monto: Number(s.monto),
     fin_prueba: s.fin_prueba ?? undefined,
-    horas_uso_mes: s.horas_uso_mes ?? undefined,
+    horas_uso_mes: s.horas_uso_mes == null ? undefined : Number(s.horas_uso_mes),
   };
 }
 
@@ -130,8 +134,27 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
-  /** Fecha calendario del uso (YYYY-MM-DD); por defecto, la fecha local actual. */
+  /**
+   * Fecha calendario del uso (YYYY-MM-DD). Opcional: sin fecha el backend usa
+   * la fecha local de hoy. No puede ser futura (RegistrarUsoSerializer.validate_fecha).
+   */
   fecha?: string;
+}
+
+/** Un registro del historial de uso (RegistroUsoSerializer). */
+export interface RegistroUso {
+  /** ISO (YYYY-MM-DD). */
+  fecha: string;
+  minutos: number;
+}
+
+/**
+ * GET /suscripciones/<id>/uso/ -> 200 OK / 404 (CH-15).
+ * Historial de uso de UNA suscripción, del más reciente al más antiguo (así
+ * lo ordena el backend). No está paginado.
+ */
+export async function getUsos(id: string): Promise<RegistroUso[]> {
+  return pedir<RegistroUso[]>(`/suscripciones/${id}/uso/`);
 }
 
 /**
@@ -143,9 +166,13 @@ export async function registrarUso(
   id: string,
   datos: UsoPayload,
 ): Promise<Suscripcion> {
+  // Una fecha vacía no se manda: RegistrarUsoSerializer rechaza "" pero
+  // acepta la propiedad ausente (usa hoy). Así ningún llamador puede mandar
+  // un body inválido por un campo de fecha borrado.
+  const cuerpo: UsoPayload = datos.fecha ? datos : { minutos: datos.minutos };
   const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/uso/`, {
     method: 'POST',
-    body: datos,
+    body: cuerpo,
   });
   return desdeLaApi(actualizada);
 }

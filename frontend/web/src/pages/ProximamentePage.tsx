@@ -1,27 +1,19 @@
-import { CalendarDays, ChartNoAxesColumn, Link2, Sparkles } from 'lucide-react';
+import { ChartNoAxesColumn, Sparkles } from 'lucide-react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { BotonEnlace } from '../components/ui/Boton';
 import styles from './ProximamentePage.module.css';
 
-type Clave = 'calendario' | 'recomendaciones' | 'cuentas' | 'informes';
+type Clave = 'recomendaciones' | 'informes';
 
 /**
- * Lo que va a hacer cada sección que todavía no existe. Antes estos cuatro
+ * Lo que va a hacer cada sección que todavía no existe. Antes estos
  * destinos del menú caían al comodín y devolvían al Panel sin decir nada;
  * ahora dicen qué viene y qué puedes hacer mientras tanto.
  */
 const SECCIONES: Record<
   Clave,
-  { titulo: string; Icono: typeof CalendarDays; que: string; mientras: string; ruta: string; accion: string }
+  { titulo: string; Icono: typeof Sparkles; que: string; mientras: string; ruta: string; accion: string }
 > = {
-  calendario: {
-    titulo: 'Calendario de pagos',
-    Icono: CalendarDays,
-    que: 'Verás cada cobro en el día que corresponde, con el total de la semana y del mes.',
-    mientras: 'Los cobros de los próximos 7 días ya aparecen en el Panel.',
-    ruta: '/dashboard',
-    accion: 'Ir al Panel',
-  },
   recomendaciones: {
     titulo: 'Recomendaciones',
     Icono: Sparkles,
@@ -29,14 +21,6 @@ const SECCIONES: Record<
     mientras: 'El Panel ya marca las suscripciones fantasma: las que pagas y no usas.',
     ruta: '/dashboard',
     accion: 'Ver fantasmas',
-  },
-  cuentas: {
-    titulo: 'Cuentas conectadas',
-    Icono: Link2,
-    que: 'Conecta tu correo y los cobros nuevos se registran solos, sin tipear nada.',
-    mientras: 'Hoy registras cada suscripción a mano desde Inicio.',
-    ruta: '/home',
-    accion: 'Agregar suscripción',
   },
   informes: {
     titulo: 'Informes',
