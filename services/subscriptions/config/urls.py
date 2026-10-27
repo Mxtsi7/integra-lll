@@ -27,11 +27,13 @@ def salud(request):
     )
 
 
+from app.catalogos_api import CatalogosSuscripcionesView
+
 urlpatterns = [
     path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaSubscriptionsView.as_view()),
+    path("api/catalogos/suscripciones/", CatalogosSuscripcionesView.as_view()),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/", include(router.urls)),
 ]
-

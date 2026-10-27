@@ -72,6 +72,18 @@ def con_token(t):
 cliente = Client()
 
 
+@pytest.mark.parametrize("ruta,servicio", [
+    ("/api/catalogos/suscripciones/", "subscriptions"),
+    ("/api/catalogos/paises/", "auth"),
+])
+def test_catalogos_exigen_token_y_conservan_consulta(upstream, ruta, servicio):
+    assert cliente.get(ruta).status_code == 401
+    respuesta = cliente.get(ruta + "?incluir_inactivos=true", **con_token(token()))
+    assert respuesta.status_code == 200
+    assert upstream.llamadas[-1]["url"] == settings.SERVICIOS[servicio] + ruta + "?incluir_inactivos=true"
+    assert upstream.llamadas[-1]["headers"]["X-Usuario-Id"] == "7f3a1b"
+
+
 # ── /health/ ────────────────────────────────────────────────────────
 
 def test_health_responde_sin_base_de_datos():

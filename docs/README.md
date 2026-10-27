@@ -7,6 +7,8 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ## Qué va en cada carpeta
 
+- [MX-24: timeout y cuotas IA](flujos/maximiliano-saez/24-limites-ia.md).
+
 ### `flujos/`
 
 - [MX-22: matriz de las 174 tareas y brechas](investigacion/MX-22-matriz-requisitos.md).
@@ -51,6 +53,9 @@ Overleaf), no seis Word que se pegan al final — la costura se nota siempre.
 ---
 
 ## Registro de decisiones
+
+- [ADR-007: catálogos de referencia](arquitectura/ADR-007-catalogos-de-referencia.md):
+  monedas, categorías y países en PostgreSQL; API, comandos y despliegue.
 
 Cada decisión técnica relevante se documenta en `arquitectura/` con esta
 estructura:
