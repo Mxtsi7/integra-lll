@@ -6,8 +6,7 @@ from datetime import timezone as datetime_timezone
 import pika
 from django.conf import settings
 
-
-EXCHANGE = "suscripciones"
+from events.topologia import EXCHANGE, declarar
 
 
 def crear_payload(evento) -> dict:
@@ -38,11 +37,13 @@ def publicar(evento) -> None:
     conexion = pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL))
     try:
         canal = conexion.channel()
-        canal.exchange_declare(
-            exchange=EXCHANGE,
-            exchange_type="topic",
-            durable=True,
-        )
+        # Declara exchange + cola + enlace, no solo el exchange. Un exchange
+        # topic sin cola enlazada descarta el mensaje; con mandatory=True eso
+        # sale como UnroutableError y el outbox reintenta hasta los 900 s,
+        # así que todo lo publicado antes de que arranque el consumidor se
+        # queda dando vueltas. Declarando acá la cola ya existe y los
+        # eventos esperan en ella. Es idempotente. Ver events/topologia.py.
+        declarar(canal)
         canal.confirm_delivery()
         canal.basic_publish(
             exchange=EXCHANGE,

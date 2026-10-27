@@ -19,6 +19,17 @@ data:
   RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
   EXCHANGE_EVENTOS: suscripciones
 
+  # El trabajo derivado de crear una suscripción (recalcular el resumen de
+  # la organización) se hace dentro del POST con "0", o detrás de RabbitMQ
+  # con "1". Queda en "0" por omisión: es el comportamiento que el equipo
+  # conoce. comparar-cola.sh la cambia con `kubectl set env` para medir las
+  # dos y la deja como estaba al terminar.
+  #
+  # Ojo: NO apaga el outbox. El evento se registra igual en los dos modos
+  # porque es parte del contrato MX-21; lo único que cambia es si el POST
+  # además recalcula el resumen antes de responder.
+  EVENTOS_ASINCRONOS: "0"
+
   # Con DEBUG=False Django exige Host conocido. Van los nombres internos, el
   # host público y localhost (las sondas mandan Host explícito, ver los
   # Deployments).

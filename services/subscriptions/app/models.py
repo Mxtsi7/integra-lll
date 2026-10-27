@@ -657,3 +657,66 @@ class Presupuesto(ModeloTenant):
     def __str__(self) -> str:
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
 
+
+
+class ResumenOrganizacion(ModeloTenant):
+    """Agregado del gasto mensual de una organización, una fila por moneda.
+
+    Esto es *trabajo derivado*: nace de que algo pasó (se creó una
+    suscripción), no de que alguien lo haya pedido. Según el ADR-003 ese tipo
+    de trabajo va por evento, no dentro de la petición HTTP.
+
+    Existe justamente para poder medir esa diferencia: con
+    `EVENTOS_ASINCRONOS=0` se recalcula dentro del POST y el usuario espera;
+    con `=1` el POST solo deja el evento en el outbox y lo recalcula el
+    consumidor. Ver `events/modo.py` y `k8s/pruebas/comparar-cola.sh`.
+    """
+
+    moneda = models.CharField(
+        max_length=3,
+        # Literales igual que en Presupuesto: Subscription.Moneda ya no existe
+        # como enum, la moneda se valida contra el catálogo compartido.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        verbose_name="Moneda",
+        help_text=(
+            "Hay una fila por moneda, no una sola con el total. Sumar CLP y "
+            "USD da un número que no es plata de ninguna divisa: 10.000 CLP "
+            "más 10 USD no son 10.010 de nada. Convertir exigiría una fuente "
+            "de tipos de cambio que el sistema no tiene, así que se informa "
+            "cada divisa por separado y quien muestre el panel decide cómo "
+            "presentarlas."
+        ),
+    )
+
+    total_mensual = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0"),
+        verbose_name="Gasto mensual en esta moneda",
+        help_text="Las anuales se dividen por 12 para dejarlas comparables.",
+    )
+
+    cantidad_activas = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Suscripciones activas",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "resumen_organizacion"
+        ordering = ["organizacion_id", "moneda"]
+        constraints = [
+            # Una fila por organización y moneda: el resumen se reemplaza, no
+            # se apila.
+            models.UniqueConstraint(
+                fields=["organizacion_id", "moneda"],
+                name="resumen_unico_por_organizacion_y_moneda",
+            ),
+        ]
+        verbose_name = "Resumen de organización"
+        verbose_name_plural = "Resúmenes de organización"
+
+    def __str__(self) -> str:
+        return (
+            f"{self.organizacion_id}: {self.total_mensual} {self.moneda} "
+            f"en {self.cantidad_activas} activas"
+        )

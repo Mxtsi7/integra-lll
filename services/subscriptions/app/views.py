@@ -18,6 +18,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from events.outbox import registrar_actualizada, registrar_creada
+from events.modo import al_crear_suscripcion
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from app.models import Cobro, Presupuesto, Subscription
@@ -219,6 +220,11 @@ class SubscriptionViewSet(TenantViewSet):
                 serializer.instance,
                 correlation_id=self._correlation_id(self.request),
             )
+            # El trabajo derivado va DENTRO de la transacción a propósito
+            # cuando EVENTOS_ASINCRONOS=0: ese acoplamiento es exactamente
+            # lo que el modo asíncrono elimina, y es lo que la prueba de
+            # comparación mide. Con la bandera en 1 no hace nada acá.
+            self._modo_despacho = al_crear_suscripcion(serializer.instance)
 
     @staticmethod
     def _correlation_id(request) -> uuid.UUID:
