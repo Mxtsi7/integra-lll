@@ -9,6 +9,7 @@ import {
   type ErroresCambioContrasena,
 } from '@ojoalgasto/shared';
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useAuth, type MarcaSesion } from '../../context/AuthContext';
 import { Boton } from '../ui/Boton';
 import { CampoContrasena } from '../ui/Campo';
 import { Modal } from '../ui/Modal';
@@ -25,9 +26,10 @@ interface CambiarContrasenaProps {
   alCerrar: () => void;
   /**
    * El backend confirmó el cambio. Ya invalidó todas las sesiones, también
-   * la de este navegador: quien abre el formulario cierra la sesión local.
+   * la de este navegador: quien abre el formulario cierra la sesión local,
+   * pero solo si sigue siendo `sesion`, la que hizo el cambio.
    */
-  onCambiada: () => void;
+  onCambiada: (sesion: MarcaSesion) => void;
 }
 
 /**
@@ -44,6 +46,7 @@ interface CambiarContrasenaProps {
  *   la sesión.
  */
 export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaProps) {
+  const { capturarSesion } = useAuth();
   const [datos, setDatos] = useState<DatosCambioContrasena>(VACIO);
   const [errores, setErrores] = useState<ErroresCambioContrasena>({});
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
@@ -83,13 +86,14 @@ export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaPro
 
     enviandoRef.current = true;
     setEnviando(true);
+    const sesion = capturarSesion();
     try {
       await cambiarContrasena({
         password_actual: datos.actual,
         password: datos.nueva,
         password_confirmacion: datos.confirmacion,
       });
-      onCambiada();
+      onCambiada(sesion);
     } catch (err: unknown) {
       if (err instanceof ErrorDeApi && err.campos) {
         const { porCampo, general } = erroresCambioContrasenaDesdeServidor(err.campos);

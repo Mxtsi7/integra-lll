@@ -8,7 +8,7 @@ import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, type MarcaSesion } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import styles from './PerfilPage.module.css';
 
@@ -29,21 +29,27 @@ export function PerfilPage() {
   // que ya había (la API de /me no trae todos los campos del tipo, p. ej.
   // `plan`) y se comparte con el contexto para que la barra superior
   // muestre el nombre nuevo sin recargar.
-  const alGuardarNombre = (guardado: Usuario) => {
-    if (estado.tipo !== 'listo') return;
+  // Si mientras se guardaba se cerró la sesión o entró otra cuenta, no se
+  // muestra nada, ni el nombre ni el aviso: el contexto rechaza la marca
+  // vieja y acá tampoco se mezclan datos de dos usuarios.
+  const alGuardarNombre = (guardado: Usuario, sesion: MarcaSesion) => {
+    if (estado.tipo !== 'listo' || estado.usuario.id !== guardado.id) return;
     const usuario = { ...estado.usuario, ...guardado };
+    if (!actualizarUsuario(usuario, sesion)) return;
     setEstado({ tipo: 'listo', usuario });
-    actualizarUsuario(usuario);
     toast.exito(MENSAJE_NOMBRE_GUARDADO);
   };
 
   // CH-29: el backend ya invalidó todas las sesiones, también esta. Se borra
   // la local sin llamar al backend (igual que al restablecer, CH-07) y
-  // <RutaPrivada> lleva al Login, que después vuelve a Perfil.
-  const alCambiarContrasena = useCallback(() => {
-    cerrarSesionLocal();
-    toast.exito(MENSAJE_CONTRASENA_CAMBIADA);
-  }, [cerrarSesionLocal, toast]);
+  // <RutaPrivada> lleva al Login, que después vuelve a Perfil. Si la sesión
+  // que hizo el cambio ya no está, la de ahora es otra y no se toca.
+  const alCambiarContrasena = useCallback(
+    (sesion: MarcaSesion) => {
+      if (cerrarSesionLocal(sesion)) toast.exito(MENSAJE_CONTRASENA_CAMBIADA);
+    },
+    [cerrarSesionLocal, toast],
+  );
 
   useEffect(() => {
     let cancelado = false;
@@ -83,8 +89,8 @@ export function PerfilPage() {
 
 interface ContenidoPerfilProps {
   usuario: Usuario;
-  onNombreGuardado: (usuario: Usuario) => void;
-  onContrasenaCambiada: () => void;
+  onNombreGuardado: (usuario: Usuario, sesion: MarcaSesion) => void;
+  onContrasenaCambiada: (sesion: MarcaSesion) => void;
 }
 
 function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: ContenidoPerfilProps) {

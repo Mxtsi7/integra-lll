@@ -1,5 +1,6 @@
 import { actualizarNombre, ErrorDeApi, validarNombre, type Usuario } from '@ojoalgasto/shared';
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useAuth, type MarcaSesion } from '../../context/AuthContext';
 import { Boton } from '../ui/Boton';
 import { CampoTexto } from '../ui/Campo';
 import { Fila } from '../ui/Seccion';
@@ -11,8 +12,12 @@ const MENSAJE_GENERICO = 'No pudimos guardar tu nombre. Intenta de nuevo.';
 interface EditarNombreProps {
   /** El último nombre que confirmó el backend. Es lo que se muestra fuera de la edición. */
   nombre: string;
-  /** Se llama con el usuario que devolvió el PATCH, ya guardado. */
-  onGuardado: (usuario: Usuario) => void;
+  /**
+   * Se llama con el usuario que devolvió el PATCH, ya guardado, y la sesión
+   * en la que se envió: si mientras tanto cambió, el resultado no es de la
+   * sesión actual.
+   */
+  onGuardado: (usuario: Usuario, sesion: MarcaSesion) => void;
 }
 
 /**
@@ -27,6 +32,7 @@ interface EditarNombreProps {
  * - Al terminar (guardar o cancelar) el foco vuelve a "Editar".
  */
 export function EditarNombre({ nombre, onGuardado }: EditarNombreProps) {
+  const { capturarSesion } = useAuth();
   const [editando, setEditando] = useState(false);
   const [valor, setValor] = useState(nombre);
   const [error, setError] = useState<string | null>(null);
@@ -83,9 +89,10 @@ export function EditarNombre({ nombre, onGuardado }: EditarNombreProps) {
     enviandoRef.current = true;
     setEnviando(true);
     setError(null);
+    const sesion = capturarSesion();
     try {
       const usuario = await actualizarNombre(valor);
-      onGuardado(usuario);
+      onGuardado(usuario, sesion);
       setEditando(false);
     } catch (err: unknown) {
       if (err instanceof ErrorDeApi && err.campos?.nombre) setError(err.campos.nombre.join(' '));

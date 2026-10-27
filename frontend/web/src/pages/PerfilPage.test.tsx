@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   actualizarNombre,
@@ -12,9 +12,11 @@ import {
   guardarTokens,
   hayTokenGuardado,
   MENSAJE_POLITICA_PASSWORD,
+  obtenerAccessToken,
+  revocarSesion,
   type Usuario,
 } from "@ojoalgasto/shared";
-import { AuthProvider } from "../context/AuthContext";
+import { AuthProvider, useAuth } from "../context/AuthContext";
 import { ToastProvider } from "../context/ToastContext";
 import { RutaPrivada } from "../components/RutaPrivada";
 import { PerfilPage } from "./PerfilPage";
@@ -23,11 +25,18 @@ import { PerfilPage } from "./PerfilPage";
 // redirect de <RutaPrivada> son los reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getUsuarioActual: vi.fn(), actualizarNombre: vi.fn(), cambiarContrasena: vi.fn() };
+  return {
+    ...real,
+    getUsuarioActual: vi.fn(),
+    actualizarNombre: vi.fn(),
+    cambiarContrasena: vi.fn(),
+    revocarSesion: vi.fn(),
+  };
 });
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const actualizarNombreMock = vi.mocked(actualizarNombre);
 const cambiarContrasenaMock = vi.mocked(cambiarContrasena);
+const revocarSesionMock = vi.mocked(revocarSesion);
 
 const USUARIO: Usuario = {
   id: "7",
@@ -38,11 +47,23 @@ const USUARIO: Usuario = {
   plan: "gratuito",
 };
 
-function jwt(expEnMs: number): string {
+// Otra cuenta, de otra organización, que entra en el mismo navegador.
+const USUARIO_B: Usuario = {
+  id: "8",
+  nombre: "Bruno Soto",
+  correo: "bruno@ejemplo.com",
+  rol: "titular",
+  organizacion_id: "org-2",
+  plan: "gratuito",
+};
+
+function jwt(expEnMs: number, sub: string): string {
   const b64 = (o: unknown) =>
     btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `${b64({ alg: "HS256" })}.${b64({ exp: Math.floor(expEnMs / 1000) })}.firma`;
+  return `${b64({ alg: "HS256" })}.${b64({ sub, exp: Math.floor(expEnMs / 1000) })}.firma`;
 }
+
+let tokenB = "";
 
 /** Promesa que el test resuelve o rechaza cuando quiere. */
 function diferida<T>() {
@@ -59,6 +80,31 @@ function Ubicacion() {
   return <div data-testid="ubicacion">{useLocation().pathname}</div>;
 }
 
+/** Quién es el usuario de la sesión según el contexto (no según la página). */
+function UsuarioEnSesion() {
+  return <div data-testid="usuario-en-sesion">{useAuth().usuario?.id ?? "nadie"}</div>;
+}
+
+/** Lo que hace Login.tsx tras un login correcto, con la cuenta B. */
+function LoginDePrueba() {
+  const { iniciarSesion } = useAuth();
+  const navigate = useNavigate();
+  return (
+    <>
+      <h1>Inicia sesión</h1>
+      <button
+        type="button"
+        onClick={() => {
+          iniciarSesion({ access_token: tokenB, refresh_token: "refresh-b" });
+          navigate("/perfil");
+        }}
+      >
+        Entrar como B
+      </button>
+    </>
+  );
+}
+
 async function montar() {
   // Como main.tsx: StrictMode corre los efectos dos veces en desarrollo.
   render(
@@ -67,12 +113,13 @@ async function montar() {
         <ToastProvider>
           <AuthProvider>
             <Routes>
-              <Route path="/login" element={<h1>Inicia sesión</h1>} />
+              <Route path="/login" element={<LoginDePrueba />} />
               <Route element={<RutaPrivada />}>
                 <Route path="/perfil" element={<PerfilPage />} />
               </Route>
             </Routes>
             <Ubicacion />
+            <UsuarioEnSesion />
           </AuthProvider>
         </ToastProvider>
       </MemoryRouter>
@@ -87,7 +134,8 @@ const barraSuperior = () => screen.getByRole("link", { name: /Plan/ });
 
 beforeEach(() => {
   localStorage.clear();
-  guardarTokens({ access_token: jwt(Date.now() + 30 * 60_000), refresh_token: "refresh" });
+  guardarTokens({ access_token: jwt(Date.now() + 30 * 60_000, "7"), refresh_token: "refresh" });
+  tokenB = jwt(Date.now() + 30 * 60_000, "8");
   getUsuarioActualMock.mockReset().mockResolvedValue(USUARIO);
   actualizarNombreMock.mockReset();
   cambiarContrasenaMock.mockReset();
@@ -342,5 +390,127 @@ describe("Cambiar contraseña desde Perfil (CH-29)", () => {
 
     await act(async () => respuesta.rechazar(new TypeError("Failed to fetch")));
     expect(within(dialogo()).getByRole("alert")).toHaveTextContent("No pudimos conectar con el servidor.");
+  });
+});
+
+// Revisión de #99: una respuesta que llega cuando la sesión que la pidió ya
+// no está no puede tocar la sesión que hay ahora (ni la pantalla ni el toast).
+describe("Respuestas que llegan después de cambiar de sesión", () => {
+  const usuarioEnSesion = () => screen.getByTestId("usuario-en-sesion").textContent;
+
+  async function salir() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+    });
+  }
+  async function entrarComoB() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Entrar como B" }));
+    });
+  }
+  /** Otra pestaña cambia los tokens: a esta solo le llega el evento `storage`. */
+  async function enOtraPestana(cambio: () => void) {
+    cambio();
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    });
+  }
+  function empezarAGuardarNombre() {
+    fireEvent.click(screen.getByRole("button", { name: "Editar nombre" }));
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Ana Cambiada" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Editar nombre" }));
+    expect(actualizarNombreMock).toHaveBeenCalledTimes(1);
+  }
+
+  beforeEach(() => {
+    revocarSesionMock.mockReset().mockResolvedValue(true);
+    // /usuarios/me/ responde según el token, como el backend.
+    getUsuarioActualMock.mockImplementation(async () => (obtenerAccessToken() === tokenB ? USUARIO_B : USUARIO));
+  });
+
+  it("el nombre que guardó A no reemplaza a B, que entró mientras tanto", async () => {
+    const respuestaA = diferida<Usuario>();
+    actualizarNombreMock.mockReturnValue(respuestaA.promesa);
+    await montar();
+    empezarAGuardarNombre();
+
+    await salir();
+    expect(usuarioEnSesion()).toBe("nadie");
+    await entrarComoB();
+    expect(usuarioEnSesion()).toBe("8");
+    expect(screen.getByRole("heading", { level: 2, name: "Bruno Soto" })).toBeInTheDocument();
+
+    await act(async () => respuestaA.resolver({ ...USUARIO, nombre: "Ana Cambiada" }));
+
+    // Usuario y tokens siguen siendo los de B, en el contexto y en la página.
+    expect(usuarioEnSesion()).toBe("8");
+    expect(obtenerAccessToken()).toBe(tokenB);
+    expect(screen.getByRole("heading", { level: 2, name: "Bruno Soto" })).toBeInTheDocument();
+    expect(within(barraSuperior()).getByText("Bruno Soto")).toBeInTheDocument();
+    expect(screen.queryByText(/Ana/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Guardamos tu nombre.")).not.toBeInTheDocument();
+  });
+
+  it("si A cerró sesión y nadie entró, la respuesta no revive la sesión ni avisa que se guardó", async () => {
+    const respuestaA = diferida<Usuario>();
+    actualizarNombreMock.mockReturnValue(respuestaA.promesa);
+    await montar();
+    empezarAGuardarNombre();
+    await salir();
+
+    await act(async () => respuestaA.resolver({ ...USUARIO, nombre: "Ana Cambiada" }));
+
+    expect(usuarioEnSesion()).toBe("nadie");
+    expect(hayTokenGuardado()).toBe(false);
+    expect(ubicacion()).toBe("/login");
+    expect(screen.queryByText("Guardamos tu nombre.")).not.toBeInTheDocument();
+  });
+
+  it("si en otra pestaña entró B y todavía no se sabe quién es, el nombre que guardó A no se aplica", async () => {
+    const respuestaA = diferida<Usuario>();
+    actualizarNombreMock.mockReturnValue(respuestaA.promesa);
+    const meDeB = diferida<Usuario>();
+    getUsuarioActualMock.mockImplementation(() =>
+      obtenerAccessToken() === tokenB ? meDeB.promesa : Promise.resolve(USUARIO),
+    );
+    await montar();
+    empezarAGuardarNombre();
+
+    // B entra sin que A haya cerrado sesión y su /usuarios/me/ sigue en
+    // vuelo: el contexto todavía tiene a A (id 7), así que comparar el id no
+    // basta para descartar la respuesta. Decide la marca de sesión.
+    await enOtraPestana(() => guardarTokens({ access_token: tokenB, refresh_token: "refresh-b" }));
+    await act(async () => respuestaA.resolver({ ...USUARIO, nombre: "Ana Cambiada" }));
+
+    expect(obtenerAccessToken()).toBe(tokenB);
+    expect(screen.queryByText("Ana Cambiada")).not.toBeInTheDocument();
+    expect(screen.queryByText("Guardamos tu nombre.")).not.toBeInTheDocument();
+
+    await act(async () => meDeB.resolver(USUARIO_B));
+    expect(usuarioEnSesion()).toBe("8");
+    expect(within(barraSuperior()).getByText("Bruno Soto")).toBeInTheDocument();
+  });
+
+  it("un cambio de contraseña de A que termina tarde no cierra la sesión de B", async () => {
+    const respuestaA = diferida<void>();
+    cambiarContrasenaMock.mockReturnValue(respuestaA.promesa);
+    await montar();
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar contraseña" }));
+    const dialogo = screen.getByRole("dialog", { name: "Cambiar contraseña" });
+    fireEvent.change(within(dialogo).getByLabelText("Contraseña actual"), { target: { value: "vieja1234" } });
+    fireEvent.change(within(dialogo).getByLabelText("Contraseña nueva"), { target: { value: "nueva1234" } });
+    fireEvent.change(within(dialogo).getByLabelText("Repite la contraseña nueva"), { target: { value: "nueva1234" } });
+    fireEvent.submit(dialogo.querySelector("form")!);
+    expect(cambiarContrasenaMock).toHaveBeenCalledTimes(1);
+
+    // Con el diálogo abierto, B entra desde otra pestaña sin que A salga.
+    await enOtraPestana(() => guardarTokens({ access_token: tokenB, refresh_token: "refresh-b" }));
+    expect(usuarioEnSesion()).toBe("8");
+
+    await act(async () => respuestaA.resolver());
+
+    expect(usuarioEnSesion()).toBe("8");
+    expect(obtenerAccessToken()).toBe(tokenB);
+    expect(screen.queryByText("Cambiaste tu contraseña. Inicia sesión con la nueva.")).not.toBeInTheDocument();
   });
 });
