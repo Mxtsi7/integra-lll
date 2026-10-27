@@ -50,6 +50,7 @@ from django.db import close_old_connections
 from django.db.utils import InterfaceError, OperationalError
 
 from events.contrato import routing_key
+from events.validacion import errores as errores_de_contrato
 from events.topologia import (
     COLA_FALLIDOS,
     COLA_RESUMEN,
@@ -63,9 +64,14 @@ from events.trabajo import recalcular_resumen
 registro = logging.getLogger(__name__)
 
 #: Cuántas veces se reintenta en el proceso antes de rendirse y mandarlo a la
-#: cola de fallos. Las esperas suman 7 s (1+2+4), bastante menos que el
-#: heartbeat de AMQP (60 s por omisión): esperar más haría que el broker diera
-#: la conexión por muerta en medio del reintento.
+#: cola de fallos. Con 3 intentos hay DOS esperas —entre el 1.º y el 2.º, y
+#: entre el 2.º y el 3.º—, así que suman 3 s (1+2), no 7. (La primera versión
+#: de este comentario decía 1+2+4; lo corrigió la revisión de la PR.)
+#:
+#: Lo que importa del número: tiene que quedar bastante por debajo del
+#: heartbeat de AMQP (60 s por omisión), o el broker daría la conexión por
+#: muerta en medio del reintento. Si se suben los intentos, revisar la suma:
+#: con 6 serían 31 s y ya queda cerca.
 INTENTOS = 3
 ESPERA_INICIAL = 1
 
@@ -81,38 +87,39 @@ class SobreInvalido(ValueError):
 def validar(cuerpo: bytes) -> str:
     """Comprueba el sobre y devuelve la organización. Lanza `SobreInvalido`.
 
-    Se valida ANTES de tocar la base. La versión anterior leía
-    `sobre["organizacion_id"]` y capturaba `ValueError/KeyError`, así que un
-    cuerpo `[]` reventaba con `TypeError` —"list indices must be integers"—
-    sin capturar, y el consumidor se moría. Cualquier JSON que no fuera un
-    objeto lo mataba igual.
+    Se valida ANTES de tocar la base, en tres pasos:
 
-    Y un objeto con tenant válido pero `evento="no.admitido"` pasaba derecho
-    al recálculo y recibía ACK: no se miraba el contrato.
+    1. **Que sea JSON.** Antes se leía `sobre["organizacion_id"]` capturando
+       `ValueError/KeyError`, así que un cuerpo `[]` reventaba con
+       `TypeError` —"list indices must be integers"— sin capturar, y el
+       consumidor se moría. Cualquier JSON que no fuera un objeto lo mataba.
+
+    2. **Que cumpla el contrato MX-21 v2 completo**, contra el mismo archivo
+       que usa el check `intercambio` de la CI. La versión anterior solo
+       miraba evento, versión y tenant, así que un sobre de esos tres campos
+       pasaba y recibía ACK sin `id`, `correlation_id`, `ocurrido_en` ni
+       `datos`. Lo reprodujo la revisión de la PR.
+
+    3. **Que sea uno de los eventos de ESTA cola.** El esquema admite los
+       cuatro del contrato; acá solo se procesan los de `EVENTOS_DEL_RESUMEN`.
+       Que llegue otro no es culpa del productor: es un enlace de más de
+       nuestro lado, y por eso se aparta en vez de ignorarse en silencio.
     """
     try:
         sobre = json.loads(cuerpo)
     except ValueError as exc:
         raise SobreInvalido(f"no es JSON: {exc}") from exc
 
-    if not isinstance(sobre, dict):
-        raise SobreInvalido(f"el sobre no es un objeto JSON, es {type(sobre).__name__}")
+    fallos = errores_de_contrato(sobre)
+    if fallos:
+        raise SobreInvalido("no cumple el contrato MX-21 v2 — " + "; ".join(fallos[:5]))
 
-    nombre = sobre.get("evento")
-    version = sobre.get("version")
+    nombre, version = sobre.get("evento"), sobre.get("version")
     if (nombre, version) not in EVENTOS_DEL_RESUMEN:
-        # No es un error del otro lado: esta cola no debería recibirlo. Se
-        # aparta para poder ver POR QUÉ llegó, que suele ser un enlace de más.
         raise SobreInvalido(f"evento no admitido en esta cola: {nombre!r} v{version!r}")
 
-    crudo = sobre.get("organizacion_id")
-    try:
-        # Regla 4 del catálogo: el contexto multi-tenant viaja en el evento.
-        # Se valida que sea un UUID; recalcular la organización equivocada
-        # sería peor que apartar el mensaje.
-        return str(uuid.UUID(str(crudo)))
-    except (ValueError, TypeError, AttributeError) as exc:
-        raise SobreInvalido(f"organizacion_id no es un UUID: {crudo!r}") from exc
+    # El esquema ya comprobó que sea un UUID; se devuelve normalizado.
+    return str(uuid.UUID(str(sobre["organizacion_id"])))
 
 
 class Command(BaseCommand):

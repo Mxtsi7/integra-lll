@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 from app.models import OutboxEvento, ResumenOrganizacion, Subscription
 from app.management.commands.consumir_eventos import SobreInvalido, validar
 from events import publicador, topologia
+from events.outbox import registrar_creada
 from events.contrato import routing_key
 from events.trabajo import recalcular_resumen
 
@@ -407,6 +408,7 @@ class TestTopologia:
 # ── el sobre que entra al consumidor ─────────────────────────────────
 
 
+@pytest.mark.django_db
 class TestValidarSobre:
     """`validar()` decide si un mensaje se procesa o se aparta.
 
@@ -418,20 +420,73 @@ class TestValidarSobre:
     """
 
     @staticmethod
-    def sobre(**cambios):
-        base = {
-            "evento": "suscripcion.creada",
-            "version": 2,
-            "id": str(uuid.uuid4()),
-            "organizacion_id": str(uuid.uuid4()),
-            "datos": {},
-        }
+    def sobre(org=None, **cambios):
+        """Un sobre armado por el PRODUCTOR REAL, no a mano.
+
+        Pasa por `registrar_creada` (el outbox) y `crear_payload` (el
+        publicador), así que es exactamente lo que sale al broker. Un fixture
+        escrito a mano se desincroniza del productor sin que nada avise: la
+        primera versión de esta prueba traía cuatro campos y le faltaban
+        `ocurrido_en`, `correlation_id` y todo `datos`, y aun así la daba por
+        buena porque `validar()` tampoco los miraba. Lo señaló la revisión.
+        """
+        from events.publicador import crear_payload  # noqa: PLC0415
+
+        org = org or uuid.uuid4()
+        suscripcion = crear(org, "9990")
+        evento = registrar_creada(suscripcion)
+        base = crear_payload(evento)
         base.update(cambios)
         return json.dumps(base).encode()
 
-    def test_un_sobre_bueno_devuelve_la_organizacion(self):
-        org = str(uuid.uuid4())
-        assert validar(self.sobre(organizacion_id=org)) == org
+    def test_un_sobre_del_productor_real_pasa_la_validacion(self):
+        """Si esto falla, el productor y el consumidor no se entienden."""
+        org = uuid.uuid4()
+        assert validar(self.sobre(org=org)) == str(org)
+
+    def test_el_sobre_del_productor_cumple_el_contrato_compartido(self):
+        """Doble comprobación contra el mismo archivo que usa la CI."""
+        from events.validacion import errores  # noqa: PLC0415
+
+        assert errores(json.loads(self.sobre())) == []
+
+    @pytest.mark.parametrize(
+        "campo",
+        ["id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+    )
+    def test_si_falta_un_campo_obligatorio_se_aparta(self, campo):
+        """Los que la versión anterior no miraba. Sin `id` no se pueden
+        descartar duplicados, que es la regla 1 del catálogo."""
+        sobre = json.loads(self.sobre())
+        del sobre[campo]
+        with pytest.raises(SobreInvalido):
+            validar(json.dumps(sobre).encode())
+
+    @pytest.mark.parametrize(
+        "campo, valor",
+        [
+            ("id", "no-soy-un-uuid"),
+            ("correlation_id", "tampoco"),
+            ("organizacion_id", "menos"),
+            ("ocurrido_en", "2026-13-45T99:99:99Z"),
+            ("ocurrido_en", "2026-10-27T00:00:00+03:00"),  # el contrato pide Z
+        ],
+    )
+    def test_un_formato_invalido_se_aparta(self, campo, valor):
+        """Sin FormatChecker, jsonschema IGNORA los `format` y esto pasaría."""
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(**{campo: valor}))
+
+    def test_una_carga_invalida_se_aparta(self):
+        """`datos` tiene su propio esquema: un monto con formato malo no pasa."""
+        sobre = json.loads(self.sobre())
+        sobre["datos"]["monto"] = "nueve mil"
+        with pytest.raises(SobreInvalido):
+            validar(json.dumps(sobre).encode())
+
+    def test_datos_vacio_se_aparta(self):
+        with pytest.raises(SobreInvalido):
+            validar(self.sobre(datos={}))
 
     @pytest.mark.parametrize(
         "cuerpo",
@@ -475,8 +530,8 @@ class TestValidarSobre:
         """Lo que importa de apartar en vez de reventar: el proceso sigue."""
         with pytest.raises(SobreInvalido):
             validar(b"[]")
-        org = str(uuid.uuid4())
-        assert validar(self.sobre(organizacion_id=org)) == org
+        org = uuid.uuid4()
+        assert validar(self.sobre(org=org)) == str(org)
 
     def test_el_motivo_no_queda_vacio(self):
         """Va al log y a la cola de fallos: sin motivo no se puede diagnosticar."""

@@ -37,11 +37,37 @@ import pytest
 
 pika = pytest.importorskip("pika")
 
-from app.models import ResumenOrganizacion, Subscription  # noqa: E402
+from django.core.management import call_command  # noqa: E402
+from django.db.utils import OperationalError  # noqa: E402
+from rest_framework import status  # noqa: E402
+from rest_framework.test import APIClient  # noqa: E402
+
+from app.models import (  # noqa: E402
+    OutboxEvento,
+    ResumenOrganizacion,
+    Subscription,
+)
 from events import publicador, topologia  # noqa: E402
 from events.contrato import routing_key  # noqa: E402
+from events.despacho import despachar_pendientes  # noqa: E402
 from events.outbox import registrar_creada  # noqa: E402
 from events.trabajo import recalcular_resumen  # noqa: E402
+
+
+CUERPO = {
+    "nombre": "Netflix",
+    "monto": "9990",
+    "moneda": "CLP",
+    "frecuencia": "mensual",
+    "fecha_proximo_cobro": "2026-11-01",
+    "categoria": "streaming",
+    "estado": "activo",
+}
+
+
+@pytest.fixture
+def cliente() -> APIClient:
+    return APIClient()
 
 
 URL_PRUEBA = os.environ.get("RABBITMQ_PRUEBA_URL", "")
@@ -203,3 +229,150 @@ class TestRecorridoCompleto:
             "el mensaje rechazado se perdió en vez de ir a la cola de fallos"
         )
         assert json.loads(cuerpo2)["organizacion_id"] == str(org)
+
+
+class TestRecorridoReal:
+    """El camino entero, con las piezas REALES de cada tramo.
+
+    `TestRecorridoCompleto` de arriba prueba el ruteo, pero arma el outbox a
+    mano y llama a `recalcular_resumen(validar(...))` directo: **no atraviesa
+    `perform_create`, ni el despachador, ni el callback del comando con su ACK
+    y sus reintentos**. Lo señaló la revisión de la PR y era cierto: un bug en
+    cualquiera de esos tres tramos pasaba sin que nada lo viera.
+
+    Acá el recorrido es:
+
+        POST /api/suscripciones/   (perform_create → outbox, en una transacción)
+          → despachar_pendientes() (el despachador de VI-26, de verdad)
+            → RabbitMQ
+              → call_command("consumir_eventos", uno=True)   (el comando real)
+                → ResumenOrganizacion
+
+    El comando corre EN ESTE PROCESO y no como subproceso: la base de pruebas
+    vive en esta conexión y un subproceso no la vería.
+    """
+
+    def test_del_POST_al_resumen_sin_saltarse_ningun_tramo(
+        self, canal, cliente, settings
+    ):
+        settings.EVENTOS_ASINCRONOS = True
+        org = uuid.uuid4()
+
+        respuesta = cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert respuesta.status_code == status.HTTP_201_CREATED
+        # El POST respondió SIN hacer el trabajo: esa es la mitad del punto.
+        assert not ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+        assert OutboxEvento.objects.filter(organizacion_id=org).count() == 1
+
+        # El despachador real toma el outbox y publica.
+        resultado = despachar_pendientes()
+        assert resultado.get("publicados") == 1, resultado
+
+        # El consumidor real: valida el sobre, recalcula y confirma.
+        call_command("consumir_eventos", uno=True)
+
+        resumen = ResumenOrganizacion.objects.get(organizacion_id=org)
+        assert resumen.moneda == "CLP"
+        assert resumen.total_mensual == Decimal("9990.00")
+        assert resumen.cantidad_activas == 1
+
+        # Y confirmó: la cola quedó vacía y nada cayó a la de fallos.
+        assert esperar_mensaje(canal, topologia.COLA_RESUMEN, intentos=3) is None
+        assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
+
+    def test_un_sobre_que_no_cumple_el_contrato_termina_en_la_cola_de_fallos(
+        self, canal
+    ):
+        """Publicado a mano, saltándose el productor: es lo que haría otro
+        servicio mal implementado. Tiene que apartarse, no morir ni perderse."""
+        canal.basic_publish(
+            exchange=topologia.EXCHANGE,
+            routing_key="suscripcion.creada.v2",
+            body=b'{"evento": "suscripcion.creada", "version": 2}',
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+        call_command("consumir_eventos", uno=True)
+
+        caido = esperar_mensaje(canal, topologia.COLA_FALLIDOS)
+        assert caido is not None, "el sobre inválido se perdió en vez de apartarse"
+        assert json.loads(caido)["evento"] == "suscripcion.creada"
+
+    def test_un_cuerpo_que_no_es_json_no_mata_el_consumidor(self, canal):
+        """El caso que antes tumbaba el proceso entero."""
+        canal.basic_publish(
+            exchange=topologia.EXCHANGE,
+            routing_key="suscripcion.creada.v2",
+            body=b"[]",
+            properties=pika.BasicProperties(delivery_mode=2),
+        )
+        # No debe lanzar: el comando procesa uno y termina ordenadamente.
+        call_command("consumir_eventos", uno=True)
+        assert esperar_mensaje(canal, topologia.COLA_FALLIDOS) is not None
+
+    def test_un_fallo_pasajero_de_la_base_se_reintenta_y_se_recupera(
+        self, canal, cliente, settings, monkeypatch
+    ):
+        """La base se cae en el primer intento y vuelve en el segundo.
+
+        Lo que tiene que quedar demostrado: el evento NO se pierde ni se va a
+        la cola de fallos por un corte pasajero, que es exactamente lo que
+        pasaba antes con `nack(requeue=False)` y sin DLX.
+        """
+        settings.EVENTOS_ASINCRONOS = True
+        org = uuid.uuid4()
+        cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        despachar_pendientes()
+
+        from app.management.commands import consumir_eventos as comando
+
+        llamadas = {"n": 0}
+        real = comando.recalcular_resumen
+
+        def a_veces_falla(organizacion_id):
+            llamadas["n"] += 1
+            if llamadas["n"] == 1:
+                raise OperationalError("la base se fue un segundo")
+            return real(organizacion_id)
+
+        monkeypatch.setattr(comando, "recalcular_resumen", a_veces_falla)
+        # Sin espera: la prueba no tiene por qué dormir 1 s de verdad.
+        monkeypatch.setattr(comando.time, "sleep", lambda _s: None)
+
+        call_command("consumir_eventos", uno=True)
+
+        assert llamadas["n"] == 2, "no reintentó"
+        assert ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+        assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
+
+    def test_si_la_base_no_vuelve_el_evento_va_a_la_cola_de_fallos(
+        self, canal, cliente, settings, monkeypatch
+    ):
+        """Agotados los intentos, se aparta con motivo. No se borra."""
+        settings.EVENTOS_ASINCRONOS = True
+        org = uuid.uuid4()
+        cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        despachar_pendientes()
+
+        from app.management.commands import consumir_eventos as comando
+
+        def siempre_falla(_organizacion_id):
+            raise OperationalError("la base no vuelve")
+
+        monkeypatch.setattr(comando, "recalcular_resumen", siempre_falla)
+        monkeypatch.setattr(comando.time, "sleep", lambda _s: None)
+
+        call_command("consumir_eventos", uno=True)
+
+        assert not ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+        caido = esperar_mensaje(canal, topologia.COLA_FALLIDOS)
+        assert caido is not None, "el evento se perdió por un fallo de base"
+        assert json.loads(caido)["organizacion_id"] == str(org)
