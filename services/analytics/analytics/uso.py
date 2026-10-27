@@ -20,7 +20,7 @@ import datetime as dt
 from dataclasses import asdict, dataclass
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Max, Sum
 
 from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
@@ -79,68 +79,148 @@ def registrar_suscripcion(
     return fila
 
 
+def _bloquear_agregado(organizacion_id, suscripcion_id, mes: dt.date) -> None:
+    """Serializa el recálculo de un (tenant, suscripción, mes).
+
+    ── Por qué no alcanza con `update_or_create` ────────────────────────────
+    El bloqueo de esa escritura protege la ESCRITURA, no el SUM que se leyó
+    antes. Con el nivel de aislamiento habitual de PostgreSQL (read committed)
+    dos recálculos del mismo mes se intercalan así:
+
+        A: SUM = 30
+        B: llega un evento, SUM = 50, guarda 50
+        A: guarda sus 30, que ya estaban viejos
+
+    y queda la fuente en 50 con el agregado en 30. Lo reprodujo la revisión de
+    la PR intercalando las llamadas, y era cierto.
+
+    El lock se toma ANTES del SUM, así que el segundo recálculo espera y
+    vuelve a leer la fuente ya completa.
+
+    ── Por qué un advisory lock y no `select_for_update` ────────────────────
+    La fila del agregado puede no existir todavía: la primera vez no hay nada
+    que bloquear. El advisory lock es sobre una CLAVE, exista la fila o no.
+    Es de transacción (`_xact_`), así que se suelta solo al terminar; por eso
+    esta función exige estar dentro de un atomic y lo comprueba.
+
+    En SQLite no existe y no hace falta: serializa las escrituras de por sí.
+    Las pruebas locales corren en SQLite, así que esta carrera **no la cubre
+    la suite**; hay que verificarla contra PostgreSQL.
+    """
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError(
+            "el lock del agregado es de transacción: hay que llamarlo dentro "
+            "de un atomic() o no protege nada"
+        )
+    if connection.vendor != "postgresql":
+        return
+    # Dos enteros de 32 bits: uno identifica la tabla, el otro la clave. Se
+    # usa un hash estable (no el hash() de Python, que cambia entre procesos
+    # por PYTHONHASHSEED y haría que dos workers tomaran llaves distintas).
+    semilla = f"{organizacion_id}|{suscripcion_id}|{mes:%Y-%m}".encode()
+    clave = int.from_bytes(hashlib.sha256(semilla).digest()[:4], "big") - 2**31
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s, %s)", [_ESPACIO_LOCK, clave])
+
+
+#: Identifica a qué "familia" de locks pertenece la clave, para no chocar con
+#: otro advisory lock del sistema que use el mismo número por casualidad.
+_ESPACIO_LOCK = 28  # FE-28
+
+
 def proyectar_uso(
     *, organizacion_id, suscripcion_id, evento_id, fecha: dt.date, minutos: int
 ) -> bool:
     """Copia un registro de uso y recalcula su mes. True si era nuevo.
 
     Devuelve False cuando el registro ya estaba: es un reproceso, y no hace
-    nada. El agregado tampoco se toca, porque no cambió nada que recalcular.
-    """
-    try:
-        with transaction.atomic():
-            UsoProyectado.objects.create(
-                organizacion_id=organizacion_id,
-                suscripcion_id=suscripcion_id,
-                evento_id=evento_id,
-                fecha=fecha,
-                minutos=minutos,
-            )
-    except IntegrityError:
-        # `evento_id` es único: este evento ya se aplicó. El atomic()
-        # anidado existe para esto: sin él, la excepción deja la transacción
-        # externa rota y lo que venga después falla con "current transaction
-        # is aborted".
-        return False
+    nada, porque no cambió nada que recalcular.
 
-    recalcular_mes(
-        organizacion_id=organizacion_id,
-        suscripcion_id=suscripcion_id,
-        mes=primer_dia(fecha),
-    )
+    ── Las dos escrituras van en UNA transacción ────────────────────────────
+    Antes el atomic cerraba después de insertar y el recálculo quedaba afuera.
+    Si el recálculo fallaba, el registro quedaba guardado sin agregado, y la
+    reentrega del mismo evento devolvía False por la restricción única **sin
+    reparar el mes**: esos minutos no se agregaban nunca más. Lo reprodujo la
+    revisión de la PR.
+
+    Ahora o entran las dos cosas o no entra ninguna, así que una reentrega
+    siempre encuentra el trabajo por hacer.
+
+    El atomic de adentro es un savepoint y existe solo para que el
+    `IntegrityError` del duplicado no deje rota la transacción exterior.
+    """
+    with transaction.atomic():
+        try:
+            with transaction.atomic():
+                UsoProyectado.objects.create(
+                    organizacion_id=organizacion_id,
+                    suscripcion_id=suscripcion_id,
+                    evento_id=evento_id,
+                    fecha=fecha,
+                    minutos=minutos,
+                )
+        except IntegrityError:
+            # Un IntegrityError NO prueba por sí solo que sea el mismo evento:
+            # podría venir de otra restricción. Se comprueba que la fila exista
+            # con este evento_id antes de darlo por reproceso; si no está, el
+            # error es otro y tiene que subir.
+            if not UsoProyectado.objects.filter(evento_id=evento_id).exists():
+                raise
+            return False
+
+        recalcular_mes(
+            organizacion_id=organizacion_id,
+            suscripcion_id=suscripcion_id,
+            mes=primer_dia(fecha),
+        )
     return True
 
 
-def recalcular_mes(*, organizacion_id, suscripcion_id, mes: dt.date) -> UsoMensual:
+def recalcular_mes(
+    *, organizacion_id, suscripcion_id, mes: dt.date, hasta: dt.date | None = None
+) -> UsoMensual:
     """Reconstruye el agregado del mes desde los registros proyectados.
 
     Función pura de `UsoProyectado`: no suma sobre lo que había. Por eso el
     agregado siempre coincide con los registros fuente del periodo, que es el
     primer criterio de FE-28, y por eso los datos tardíos no necesitan nada
     especial.
+
+    `hasta` acota hasta qué día se cuenta, para poder reconstruir el agregado
+    de un mes en curso sin incluir días posteriores al corte. Sin `hasta` se
+    cuenta el mes completo, que es lo correcto para un mes cerrado.
+
+    Toma un lock de la clave del agregado ANTES de leer la fuente: ver
+    `_bloquear_agregado`.
     """
     fin = mes_siguiente(mes)
-    registros = UsoProyectado.objects.filter(
-        organizacion_id=organizacion_id,
-        suscripcion_id=suscripcion_id,
-        fecha__gte=mes,
-        fecha__lt=fin,
-    )
-    resumen = registros.aggregate(
-        minutos=Sum("minutos"),
-        dias=Count("fecha", distinct=True),
-        ultimo=Max("fecha"),
-    )
-    fila, _ = UsoMensual.objects.update_or_create(
-        organizacion_id=organizacion_id,
-        suscripcion_id=suscripcion_id,
-        mes=mes,
-        defaults={
-            "minutos": resumen["minutos"] or 0,
-            "dias_con_uso": resumen["dias"] or 0,
-            "ultimo_uso": resumen["ultimo"],
-        },
-    )
+    if hasta is not None and hasta < fin:
+        # +1 día porque el filtro es `< fin`, y `hasta` es inclusivo.
+        fin = min(fin, hasta + dt.timedelta(days=1))
+
+    with transaction.atomic():
+        _bloquear_agregado(organizacion_id, suscripcion_id, mes)
+        registros = UsoProyectado.objects.filter(
+            organizacion_id=organizacion_id,
+            suscripcion_id=suscripcion_id,
+            fecha__gte=mes,
+            fecha__lt=fin,
+        )
+        resumen = registros.aggregate(
+            minutos=Sum("minutos"),
+            dias=Count("fecha", distinct=True),
+            ultimo=Max("fecha"),
+        )
+        fila, _ = UsoMensual.objects.update_or_create(
+            organizacion_id=organizacion_id,
+            suscripcion_id=suscripcion_id,
+            mes=mes,
+            defaults={
+                "minutos": resumen["minutos"] or 0,
+                "dias_con_uso": resumen["dias"] or 0,
+                "ultimo_uso": resumen["ultimo"],
+            },
+        )
     return fila
 
 
@@ -233,8 +313,14 @@ def puntuar(
     cantidad_meses = _meses_ventana()
     ventana = meses_hacia_atras(mes_final, cantidad_meses)
 
+    ultimo_del_mes = mes_siguiente(mes_final) - dt.timedelta(days=1)
     if hasta is None:
-        hasta = mes_siguiente(mes_final) - dt.timedelta(days=1)
+        hasta = ultimo_del_mes
+    else:
+        # El corte NUNCA puede pasar del mes pedido: si lo pasara, un GET del
+        # mes de marzo hecho en octubre contaría como observados los meses de
+        # abril a octubre.
+        hasta = min(hasta, ultimo_del_mes)
 
     observada = SuscripcionObservada.objects.filter(
         organizacion_id=organizacion_id, suscripcion_id=suscripcion_id
@@ -248,22 +334,57 @@ def puntuar(
             mes__in=ventana,
         )
     }
-    por_mes = [
-        {
+    # ── Por qué el último mes no se lee del agregado ──────────────────────
+    # `UsoMensual` tiene el mes COMPLETO. Si el corte cae a mitad de mes, un
+    # uso del día 20 seguiría contando aunque `hasta` sea el día 2: el
+    # agregado no sabe nada del corte. Lo reprodujo la revisión de la PR.
+    #
+    # Para el mes del corte se cuenta desde los registros, acotados a `hasta`.
+    # Los meses anteriores ya están cerrados y el agregado sirve tal cual, que
+    # es justamente para lo que existe.
+    mes_abierto = hasta < ultimo_del_mes
+
+    def _del_mes(mes: dt.date) -> dict:
+        if mes == mes_final and mes_abierto:
+            crudo = UsoProyectado.objects.filter(
+                organizacion_id=organizacion_id,
+                suscripcion_id=suscripcion_id,
+                fecha__gte=mes,
+                fecha__lte=hasta,
+            ).aggregate(
+                minutos=Sum("minutos"), dias=Count("fecha", distinct=True)
+            )
+            return {
+                "mes": f"{mes:%Y-%m}",
+                "minutos": crudo["minutos"] or 0,
+                "dias_con_uso": crudo["dias"] or 0,
+                "proyectado": mes in filas,
+                "mes_en_curso": True,
+                "contado_hasta": f"{hasta:%Y-%m-%d}",
+            }
+        return {
             "mes": f"{mes:%Y-%m}",
             "minutos": filas[mes].minutos if mes in filas else 0,
             "dias_con_uso": filas[mes].dias_con_uso if mes in filas else 0,
             "proyectado": mes in filas,
         }
-        for mes in ventana
-    ]
+
+    por_mes = [_del_mes(mes) for mes in ventana]
     minutos_totales = sum(item["minutos"] for item in por_mes)
     dias_totales = sum(item["dias_con_uso"] for item in por_mes)
 
     dias_observados = (hasta - observada.observada_desde).days if observada else 0
     # Solo cuentan los meses de la ventana que la suscripción llegó a vivir.
+    # Solo los meses de la ventana que la suscripción llegó a vivir Y que ya
+    # empezaron a la fecha de corte. Sin lo segundo, un GET del mes en curso
+    # promediaba sobre meses que todavía no pasaron.
     meses_observados = (
-        len([m for m in ventana if observada and m >= primer_dia(observada.observada_desde)])
+        len([
+            m for m in ventana
+            if observada
+            and m >= primer_dia(observada.observada_desde)
+            and m <= primer_dia(hasta)
+        ])
         if observada
         else 0
     )
@@ -276,6 +397,7 @@ def puntuar(
             f"{observada.observada_desde:%Y-%m-%d}" if observada else None
         ),
         "medido_hasta": f"{hasta:%Y-%m-%d}",
+        "mes_en_curso": mes_abierto,
         "meses": por_mes,
         "meses_observados_en_la_ventana": meses_observados,
         "uso_cero_real": False,

@@ -3,6 +3,7 @@ import re
 import uuid
 
 from drf_spectacular.utils import OpenApiParameter
+from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
@@ -114,7 +115,26 @@ class PuntajesUsoView(APIView):
         if not org:
             raise PermissionDenied("Falta el contexto de organización")
         mes = _mes_pedido(request)
-        puntajes = puntuar_organizacion(organizacion_id=org, mes_final=mes)
+        hoy = timezone.localdate()
+        if mes > hoy.replace(day=1):
+            # Un mes que todavía no empezó no tiene nada que puntuar, y
+            # responder ceros se leería como "no se usa".
+            raise ValidationError({"mes": "Ese mes todavía no empieza."})
+
+        # ── El corte lo pone la vista, no la fórmula ─────────────────────────
+        # `puntuar` es determinístico porque no mira el reloj: la fecha de
+        # corte es un parámetro. La vista es la que sabe qué día es hoy.
+        #
+        # Sin esto, un GET del mes EN CURSO contaba como observados los días
+        # que todavía no ocurrieron: con la suscripción creada el 1 de octubre
+        # y el GET hecho el 2, respondía `dias_observados=30` y `bajo`. Lo
+        # reprodujo la revisión de la PR.
+        #
+        # `puntuar` lo recorta al último día del mes pedido, así que para un
+        # mes ya cerrado pasar hoy no cambia nada.
+        puntajes = puntuar_organizacion(
+            organizacion_id=org, mes_final=mes, hasta=hoy
+        )
         return Response(
             PuntajeUsoSerializer([p.como_dict() for p in puntajes], many=True).data,
             status=status.HTTP_200_OK,

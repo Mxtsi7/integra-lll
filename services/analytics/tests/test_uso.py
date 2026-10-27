@@ -21,8 +21,11 @@ import uuid
 import pytest
 
 from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
+from django.db import DataError, IntegrityError
+
 from analytics.uso import (
     Clasificacion,
+    _bloquear_agregado,
     mes_siguiente,
     meses_hacia_atras,
     primer_dia,
@@ -521,3 +524,220 @@ class TestListado:
         )
         texto = json.dumps(puntaje.como_dict())
         assert json.loads(texto)["clasificacion"] == puntaje.clasificacion
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Las correcciones de la revisión de #110
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestUnidadTransaccional:
+    """El registro y el agregado entran juntos o no entra ninguno.
+
+    Antes el atomic cerraba después de insertar y el recálculo quedaba afuera.
+    Si el recálculo fallaba, el registro quedaba guardado SIN agregado, y la
+    reentrega del mismo evento devolvía False por la restricción única **sin
+    reparar el mes**: esos minutos no se agregaban nunca más.
+    """
+
+    def test_si_falla_el_recalculo_no_queda_el_registro_suelto(self, monkeypatch):
+        import analytics.uso as modulo
+
+        def explotar(**_kw):
+            raise RuntimeError("se cayó el recálculo")
+
+        monkeypatch.setattr(modulo, "recalcular_mes", explotar)
+        with pytest.raises(RuntimeError):
+            proyectar(dt.date(2026, 10, 3), 40)
+
+        assert not UsoProyectado.objects.exists()
+        assert not UsoMensual.objects.exists()
+
+    def test_tras_el_fallo_la_reentrega_SI_repara_el_mes(self, monkeypatch):
+        """Lo que de verdad importa: que el evento se pueda volver a aplicar."""
+        import analytics.uso as modulo
+
+        registro = uuid.uuid4()
+
+        def explotar(**_kw):
+            raise RuntimeError("se cayó")
+
+        monkeypatch.setattr(modulo, "recalcular_mes", explotar)
+        with pytest.raises(RuntimeError):
+            proyectar(dt.date(2026, 10, 3), 40, registro=registro)
+
+        monkeypatch.undo()
+        assert proyectar(dt.date(2026, 10, 3), 40, registro=registro) is True
+        assert mensual().minutos == 40
+
+    def test_un_IntegrityError_de_OTRA_cosa_no_se_toma_como_reproceso(self):
+        """Un IntegrityError no prueba por sí solo que sea el mismo evento.
+
+        Acá se fuerza uno distinto —un minutos negativo contra el
+        PositiveIntegerField— y tiene que SUBIR, no devolver False en silencio.
+        """
+        with pytest.raises((IntegrityError, ValueError, DataError)):
+            proyectar_uso(
+                organizacion_id=ORG_A,
+                suscripcion_id=SUSC,
+                evento_id=uuid.uuid4(),
+                fecha=dt.date(2026, 10, 3),
+                minutos=-1,
+            )
+
+
+class TestBloqueoDelAgregado:
+    """El lock se toma ANTES del SUM; si no, dos recálculos se pisan.
+
+    ⚠️ La carrera en sí **no la cubre esta suite**: en SQLite no hay advisory
+    locks y las escrituras se serializan igual, así que el intercalado no se
+    puede reproducir acá. Hay que verificarlo contra PostgreSQL. Lo que sí se
+    fija es el contrato del lock, para que nadie lo saque de la transacción.
+    """
+
+    def test_exige_estar_dentro_de_una_transaccion(self, monkeypatch):
+        """Un `pg_advisory_xact_lock` fuera de un atomic se suelta al tiro y
+        no protege nada. Mejor reventar que dar una falsa sensación.
+
+        La guarda se prueba simulando la conexión: pytest-django envuelve cada
+        prueba en una transacción, así que `in_atomic_block` es verdadero
+        siempre y no se puede llegar al caso de otra forma.
+        """
+        import analytics.uso as modulo
+
+        class FueraDeTransaccion:
+            in_atomic_block = False
+
+        monkeypatch.setattr(
+            modulo.transaction, "get_connection", lambda *_a, **_k: FueraDeTransaccion()
+        )
+        with pytest.raises(RuntimeError, match="transacción"):
+            _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+
+    def test_dentro_de_una_transaccion_no_revienta(self):
+        from django.db import transaction
+
+        with transaction.atomic():
+            _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+
+    def test_recalcular_mes_lo_toma_siempre(self):
+        """Si alguien saca el lock de `recalcular_mes`, esto falla."""
+        import inspect
+
+        fuente = inspect.getsource(recalcular_mes)
+        assert "_bloquear_agregado(" in fuente
+        # Y antes del SUM, no después.
+        assert fuente.index("_bloquear_agregado(") < fuente.index("aggregate(")
+
+
+class TestCorteTemporal:
+    """No se cuentan días que todavía no ocurrieron."""
+
+    def test_el_mes_en_curso_no_cuenta_los_dias_que_faltan(self):
+        """La reproducción de la revisión: reloj en el 2 de octubre, la
+        suscripción observada desde el 1. Antes respondía `dias_observados=30`
+        y `bajo`; o sea daba por observado un mes que recién empezaba."""
+        observar(desde=dt.date(2026, 10, 1))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 2),
+        )
+        assert resultado.evidencia["dias_observados"] == 1
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert resultado.evidencia["uso_cero_real"] is False
+
+    def test_un_uso_posterior_al_corte_no_entra(self):
+        """La otra reproducción: con `hasta` el 2 de octubre, una fila del
+        día 20 seguía sumando porque se leía todo UsoMensual."""
+        observar(desde=dt.date(2026, 1, 1))
+        proyectar(dt.date(2026, 10, 20), 500)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 2),
+        )
+        assert resultado.minutos_totales == 0
+        octubre = [m for m in resultado.evidencia["meses"] if m["mes"] == "2026-10"][0]
+        assert octubre["minutos"] == 0
+        assert octubre["mes_en_curso"] is True
+        assert octubre["contado_hasta"] == "2026-10-02"
+
+    def test_un_uso_anterior_al_corte_si_entra(self):
+        """El corte no puede tragarse lo que sí ocurrió."""
+        observar(desde=dt.date(2026, 1, 1))
+        proyectar(dt.date(2026, 10, 1), 30)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 2),
+        )
+        assert resultado.minutos_totales == 30
+
+    def test_el_corte_no_puede_pasar_del_mes_pedido(self):
+        """Pedir marzo en octubre no puede contar abril a octubre como
+        observados: `hasta` se recorta al último día del mes pedido."""
+        observar(desde=dt.date(2026, 1, 1))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            mes_final=dt.date(2026, 3, 1), hasta=dt.date(2026, 10, 27),
+        )
+        assert resultado.evidencia["medido_hasta"] == "2026-03-31"
+        assert resultado.evidencia["mes_en_curso"] is False
+
+    def test_un_mes_cerrado_no_cambia_por_pasar_hoy(self):
+        """Para un mes ya cerrado, pasar la fecha de hoy da lo mismo que no
+        pasarla: es lo que hace que la vista pueda pasarla siempre."""
+        observar(desde=dt.date(2026, 1, 1))
+        proyectar(dt.date(2026, 9, 10), 90)
+        sin_corte = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            mes_final=dt.date(2026, 9, 1),
+        )
+        con_corte = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            mes_final=dt.date(2026, 9, 1), hasta=dt.date(2026, 10, 27),
+        )
+        assert sin_corte == con_corte
+
+    def test_con_el_mes_del_corte_todos_los_de_la_ventana_ya_empezaron(self):
+        observar(desde=dt.date(2026, 1, 1))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 2),
+        )
+        # Agosto, septiembre y octubre ya empezaron al 2 de octubre.
+        assert resultado.evidencia["meses_observados_en_la_ventana"] == 3
+
+    def test_un_mes_final_ADELANTE_del_corte_no_promedia_meses_que_no_pasaron(self):
+        """El caso que de verdad ejercita el recorte de `meses_observados`.
+
+        La vista rechaza un mes futuro, pero `puntuar` se puede llamar directo
+        —Recommendations lo hace— y ahí el recorte es lo único que impide
+        dividir los minutos entre meses que nunca ocurrieron.
+
+        Ventana de noviembre: septiembre, octubre y noviembre. Con el corte el
+        2 de octubre, noviembre NO empezó: el divisor tiene que ser 2, no 3.
+        """
+        observar(desde=dt.date(2026, 1, 1))
+        proyectar(dt.date(2026, 9, 10), 120)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            mes_final=dt.date(2026, 11, 1), hasta=dt.date(2026, 10, 2),
+        )
+        assert resultado.evidencia["meses_observados_en_la_ventana"] == 2
+        assert resultado.meses_evaluados == 2
+        assert resultado.minutos_por_mes == 60.0   # 120 / 2, no 120 / 3
+
+    def test_recalcular_mes_tambien_respeta_el_corte(self):
+        """Hace falta para poder reconstruir el agregado de un mes en curso."""
+        proyectar(dt.date(2026, 10, 1), 10)
+        proyectar(dt.date(2026, 10, 20), 500)
+        recalcular_mes(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes=OCTUBRE,
+            hasta=dt.date(2026, 10, 2),
+        )
+        assert mensual().minutos == 10
+
+    def test_sin_corte_recalcular_cuenta_el_mes_completo(self):
+        proyectar(dt.date(2026, 10, 1), 10)
+        proyectar(dt.date(2026, 10, 20), 500)
+        recalcular_mes(organizacion_id=ORG_A, suscripcion_id=SUSC, mes=OCTUBRE)
+        assert mensual().minutos == 510
