@@ -1,4 +1,5 @@
-// Validaciones de formularios de cuenta (registro y restablecer contraseña).
+// Validaciones de formularios de cuenta (registro, restablecer contraseña,
+// editar el nombre del perfil y cambiar la contraseña).
 //
 // Son una copia FIEL de las reglas del backend para avisar antes de enviar,
 // pero el backend sigue siendo la validación definitiva: si responde con un
@@ -7,8 +8,10 @@
 // Fuente de cada regla en services/auth:
 // - Contraseña: app/passwords.py → validar_password (RF-01.1 / MX-30).
 // - Correo: EmailField del modelo User (máx. 254) y del serializer.
-// - Nombre: CharField(max_length=150) del modelo User.
+// - Nombre: CharField(max_length=150) del modelo User y de
+//   CambioPerfilSerializer (app/perfil.py, MX-06).
 // - Consentimiento: RegisterSerializer.validate_acepta_datos.
+// - Cambio de contraseña: CambioClaveSerializer (app/perfil.py, MX-05).
 
 export const LARGO_MINIMO_PASSWORD = 8;
 export const LARGO_MAXIMO_NOMBRE = 150;
@@ -52,6 +55,20 @@ export function validarCorreo(correo: string): string | null {
   return null;
 }
 
+/**
+ * Nombre de la persona (registro y Perfil). DRF recorta los espacios del
+ * CharField antes de validar, así que se mide el texto ya recortado, y en
+ * caracteres (code points) como Python, no en unidades UTF-16.
+ */
+export function validarNombre(nombre: string): string | null {
+  const limpio = nombre.trim();
+  if (!limpio) return "Ingresa tu nombre.";
+  if ([...limpio].length > LARGO_MAXIMO_NOMBRE) {
+    return `El nombre puede tener hasta ${LARGO_MAXIMO_NOMBRE} caracteres.`;
+  }
+  return null;
+}
+
 export type DatosRegistro = {
   nombre: string;
   correo: string;
@@ -67,11 +84,8 @@ export type ErroresRegistro = Partial<Record<CampoRegistro, string>>;
 export function validarRegistro(datos: DatosRegistro): ErroresRegistro {
   const errores: ErroresRegistro = {};
 
-  const nombre = datos.nombre.trim();
-  if (!nombre) errores.nombre = "Ingresa tu nombre.";
-  else if (nombre.length > LARGO_MAXIMO_NOMBRE) {
-    errores.nombre = `El nombre puede tener hasta ${LARGO_MAXIMO_NOMBRE} caracteres.`;
-  }
+  const nombre = validarNombre(datos.nombre);
+  if (nombre) errores.nombre = nombre;
 
   const correo = validarCorreo(datos.correo);
   if (correo) errores.correo = correo;
@@ -107,12 +121,72 @@ export function erroresRegistroDesdeServidor(campos: Record<string, string[]>): 
   porCampo: ErroresRegistro;
   general: string[];
 } {
-  const porCampo: ErroresRegistro = {};
+  return repartirErrores(campos, CAMPO_DESDE_API);
+}
+
+// Lo mismo para cualquier formulario: `mapa` dice qué campo de la API va a
+// qué campo del formulario. Lo usan el registro y el cambio de contraseña.
+function repartirErrores<C extends string>(
+  campos: Record<string, string[]>,
+  mapa: Record<string, C>,
+): { porCampo: Partial<Record<C, string>>; general: string[] } {
+  const porCampo: Partial<Record<C, string>> = {};
   const general: string[] = [];
   for (const [campoApi, mensajes] of Object.entries(campos)) {
-    const campo = CAMPO_DESDE_API[campoApi];
+    // Solo claves propias del mapa: una clave como "constructor" no es un campo.
+    const campo = Object.prototype.hasOwnProperty.call(mapa, campoApi) ? mapa[campoApi] : undefined;
     if (campo && mensajes.length > 0) porCampo[campo] = mensajes.join(" ");
     else general.push(...mensajes);
   }
   return { porCampo, general };
+}
+
+// ── Cambio de contraseña con sesión iniciada (CH-29) ──────────────────
+
+export type DatosCambioContrasena = {
+  actual: string;
+  nueva: string;
+  confirmacion: string;
+};
+
+export type CampoCambioContrasena = keyof DatosCambioContrasena;
+export type ErroresCambioContrasena = Partial<Record<CampoCambioContrasena, string>>;
+
+/**
+ * Valida el formulario de cambio de contraseña. Objeto vacío = se puede
+ * enviar. Si la confirmación no coincide no se envía nada (el backend la
+ * rechazaría igual con password_confirmacion).
+ *
+ * La contraseña actual solo se exige: si es la correcta lo sabe el backend.
+ * No se recorta ningún valor (trim_whitespace=False en el serializer).
+ */
+export function validarCambioContrasena(datos: DatosCambioContrasena): ErroresCambioContrasena {
+  const errores: ErroresCambioContrasena = {};
+
+  if (!datos.actual) errores.actual = "Ingresa tu contraseña actual.";
+
+  const nueva = validarPassword(datos.nueva);
+  if (nueva) errores.nueva = nueva;
+
+  if (!datos.confirmacion) errores.confirmacion = "Repite la contraseña nueva.";
+  else if (datos.confirmacion !== datos.nueva) {
+    errores.confirmacion = "Las contraseñas no coinciden.";
+  }
+
+  return errores;
+}
+
+// Nombres de CambioClaveSerializer → campos del formulario.
+const CAMPO_CAMBIO_DESDE_API: Record<string, CampoCambioContrasena> = {
+  password_actual: "actual",
+  password: "nueva",
+  password_confirmacion: "confirmacion",
+};
+
+/** Reparte los errores del backend del cambio de contraseña (formato DRF). */
+export function erroresCambioContrasenaDesdeServidor(campos: Record<string, string[]>): {
+  porCampo: ErroresCambioContrasena;
+  general: string[];
+} {
+  return repartirErrores(campos, CAMPO_CAMBIO_DESDE_API);
 }
