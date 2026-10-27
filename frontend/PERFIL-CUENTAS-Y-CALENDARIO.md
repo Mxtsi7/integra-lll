@@ -7,8 +7,8 @@ o, si la API todavía no existe, la pantalla lo dice.
 
 | Tarea | Qué hace | Dónde está |
 |---|---|---|
-| CH-08 | Editar el nombre desde Perfil | `web/src/components/perfil/EditarNombre.tsx` |
-| CH-29 | Cambiar la contraseña con la sesión iniciada | `web/src/components/perfil/CambiarContrasena.tsx` |
+| CH-08 | Editar el nombre desde Perfil | `web/src/components/Perfil/EditarNombre.tsx` |
+| CH-29 | Cambiar la contraseña con la sesión iniciada | `web/src/components/Perfil/CambiarContrasena.tsx` |
 | CH-23 | Página de Cuentas conectadas y sus estados | `web/src/pages/CuentasConectadasPage.tsx`, `web/src/components/Cuentas/ListaCuentas.tsx` |
 | CH-17 | Página Calendario con la cuadrícula del mes | `web/src/pages/CalendarioPage.tsx`, `web/src/components/calendario/CuadriculaMes.tsx` |
 
@@ -21,7 +21,7 @@ En Perfil, "Editar" abre el campo en la misma fila. Se guarda con
 backend**, no lo que se escribió:
 
 ```tsx
-// web/src/components/perfil/EditarNombre.tsx
+// web/src/components/Perfil/EditarNombre.tsx
 const usuario = await actualizarNombre(valor); // shared: PATCH solo con { nombre }
 onGuardado(usuario);                            // Perfil y la barra superior
 ```
@@ -120,7 +120,7 @@ export interface EventoCalendario {
 
 **Nuevos**
 - `shared/src/api/usuarios.test.ts`, `shared/src/formato.test.ts`
-- `web/src/components/perfil/` (EditarNombre, CambiarContrasena, Perfil.module.css)
+- `web/src/components/Perfil/` (EditarNombre, CambiarContrasena, Perfil.module.css)
 - `web/src/components/Cuentas/` (ListaCuentas, Cuentas.module.css)
 - `web/src/components/calendario/` (CuadriculaMes, Calendario.module.css)
 - `web/src/components/ui/ErrorConReintento.tsx` (+ css)

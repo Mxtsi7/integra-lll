@@ -150,3 +150,34 @@ despliegue levante los suyos.
 El cluster es compartido con el resto del curso. Conviene avisar, y no dejar
 una prueba corriendo sola: el `Job` termina y se borra a los 10 minutos, pero
 el pod de diagnóstico hay que borrarlo a mano.
+
+
+## Demostrar el autoescalado
+
+El HPA agrega réplicas cuando el promedio de CPU por pod pasa los 120m
+(`k8s/30-autoescalado.yaml`). Para verlo reaccionar en vivo hacen falta dos
+terminales.
+
+En la primera, mirando el HPA:
+
+```bash
+kubectl get hpa -w
+```
+
+En la segunda, la carga:
+
+```bash
+kubectl apply -f k8s/pruebas/carga-fortio.yaml
+```
+
+En la primera terminal, `REPLICAS` debería pasar de 1 a 2 y a 3 en menos de
+un minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
+ventana para que no entre en vaivén.
+
+Si la columna `TARGETS` dice `<unknown>` en vez de un número, el HPA no está
+recibiendo métricas y no va a escalar nunca. Eso es metrics-server, no el
+manifiesto.
+
+**El techo no es arbitrario.** `gateway` llega a 3 y `subscriptions` a 2
+porque la cuota permite 12 pods y la base son 9. Pedir más réplicas no daría
+más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.

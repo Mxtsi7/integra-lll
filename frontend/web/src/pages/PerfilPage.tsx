@@ -2,8 +2,9 @@ import { getUsuarioActual, type Usuario } from '@ojoalgasto/shared';
 import { Database, Home, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
-import { CambiarContrasena } from '../components/perfil/CambiarContrasena';
-import { EditarNombre } from '../components/perfil/EditarNombre';
+import { CambiarContrasena } from '../components/Perfil/CambiarContrasena';
+import { EditarNombre } from '../components/Perfil/EditarNombre';
+import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
@@ -157,9 +158,7 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
             </Boton>
           </Fila>
           <Fila etiqueta="Eliminar cuenta" detalle="Borra tu cuenta y tus suscripciones.">
-            <Boton variante="sutil" tamano="s" className={styles.peligro} disabled title="Próximamente">
-              Eliminar
-            </Boton>
+              <EliminarCuenta className={styles.peligro} />
           </Fila>
         </Seccion>
       </div>

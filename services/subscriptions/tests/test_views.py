@@ -55,7 +55,7 @@ class TestSubscriptionUpdateDeleteViews:
             format="json",
             headers={
                 "X-Organizacion-Id": str(org_a),
-                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Usuario-Id": "42",
                 "X-Rol": "titular",
             },
         )
@@ -78,7 +78,7 @@ class TestSubscriptionUpdateDeleteViews:
             format="json",
             headers={
                 "X-Organizacion-Id": str(org_a),
-                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Usuario-Id": "42",
                 "X-Rol": "titular",
             },
         )
@@ -809,6 +809,76 @@ class TestSubscriptionRegistrarUso:
             minutos=60,
         ).exists()
 
+    def test_cambio_de_mes_recalcula_el_agregado_desde_el_historico(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Un total persistido del mes anterior no se arrastra al mes vigente."""
+        from django.utils import timezone
+
+        hoy = timezone.localdate()
+        fecha_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_activa,
+            fecha=fecha_mes_anterior,
+            minutos=120,
+        )
+        sub_activa.horas_uso_mes = Decimal("2.00")
+        sub_activa.save(update_fields=("horas_uso_mes",))
+
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 30},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("0.50")
+
+    def test_uso_de_otro_mes_no_contamina_el_agregado_vigente(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """El total se recalcula desde registros del mes vigente al recibir uso retroactivo."""
+        from django.utils import timezone
+
+        hoy = timezone.localdate()
+        fecha_mes_anterior = hoy.replace(day=1) - timedelta(days=1)
+        RegistroUso.objects.create(
+            organizacion_id=org,
+            suscripcion=sub_activa,
+            fecha=hoy.replace(day=1),
+            minutos=60,
+        )
+
+        response = api_client.post(
+            f"/api/suscripciones/{sub_activa.id}/uso/",
+            {"minutos": 90, "fecha": fecha_mes_anterior.isoformat()},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("1.00")
+
+    def test_agregado_mensual_redondea_el_total_y_no_cada_registro(
+        self, api_client: APIClient, org: uuid.UUID, sub_activa: Subscription
+    ) -> None:
+        """Tres registros de un minuto suman 0.05 horas, sin redondeo acumulativo."""
+        for _ in range(3):
+            response = api_client.post(
+                f"/api/suscripciones/{sub_activa.id}/uso/",
+                {"minutos": 1},
+                format="json",
+                headers={"X-Organizacion-Id": str(org)},
+            )
+            assert response.status_code == status.HTTP_200_OK
+
+        sub_activa.refresh_from_db()
+        assert sub_activa.horas_uso_mes == Decimal("0.05")
+
     def test_registrar_uso_aislamiento_tenant_otra_org_devuelve_404(
         self, api_client: APIClient, sub_activa: Subscription
     ) -> None:
@@ -1086,6 +1156,21 @@ class TestSubscriptionHistoricoUso:
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "fecha" in response.data
+
+    def test_registrar_uso_fecha_invalida_devuelve_400(
+        self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription
+    ) -> None:
+        """POST con una fecha que no existe responde 400 y no crea histórico."""
+        response = api_client.post(
+            f"/api/suscripciones/{sub_1.id}/uso/",
+            {"minutos": 10, "fecha": "2026-02-30"},
+            format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "fecha" in response.data
+        assert not RegistroUso.objects.filter(suscripcion=sub_1).exists()
 
     def test_registrar_uso_fecha_pasada_se_acepta(
         self, api_client: APIClient, org: uuid.UUID, sub_1: Subscription

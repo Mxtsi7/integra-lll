@@ -12,7 +12,7 @@ import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Insignia } from '../components/ui/Insignia';
 import {
-  CATEGORIA_VISUAL,
+  usePresentacionCategoria,
   cuandoEnDias,
   ESTADOS,
   etiquetaFrecuencia,
@@ -28,6 +28,7 @@ type EstadoCarga =
   | { tipo: 'listo'; suscripcion: Suscripcion };
 
 export function SuscripcionDetallePage() {
+  const categoriaVisual = usePresentacionCategoria();
   const { id } = useParams<{ id: string }>();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
 
@@ -57,7 +58,7 @@ export function SuscripcionDetallePage() {
   return (
     <AppLayout
       headerTitulo={estado.tipo === 'listo' ? estado.suscripcion.nombre : 'Suscripción'}
-      headerSubtitulo={estado.tipo === 'listo' ? CATEGORIA_VISUAL[estado.suscripcion.categoria].etiqueta : undefined}
+      headerSubtitulo={estado.tipo === 'listo' ? categoriaVisual(estado.suscripcion.categoria).etiqueta : undefined}
       angosto
     >
       <Link to="/home" className={styles.volver}>
@@ -76,10 +77,11 @@ export function SuscripcionDetallePage() {
 }
 
 function ContenidoDetalle({ suscripcion }: { suscripcion: Suscripcion }) {
+  const categoriaVisual = usePresentacionCategoria();
   const montoMensual = equivalenteMensual(suscripcion.monto, suscripcion.frecuencia);
   const porHora = costoPorHora(montoMensual, suscripcion.horas_uso_mes ?? 0);
   const info = ESTADOS[suscripcion.estado];
-  const { Icono, color, suave } = CATEGORIA_VISUAL[suscripcion.categoria];
+  const { Icono, color, suave } = categoriaVisual(suscripcion.categoria);
   const dias = diasHasta(suscripcion.fecha_proximo_cobro);
 
   return (

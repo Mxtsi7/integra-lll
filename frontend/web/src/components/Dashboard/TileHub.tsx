@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { OjoMarca } from '../layout/Marca';
 import { Boton, BotonEnlace } from '../ui/Boton';
-import { CATEGORIA_VISUAL, sufijoFrecuencia } from '../subscriptions/presentacion';
+import { usePresentacionCategoria, sufijoFrecuencia } from '../subscriptions/presentacion';
 import styles from './Tiles.module.css';
 
 interface TileHubProps {
@@ -12,7 +12,7 @@ interface TileHubProps {
   alExportar: () => void;
 }
 
-type Pestana = 'todas' | Suscripcion['categoria'];
+type Pestana = Suscripcion['categoria'] | null;
 
 // Seis lugares alrededor del ojo, en porcentaje del escenario. En pantalla
 // ancha forman un anillo; en el celular, dos columnas con el ojo al medio.
@@ -56,16 +56,16 @@ function useEsAngosto(): boolean {
  * como los dispositivos de una casa. Las pestañas cambian la categoría.
  */
 export function TileHub({ suscripciones, alExportar }: TileHubProps) {
-  const [pestana, setPestana] = useState<Pestana>('todas');
+  const categoriaVisual = usePresentacionCategoria();
+  const [pestana, setPestana] = useState<Pestana>(null);
   const angosto = useEsAngosto();
   const lugares = angosto ? LUGARES_ANGOSTO : LUGARES_ANCHO;
 
-  const categoriasPresentes = (Object.keys(CATEGORIA_VISUAL) as Suscripcion['categoria'][]).filter((c) =>
-    suscripciones.some((s) => s.categoria === c && s.estado !== 'cancelado'),
-  );
+  const categoriasPresentes = [...new Set(suscripciones
+    .filter((s) => s.estado !== 'cancelado').map((s) => s.categoria))];
 
   const visibles = suscripciones
-    .filter((s) => s.estado !== 'cancelado' && (pestana === 'todas' || s.categoria === pestana))
+    .filter((s) => s.estado !== 'cancelado' && (pestana === null || s.categoria === pestana))
     .sort((a, b) => equivalenteMensual(b.monto, b.frecuencia) - equivalenteMensual(a.monto, a.frecuencia))
     .slice(0, lugares.length);
 
@@ -73,9 +73,9 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
   const fantasmas = suscripciones.filter((s) => s.estado === 'fantasma').length;
 
   const pestanas: { valor: Pestana; etiqueta: string; icono?: ReactNode }[] = [
-    { valor: 'todas', etiqueta: 'Todas' },
+    { valor: null, etiqueta: 'Todas' },
     ...categoriasPresentes.map((c) => {
-      const { etiqueta, Icono } = CATEGORIA_VISUAL[c];
+      const { etiqueta, Icono } = categoriaVisual(c);
       return { valor: c as Pestana, etiqueta, icono: <Icono size={14} aria-hidden="true" /> };
     }),
   ];
@@ -85,7 +85,7 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
       <div className={styles.hubPestanas} role="tablist" aria-label="Categoría">
         {pestanas.map((p) => (
           <button
-            key={p.valor}
+            key={p.valor ?? '__todas__'}
             type="button"
             role="tab"
             aria-selected={pestana === p.valor}
@@ -133,7 +133,7 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
         </div>
 
         {visibles.map((s, i) => {
-          const { Icono, color } = CATEGORIA_VISUAL[s.categoria];
+          const { Icono, color } = categoriaVisual(s.categoria);
           return (
             <Link
               key={`${pestana}-${s.id}`}

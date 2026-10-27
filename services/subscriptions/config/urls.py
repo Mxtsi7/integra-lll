@@ -26,7 +26,10 @@ def salud(request):
     )
 
 
+from app.catalogos_api import CatalogosSuscripcionesView
+
 urlpatterns = [
+    path("api/catalogos/suscripciones/", CatalogosSuscripcionesView.as_view()),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),

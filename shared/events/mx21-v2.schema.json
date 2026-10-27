@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MX-21: cuatro contratos de intercambio v2",
+  "type": "object",
+  "required": ["evento", "version", "id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+  "properties": {
+    "evento": {"enum": ["suscripcion.creada", "suscripcion.actualizada", "suscripcion.estado_cambiado", "alerta.activada"]},
+    "version": {"const": 2, "type": "integer"},
+    "id": {"$ref": "#/$defs/uuid"},
+    "organizacion_id": {"$ref": "#/$defs/uuid"},
+    "correlation_id": {"$ref": "#/$defs/uuid"},
+    "ocurrido_en": {"$ref": "#/$defs/instante"},
+    "datos": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"evento": {"const": "alerta.activada"}}},
+     "then": {"properties": {"datos": {"$ref": "#/$defs/alerta"}}},
+     "else": {"properties": {"datos": {"$ref": "#/$defs/suscripcion"}}}},
+    {"if": {"properties": {"evento": {"const": "suscripcion.actualizada"}}},
+     "then": {"properties": {"datos": {"required": ["campos_modificados"]}}}},
+    {"if": {"properties": {"evento": {"const": "suscripcion.estado_cambiado"}}},
+     "then": {"properties": {"datos": {"required": ["estado_anterior"]}}}}
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "instante": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "estado": {"enum": ["prueba", "activo", "por_confirmar", "cancelado", "fantasma"]},
+    "suscripcion": {
+      "type": "object",
+      "required": ["suscripcion_id", "proveedor_id", "nombre", "monto", "moneda", "ciclo", "proximo_cobro", "estado"],
+      "properties": {
+        "suscripcion_id": {"$ref": "#/$defs/uuid"},
+        "proveedor_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "nombre": {"type": "string", "minLength": 1, "maxLength": 100},
+        "monto": {"type": "string", "pattern": "^(?!0[.]00$)(0|[1-9][0-9]{0,7})[.][0-9]{2}$"},
+        "moneda": {"type": "string", "pattern": "^[A-Z]{3}$", "maxLength": 3},
+        "ciclo": {"enum": ["mensual", "anual"]},
+        "proximo_cobro": {"type": "string", "format": "date"},
+        "estado": {"$ref": "#/$defs/estado"},
+        "estado_anterior": {"$ref": "#/$defs/estado"},
+        "evento_estado": {"enum": ["fin_prueba", "fallo_cobro_inicial", "cancelacion_usuario", "fallo_cobro", "cobro_regularizado", "confirmacion_usuario", "sin_cobros_60_dias", "sin_respuesta_30_dias", "sin_uso_45_dias", "uso_registrado", "cobro_nuevo_detectado", "reactivacion_usuario"]},
+        "campos_modificados": {"type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"enum": ["proveedor_id", "nombre", "monto", "moneda", "ciclo", "proximo_cobro", "estado"]}}
+      }
+    },
+    "alerta": {
+      "type": "object", "required": ["alerta_id", "suscripcion_id", "usuario_id", "tipo", "programada_para"],
+      "properties": {
+        "alerta_id": {"$ref": "#/$defs/uuid"}, "suscripcion_id": {"$ref": "#/$defs/uuid"},
+        "usuario_id": {"type": "integer", "minimum": 1, "maximum": 9223372036854775807},
+        "tipo": {"enum": ["proximo_cobro", "fin_prueba"]},
+        "programada_para": {"$ref": "#/$defs/instante"}
+      }
+    }
+  }
+}
+
