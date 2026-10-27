@@ -51,9 +51,8 @@ export function RecomendacionesPage() {
                       style={{ cursor: destino ? 'pointer' : 'default' }}
                     >
                       <div className={styles.tarjetaContenido}>
-                        <h3 className={styles.nombreSuscripcion}>
-                          {item.nombre || item.titulo || 'Suscripción'}
-                        </h3>
+                       <h3 className={styles.nombreSuscripcion}>Recomendación de ahorro</h3>
+
                         {item.motivo && <p className={styles.motivo}>{item.motivo}</p>}
                         {item.ahorro_estimado !== undefined && (
                           <span className={styles.ahorroBadge}>
