@@ -28,3 +28,4 @@ export * from './api/planes';
 export * from './api/eliminarCuenta';
 export * from './api/verificacionCorreo';
 export * from './estadoCarga';
+export * from './api/calendario';

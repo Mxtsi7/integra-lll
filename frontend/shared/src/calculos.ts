@@ -3,7 +3,7 @@
  * la app móvil muestren exactamente el mismo número.
  */
 
-import type { Frecuencia, Suscripcion } from './tipos';
+import type { Frecuencia, Moneda, Suscripcion } from './tipos';
 
 /** RN-CIC-005: los cobros anuales se convierten a equivalente mensual. */
 export function equivalenteMensual(monto: number, frecuencia: Frecuencia): number {
@@ -23,21 +23,29 @@ export function costoPorHora(montoMensual: number, horasUsoMes: number): number 
 }
 
 /**
- * RN-CIC-005: el gasto mensual proyectado incluye las suscripciones activas y
- * las pruebas gratuitas con fecha de término y monto conocidos, todo en
- * equivalente mensual.
+ * RN-CIC-005: qué suscripciones van a cobrarse. Las activas y las pruebas
+ * gratuitas con fecha de término y monto conocidos.
  *
  * Una suscripción fantasma sigue cobrándose —es activa sin uso—, así que
- * entra en la proyección. Ocultarla escondería justo el gasto que el producto
- * existe para mostrar.
+ * cuenta. Ocultarla escondería justo el gasto que el producto existe para
+ * mostrar. Una cancelada o una por confirmar no tienen un cobro seguro.
+ *
+ * La usa la proyección del Panel. El Calendario ya no: desde CH-18 los
+ * cobros del mes los calcula el backend (VI-07).
+ */
+export function generaCobro(s: Suscripcion): boolean {
+  if (s.estado === 'activo' || s.estado === 'fantasma') return true;
+  if (s.estado === 'prueba') return s.monto > 0 && Boolean(s.fin_prueba);
+  return false;
+}
+
+/**
+ * RN-CIC-005: el gasto mensual proyectado suma, en equivalente mensual, las
+ * suscripciones que generan cobro (ver generaCobro).
  */
 export function gastoProyectado(suscripciones: Suscripcion[]): number {
   return suscripciones
-    .filter((s) => {
-      if (s.estado === 'activo' || s.estado === 'fantasma') return true;
-      if (s.estado === 'prueba') return s.monto > 0 && Boolean(s.fin_prueba);
-      return false;
-    })
+    .filter(generaCobro)
     .reduce((total, s) => total + equivalenteMensual(s.monto, s.frecuencia), 0);
 }
 
@@ -46,4 +54,17 @@ export function conteoPorEstado(suscripciones: Suscripcion[]): Record<Suscripcio
   const conteo = { prueba: 0, activo: 0, por_confirmar: 0, cancelado: 0, fantasma: 0 };
   for (const s of suscripciones) conteo[s.estado] += 1;
   return conteo;
+}
+
+/**
+ * Suma montos separados por moneda (CH-20, CH-21): pesos y dólares no se
+ * suman entre sí. Se suma en centavos para que 4,99 + 4,99 dé 9,98 exacto y
+ * no 9,980000000000001. El orden es el de la primera aparición de cada moneda.
+ */
+export function totalesPorMoneda(montos: { importe: number; moneda: Moneda }[]): { moneda: Moneda; total: number }[] {
+  const centavos = new Map<Moneda, number>();
+  for (const { importe, moneda } of montos) {
+    centavos.set(moneda, (centavos.get(moneda) ?? 0) + Math.round(importe * 100));
+  }
+  return [...centavos].map(([moneda, total]) => ({ moneda, total: total / 100 }));
 }
