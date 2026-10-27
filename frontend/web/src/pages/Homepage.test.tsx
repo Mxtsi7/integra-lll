@@ -419,3 +419,247 @@ describe("Guardar con el aviso visible no lo deja pendiente (CH-16, revisión PR
     expect(aviso()).not.toBeInTheDocument();
   });
 });
+
+
+describe("Filtros, orden y limpiar en Inicio (CH-11, CH-12, CH-13)", () => {
+  const sus = (nombre: string, extra: Partial<Suscripcion> = {}): Suscripcion => ({
+    ...SPOTIFY,
+    id: `id-${nombre}`,
+    nombre,
+    ...extra,
+  });
+  /** Nombres de las tarjetas visibles, en el orden en que se ven. */
+  const nombresEnGrilla = () =>
+    screen.queryAllByRole("button", { name: /^Ver / }).map((b) => (b.getAttribute("aria-label") ?? "").replace(/^Ver /, ""));
+  /** La última consulta CON filtros u orden (la lista completa del resumen se pide sin consulta). */
+  const ultimaConsulta = () =>
+    vi.mocked(getSuscripciones).mock.calls.map((c) => c[0]).filter((c) => c !== undefined).at(-1);
+  const chip = (nombre: RegExp) =>
+    within(screen.getByRole("group", { name: "Filtrar por estado" })).getByRole("button", { name: nombre });
+  const parametro = (router: Awaited<ReturnType<typeof montar>>, nombre: string) =>
+    new URLSearchParams(router.state.location.search).get(nombre);
+  const clic = (elemento: HTMLElement) => act(async () => fireEvent.click(elemento));
+  const cambiar = (elemento: HTMLElement, value: string) =>
+    act(async () => fireEvent.change(elemento, { target: { value } }));
+  const fechaDeCobro = () => screen.getByLabelText("Fecha de cobro");
+  const ordenarPor = () => screen.getByLabelText("Ordenar por");
+  const buscador = () => screen.getByRole("searchbox", { name: "Buscar una suscripción" });
+  const paginaActual = () =>
+    within(screen.getByRole("navigation", { name: "Paginación de suscripciones" })).getByRole("button", {
+      current: "page",
+    });
+
+  /** Promesa que el test resuelve cuando quiere. */
+  function diferida<T>() {
+    let resolver!: (v: T) => void;
+    const promesa = new Promise<T>((res) => (resolver = res));
+    return { promesa, resolver };
+  }
+
+  describe("CH-11: estado y fecha de cobro", () => {
+    it("estado y fecha juntos van a la API y la grilla muestra justo lo que devuelve", async () => {
+      const NETFLIX = sus("Netflix", { estado: "cancelado", fecha_proximo_cobro: "2026-11-10" });
+      const HBO = sus("HBO", { estado: "cancelado", fecha_proximo_cobro: "2026-12-01" });
+      vi.mocked(getSuscripciones).mockImplementation(async (c) => {
+        if (c?.estado === "cancelado" && c.fecha_cobro === "2026-11-10") return [NETFLIX];
+        if (c?.estado === "cancelado") return [NETFLIX, HBO];
+        return [SPOTIFY, NETFLIX, HBO];
+      });
+      const router = await montar();
+
+      await clic(chip(/^Canceladas/));
+      expect(nombresEnGrilla()).toEqual(["Netflix", "HBO"]);
+      await cambiar(fechaDeCobro(), "2026-11-10");
+
+      expect(ultimaConsulta()).toEqual({ estado: "cancelado", fecha_cobro: "2026-11-10", orden: "fecha_proximo_cobro" });
+      expect(nombresEnGrilla()).toEqual(["Netflix"]);
+      expect(chip(/^Canceladas/)).toHaveAttribute("aria-pressed", "true");
+      expect(parametro(router, "estado")).toBe("cancelado");
+      expect(parametro(router, "fecha_cobro")).toBe("2026-11-10");
+    });
+
+    it("cambiar de filtro en la página 2 vuelve a la 1 y, mientras carga, no muestra la consulta anterior", async () => {
+      const activas = Array.from({ length: 12 }, (_, i) => sus(`Activa ${i + 1}`));
+      const canceladas = Array.from({ length: 10 }, (_, i) => sus(`Cancelada ${i + 1}`, { estado: "cancelado" }));
+      const respuesta = diferida<Suscripcion[]>();
+      vi.mocked(getSuscripciones).mockImplementation((c) =>
+        c?.estado === "cancelado" ? respuesta.promesa : Promise.resolve([...activas, ...canceladas]),
+      );
+      await montar();
+      await clic(screen.getByRole("button", { name: "2" }));
+      expect(paginaActual()).toHaveTextContent("2");
+
+      await clic(chip(/^Canceladas/));
+      // Ni las tarjetas ni la paginación de la consulta anterior.
+      expect(nombresEnGrilla()).toEqual([]);
+      expect(screen.queryByRole("navigation", { name: "Paginación de suscripciones" })).not.toBeInTheDocument();
+
+      await act(async () => respuesta.resolver(canceladas));
+      expect(nombresEnGrilla()).toEqual(canceladas.slice(0, 9).map((s) => s.nombre));
+      expect(paginaActual()).toHaveTextContent("1");
+    });
+
+    it("una respuesta tardía de un filtro anterior no pisa la del filtro actual", async () => {
+      const lenta = diferida<Suscripcion[]>();
+      vi.mocked(getSuscripciones).mockImplementation((c) => {
+        if (c?.estado === "fantasma") return lenta.promesa;
+        if (c?.estado === "cancelado") return Promise.resolve([sus("HBO", { estado: "cancelado" })]);
+        return Promise.resolve([SPOTIFY, sus("Gimnasio", { estado: "fantasma" }), sus("HBO", { estado: "cancelado" })]);
+      });
+      await montar();
+
+      await clic(chip(/^Sin uso/));
+      await clic(chip(/^Canceladas/));
+      await act(async () => lenta.resolver([sus("Gimnasio", { estado: "fantasma" })]));
+
+      expect(nombresEnGrilla()).toEqual(["HBO"]);
+      expect(chip(/^Canceladas/)).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("los filtros viven en la URL: al ir a otra página y volver siguen puestos", async () => {
+      const router = await montar(["/home?estado=cancelado&fecha_cobro=2026-11-10&orden=-monto"]);
+
+      expect(ultimaConsulta()).toEqual({ estado: "cancelado", fecha_cobro: "2026-11-10", orden: "-monto" });
+      // El estado elegido se ve aunque hoy no haya ninguna cancelada.
+      expect(chip(/^Canceladas/)).toHaveAttribute("aria-pressed", "true");
+      expect(fechaDeCobro()).toHaveValue("2026-11-10");
+      expect(ordenarPor()).toHaveValue("-monto");
+
+      await navegar(router, "/perfil");
+      await navegar(router, -1);
+
+      expect(chip(/^Canceladas/)).toHaveAttribute("aria-pressed", "true");
+      expect(fechaDeCobro()).toHaveValue("2026-11-10");
+      expect(ultimaConsulta()).toEqual({ estado: "cancelado", fecha_cobro: "2026-11-10", orden: "-monto" });
+    });
+
+    it("buscar desde la barra superior no borra los filtros ni el orden", async () => {
+      const router = await montar(["/home?estado=activo&orden=nombre"]);
+
+      await cambiar(buscador(), "spo");
+
+      expect(parametro(router, "q")).toBe("spo");
+      expect(parametro(router, "estado")).toBe("activo");
+      expect(parametro(router, "orden")).toBe("nombre");
+      expect(nombresEnGrilla()).toEqual(["Spotify"]);
+    });
+  });
+
+  describe("CH-12: ordenar", () => {
+    it("por defecto pide el cobro más cercano primero y el selector lo indica", async () => {
+      await montar();
+
+      expect(ultimaConsulta()).toEqual({ orden: "fecha_proximo_cobro" });
+      expect(ordenarPor()).toHaveDisplayValue("Próximo cobro: más cercano primero");
+    });
+
+    it("el orden lo aplica la API antes de paginar: la página 2 sigue el mismo orden", async () => {
+      // A propósito sin ningún orden reconocible: si la web reordenara la página, se notaría.
+      const deMayorAMenor = ["Kappa", "Alfa", "Zeta", "Beta", "Omega", "Delta", "Mu", "Gamma", "Rho", "Iota", "Chi", "Eta"].map(
+        (nombre, i) => sus(nombre, { monto: 12_000 - i * 1_000 }),
+      );
+      vi.mocked(getSuscripciones).mockImplementation(async (c) =>
+        c?.orden === "-monto" ? deMayorAMenor : [...deMayorAMenor].reverse(),
+      );
+      const router = await montar();
+
+      await cambiar(ordenarPor(), "-monto");
+
+      expect(ultimaConsulta()).toEqual({ orden: "-monto" });
+      expect(parametro(router, "orden")).toBe("-monto");
+      expect(ordenarPor()).toHaveDisplayValue("Monto: de mayor a menor");
+      expect(nombresEnGrilla()).toEqual(deMayorAMenor.slice(0, 9).map((s) => s.nombre));
+      await clic(screen.getByRole("button", { name: "Página siguiente" }));
+      expect(nombresEnGrilla()).toEqual(["Iota", "Chi", "Eta"]);
+    });
+
+    it("un estado, fecha u orden inventados en la URL no llegan a la API", async () => {
+      await montar(["/home?estado=borrado&fecha_cobro=2026-02-30&orden=password"]);
+
+      const consultas = vi.mocked(getSuscripciones).mock.calls.map((c) => c[0]).filter((c) => c !== undefined);
+      expect(consultas.length).toBeGreaterThan(0);
+      for (const consulta of consultas) expect(consulta).toEqual({ orden: "fecha_proximo_cobro" });
+      expect(chip(/^Todas/)).toHaveAttribute("aria-pressed", "true");
+      expect(fechaDeCobro()).toHaveValue("");
+    });
+  });
+
+  describe("CH-13: limpiar filtros y sin coincidencias", () => {
+    it("Limpiar filtros vuelve a todas, sin fecha, el orden predeterminado, sin búsqueda y a la página 1", async () => {
+      const doce = Array.from({ length: 12 }, (_, i) => sus(`Activa ${i + 1}`));
+      vi.mocked(getSuscripciones).mockResolvedValue(doce);
+      const router = await montar(["/home?estado=activo&fecha_cobro=2026-11-10&orden=-monto&q=Activa"]);
+      await clic(screen.getByRole("button", { name: "2" }));
+
+      await clic(screen.getByRole("button", { name: "Limpiar filtros" }));
+
+      expect(router.state.location.search).toBe("");
+      expect(ultimaConsulta()).toEqual({ orden: "fecha_proximo_cobro" });
+      expect(chip(/^Todas/)).toHaveAttribute("aria-pressed", "true");
+      expect(fechaDeCobro()).toHaveValue("");
+      expect(ordenarPor()).toHaveValue("fecha_proximo_cobro");
+      expect(buscador()).toHaveValue("");
+      expect(paginaActual()).toHaveTextContent("1");
+      expect(screen.queryByRole("button", { name: "Limpiar filtros" })).not.toBeInTheDocument();
+    });
+
+    it("sin coincidencias dice que nada coincide y ofrece limpiar, sin invitar a crear la primera", async () => {
+      vi.mocked(getSuscripciones).mockImplementation(async (c) => (c?.estado === "cancelado" ? [] : [SPOTIFY]));
+      await montar(["/home?estado=cancelado&q=net&fecha_cobro=2026-11-10"]);
+
+      const aviso = screen.getByRole("heading", { name: "Ninguna suscripción coincide" }).closest("section")!;
+      expect(aviso).toHaveTextContent(
+        "No hay suscripciones en Canceladas, con «net» en el nombre y con cobro el 10 nov 2026.",
+      );
+      expect(within(aviso).getByRole("button")).toHaveTextContent("Limpiar filtros");
+      expect(screen.queryByText(/Todavía no registras/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Agrega la primera/)).not.toBeInTheDocument();
+
+      await clic(within(aviso).getByRole("button", { name: "Limpiar filtros" }));
+      expect(nombresEnGrilla()).toEqual(["Spotify"]);
+      expect(screen.queryByText("Ninguna suscripción coincide")).not.toBeInTheDocument();
+    });
+
+    it("una cuenta sin suscripciones sigue invitando a agregar la primera, aunque la URL traiga filtros", async () => {
+      vi.mocked(getSuscripciones).mockResolvedValue([]);
+      await montar(["/home?estado=cancelado"]);
+
+      expect(screen.getByRole("heading", { name: "Todavía no registras suscripciones" })).toBeInTheDocument();
+      expect(screen.queryByText("Ninguna suscripción coincide")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Limpiar filtros" })).not.toBeInTheDocument();
+    });
+
+    it("sin filtros ni búsqueda no aparece Limpiar filtros", async () => {
+      await montar();
+      expect(screen.queryByRole("button", { name: "Limpiar filtros" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("al crear con filtros puestos, se quitan estado y fecha y se ve la página donde quedó la nueva", async () => {
+    const doce = Array.from({ length: 12 }, (_, i) => sus(`Activa ${i + 1}`));
+    const NUEVA = sus("Netflix", { id: "nueva" });
+    let creada = false;
+    vi.mocked(getSuscripciones).mockImplementation(async () =>
+      creada ? [...doce.slice(0, 10), NUEVA, ...doce.slice(10)] : doce,
+    );
+    vi.mocked(crearSuscripcion).mockImplementation(async () => {
+      creada = true;
+      return NUEVA;
+    });
+    const router = await montar(["/home?estado=activo&fecha_cobro=2026-11-10&orden=nombre"]);
+
+    abrirNueva();
+    fireEvent.change(enDialogo().getByLabelText("Servicio"), { target: { value: "Netflix" } });
+    fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "9990" } });
+    fireEvent.change(enDialogo().getByLabelText("Próximo cobro"), { target: { value: "2026-11-05" } });
+    await act(async () => {
+      fireEvent.click(enDialogo().getByRole("button", { name: "Guardar suscripción" }));
+    });
+
+    expect(parametro(router, "estado")).toBeNull();
+    expect(parametro(router, "fecha_cobro")).toBeNull();
+    expect(parametro(router, "orden")).toBe("nombre"); // el orden elegido se respeta
+    expect(paginaActual()).toHaveTextContent("2");
+    expect(nombresEnGrilla()).toContain("Netflix");
+  });
+});
