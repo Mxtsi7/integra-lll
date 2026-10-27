@@ -76,6 +76,10 @@ accionConectar?: ReactNode;                        // AN-15: <ConectarCorreo …
 
 - El tipo `CuentaConectada` (`shared/src/tipos.ts`) copia
   `CuentaConectadaSerializer` del servicio connectors (FE-01), sin los tokens.
+- **Al cablear `cargarCuentas` con `GET /api/conectores/` (FE-02, PR #82):** esa ruta devuelve el
+  envoltorio paginado `{ count, next, previous, results }` (10 por página). Hay que devolver
+  `.results` y pedir las páginas siguientes si `next` no es null. Si llega el envoltorio sin
+  desenvolver, la página muestra un error con Reintentar, no un listado vacío.
 - Estados: conectada, **pendiente** (= `requiere_reautorizacion`, la cuenta
   necesita que el usuario vuelva a autorizar), con error y desconectada. Además
   hay tres estados de pantalla: sin cuentas, cargando, y error con Reintentar.

@@ -172,6 +172,16 @@ describe("Cuentas conectadas (CH-23)", () => {
     expect(lista).not.toHaveTextContent("vieja@gmail.com");
   });
 
+  it("si llega el envoltorio paginado de GET /api/conectores/ sin desenvolver, es un error y no 'sin cuentas'", async () => {
+    // Lo que devuelve FE-02 (PR #82): { count, next, previous, results }.
+    const envoltorio = { count: 1, next: null, previous: null, results: [cuenta({})] };
+    await montar({ cargarCuentas: async () => envoltorio as unknown as CuentaConectada[] });
+
+    expect(screen.getByRole("alert")).toHaveTextContent("No pudimos cargar tus cuentas conectadas.");
+    expect(screen.queryByText("Todavía no conectas ninguna cuenta")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+  });
+
   it("sin conexión lo dice distinto de un error del servidor", async () => {
     await montar({ cargarCuentas: () => Promise.reject(new TypeError("Failed to fetch")) });
 

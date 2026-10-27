@@ -11,10 +11,18 @@ const MENSAJE_ERROR = 'No pudimos cargar tus cuentas conectadas. Intenta de nuev
 
 export interface CuentasConectadasPageProps {
   /**
-   * AN-17: trae las cuentas de la organización (GET del servicio
-   * connectors) con la forma de CuentaConectadaSerializer. Mientras no se
+   * AN-17: trae TODAS las cuentas de la organización como un arreglo de
+   * CuentaConectada (la forma de CuentaConectadaSerializer). Mientras no se
    * pase, el listado dice que todavía no está disponible: no se inventan
    * cuentas ni se dice que no hay ninguna.
+   *
+   * Ojo al cablearla con GET /api/conectores/ (FE-02, PR #82): esa ruta NO
+   * devuelve el arreglo pelado sino el envoltorio paginado del resto de la API,
+   * `{ count, next, previous, results }`, de a 10 cuentas por página
+   * (`?page_size=` hasta 100). Hay que devolver `.results` y, si `next` no
+   * es null, pedir también las páginas siguientes (como getSuscripciones en
+   * shared). Si llega el envoltorio sin desenvolver, la página lo muestra
+   * como error en vez de un listado vacío.
    *
    * Tiene que ser una función estable (p. ej. la de shared, no una flecha
    * nueva en cada render): si cambia, el listado se vuelve a pedir.
@@ -50,8 +58,13 @@ export function CuentasConectadasPage({ cargarCuentas, accionConectar }: Cuentas
     let vigente = true;
     setEstado({ tipo: 'cargando' });
     cargarCuentas()
-      .then((cuentas) => {
-        if (vigente) setEstado({ tipo: 'listo', cuentas });
+      .then((cuentas: unknown) => {
+        if (!vigente) return;
+        // Si llega otra cosa (p. ej. el envoltorio paginado sin .results),
+        // es un error de integración: se avisa y se puede reintentar, en vez
+        // de romper la página o decir "no tienes cuentas".
+        if (Array.isArray(cuentas)) setEstado({ tipo: 'listo', cuentas: cuentas as CuentaConectada[] });
+        else setEstado({ tipo: 'error', mensaje: MENSAJE_ERROR });
       })
       .catch((err: unknown) => {
         if (vigente) setEstado({ tipo: 'error', mensaje: err instanceof TypeError ? MENSAJE_SIN_RED : MENSAJE_ERROR });
