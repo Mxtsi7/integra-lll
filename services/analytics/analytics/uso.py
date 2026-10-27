@@ -17,6 +17,7 @@ los datos, y recalcular puntajes viejos con la fórmula nueva.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from dataclasses import asdict, dataclass
 
 from django.conf import settings

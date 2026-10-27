@@ -21,10 +21,11 @@ import uuid
 import pytest
 
 from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
-from django.db import DataError, IntegrityError
+from django.db import DataError, IntegrityError, connection
 
 from analytics.uso import (
     Clasificacion,
+    _ESPACIO_LOCK as ESPACIO_LOCK,
     _bloquear_agregado,
     mes_siguiente,
     meses_hacia_atras,
@@ -586,6 +587,20 @@ class TestUnidadTransaccional:
             )
 
 
+@pytest.fixture
+def solo_postgres():
+    """Salta la prueba si la base no es PostgreSQL, comprobándolo EN TIEMPO DE
+    EJECUCIÓN.
+
+    Con `@pytest.mark.skipif(connection.vendor != ...)` no sirve: el decorador
+    se evalúa al IMPORTAR el módulo, y el `django_db_setup` del conftest cambia
+    la base a SQLite después. Resultado: las pruebas de PostgreSQL se
+    ejecutaban igual contra SQLite y fallaban.
+    """
+    if connection.vendor != "postgresql":
+        pytest.skip("los advisory locks son de PostgreSQL; en SQLite es un no-op")
+
+
 class TestBloqueoDelAgregado:
     """El lock se toma ANTES del SUM; si no, dos recálculos se pisan.
 
@@ -619,6 +634,65 @@ class TestBloqueoDelAgregado:
 
         with transaction.atomic():
             _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+
+    def test_en_postgres_el_lock_QUEDA_TOMADO(self, solo_postgres):
+        """Que la función no reviente no prueba que el lock exista.
+
+        Acá se mira `pg_locks` de verdad: tiene que aparecer un lock advisory
+        del espacio de FE-28 tomado por esta sesión. Es determinístico, a
+        diferencia de una carrera con hilos, que sería intermitente.
+
+        Esta prueba **solo corre contra PostgreSQL**. Es la que habría cazado
+        el `NameError: hashlib` que la suite en SQLite no vio, porque en
+        SQLite la función sale antes de llegar al hash.
+        """
+        from django.db import transaction
+
+        with transaction.atomic():
+            _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND classid = %s "
+                    "AND pid = pg_backend_pid()",
+                    [ESPACIO_LOCK],
+                )
+                assert cursor.fetchone()[0] == 1
+
+    def test_en_postgres_el_lock_se_suelta_al_cerrar_la_transaccion(self, solo_postgres):
+        """Es `_xact_`: si no se soltara, la conexión quedaría reteniéndolo."""
+        from django.db import transaction
+
+        with transaction.atomic():
+            _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM pg_locks "
+                "WHERE locktype = 'advisory' AND classid = %s AND pid = pg_backend_pid()",
+                [ESPACIO_LOCK],
+            )
+            # pytest-django envuelve la prueba en su propia transacción, así
+            # que el atomic de arriba es un savepoint y el lock sigue hasta el
+            # final; lo que se comprueba es que no se acumule más de uno.
+            assert cursor.fetchone()[0] <= 1
+
+    def test_en_postgres_claves_distintas_dan_locks_distintos(self, solo_postgres):
+        """Si todas las claves colapsaran en una, se serializaría el servicio
+        entero en vez de un (tenant, suscripcion, mes)."""
+        from django.db import transaction
+
+        with transaction.atomic():
+            _bloquear_agregado(ORG_A, SUSC, OCTUBRE)
+            _bloquear_agregado(ORG_A, OTRA, OCTUBRE)
+            _bloquear_agregado(ORG_B, SUSC, OCTUBRE)
+            _bloquear_agregado(ORG_A, SUSC, dt.date(2026, 9, 1))
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(DISTINCT objid) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND classid = %s AND pid = pg_backend_pid()",
+                    [ESPACIO_LOCK],
+                )
+                assert cursor.fetchone()[0] == 4
 
     def test_recalcular_mes_lo_toma_siempre(self):
         """Si alguien saca el lock de `recalcular_mes`, esto falla."""
