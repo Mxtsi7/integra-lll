@@ -401,3 +401,126 @@ describe("Cancelar suscripción sin borrarla (CH-10)", () => {
     expect(screen.queryByText(/Cancelaste/)).not.toBeInTheDocument();
   });
 });
+
+// Revisión de #112: registrar uso y cancelar pueden estar en vuelo a la vez y
+// sus respuestas llegar en cualquier orden. Ninguna respuesta vieja puede
+// tapar a una posterior: lo que se ve tiene que coincidir con el servidor.
+describe("Registrar uso y cancelar a la vez (revisión de #112)", () => {
+  const CANCELADA: Suscripcion = { ...SPOTIFY, estado: "cancelado" };
+  const dialogo = () => screen.getByRole("alertdialog", { name: "¿Cancelar Spotify?" });
+  const abrirCancelacion = () => fireEvent.click(screen.getByRole("button", { name: "Cancelar suscripción" }));
+  const confirmar = () =>
+    act(async () => fireEvent.click(within(dialogo()).getByRole("button", { name: /Cancelar suscripción|Cancelando/ })));
+  const proximoCobro = () => screen.getByText("Próximo cobro").closest("div");
+  const horasDelMes = () => screen.getByText("Horas de uso este mes").closest("div");
+
+  /** Promesa que el test resuelve cuando quiere. */
+  function diferida<T>() {
+    let resolver!: (v: T) => void;
+    const promesa = new Promise<T>((res) => (resolver = res));
+    return { promesa, resolver };
+  }
+
+  it("registrar → cancelar → llega tarde el uso: sigue Cancelada y las horas son las del servidor", async () => {
+    const uso = diferida<Suscripcion>();
+    registrarUsoMock.mockReturnValue(uso.promesa);
+    cancelarSuscripcionMock.mockResolvedValue(CANCELADA);
+    await montar();
+    fireEvent.change(minutos(), { target: { value: "45" } });
+    await registrar(); // queda pendiente
+
+    abrirCancelacion();
+    await confirmar();
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+
+    // En el servidor quedaron las dos: cancelada y con el uso sumado.
+    getSuscripcionMock.mockResolvedValue({ ...CANCELADA, horas_uso_mes: 0.75 });
+    // La respuesta del uso se produjo antes de cancelar: todavía dice "activo".
+    await act(async () => uso.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByText("Activa")).not.toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent("Sin cobros pendientes");
+    expect(screen.queryByRole("button", { name: "Cancelar suscripción" })).not.toBeInTheDocument();
+    expect(horasDelMes()).toHaveTextContent("0,75 h");
+    expect(filas()).toHaveLength(3); // el historial se volvió a pedir, sin duplicar filas
+    expect(getUsosMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancelar → registrar mientras tanto → llega tarde la cancelación: Cancelada y sin perder las horas", async () => {
+    const cancelacion = diferida<Suscripcion>();
+    cancelarSuscripcionMock.mockReturnValue(cancelacion.promesa);
+    registrarUsoMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0.75 });
+    await montar();
+    abrirCancelacion();
+    await confirmar(); // queda pendiente
+    // El formulario de uso sigue en la página detrás del diálogo (p. ej. con el teclado).
+    fireEvent.change(minutos(), { target: { value: "45" } });
+    await registrar();
+    expect(horasDelMes()).toHaveTextContent("0,75 h");
+
+    getSuscripcionMock.mockResolvedValue({ ...CANCELADA, horas_uso_mes: 0.75 });
+    // La respuesta de cancelar se produjo antes del uso: no trae sus horas.
+    await act(async () => cancelacion.resolver(CANCELADA));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent("Sin cobros pendientes");
+    expect(horasDelMes()).toHaveTextContent("0,75 h"); // no vuelve a "Sin registrar"
+    expect(screen.getByText("Cancelaste Spotify. Ya no contamos sus próximos cobros.")).toBeInTheDocument();
+  });
+
+  it("si la recarga del detalle falla, no se muestra la respuesta vieja", async () => {
+    const uso = diferida<Suscripcion>();
+    registrarUsoMock.mockReturnValue(uso.promesa);
+    cancelarSuscripcionMock.mockResolvedValue(CANCELADA);
+    await montar();
+    fireEvent.change(minutos(), { target: { value: "45" } });
+    await registrar();
+    abrirCancelacion();
+    await confirmar();
+
+    getSuscripcionMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    await act(async () => uso.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByText("Activa")).not.toBeInTheDocument();
+  });
+
+  it("las dos respuestas llegan tarde: una recarga vieja tampoco tapa a la más nueva", async () => {
+    const uso = diferida<Suscripcion>();
+    const cancelacion = diferida<Suscripcion>();
+    const recargaVieja = diferida<Suscripcion>();
+    registrarUsoMock.mockReturnValue(uso.promesa);
+    cancelarSuscripcionMock.mockReturnValue(cancelacion.promesa);
+    await montar();
+    fireEvent.change(minutos(), { target: { value: "45" } });
+    await registrar();
+    abrirCancelacion();
+    await confirmar();
+
+    // Llega el uso: ya empezó cancelar, así que se pide el detalle (y esa recarga tarda).
+    getSuscripcionMock.mockReturnValueOnce(recargaVieja.promesa);
+    await act(async () => uso.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+    // Llega la cancelación: también se descarta y se vuelve a pedir; esta recarga responde al tiro.
+    getSuscripcionMock.mockResolvedValueOnce({ ...CANCELADA, horas_uso_mes: 0.75 });
+    await act(async () => cancelacion.resolver(CANCELADA));
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+
+    // La primera recarga trae lo que había antes de cancelar: no se muestra.
+    await act(async () => recargaVieja.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByText("Activa")).not.toBeInTheDocument();
+    expect(horasDelMes()).toHaveTextContent("0,75 h");
+  });
+
+  it("una sola operación muestra su respuesta sin volver a pedir el detalle", async () => {
+    cancelarSuscripcionMock.mockResolvedValue(CANCELADA);
+    await montar();
+    abrirCancelacion();
+    await confirmar();
+
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(getSuscripcionMock).toHaveBeenCalledTimes(1); // solo la carga inicial
+  });
+});

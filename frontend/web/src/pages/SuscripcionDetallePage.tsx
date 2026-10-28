@@ -74,8 +74,42 @@ export function SuscripcionDetallePage() {
   const cancelandoRef = useRef(false);
   const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null);
 
+  // Revisión de #112: registrar uso y cancelar pueden estar en vuelo a la vez
+  // y las dos devuelven la suscripción completa. Cada operación sobre el
+  // detalle lleva un número y solo la última que empezó puede mostrar su
+  // respuesta. Una que llega cuando ya empezó otra no se sabe si el servidor
+  // la produjo antes o después: no se muestra y se vuelve a pedir el detalle,
+  // así manda lo que dice el servidor y no el orden de llegada.
+  const ultimaOperacion = useRef(0);
+
+  const recargarDetalle = useCallback((idDetalle: string) => {
+    const operacion = ++ultimaOperacion.current;
+    getSuscripcion(idDetalle)
+      .then((suscripcion) => {
+        if (idActual.current === idDetalle && operacion === ultimaOperacion.current) {
+          setEstado({ tipo: 'listo', suscripcion });
+        }
+      })
+      .catch(() => {
+        // Se queda lo que se ve (nunca la respuesta vieja); la próxima acción
+        // o la próxima visita lo pone al día.
+      });
+  }, []);
+
+  /** Muestra la respuesta de `operacion` si sigue siendo la última; si no, vuelve a pedir el detalle. */
+  const mostrarRespuesta = useCallback(
+    (idDetalle: string, operacion: number, suscripcion: Suscripcion) => {
+      if (idActual.current !== idDetalle) return; // se navegó a otra suscripción
+      if (operacion === ultimaOperacion.current) setEstado({ tipo: 'listo', suscripcion });
+      else recargarDetalle(idDetalle);
+    },
+    [recargarDetalle],
+  );
+
   useEffect(() => {
     idActual.current = id;
+    // Lo que siga en vuelo de una visita anterior ya no cuenta.
+    ultimaOperacion.current += 1;
     // Al pasar a otra suscripción no queda abierta la confirmación de la anterior.
     setConfirmandoCancelacion(false);
     setErrorCancelacion(null);
@@ -129,16 +163,18 @@ export function SuscripcionDetallePage() {
       if (!id) return;
       // Sin fecha se omite la propiedad: { minutos } es válido para la API y
       // usa hoy; { minutos, fecha: "" } no lo es.
+      const operacion = ++ultimaOperacion.current;
       const actualizada = await registrarUso(id, fecha ? { minutos, fecha } : { minutos });
       if (idActual.current !== id) return; // se navegó a otra suscripción
       // La respuesta trae la suscripción actualizada: horas de uso del mes y
-      // costo por hora se recalculan con ella, sin otra petición.
-      setEstado({ tipo: 'listo', suscripcion: actualizada });
+      // costo por hora se recalculan con ella, sin otra petición (salvo que
+      // mientras tanto haya empezado otra operación, p. ej. cancelar).
+      mostrarRespuesta(id, operacion, actualizada);
       // El historial se vuelve a pedir en vez de agregar la fila a mano: así
       // el registro nuevo aparece una sola vez y en el orden del backend.
       recargarHistorial();
     },
-    [id, recargarHistorial],
+    [id, mostrarRespuesta, recargarHistorial],
   );
 
   const abrirCancelacion = useCallback(() => {
@@ -161,10 +197,13 @@ export function SuscripcionDetallePage() {
     cancelandoRef.current = true;
     setCancelando(true);
     setErrorCancelacion(null);
+    const operacion = ++ultimaOperacion.current;
     try {
       const cancelada = await cancelarSuscripcion(id);
       if (idActual.current !== id) return; // se navegó a otra suscripción
-      setEstado({ tipo: 'listo', suscripcion: cancelada });
+      // La cancelación ya está hecha en el servidor: el aviso es cierto aunque
+      // lo que se muestre salga de la recarga (ver mostrarRespuesta).
+      mostrarRespuesta(id, operacion, cancelada);
       setConfirmandoCancelacion(false);
       toast.exito(`Cancelaste ${nombre}. Ya no contamos sus próximos cobros.`);
     } catch (err: unknown) {
