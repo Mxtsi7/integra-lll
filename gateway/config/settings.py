@@ -95,6 +95,8 @@ RUTAS = {
     "/api/recomendaciones/": "analytics",
     "/api/asistente/": "analytics",
     "/api/alertas/": "notifications",
+    # FE-21: preferencias de notificación, por usuario.
+    "/api/preferencias-alertas/": "notifications",
 }
 
 # Coincidencias exactas sin access: Auth valida el refresh del body en

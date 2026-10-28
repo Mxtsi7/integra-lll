@@ -2,6 +2,7 @@ import json
 from unittest.mock import Mock
 import pytest
 import requests
+from django.conf import settings
 from django.test import Client
 from app import proxy
 from tests.test_gateway import token, con_token
@@ -39,6 +40,29 @@ def test_premium_consulta_auth_y_luego_el_dominio(transporte):
     assert Client().post("/api/asistente/", data="{}", content_type="application/json", **con_token(token())).status_code == 200
     assert peticion.call_count == 2
     assert peticion.call_args.kwargs["data"] == b"{}"
+
+
+def test_descarte_de_recomendacion_llega_a_analytics_sin_traducir_la_ruta(transporte):
+    peticion, permiso = transporte
+    permiso._content = b'{"plan":"premium","features":{"recomendaciones_automaticas":true}}'
+    recomendacion_id = "11111111-1111-4111-8111-111111111111"
+    ruta = f"/api/recomendaciones/{recomendacion_id}/dismiss/"
+
+    respuesta = Client().post(
+        ruta,
+        data='{"motivo":"revisada"}',
+        content_type="application/json",
+        **con_token(token()),
+    )
+
+    assert respuesta.status_code == 200
+    assert peticion.call_count == 2
+    llamada = peticion.call_args
+    assert llamada.args[:2] == ("POST", settings.SERVICIOS["analytics"] + ruta)
+    assert llamada.kwargs["data"] == b'{"motivo":"revisada"}'
+    assert "X-Organizacion-Id" in llamada.kwargs["headers"]
+    assert "X-Usuario-Id" in llamada.kwargs["headers"]
+
 
 
 @pytest.mark.parametrize("falso", [None, [], {"plan": "premium", "features": {"asistente_financiero": "true"}}, {"plan": "inventado", "features": {"asistente_financiero": True}}])
