@@ -3,18 +3,24 @@
 import uuid
 
 from django.conf import settings
-from django.db import connection
+from django.db import connection, transaction
 from django.http import JsonResponse
 from rest_framework import status
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from .models import Alerta
-from .serializers import AlertaSerializer, ContadorSerializer
+from .models import Alerta, PreferenciaNotificacion
+from .serializers import (
+    AlertaSerializer,
+    ContadorSerializer,
+    PreferenciaNotificacionSerializer,
+)
 
 
 def salud(request):
@@ -164,3 +170,71 @@ class AlertaViewSet(SoloLecturaTenantViewSet):
             alerta.marcar_leida()
             cambiadas += 1
         return Response({"leidas": cambiadas}, status=status.HTTP_200_OK)
+
+
+@extend_schema_view(
+    get=extend_schema(
+        responses={200: PreferenciaNotificacionSerializer},
+        summary="Leer las preferencias de notificación propias (FE-21)",
+    ),
+    patch=extend_schema(
+        request=PreferenciaNotificacionSerializer,
+        responses={200: PreferenciaNotificacionSerializer},
+        summary="Cambiar algunas preferencias de notificación (FE-21)",
+    ),
+)
+class PreferenciasNotificacionView(APIView):
+    """
+        GET   /api/preferencias-alertas/
+        PATCH /api/preferencias-alertas/   { "por_push": true }
+
+    Las preferencias **propias**: la llave es (organización, usuario) y las dos
+    salen de las cabeceras del gateway, así que no hay forma de leer ni tocar
+    las de otra persona. Por eso tampoco hay listado ni `<id>`: no hay nada que
+    elegir.
+
+    ── El GET crea los valores por omisión ─────────────────────────────────
+    La primera vez que alguien pregunta, se crea su fila con los valores
+    documentados en el modelo. La alternativa —devolver 404 hasta que alguien
+    haga un POST— obligaría al frontend a manejar un caso que no le aporta
+    nada: no existe el estado "esta persona no tiene preferencias", existe
+    "todavía no las cambió".
+
+    ── Solo PATCH, no PUT ──────────────────────────────────────────────────
+    Un PUT exige mandar el objeto completo, y un cliente que mande de menos
+    borraría sin querer lo que no conoce. Es justamente lo que el criterio
+    "un PATCH inválido no sustituye preferencias válidas" quiere evitar, y con
+    PATCH además la pantalla puede mandar un solo toggle.
+    """
+
+    def _mias(self, request) -> PreferenciaNotificacion:
+        org = getattr(request, "organizacion_id", None)
+        usuario = getattr(request, "usuario_id", None)
+        if not org:
+            raise PermissionDenied("Falta el contexto de organización")
+        if not usuario:
+            # Sin saber QUIÉN pregunta no se pueden entregar preferencias
+            # personales. Devolver las de la organización sería mezclar a dos
+            # personas en una misma fila.
+            raise PermissionDenied("Falta el contexto de usuario")
+        preferencia, _ = PreferenciaNotificacion.objects.get_or_create(
+            organizacion_id=org, usuario_id=str(usuario)
+        )
+        return preferencia
+
+    def get(self, request):
+        datos = PreferenciaNotificacionSerializer(self._mias(request)).data
+        return Response(datos, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        preferencia = self._mias(request)
+        entrada = PreferenciaNotificacionSerializer(
+            preferencia, data=request.data, partial=True
+        )
+        # `raise_exception` hace que un cuerpo inválido salga como 400 ANTES
+        # de tocar la fila: el criterio "un PATCH inválido no sustituye
+        # preferencias válidas" se cumple porque no se guarda nada.
+        entrada.is_valid(raise_exception=True)
+        with transaction.atomic():
+            entrada.save()
+        return Response(entrada.data, status=status.HTTP_200_OK)
