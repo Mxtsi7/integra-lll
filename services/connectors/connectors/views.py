@@ -3,13 +3,16 @@
 from django.conf import settings
 from django.db import connection
 from django.http import JsonResponse
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from .models import CuentaConectada
-from .serializers import CuentaConectadaSerializer
+from .models import CuentaConectada, Importacion
+from .serializers import (
+    CuentaConectadaSerializer,
+    ImportacionSerializer,
+)
 
 
 def salud(request):
@@ -26,6 +29,19 @@ def salud(request):
     return JsonResponse(
         {"servicio": settings.SERVICE_NAME, "esquema": esquema, "estado": "ok"}
     )
+
+
+def _usuario_de(request) -> str:
+    """El usuario de la cabecera, o 403. La pone el gateway (ADR-004).
+
+    Hace falta para el filtro `?mias=true`: sin saber quién pregunta no se
+    puede saber cuáles son suyas, y devolver todas las de la organización
+    sería contestar otra cosa.
+    """
+    usuario = getattr(request, "usuario_id", None)
+    if not usuario:
+        raise PermissionDenied("Falta el contexto de usuario")
+    return str(usuario)
 
 
 class CuentaConectadaPagination(PageNumberPagination):
@@ -109,5 +125,73 @@ class CuentaConectadaViewSet(SoloLecturaTenantViewSet):
                 raise ValidationError(
                     {"necesita_reautorizacion": "Debe ser true o false."}
                 )
+
+        return qs
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Importaciones (FE-08)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class ImportacionViewSet(SoloLecturaTenantViewSet):
+    """
+        GET /api/importaciones/           las de la organización
+        GET /api/importaciones/<id>/      una, para hacerle polling
+
+    Solo lectura. Una importación no se crea con un POST suelto: nace del
+    proceso que la ejecuta —FE-07 al recibir un CSV, FE-13 al leer correo— y
+    su estado lo mueve ese proceso, no el cliente. Un `create` abierto acá
+    permitiría inventar una importación "completada" sin que nada se hubiera
+    procesado.
+
+    ── El aislamiento ──────────────────────────────────────────────────────
+    `MezclaTenant` filtra por la cabecera `X-Organizacion-Id` del gateway, así
+    que una importación de otra organización ni se encuentra: responde 404 y
+    no 403. Un 403 confirmaría que el id es de alguien. Es el criterio "no se
+    consulta importación de otra organización".
+
+    Filtros del listado:
+        ?estado=procesando
+        ?origen=csv
+        ?mias=true        solo las que pidió quien consulta
+    """
+
+    queryset = Importacion.objects.all()
+    serializer_class = ImportacionSerializer
+    pagination_class = CuentaConectadaPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Solo el listado se filtra: `retrieve` también pasa por acá, y un
+        # query param colgado haría desaparecer el recurso con un 404.
+        if self.action != "list":
+            return qs
+
+        estado = self.request.query_params.get("estado")
+        if estado:
+            validos = Importacion.Estado.values
+            if estado not in validos:
+                raise ValidationError(
+                    {"estado": f"Debe ser uno de: {', '.join(validos)}."}
+                )
+            qs = qs.filter(estado=estado)
+
+        origen = self.request.query_params.get("origen")
+        if origen:
+            validos = Importacion.Origen.values
+            if origen not in validos:
+                raise ValidationError(
+                    {"origen": f"Debe ser uno de: {', '.join(validos)}."}
+                )
+            qs = qs.filter(origen=origen)
+
+        mias = self.request.query_params.get("mias")
+        if mias is not None:
+            if mias.lower() in ("true", "1"):
+                # Sin cabecera de usuario no se puede saber cuáles son "mías".
+                qs = qs.filter(usuario_id=_usuario_de(self.request))
+            elif mias.lower() not in ("false", "0"):
+                raise ValidationError({"mias": "Debe ser true o false."})
 
         return qs

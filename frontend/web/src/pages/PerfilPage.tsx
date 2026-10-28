@@ -1,12 +1,20 @@
 import { getUsuarioActual, type Usuario } from '@ojoalgasto/shared';
 import { Database, Home, UserRound } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { CambiarContrasena } from '../components/Perfil/CambiarContrasena';
+import { EditarNombre } from '../components/Perfil/EditarNombre';
+import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
+import { useAuth, type MarcaSesion } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import styles from './PerfilPage.module.css';
-import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
+
+const MENSAJE_NOMBRE_GUARDADO = 'Guardamos tu nombre.';
+const MENSAJE_CONTRASENA_CAMBIADA = 'Cambiaste tu contraseña. Inicia sesión con la nueva.';
+
 type EstadoCarga =
   | { tipo: 'cargando' }
   | { tipo: 'error'; mensaje: string }
@@ -14,6 +22,34 @@ type EstadoCarga =
 
 export function PerfilPage() {
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
+  const { actualizarUsuario, cerrarSesionLocal } = useAuth();
+  const toast = useToast();
+
+  // CH-08: lo que devolvió el PATCH es el dato confirmado. Se combina con lo
+  // que ya había (la API de /me no trae todos los campos del tipo, p. ej.
+  // `plan`) y se comparte con el contexto para que la barra superior
+  // muestre el nombre nuevo sin recargar.
+  // Si mientras se guardaba se cerró la sesión o entró otra cuenta, no se
+  // muestra nada, ni el nombre ni el aviso: el contexto rechaza la marca
+  // vieja y acá tampoco se mezclan datos de dos usuarios.
+  const alGuardarNombre = (guardado: Usuario, sesion: MarcaSesion) => {
+    if (estado.tipo !== 'listo' || estado.usuario.id !== guardado.id) return;
+    const usuario = { ...estado.usuario, ...guardado };
+    if (!actualizarUsuario(usuario, sesion)) return;
+    setEstado({ tipo: 'listo', usuario });
+    toast.exito(MENSAJE_NOMBRE_GUARDADO);
+  };
+
+  // CH-29: el backend ya invalidó todas las sesiones, también esta. Se borra
+  // la local sin llamar al backend (igual que al restablecer, CH-07) y
+  // <RutaPrivada> lleva al Login, que después vuelve a Perfil. Si la sesión
+  // que hizo el cambio ya no está, la de ahora es otra y no se toca.
+  const alCambiarContrasena = useCallback(
+    (sesion: MarcaSesion) => {
+      if (cerrarSesionLocal(sesion)) toast.exito(MENSAJE_CONTRASENA_CAMBIADA);
+    },
+    [cerrarSesionLocal, toast],
+  );
 
   useEffect(() => {
     let cancelado = false;
@@ -40,12 +76,26 @@ export function PerfilPage() {
     <AppLayout headerTitulo="Perfil" headerSubtitulo="Tu cuenta y tu hogar.">
       {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tu perfil…</p>}
       {estado.tipo === 'error' && <p className={styles.mensaje}>{estado.mensaje}</p>}
-      {estado.tipo === 'listo' && <ContenidoPerfil usuario={estado.usuario} />}
+      {estado.tipo === 'listo' && (
+        <ContenidoPerfil
+          usuario={estado.usuario}
+          onNombreGuardado={alGuardarNombre}
+          onContrasenaCambiada={alCambiarContrasena}
+        />
+      )}
     </AppLayout>
   );
 }
 
-function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
+interface ContenidoPerfilProps {
+  usuario: Usuario;
+  onNombreGuardado: (usuario: Usuario, sesion: MarcaSesion) => void;
+  onContrasenaCambiada: (sesion: MarcaSesion) => void;
+}
+
+function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: ContenidoPerfilProps) {
+  const [cambiandoContrasena, setCambiandoContrasena] = useState(false);
+  const cerrarCambioContrasena = useCallback(() => setCambiandoContrasena(false), []);
   const plan = usuario.plan ?? 'gratuito';
   const esPremium = plan === 'premium';
   const etiquetaRol = usuario.rol === 'titular' ? 'Titular del hogar' : 'Integrante del hogar';
@@ -75,18 +125,19 @@ function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
 
       <div className={styles.grid}>
         <Seccion titulo="Cuenta" icono={<UserRound size={19} aria-hidden="true" />} tinte="azul">
-          <Fila etiqueta="Nombre" detalle={usuario.nombre}>
-            <Boton variante="sutil" tamano="s" disabled title="Próximamente">
-              Editar
-            </Boton>
-          </Fila>
+          <EditarNombre nombre={usuario.nombre} onGuardado={onNombreGuardado} />
           <Fila etiqueta="Correo electrónico" detalle={usuario.correo}>
             <Boton variante="sutil" tamano="s" disabled title="Próximamente">
               Editar
             </Boton>
           </Fila>
           <Fila etiqueta="Contraseña" detalle="••••••••••">
-            <Boton variante="sutil" tamano="s" disabled title="Próximamente">
+            <Boton
+              variante="sutil"
+              tamano="s"
+              onClick={() => setCambiandoContrasena(true)}
+              aria-label="Cambiar contraseña"
+            >
               Cambiar
             </Boton>
           </Fila>
@@ -117,6 +168,10 @@ function ContenidoPerfil({ usuario }: { usuario: Usuario }) {
           </Fila>
         </Seccion>
       </div>
+
+      {cambiandoContrasena && (
+        <CambiarContrasena alCerrar={cerrarCambioContrasena} onCambiada={onContrasenaCambiada} />
+      )}
     </>
   );
 }
