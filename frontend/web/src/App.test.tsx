@@ -3,14 +3,14 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCobrosDelMes, getUsuarioActual, guardarTokens, type Usuario } from "@ojoalgasto/shared";
+import { getCobrosDelMes, getRecomendaciones, getUsuarioActual, guardarTokens, type Usuario } from "@ojoalgasto/shared";
 import { App } from "./App";
 
 // Prueba el árbol de rutas REAL de App.tsx (RutaPrivada.test.tsx usa una
 // copia liviana). Solo se simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getUsuarioActual: vi.fn(), getCobrosDelMes: vi.fn() };
+  return { ...real, getUsuarioActual: vi.fn(), getCobrosDelMes: vi.fn(), getRecomendaciones: vi.fn() };
 });
 
 const USUARIO: Usuario = {
@@ -74,11 +74,18 @@ describe("App: rutas privadas", () => {
 });
 
 describe("App: secciones del menú que ya existen", () => {
-  it("con sesión, /cuentas abre Cuentas conectadas y no el 'En construcción' (CH-23)", async () => {
+    it("con sesión, /cuentas abre Cuentas conectadas y no el 'En construcción' (CH-23)", async () => {
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     montar("/cuentas");
     expect(await screen.findByRole("heading", { name: "Tus cuentas" })).toBeInTheDocument();
     expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+  });
+
+  it("con sesión, /recomendaciones muestra Próximamente y no llama al backend mientras VI-17 no exista (AN-20)", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    montar("/recomendaciones");
+    expect(await screen.findByText("En construcción")).toBeInTheDocument();
+    expect(getRecomendaciones).not.toHaveBeenCalled();
   });
 
   it("con sesión, /calendario abre la cuadrícula del mes (CH-17)", async () => {
