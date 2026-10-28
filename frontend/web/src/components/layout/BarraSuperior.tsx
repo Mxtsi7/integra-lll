@@ -38,18 +38,27 @@ export function BarraSuperior({
     setBusqueda(parametros.get('q') ?? '');
   }, [parametros]);
 
+  // Ya en Inicio, buscar conserva los filtros y el orden que también viven en
+  // la URL (CH-11, CH-12); desde otra página se llega a Inicio solo con la
+  // búsqueda.
+  function urlDeBusqueda(q: string): string {
+    const parametros = new URLSearchParams(location.pathname === '/home' ? location.search : '');
+    if (q) parametros.set('q', q);
+    else parametros.delete('q');
+    const texto = parametros.toString();
+    return texto ? `/home?${texto}` : '/home';
+  }
+
   function enviar(e: FormEvent) {
     e.preventDefault();
-    const q = busqueda.trim();
-    navigate(q ? `/home?q=${encodeURIComponent(q)}` : '/home');
+    navigate(urlDeBusqueda(busqueda.trim()));
   }
 
   function alEscribir(valor: string) {
     setBusqueda(valor);
     // En Inicio se filtra mientras escribes; en otras páginas, al enviar.
     if (location.pathname === '/home') {
-      const q = valor.trim();
-      navigate(q ? `/home?q=${encodeURIComponent(q)}` : '/home', { replace: true });
+      navigate(urlDeBusqueda(valor.trim()), { replace: true });
     }
   }
 

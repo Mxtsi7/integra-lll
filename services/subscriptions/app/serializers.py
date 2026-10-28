@@ -316,4 +316,3 @@ class ResumenPanelSerializer(serializers.Serializer):
     gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
     conteo_estados = ConteoEstadosSerializer()
-

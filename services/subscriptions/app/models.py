@@ -663,7 +663,6 @@ class Presupuesto(ModeloTenant):
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
 
 
-
 class ResumenOrganizacion(ModeloTenant):
     """Agregado del gasto mensual de una organización, una fila por moneda.
 
