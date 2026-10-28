@@ -12,17 +12,6 @@ a `desconectada` y sale de la selección que usa la lectura de correo (FE-13).
 fallar por una caída pasajera, y Microsoft directamente no publica endpoint de
 revocación por token.
 
-La versión anterior mezclaba las dos: borraba los tokens pasara lo que pasara.
-Eso tenía dos consecuencias malas que encontró la revisión de la PR:
-
-· **Se perdía la única credencial para reintentar.** Si el proveedor no
-  contestaba, no quedaba con qué volver a pedirlo: la revocación se volvía
-  imposible, no solo pendiente.
-· **Con `access_token` vacío y `refresh_token` vivo ni siquiera se intentaba**,
-  y el refresh se borraba igual. Google revoca con cualquiera de los dos.
-
-Ahora:
-
     confirmada      → se borran los tokens y se escribe `revocado_en`
     no confirmada   → los tokens se CONSERVAN cifrados para reintentar, la
                       cuenta igual queda desconectada, y `revocado_en` sigue
@@ -31,6 +20,24 @@ Ahora:
 `revocado_en` es la evidencia que consume la limpieza coordinada de #72. Que
 no haya tokens guardados **no** demuestra que el acceso se haya revocado del
 otro lado.
+
+── Tres cosas que la revisión de la PR encontró, y por qué están así ────────
+
+**La evidencia es de una CONCESIÓN, no de la cuenta.** Hablar con el proveedor
+toma tiempo, y en ese rato un callback puede dejar credenciales nuevas. La
+versión anterior guardaba sobre la instancia que había leído: borraba los
+tokens nuevos y escribía `revocado_en` como si los hubiera revocado, cuando
+revocó los viejos. Ahora la escritura es **condicional a que la versión no
+haya cambiado**; si cambió, no se toca nada.
+
+**Un secreto ilegible NO es un secreto ausente.** Si la clave de cifrado no
+está disponible, `CampoCifrado` devuelve `SECRETO_ILEGIBLE`. Tratar eso como
+"no había token" llevaba a escribir ambos campos a NULL, **destruyendo un
+ciphertext que se recuperaba restaurando la clave**, y de paso la sacaba del
+conjunto de reintentos. Ahora se distingue y no se borra nada.
+
+**Reconectar invalida la evidencia anterior.** Ver `credenciales_version` en
+el modelo.
 """
 
 from __future__ import annotations
@@ -38,12 +45,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from shared.cifrado import SECRETO_ILEGIBLE
 
 from . import proveedores
 from .models import CuentaConectada
+
+
+#: Situación de las credenciales guardadas. Las tres son distintas y antes se
+#: confundían dos de ellas.
+HAY = "hay"            # hay un token legible con que pedir la revocación
+NINGUNA = "ninguna"    # no hay credenciales: no hay nada que revocar
+ILEGIBLE = "ilegible"  # las hay, pero no se pueden descifrar ahora
 
 
 @dataclass(frozen=True)
@@ -53,24 +68,29 @@ class Resultado:
     confirmada: bool
     #: True si no había nada que revocar (una cuenta CSV, o sin tokens).
     sin_nada_que_revocar: bool
+    #: True si había credenciales pero no se pudieron descifrar. NO se borran.
+    ilegible: bool
+    #: True si alguien reconectó mientras hablábamos con el proveedor, así que
+    #: lo revocado fue la concesión anterior y no se tocó la nueva.
+    reconectada_mientras_tanto: bool
     detalle: str
 
 
-def _token_para_revocar(cuenta: CuentaConectada) -> str:
-    """El token con que pedirle al proveedor que revoque.
+def _credenciales_para_revocar(cuenta: CuentaConectada) -> tuple[str, str]:
+    """(token, situación). Se prefiere el de acceso y se cae al de refresco.
 
-    Se prefiere el de acceso y se cae al de refresco. Google acepta
-    cualquiera de los dos y revoca la concesión completa; mirar solo el de
-    acceso dejaba sin intentar a las cuentas cuyo access ya había vencido,
-    que son justamente las más viejas.
-
-    Un secreto ilegible (cifrado con una clave que ya no está) no sirve para
-    hablar con el proveedor: se trata como si no hubiera token.
+    Google acepta cualquiera de los dos y revoca la concesión completa; mirar
+    solo el de acceso dejaba sin intentar a las cuentas cuyo access ya había
+    vencido, que son justamente las más viejas.
     """
+    ilegible = False
     for token in (cuenta.access_token, cuenta.refresh_token):
-        if token and token is not SECRETO_ILEGIBLE:
-            return str(token)
-    return ""
+        if token is SECRETO_ILEGIBLE:
+            ilegible = True
+            continue
+        if token:
+            return str(token), HAY
+    return "", (ILEGIBLE if ilegible else NINGUNA)
 
 
 def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
@@ -80,14 +100,37 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
     pidió y de eso nos encargamos nosotros. Lo que el proveedor conteste
     decide si además se puede dar por revocado.
     """
-    token = _token_para_revocar(cuenta)
+    version = cuenta.credenciales_version
+    token, situacion = _credenciales_para_revocar(cuenta)
+
+    if situacion == ILEGIBLE:
+        # No se puede pedir la revocación sin el token, y borrarlo destruiría
+        # un ciphertext recuperable. Se deja desconectada —eso sí depende de
+        # nosotros— y la revocación queda pendiente.
+        detalle = (
+            "Desconectada por el usuario; las credenciales no se pudieron "
+            "descifrar con las claves vigentes. Se conservan cifradas: "
+            "restaurando la clave se puede completar la revocación."
+        )
+        cambiadas = CuentaConectada.objects.filter(
+            pk=cuenta.pk, credenciales_version=version
+        ).update(
+            estado=CuentaConectada.Estado.DESCONECTADA,
+            detalle_del_estado=detalle[:200],
+            actualizado_en=timezone.now(),
+        )
+        cuenta.refresh_from_db()
+        return Resultado(
+            confirmada=False,
+            sin_nada_que_revocar=False,
+            ilegible=True,
+            reconectada_mientras_tanto=not cambiadas,
+            detalle=detalle,
+        )
 
     confirmada = False
-    sin_nada = False
-    if not token:
-        sin_nada = True
-        detalle = "Desconectada por el usuario; no había token que revocar."
-    else:
+    sin_nada = situacion == NINGUNA
+    if situacion == HAY:
         try:
             confirmada = proveedores.revocar(cuenta.proveedor, access_token=token)
         except proveedores.ProveedorNoSoportado:
@@ -95,48 +138,81 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
             sin_nada = True
             confirmada = False
 
-        if sin_nada:
-            detalle = "Desconectada por el usuario; este proveedor no usa OAuth."
-        elif confirmada:
-            detalle = (
-                "Desconectada por el usuario; el proveedor confirmó la revocación."
-            )
-        else:
-            # Importa que quede escrito: el acceso podría seguir vivo del lado
-            # del proveedor hasta que expire solo.
-            detalle = (
-                "Desconectada por el usuario; el proveedor no confirmó la "
-                "revocación. El token se conserva cifrado para reintentar."
-            )
+    if sin_nada:
+        detalle = (
+            "Desconectada por el usuario; este proveedor no usa OAuth."
+            if situacion == HAY
+            else "Desconectada por el usuario; no había token que revocar."
+        )
+    elif confirmada:
+        detalle = "Desconectada por el usuario; el proveedor confirmó la revocación."
+    else:
+        # Importa que quede escrito: el acceso podría seguir vivo del lado del
+        # proveedor hasta que expire solo.
+        detalle = (
+            "Desconectada por el usuario; el proveedor no confirmó la "
+            "revocación. El token se conserva cifrado para reintentar."
+        )
 
-    campos = ["estado", "detalle_del_estado", "actualizado_en"]
+    valores = {
+        "estado": CuentaConectada.Estado.DESCONECTADA,
+        "detalle_del_estado": detalle[:200],
+        "actualizado_en": timezone.now(),
+    }
+    if confirmada or sin_nada:
+        # Ya no hace falta reintentar: se borran las credenciales.
+        valores.update(access_token=None, refresh_token=None, token_expira_en=None)
+    if confirmada:
+        # La evidencia que consume #72. Solo acá: ni cuando no hay nada que
+        # revocar, porque entonces no hay nada que acreditar.
+        valores["revocado_en"] = timezone.now()
+
     with transaction.atomic():
-        cuenta.estado = CuentaConectada.Estado.DESCONECTADA
-        cuenta.detalle_del_estado = detalle[:200]
+        # ── La escritura es condicional a la versión ────────────────────────
+        # Si alguien reconectó mientras hablábamos con el proveedor, lo que se
+        # revocó fue la concesión ANTERIOR. Borrar los tokens nuevos o
+        # acreditar su revocación sería mentir, así que no se escribe nada.
+        cambiadas = CuentaConectada.objects.filter(
+            pk=cuenta.pk, credenciales_version=version
+        ).update(**valores)
 
-        if confirmada or sin_nada:
-            # Ya no hace falta reintentar: se borran las credenciales.
-            cuenta.access_token = None
-            cuenta.refresh_token = None
-            cuenta.token_expira_en = None
-            campos += ["access_token", "refresh_token", "token_expira_en"]
+    cuenta.refresh_from_db()
+    return Resultado(
+        confirmada=confirmada and bool(cambiadas),
+        sin_nada_que_revocar=sin_nada,
+        ilegible=False,
+        reconectada_mientras_tanto=not cambiadas,
+        detalle=detalle,
+    )
 
-        if confirmada:
-            # La evidencia que consume #72. Solo acá: ni cuando no hay nada
-            # que revocar, porque entonces no hay nada que acreditar.
-            cuenta.revocado_en = timezone.now()
-            campos.append("revocado_en")
 
-        cuenta.save(update_fields=campos)
+def registrar_credenciales_nuevas(cuenta: CuentaConectada) -> None:
+    """Sube la versión e invalida la evidencia de revocación anterior.
 
-    return Resultado(confirmada=confirmada, sin_nada_que_revocar=sin_nada, detalle=detalle)
+    Lo llama el callback de OAuth después de guardar tokens nuevos. Sin esto,
+    una cuenta revocada y reconectada conservaba la fecha de la revocación
+    vieja, `pendientes_de_revocar()` la excluía por tener `revocado_en`, y la
+    limpieza de #72 habría tomado esa fecha como prueba de que las
+    credenciales NUEVAS estaban revocadas.
+    """
+    CuentaConectada.objects.filter(pk=cuenta.pk).update(
+        credenciales_version=F("credenciales_version") + 1,
+        revocado_en=None,
+        actualizado_en=timezone.now(),
+    )
+    cuenta.refresh_from_db()
 
 
 def pendientes_de_revocar(organizacion_id=None):
     """Las cuentas desconectadas que el proveedor nunca confirmó.
 
-    Son las que todavía conservan el token: si no lo tuvieran, no habría con
-    qué reintentar. Es lo que recorre `manage.py reintentar_revocaciones`.
+    Son las que todavía conservan credenciales: si no las tuvieran, no habría
+    con qué reintentar. Incluye las ilegibles a propósito — son exactamente
+    las que hay que reintentar cuando vuelva la clave de cifrado.
+
+    Devuelve un queryset y no una lista: el comando lo recorre y vuelve a leer
+    cada cuenta antes de cada intento, porque una lista materializada queda
+    vieja apenas alguien reconecta.
     """
     qs = CuentaConectada.objects.filter(
         estado=CuentaConectada.Estado.DESCONECTADA,

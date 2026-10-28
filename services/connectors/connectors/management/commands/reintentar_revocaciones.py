@@ -21,6 +21,7 @@ límite, el lugar es `revocacion.pendientes_de_revocar`.
 
 from django.core.management.base import BaseCommand
 
+from connectors.models import CuentaConectada
 from connectors.revocacion import pendientes_de_revocar, revocar_y_desconectar
 
 
@@ -56,12 +57,30 @@ class Command(BaseCommand):
             return
 
         confirmadas = 0
-        for cuenta in pendientes:
+        for pendiente in pendientes:
+            # ── Se vuelve a leer antes de cada intento ──────────────────────
+            # La lista se materializó al principio y puede quedar vieja: basta
+            # con que alguien reconecte una cuenta en el intervalo. Releerla
+            # hace que `revocar_y_desconectar` vea la versión actual de las
+            # credenciales y su escritura condicional funcione.
+            cuenta = CuentaConectada.objects.filter(pk=pendiente.pk).first()
+            if cuenta is None or cuenta.revocado_en is not None:
+                self.stdout.write(f"  ya no aplica: {pendiente.cuenta_externa}")
+                continue
+
             resultado = revocar_y_desconectar(cuenta)
             if resultado.confirmada:
                 confirmadas += 1
                 self.stdout.write(
                     self.style.SUCCESS(f"  confirmada: {cuenta.cuenta_externa}")
+                )
+            elif resultado.reconectada_mientras_tanto:
+                self.stdout.write(
+                    f"  se reconectó mientras tanto, no se tocó: {cuenta.cuenta_externa}"
+                )
+            elif resultado.ilegible:
+                self.stdout.write(
+                    f"  credenciales ilegibles (¿falta la clave?): {cuenta.cuenta_externa}"
                 )
             else:
                 self.stdout.write(f"  sigue pendiente: {cuenta.cuenta_externa}")

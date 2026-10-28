@@ -239,6 +239,7 @@ class IniciarAutorizacionView(APIView):
         autorizacion, desafio = AutorizacionPendiente.abrir(
             organizacion_id=org,
             usuario_id=usuario,
+            sesion_id=getattr(request, "sesion_id", "") or "",
             proveedor=proveedor,
             redirect_uri=redirect_uri,
             retorno=entrada.validated_data.get("retorno", ""),
@@ -322,6 +323,12 @@ class CallbackAutorizacionView(APIView):
         if _usuario_de(request) != autorizacion.usuario_id:
             # Mismo tenant, otra persona. No se dice de quién es el flujo.
             raise PermissionDenied("El flujo lo inició otro usuario.")
+        # Y la misma SESIÓN: dos pestañas del mismo usuario son dos flujos.
+        # Si el flujo se abrió sin `sid` (token viejo) no se compara, para
+        # no romper los que estaban en vuelo al desplegar esto.
+        if autorizacion.sesion_id:
+            if (getattr(request, "sesion_id", "") or "") != autorizacion.sesion_id:
+                raise PermissionDenied("El flujo lo inició otra sesión.")
 
         if not autorizacion.vigente:
             raise ValidationError({"estado_oauth": "El flujo no es válido o ya venció."})
@@ -390,6 +397,12 @@ class CallbackAutorizacionView(APIView):
                 cuenta_externa=correo,
                 defaults=defaults,
             )
+            # Credenciales nuevas: sube la versión y BORRA `revocado_en`.
+            # Sin esto, una cuenta revocada y reconectada conservaba la
+            # fecha de la revocación vieja, quedaba fuera de
+            # `pendientes_de_revocar()` y la limpieza de #72 habría tomado
+            # esa fecha como prueba de que las NUEVAS estaban revocadas.
+            revocacion.registrar_credenciales_nuevas(cuenta)
 
         salida = CuentaConectadaSerializer(cuenta, context={"request": request})
         return Response(salida.data, status=status.HTTP_200_OK)

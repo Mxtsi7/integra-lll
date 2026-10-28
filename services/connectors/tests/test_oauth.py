@@ -33,6 +33,8 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from shared.cifrado import SECRETO_ILEGIBLE
+
 from connectors import proveedores
 from connectors.models import AutorizacionPendiente, CuentaConectada
 
@@ -811,3 +813,388 @@ class TestReintento:
 
         assert cuenta.estado == CuentaConectada.Estado.CONECTADA
         assert list(pendientes_de_revocar()) == []
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FE-05 — el ciclo de vida de las credenciales
+# (los hallazgos de la segunda revisión de #107)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestReconexionInvalidaLaEvidencia:
+    """Reconectar tiene que borrar la evidencia de la revocación anterior.
+
+    La secuencia que señaló la revisión: revocación confirmada → reconexión
+    con credenciales nuevas → la revocación nueva falla. La cuenta conservaba
+    la fecha ANTERIOR y `pendientes_de_revocar()` la excluía, así que las
+    credenciales nuevas quedaban vivas con una revocación "acreditada" que no
+    era de ellas. #72 habría tomado esa fecha como prueba.
+    """
+
+    def _reconectar(self, cliente, monkeypatch, org=ORG_A):
+        """Pasa por el callback real para que valga como reconexión."""
+        iniciar(cliente, org=org)
+        flujo = AutorizacionPendiente.objects.filter(usada_en__isnull=True).latest(
+            "creado_en"
+        )
+        canje_falso(monkeypatch)
+        respuesta = cliente.post(
+            CALLBACK,
+            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
+            format="json",
+            headers=cabecera(org),
+        )
+        assert respuesta.status_code == status.HTTP_200_OK
+        return CuentaConectada.objects.get(organizacion_id=org)
+
+    def test_la_reconexion_borra_revocado_en(self, cliente, cuenta, monkeypatch):
+        revocacion_falsa(monkeypatch, confirma=True)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is not None
+
+        reconectada = self._reconectar(cliente, monkeypatch)
+        assert reconectada.revocado_en is None
+        assert reconectada.estado == CuentaConectada.Estado.CONECTADA
+
+    def test_la_reconexion_sube_la_version_de_credenciales(
+        self, cliente, cuenta, monkeypatch
+    ):
+        antes = cuenta.credenciales_version
+        reconectada = self._reconectar(cliente, monkeypatch)
+        assert reconectada.credenciales_version > antes
+
+    def test_la_secuencia_completa_deja_la_nueva_revocacion_PENDIENTE(
+        self, cliente, cuenta, monkeypatch
+    ):
+        """El criterio: revocar → reconectar → revocar y que falle.
+
+        La cuenta tiene que quedar en la lista de pendientes, porque lo que
+        está sin revocar son las credenciales NUEVAS.
+        """
+        from connectors.revocacion import pendientes_de_revocar
+
+        revocacion_falsa(monkeypatch, confirma=True)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        reconectada = self._reconectar(cliente, monkeypatch)
+
+        revocacion_falsa(monkeypatch, confirma=False)
+        cliente.delete(f"{LISTA}{reconectada.id}/", headers=cabecera(ORG_A))
+
+        reconectada.refresh_from_db()
+        assert reconectada.revocado_en is None
+        assert list(pendientes_de_revocar()) == [reconectada]
+
+    def test_el_reintento_relee_cada_cuenta_antes_de_tocarla(
+        self, cliente, claves, monkeypatch
+    ):
+        """La lista de pendientes se materializa al principio y queda vieja.
+
+        Basta con que alguien reconecte una cuenta mientras el comando procesa
+        las anteriores. Si el comando usara la instancia vieja, le pediría al
+        proveedor que revoque un token que ya no es el vigente y escribiría
+        sobre credenciales nuevas.
+
+        Se fuerza ese intercalado: al procesar la PRIMERA cuenta, el doble del
+        proveedor reconecta la SEGUNDA.
+        """
+        from io import StringIO
+
+        from django.core.management import call_command
+        from django.utils import timezone as tz
+
+        primera = CuentaConectada.objects.create(
+            organizacion_id=ORG_A, proveedor="gmail", cuenta_externa="a@gmail.com",
+            access_token="ya29.token-a",
+            estado=CuentaConectada.Estado.DESCONECTADA,
+        )
+        segunda = CuentaConectada.objects.create(
+            organizacion_id=ORG_A, proveedor="outlook", cuenta_externa="b@outlook.com",
+            access_token="ya29.token-b",
+            estado=CuentaConectada.Estado.DESCONECTADA,
+        )
+
+        tocadas = []
+
+        def revocar_y_reconectar_la_otra(proveedor, *, access_token):
+            tocadas.append(access_token)
+            if access_token == "ya29.token-a":
+                # Mientras se procesa la primera, alguien cierra la segunda:
+                # la reconecta y su revocación queda acreditada por otro lado.
+                CuentaConectada.objects.filter(pk=segunda.pk).update(
+                    revocado_en=tz.now(),
+                    credenciales_version=segunda.credenciales_version + 1,
+                )
+            return True
+
+        monkeypatch.setattr(proveedores, "revocar", revocar_y_reconectar_la_otra)
+        salida = StringIO()
+        call_command("reintentar_revocaciones", aplicar=True, stdout=salida)
+
+        # A la segunda ya no le corresponde: se saltó en vez de revocarla con
+        # datos viejos.
+        assert "ya29.token-b" not in tocadas, "uso la instancia vieja"
+        assert "ya no aplica" in salida.getvalue()
+        assert primera.pk != segunda.pk
+
+    def test_y_el_reintento_la_toma(self, cliente, cuenta, monkeypatch):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        revocacion_falsa(monkeypatch, confirma=True)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+        reconectada = self._reconectar(cliente, monkeypatch)
+        revocacion_falsa(monkeypatch, confirma=False)
+        cliente.delete(f"{LISTA}{reconectada.id}/", headers=cabecera(ORG_A))
+
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        call_command("reintentar_revocaciones", aplicar=True, stdout=StringIO())
+        assert llamadas, "el reintento no la tomó"
+        reconectada.refresh_from_db()
+        assert reconectada.revocado_en is not None
+
+
+class TestReconexionConcurrente:
+    """Una confirmación del token viejo no puede borrar ni certificar el nuevo.
+
+    `revocar_y_desconectar` habla con el proveedor ANTES de guardar. En ese
+    rato un callback puede dejar credenciales nuevas. La versión anterior
+    guardaba sobre la instancia que había leído: borraba los tokens nuevos y
+    escribía `revocado_en` como si los hubiera revocado.
+
+    Se simula el intercalado de forma controlada —reconectando DENTRO del
+    doble del proveedor, que es justo el momento en que el código está
+    esperando— en vez de con hilos, que sería intermitente.
+    """
+
+    def test_no_borra_las_credenciales_nuevas(self, cliente, cuenta, monkeypatch):
+        from connectors import revocacion as modulo
+
+        def revocar_y_mientras_tanto_reconectan(proveedor, *, access_token):
+            # Esto pasa "mientras" hablamos con el proveedor.
+            CuentaConectada.objects.filter(pk=cuenta.pk).update(
+                access_token="ya29.TOKEN-NUEVO",
+                refresh_token="1//REFRESH-NUEVO",
+                estado=CuentaConectada.Estado.CONECTADA,
+                credenciales_version=cuenta.credenciales_version + 1,
+                revocado_en=None,
+            )
+            return True   # el proveedor confirma… pero del token VIEJO
+
+        monkeypatch.setattr(modulo.proveedores, "revocar", revocar_y_mientras_tanto_reconectan)
+        resultado = modulo.revocar_y_desconectar(cuenta)
+
+        cuenta.refresh_from_db()
+        assert resultado.reconectada_mientras_tanto is True
+        # Lo que importa: las credenciales NUEVAS siguen ahí.
+        assert str(cuenta.access_token) == "ya29.TOKEN-NUEVO"
+        assert str(cuenta.refresh_token) == "1//REFRESH-NUEVO"
+
+    def test_no_acredita_la_revocacion_de_las_nuevas(
+        self, cliente, cuenta, monkeypatch
+    ):
+        from connectors import revocacion as modulo
+
+        def revocar_y_mientras_tanto_reconectan(proveedor, *, access_token):
+            CuentaConectada.objects.filter(pk=cuenta.pk).update(
+                access_token="ya29.TOKEN-NUEVO",
+                credenciales_version=cuenta.credenciales_version + 1,
+                revocado_en=None,
+            )
+            return True
+
+        monkeypatch.setattr(modulo.proveedores, "revocar", revocar_y_mientras_tanto_reconectan)
+        resultado = modulo.revocar_y_desconectar(cuenta)
+
+        cuenta.refresh_from_db()
+        assert resultado.confirmada is False
+        assert cuenta.revocado_en is None, "acreditó haber revocado las nuevas"
+
+    def test_sin_reconexion_de_por_medio_si_escribe(self, cliente, cuenta, monkeypatch):
+        """El control: la protección no puede romper el caso normal."""
+        from connectors import revocacion as modulo
+
+        revocacion_falsa(monkeypatch, confirma=True)
+        resultado = modulo.revocar_y_desconectar(cuenta)
+        cuenta.refresh_from_db()
+        assert resultado.confirmada is True
+        assert resultado.reconectada_mientras_tanto is False
+        assert cuenta.revocado_en is not None
+        assert cuenta.access_token is None
+
+
+class TestCredencialesIlegibles:
+    """Un secreto que no se puede descifrar NO es un secreto ausente.
+
+    Si la clave de cifrado no está disponible, `CampoCifrado` devuelve
+    `SECRETO_ILEGIBLE`. Tratarlo como "no había token" llevaba a escribir
+    ambos campos a NULL, **destruyendo un ciphertext que se recuperaba
+    restaurando la clave**, y de paso la sacaba del conjunto de reintentos.
+    """
+
+    def test_no_se_borran_las_credenciales_ilegibles(
+        self, cliente, claves, monkeypatch
+    ):
+        from shared.cifrado.cifrador import generar_clave
+
+        cuenta = CuentaConectada.objects.create(
+            organizacion_id=ORG_A,
+            proveedor="gmail",
+            cuenta_externa="persona@gmail.com",
+            access_token="ya29.token-cifrado-con-la-clave-vieja",
+            refresh_token="1//refresh-cifrado",
+        )
+        # Rotación que deja fuera la clave con que se cifró: ahora es ilegible.
+        claves(generar_clave())
+        cuenta.refresh_from_db()
+        assert cuenta.access_token is SECRETO_ILEGIBLE
+
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        # No se le pidió nada al proveedor: no teníamos con qué.
+        assert llamadas == []
+
+        # Lo que distingue "preservado" de "destruido" es SECRETO_ILEGIBLE vs
+        # None: si se hubiera borrado quedaría en NULL, y leerlo daría None.
+        # Que siga dando SECRETO_ILEGIBLE significa que el ciphertext está ahí,
+        # solo que no se puede descifrar ahora.
+        #
+        # (Ojo: SECRETO_ILEGIBLE es FALSY a propósito, para que `if token:` dé
+        # falso. Así que hay que comparar por identidad, no por verdad.)
+        cuenta.refresh_from_db()
+        assert cuenta.access_token is SECRETO_ILEGIBLE, "se destruyó el access token"
+        assert cuenta.refresh_token is SECRETO_ILEGIBLE, "se destruyó el refresh token"
+        assert cuenta.access_token is not None
+
+    def test_queda_desconectada_y_pendiente(self, cliente, claves, monkeypatch):
+        from connectors.revocacion import pendientes_de_revocar
+        from shared.cifrado.cifrador import generar_clave
+
+        cuenta = CuentaConectada.objects.create(
+            organizacion_id=ORG_A, proveedor="gmail",
+            cuenta_externa="persona@gmail.com",
+            access_token="ya29.token", refresh_token="1//refresh",
+        )
+        claves(generar_clave())
+        revocacion_falsa(monkeypatch)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        cuenta.refresh_from_db()
+        # Dejar de leer sí depende de nosotros.
+        assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
+        # Pero no se acredita nada.
+        assert cuenta.revocado_en is None
+        assert list(pendientes_de_revocar()) == [cuenta]
+        assert "no se pudieron descifrar" in cuenta.detalle_del_estado
+
+    def test_al_restaurar_la_clave_se_puede_completar(
+        self, cliente, claves, monkeypatch
+    ):
+        """El criterio exacto: retirar la clave → desconectar → restaurarla →
+        recuperar la credencial y completar la revocación."""
+        from io import StringIO
+
+        from django.core.management import call_command
+        from shared.cifrado.cifrador import generar_clave
+
+        original = generar_clave()
+        claves(original)
+        cuenta = CuentaConectada.objects.create(
+            organizacion_id=ORG_A, proveedor="gmail",
+            cuenta_externa="persona@gmail.com",
+            access_token="ya29.token-que-hay-que-revocar",
+        )
+
+        otra = generar_clave()
+        claves(otra)                       # se retira la clave original
+        revocacion_falsa(monkeypatch)
+        cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        claves(otra, original)             # se restaura
+        cuenta.refresh_from_db()
+        assert str(cuenta.access_token) == "ya29.token-que-hay-que-revocar"
+
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        call_command("reintentar_revocaciones", aplicar=True, stdout=StringIO())
+
+        assert llamadas and llamadas[0]["access_token"] == "ya29.token-que-hay-que-revocar"
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is not None
+        assert cuenta.access_token is None
+
+
+class TestVinculoDeSesion:
+    """FE-03 pide el state vinculado a SESIÓN, no solo a usuario.
+
+    Con solo `usuario_id`, dos pestañas del mismo usuario eran
+    indistinguibles: el callback de una cerraba el flujo de la otra. El
+    gateway ya inyecta `X-Sesion-Id` desde el claim `sid` del JWT.
+    """
+
+    SESION_A = "sesion-aaaa"
+    SESION_B = "sesion-bbbb"
+
+    def _con_sesion(self, org=ORG_A, usuario=USUARIO_A, sesion=SESION_A):
+        return {**cabecera(org, usuario), "X-Sesion-Id": sesion}
+
+    def test_el_flujo_guarda_la_sesion(self, cliente):
+        cliente.post(
+            INICIAR, {"proveedor": "gmail"}, format="json",
+            headers=self._con_sesion(),
+        )
+        assert AutorizacionPendiente.objects.get().sesion_id == self.SESION_A
+
+    def test_otra_sesion_del_MISMO_usuario_no_puede_cerrarlo(
+        self, cliente, monkeypatch
+    ):
+        cliente.post(
+            INICIAR, {"proveedor": "gmail"}, format="json",
+            headers=self._con_sesion(sesion=self.SESION_A),
+        )
+        flujo = AutorizacionPendiente.objects.get()
+        llamadas = canje_falso(monkeypatch)
+
+        respuesta = cliente.post(
+            CALLBACK,
+            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
+            format="json",
+            headers=self._con_sesion(sesion=self.SESION_B),
+        )
+        assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+        assert not CuentaConectada.objects.exists()
+        assert llamadas == []
+
+    def test_la_misma_sesion_si_puede(self, cliente, monkeypatch):
+        cliente.post(
+            INICIAR, {"proveedor": "gmail"}, format="json",
+            headers=self._con_sesion(),
+        )
+        flujo = AutorizacionPendiente.objects.get()
+        canje_falso(monkeypatch)
+        respuesta = cliente.post(
+            CALLBACK,
+            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
+            format="json",
+            headers=self._con_sesion(),
+        )
+        assert respuesta.status_code == status.HTTP_200_OK
+
+    def test_un_flujo_abierto_SIN_sesion_no_se_compara(self, cliente, monkeypatch):
+        """Los flujos en vuelo al desplegar esto no traen `sid`. Romperlos
+        sería peor que no comparar: el usuario y la organización igual se
+        comprueban."""
+        iniciar(cliente)            # sin cabecera de sesión
+        flujo = AutorizacionPendiente.objects.get()
+        assert flujo.sesion_id == ""
+        canje_falso(monkeypatch)
+        respuesta = cliente.post(
+            CALLBACK,
+            {"estado_oauth": flujo.estado_oauth, "codigo": "c"},
+            format="json",
+            headers=self._con_sesion(sesion=self.SESION_B),
+        )
+        assert respuesta.status_code == status.HTTP_200_OK

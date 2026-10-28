@@ -117,6 +117,32 @@ class CuentaConectada(ModeloTenant):
     # mientras que dos `AddField` con el mismo nombre son UN conflicto
     # visible que se resuelve borrando una línea al integrar. Si #72 entra
     # primero, se borra esta declaración y su AddField de acá.
+    # ── La evidencia de revocación es de UNA concesión, no de la cuenta ──
+    # Sin esto había dos agujeros, los dos encontrados en revisión:
+    #
+    # · Revocación confirmada → reconexión con credenciales nuevas → la
+    #   nueva revocación falla. La cuenta conservaba la fecha ANTERIOR y
+    #   `pendientes_de_revocar()` la excluía, así que las credenciales
+    #   nuevas quedaban vivas con una revocación "acreditada" que no era
+    #   de ellas. #72 habría tomado esa fecha como prueba.
+    #
+    # · Desconexión y reconexión a la vez: `revocar_y_desconectar` habla
+    #   con el proveedor ANTES de guardar, y mientras espera un callback
+    #   puede dejar tokens nuevos. Al volver, borraba los nuevos y
+    #   acreditaba haberlos revocado, cuando revocó los viejos.
+    #
+    # El contador sube con cada juego de credenciales nuevo, y la
+    # revocación solo se guarda si la versión no cambió mientras tanto.
+    credenciales_version = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Versión de las credenciales",
+        help_text=(
+            "Sube cada vez que se guardan tokens nuevos. `revocado_en` "
+            "acredita la revocación de la versión que había al momento de "
+            "pedirla, no de cualquiera posterior."
+        ),
+    )
+
     revocado_en = models.DateTimeField(
         null=True,
         blank=True,
@@ -255,6 +281,21 @@ class AutorizacionPendiente(ModeloTenant):
         verbose_name="Usuario que inició el flujo",
     )
 
+    # Dos sesiones del MISMO usuario también son flujos distintos: con solo
+    # `usuario_id`, el callback abierto en una pestaña cerraba el flujo
+    # iniciado en otra. El gateway inyecta `X-Sesion-Id` desde el claim
+    # `sid` del JWT (gateway/app/proxy.py), así que el dato ya llega.
+    #
+    # Admite vacío para los flujos abiertos antes de este campo: un token
+    # viejo puede no traer `sid`. Cuando está vacío no se compara, y queda
+    # dicho en el callback por qué.
+    sesion_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="Sesión que inició el flujo",
+    )
+
     # Secreto: va cifrado igual que los tokens (FE-06).
     verificador_pkce = CampoCifrado(
         verbose_name="Verificador PKCE",
@@ -296,7 +337,8 @@ class AutorizacionPendiente(ModeloTenant):
 
     @classmethod
     def abrir(cls, *, organizacion_id, usuario_id, proveedor: str,
-              redirect_uri: str, retorno: str = "") -> tuple["AutorizacionPendiente", str]:
+              redirect_uri: str, retorno: str = "",
+              sesion_id: str = "") -> tuple["AutorizacionPendiente", str]:
         """Crea el flujo y devuelve (fila, desafio_pkce).
 
         El verificador queda guardado cifrado; el desafío es lo único que sale
@@ -311,6 +353,7 @@ class AutorizacionPendiente(ModeloTenant):
         fila = cls.objects.create(
             organizacion_id=organizacion_id,
             usuario_id=str(usuario_id),
+            sesion_id=str(sesion_id or ""),
             proveedor=proveedor,
             estado_oauth=secrets.token_urlsafe(32),
             verificador_pkce=verificador,
