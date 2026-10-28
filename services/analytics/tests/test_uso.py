@@ -20,7 +20,12 @@ import uuid
 
 import pytest
 
-from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
+from analytics.models import (
+    CoberturaUso,
+    SuscripcionObservada,
+    UsoMensual,
+    UsoProyectado,
+)
 from django.db import DataError, IntegrityError, connection
 
 from shared.bloqueo import ESPACIOS
@@ -35,7 +40,9 @@ from analytics.uso import (
     puntuar,
     puntuar_organizacion,
     recalcular_mes,
+    primer_hueco,
     registrar_cobertura,
+    tramos_acreditados,
     registrar_suscripcion,
 )
 
@@ -713,6 +720,12 @@ class TestBloqueoDelAgregado:
                 )
                 assert cursor.fetchone()[0] == 4
 
+    def test_los_espacios_de_lock_no_colisionan(self):
+        """Dos espacios con el mismo número serían el mismo lock: dos usos
+        distintos se serializarían entre sí sin necesidad."""
+        assert len(set(ESPACIOS.values())) == len(ESPACIOS)
+        assert {"uso_mensual", "cobertura_uso"} <= set(ESPACIOS)
+
     def test_recalcular_mes_lo_toma_siempre(self):
         """Si alguien saca el lock de `recalcular_mes`, esto falla."""
         import inspect
@@ -876,7 +889,7 @@ class TestCobertura:
         )
         assert resultado.clasificacion == Clasificacion.SIN_DATOS
         assert resultado.evidencia["uso_cero_real"] is False
-        assert resultado.evidencia["cobertura_hasta"] is None
+        assert resultado.evidencia["cobertura_tramos"] == []
 
     def test_con_cobertura_del_periodo_y_cero_minutos_SI_es_bajo(self):
         """El cero de verdad: sabemos que el periodo llegó completo y no hubo
@@ -959,9 +972,9 @@ class TestCobertura:
             organizacion_id=ORG_A, suscripcion_id=SUSC,
             desde=dt.date(2026, 6, 1), hasta=dt.date(2026, 9, 1),
         )
-        fila = SuscripcionObservada.objects.get()
-        assert fila.cobertura_desde == dt.date(2026, 1, 1)
-        assert fila.cobertura_hasta == dt.date(2026, 10, 31)
+        assert tramos_acreditados(organizacion_id=ORG_A, suscripcion_id=SUSC) == [
+            (dt.date(2026, 1, 1), dt.date(2026, 10, 31)),
+        ]
 
     def test_la_cobertura_de_una_suscripcion_desconocida_no_crea_nada(self):
         """No se acredita cobertura de algo que no sabemos que existe."""
@@ -980,7 +993,8 @@ class TestCobertura:
         ).evidencia
         assert evidencia["cobertura_necesaria_desde"] == "2026-08-01"
         assert evidencia["medido_hasta"] == "2026-10-31"
-        assert evidencia["cobertura_hasta"] is None
+        assert evidencia["cobertura_tramos"] == []
+        assert evidencia["cobertura_faltante"] == {"desde": "2026-08-01", "hasta": "2026-10-31"}
 
     def test_el_listado_no_afirma_bajo_uso_sin_cobertura(self):
         """La API pública es lo que consume VI-17: no puede afirmar un cero
@@ -999,3 +1013,340 @@ class TestCobertura:
         # La que sí tiene cobertura sigue pudiendo afirmarlo.
         assert por_id[str(OTRA)].clasificacion == Clasificacion.BAJO
         assert por_id[str(OTRA)].evidencia["uso_cero_real"] is True
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FE-29 — la cobertura son TRAMOS, y un hueco es un hueco
+# (los dos hallazgos de la tercera revisión de #111)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def acreditar(desde, hasta, *, org=ORG_A, susc=SUSC):
+    return registrar_cobertura(
+        organizacion_id=org, suscripcion_id=susc, desde=desde, hasta=hasta
+    )
+
+
+def tramos(*, org=ORG_A, susc=SUSC):
+    return tramos_acreditados(organizacion_id=org, suscripcion_id=susc)
+
+
+class TestPrimerHueco:
+    """La decisión "¿está cubierto de corrido?" es una función pura, y se
+    prueba sola, sin base."""
+
+    D = dt.date
+
+    def test_sin_tramos_falta_todo(self):
+        assert primer_hueco([], self.D(2026, 9, 1), self.D(2026, 10, 31)) == (
+            self.D(2026, 9, 1), self.D(2026, 10, 31)
+        )
+
+    def test_un_tramo_que_cubre_todo_no_deja_hueco(self):
+        assert primer_hueco(
+            [(self.D(2026, 1, 1), self.D(2026, 12, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) is None
+
+    def test_la_cobertura_justa_no_deja_hueco(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 1), self.D(2026, 10, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) is None
+
+    def test_dos_tramos_separados_dejan_el_hueco_del_medio(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 1), self.D(2026, 9, 10)),
+             (self.D(2026, 10, 20), self.D(2026, 10, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) == (self.D(2026, 9, 11), self.D(2026, 10, 19))
+
+    def test_dos_tramos_adyacentes_no_dejan_hueco(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 1), self.D(2026, 9, 30)),
+             (self.D(2026, 10, 1), self.D(2026, 10, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) is None
+
+    def test_el_orden_de_los_tramos_no_importa(self):
+        assert primer_hueco(
+            [(self.D(2026, 10, 1), self.D(2026, 10, 31)),
+             (self.D(2026, 9, 1), self.D(2026, 9, 30))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) is None
+
+    def test_que_empiece_tarde_es_un_hueco_al_principio(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 5), self.D(2026, 10, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) == (self.D(2026, 9, 1), self.D(2026, 9, 4))
+
+    def test_que_termine_antes_es_un_hueco_al_final(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 1), self.D(2026, 10, 10))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) == (self.D(2026, 10, 11), self.D(2026, 10, 31))
+
+    def test_un_tramo_fuera_del_periodo_no_aporta(self):
+        assert primer_hueco(
+            [(self.D(2026, 1, 1), self.D(2026, 3, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) == (self.D(2026, 9, 1), self.D(2026, 10, 31))
+
+    def test_solo_informa_el_PRIMER_hueco(self):
+        assert primer_hueco(
+            [(self.D(2026, 9, 1), self.D(2026, 9, 10)),
+             (self.D(2026, 9, 20), self.D(2026, 9, 30)),
+             (self.D(2026, 10, 10), self.D(2026, 10, 31))],
+            self.D(2026, 9, 1), self.D(2026, 10, 31),
+        ) == (self.D(2026, 9, 11), self.D(2026, 9, 19))
+
+    def test_sin_nada_que_cubrir_no_hay_hueco(self):
+        """Nació después del corte: eso lo rechaza el mínimo de días, no esto."""
+        assert primer_hueco([], self.D(2026, 11, 5), self.D(2026, 10, 31)) is None
+
+
+class TestTramosDeCobertura:
+    """`registrar_cobertura` conserva lo acreditado tal cual y funde solo lo
+    que se toca. Entre dos filas de la misma suscripción siempre hay al menos
+    un día sin acreditar."""
+
+    def test_un_tramo_se_guarda_tal_cual(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 9, 10))]
+
+    def test_dos_tramos_SEPARADOS_quedan_como_dos(self):
+        """El caso de la revisión: unir los extremos acreditaba seis semanas
+        que nunca llegaron."""
+        observar(desde=dt.date(2026, 9, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        acreditar(dt.date(2026, 10, 20), dt.date(2026, 10, 31))
+        assert tramos() == [
+            (dt.date(2026, 9, 1), dt.date(2026, 9, 10)),
+            (dt.date(2026, 10, 20), dt.date(2026, 10, 31)),
+        ]
+
+    def test_dos_tramos_que_se_SOLAPAN_se_funden(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 15))
+        acreditar(dt.date(2026, 9, 10), dt.date(2026, 9, 30))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 9, 30))]
+
+    def test_dos_tramos_ADYACENTES_se_funden(self):
+        """Terminar el 15 y empezar el 16 no deja ningún día afuera."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 15))
+        acreditar(dt.date(2026, 9, 16), dt.date(2026, 9, 30))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 9, 30))]
+
+    def test_un_dia_de_separacion_NO_es_adyacente(self):
+        """Terminar el 15 y empezar el 17 deja el 16 sin acreditar."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 15))
+        acreditar(dt.date(2026, 9, 17), dt.date(2026, 9, 30))
+        assert len(tramos()) == 2
+
+    def test_adyacente_por_delante_tambien_se_funde(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 16), dt.date(2026, 9, 30))
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 15))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 9, 30))]
+
+    def test_fuera_de_orden_y_el_hueco_se_llena_despues(self):
+        """Llega octubre, después septiembre, y al final el tramo del medio:
+        los tres se funden en uno."""
+        observar(desde=dt.date(2026, 9, 1), cubierto=False)
+        acreditar(dt.date(2026, 10, 20), dt.date(2026, 10, 31))
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        assert len(tramos()) == 2
+        acreditar(dt.date(2026, 9, 11), dt.date(2026, 10, 19))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 10, 31))]
+
+    def test_un_tramo_que_cruza_varios_los_absorbe_a_todos(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 5))
+        acreditar(dt.date(2026, 9, 10), dt.date(2026, 9, 15))
+        acreditar(dt.date(2026, 9, 20), dt.date(2026, 9, 25))
+        acreditar(dt.date(2026, 9, 3), dt.date(2026, 9, 22))
+        assert tramos() == [(dt.date(2026, 9, 1), dt.date(2026, 9, 25))]
+
+    def test_un_tramo_contenido_no_cambia_nada(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+        antes = list(CoberturaUso.objects.values_list("pk", flat=True))
+        acreditar(dt.date(2026, 9, 10), dt.date(2026, 9, 12))
+        assert list(CoberturaUso.objects.values_list("pk", flat=True)) == antes
+
+    def test_un_tramo_al_reves_revienta_y_no_escribe(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        with pytest.raises(ValueError, match="al revés"):
+            acreditar(dt.date(2026, 9, 30), dt.date(2026, 9, 1))
+        assert not CoberturaUso.objects.exists()
+
+    def test_la_base_tampoco_acepta_un_tramo_al_reves(self):
+        """Si alguien escribe la tabla a mano, la restricción lo para."""
+        from django.db import transaction
+
+        with pytest.raises(IntegrityError), transaction.atomic():
+            CoberturaUso.objects.create(
+                organizacion_id=ORG_A, suscripcion_id=SUSC,
+                desde=dt.date(2026, 9, 30), hasta=dt.date(2026, 9, 1),
+            )
+
+    def test_no_mezcla_suscripciones_ni_organizaciones(self):
+        observar(susc=SUSC, desde=dt.date(2026, 1, 1), cubierto=False)
+        observar(susc=OTRA, desde=dt.date(2026, 1, 1), cubierto=False)
+        observar(org=ORG_B, susc=SUSC, desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 15), susc=SUSC)
+        acreditar(dt.date(2026, 9, 16), dt.date(2026, 9, 30), susc=OTRA)
+        acreditar(dt.date(2026, 9, 16), dt.date(2026, 9, 30), org=ORG_B, susc=SUSC)
+        # Adyacentes, pero de distintas suscripciones: no se funden.
+        assert tramos(susc=SUSC) == [(dt.date(2026, 9, 1), dt.date(2026, 9, 15))]
+        assert tramos(susc=OTRA) == [(dt.date(2026, 9, 16), dt.date(2026, 9, 30))]
+        assert tramos(org=ORG_B, susc=SUSC) == [(dt.date(2026, 9, 16), dt.date(2026, 9, 30))]
+
+    def test_toma_el_lock_antes_de_leer_los_tramos(self):
+        """Dos sincronizaciones a la vez leerían los mismos tramos y cada una
+        fundiría los suyos, dejando filas que se solapan."""
+        import inspect
+
+        fuente = inspect.getsource(registrar_cobertura)
+        assert fuente.count('bloquear("cobertura_uso"') == 1
+        assert fuente.index('bloquear("cobertura_uso"') < fuente.index("CoberturaUso.objects.filter(")
+
+    def test_en_postgres_el_lock_es_de_su_propio_espacio(self, solo_postgres):
+        """Que no comparta espacio con el del agregado: se serializarían
+        entre sí sin necesidad."""
+        from django.db import transaction
+
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        with transaction.atomic():
+            acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 30))
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND classid = %s "
+                    "AND pid = pg_backend_pid()",
+                    [ESPACIOS["cobertura_uso"]],
+                )
+                assert cursor.fetchone()[0] == 1
+
+
+class TestCoberturaConHuecos:
+    """Lo que `puntuar` hace con los tramos: afirma bajo uso solo si cubren
+    de corrido desde que nació (o desde el inicio de la ventana) hasta el
+    corte."""
+
+    def test_la_reproduccion_de_la_revision_tramos_separados_es_sin_datos(self):
+        """Creada el 01-09; acreditado 01-09…10-09 y 20-10…31-10; puntuada
+        octubre al 27-10. Antes: `bajo` con `uso_cero_real`."""
+        observar(desde=dt.date(2026, 9, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        acreditar(dt.date(2026, 10, 20), dt.date(2026, 10, 31))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 27),
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert resultado.evidencia["uso_cero_real"] is False
+        assert resultado.evidencia["cobertura_faltante"] == {
+            "desde": "2026-09-11", "hasta": "2026-10-19",
+        }
+        assert "Cobertura incompleta" in resultado.evidencia["motivo"]
+        assert "2026-09-11…2026-10-19" in resultado.evidencia["motivo"]
+
+    def test_cuando_el_hueco_se_llena_SI_se_puede_afirmar(self):
+        """El mismo caso, con el tramo del medio llegando al final."""
+        observar(desde=dt.date(2026, 9, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        acreditar(dt.date(2026, 10, 20), dt.date(2026, 10, 31))
+        acreditar(dt.date(2026, 9, 11), dt.date(2026, 10, 19))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 27),
+        )
+        assert resultado.clasificacion == Clasificacion.BAJO
+        assert resultado.evidencia["uso_cero_real"] is True
+        assert resultado.evidencia["cobertura_faltante"] is None
+
+    def test_tramos_adyacentes_cubren_igual_que_uno_solo(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 8, 1), dt.date(2026, 9, 30))
+        acreditar(dt.date(2026, 10, 1), dt.date(2026, 10, 31))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.BAJO
+
+    def test_la_reproduccion_de_la_revision_nacida_a_mitad_de_mes(self):
+        """Creada el 15-09 con toda su vida acreditada (15-09…31-10). Antes:
+        `sin_datos`, porque exigía cobertura desde el 01-09, días en que la
+        suscripción no existía."""
+        observar(desde=dt.date(2026, 9, 15), cubierto=False)
+        acreditar(dt.date(2026, 9, 15), dt.date(2026, 10, 31))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.evidencia["cobertura_necesaria_desde"] == "2026-09-15"
+        assert resultado.evidencia["cobertura_faltante"] is None
+        assert resultado.clasificacion == Clasificacion.BAJO
+        assert resultado.evidencia["uso_cero_real"] is True
+        # Los límites mensuales de la agregación siguen aparte: septiembre
+        # cuenta como mes observado aunque haya nacido el 15.
+        assert resultado.evidencia["meses_observados_en_la_ventana"] == 2
+
+    def test_nacida_a_mitad_de_mes_con_un_hueco_DESPUES_sigue_sin_datos(self):
+        observar(desde=dt.date(2026, 9, 15), cubierto=False)
+        acreditar(dt.date(2026, 9, 15), dt.date(2026, 9, 30))
+        acreditar(dt.date(2026, 10, 5), dt.date(2026, 10, 31))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert resultado.evidencia["cobertura_faltante"] == {
+            "desde": "2026-10-01", "hasta": "2026-10-04",
+        }
+
+    def test_no_se_exige_cobertura_de_antes_del_nacimiento(self):
+        """Acreditar desde el 01-09 cuando nació el 15-09 tampoco hace falta,
+        pero no estorba."""
+        observar(desde=dt.date(2026, 9, 15), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 10, 31))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.BAJO
+
+    def test_la_evidencia_lista_los_tramos_tal_cual(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+        acreditar(dt.date(2026, 10, 20), dt.date(2026, 10, 31))
+        evidencia = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        ).evidencia
+        assert evidencia["cobertura_tramos"] == [
+            {"desde": "2026-09-01", "hasta": "2026-09-10"},
+            {"desde": "2026-10-20", "hasta": "2026-10-31"},
+        ]
+        # Y el primer hueco es el de ADELANTE: la ventana empieza en agosto.
+        assert evidencia["cobertura_faltante"] == {
+            "desde": "2026-08-01", "hasta": "2026-08-31",
+        }
+
+    def test_un_hueco_posterior_al_corte_no_cuenta(self):
+        """Puntuada al 10-10 con cobertura hasta el 10-10: lo que falte del
+        11 en adelante todavía no se mide."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        acreditar(dt.date(2026, 1, 1), dt.date(2026, 10, 10))
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 10),
+        )
+        assert resultado.evidencia["cobertura_faltante"] is None
+        assert resultado.clasificacion == Clasificacion.BAJO

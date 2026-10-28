@@ -25,7 +25,12 @@ from django.db import IntegrityError, transaction
 from shared.bloqueo import bloquear
 from django.db.models import Count, Max, Sum
 
-from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
+from analytics.models import (
+    CoberturaUso,
+    SuscripcionObservada,
+    UsoMensual,
+    UsoProyectado,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -81,10 +86,13 @@ def registrar_suscripcion(
     return fila
 
 
+UN_DIA = dt.timedelta(days=1)
+
+
 def registrar_cobertura(
     *, organizacion_id, suscripcion_id, desde: dt.date, hasta: dt.date
 ) -> SuscripcionObservada | None:
-    """Acredita que el uso de ese periodo llegó COMPLETO.
+    """Acredita que el uso del tramo `desde…hasta` (inclusive) llegó COMPLETO.
 
     Solo puede llamarla quien de verdad lo sepa: el proceso de sincronización
     con la fuente, cuando esta confirma haber entregado un rango. **No** se
@@ -96,25 +104,104 @@ def registrar_cobertura(
     consecuencia correcta es que `puntuar` responda `sin_datos`, no que
     invente un cero.
 
-    La cobertura se EXTIENDE, nunca se encoge: un rango nuevo que empieza
-    antes o termina después amplía el acreditado; uno más chico no lo recorta,
-    porque acreditar menos de lo que ya se sabía no es información nueva.
+    ── Se guardan TRAMOS, y solo se funden los que se tocan ────────────────
+    La primera versión ampliaba dos fechas con mínimo y máximo, y eso
+    certificaba lo que había en medio: el 1–10 de septiembre más el 20–31 de
+    octubre quedaban como "1 de septiembre al 31 de octubre", con seis semanas
+    acreditadas que nunca llegaron. Lo reprodujo la revisión de la PR.
+
+    Ahora cada tramo se conserva tal cual. Si el nuevo se solapa con alguno
+    existente o es adyacente (termina el día antes de que empiece otro, o al
+    revés), se funden en uno solo, porque entre ellos no hay ningún día sin
+    acreditar. Si no se tocan, quedan como dos filas, y el hueco entre ambas
+    sigue siendo un hueco hasta que alguien lo acredite. Llegar fuera de
+    orden da lo mismo: cuando el tramo del medio llega, los tres se funden.
+
+    La cobertura se EXTIENDE, nunca se encoge: un tramo contenido en otro no
+    cambia nada, porque acreditar menos de lo que ya se sabía no es
+    información nueva.
+
+    Devuelve la `SuscripcionObservada`, o None si Analytics no conoce la
+    suscripción: no se acredita cobertura de algo que no sabemos que existe.
     """
+    if desde > hasta:
+        raise ValueError(
+            f"el tramo acreditado está al revés: desde {desde} > hasta {hasta}"
+        )
     fila = SuscripcionObservada.objects.filter(
         organizacion_id=organizacion_id, suscripcion_id=suscripcion_id
     ).first()
     if fila is None:
         return None
-    cambios = []
-    if fila.cobertura_desde is None or desde < fila.cobertura_desde:
-        fila.cobertura_desde = desde
-        cambios.append("cobertura_desde")
-    if fila.cobertura_hasta is None or hasta > fila.cobertura_hasta:
-        fila.cobertura_hasta = hasta
-        cambios.append("cobertura_hasta")
-    if cambios:
-        fila.save(update_fields=cambios + ["actualizado_en"])
+
+    with transaction.atomic():
+        # Antes de LEER los tramos, por lo mismo que en el agregado: dos
+        # sincronizaciones a la vez leerían los mismos tramos y cada una
+        # fundiría los suyos, dejando dos filas que se solapan.
+        bloquear("cobertura_uso", organizacion_id, suscripcion_id)
+        # Los que se tocan con el nuevo: se solapan, o lo rozan por un día.
+        # `desde - 1` y `hasta + 1` son lo que hace adyacente ≠ separado.
+        vecinos = list(
+            CoberturaUso.objects.filter(
+                organizacion_id=organizacion_id,
+                suscripcion_id=suscripcion_id,
+                desde__lte=hasta + UN_DIA,
+                hasta__gte=desde - UN_DIA,
+            )
+        )
+        nuevo_desde = min([desde] + [v.desde for v in vecinos])
+        nuevo_hasta = max([hasta] + [v.hasta for v in vecinos])
+        if len(vecinos) == 1 and (vecinos[0].desde, vecinos[0].hasta) == (
+            nuevo_desde,
+            nuevo_hasta,
+        ):
+            # Ya estaba acreditado: no hay nada nuevo que saber.
+            return fila
+        CoberturaUso.objects.filter(pk__in=[v.pk for v in vecinos]).delete()
+        CoberturaUso.objects.create(
+            organizacion_id=organizacion_id,
+            suscripcion_id=suscripcion_id,
+            desde=nuevo_desde,
+            hasta=nuevo_hasta,
+        )
     return fila
+
+
+def tramos_acreditados(*, organizacion_id, suscripcion_id) -> list[tuple[dt.date, dt.date]]:
+    """Los tramos de cobertura de la suscripción, del más viejo al más nuevo."""
+    return [
+        (t.desde, t.hasta)
+        for t in CoberturaUso.objects.filter(
+            organizacion_id=organizacion_id, suscripcion_id=suscripcion_id
+        ).order_by("desde")
+    ]
+
+
+def primer_hueco(
+    tramos: list[tuple[dt.date, dt.date]], desde: dt.date, hasta: dt.date
+) -> tuple[dt.date, dt.date] | None:
+    """El primer día sin acreditar dentro de `desde…hasta`, y hasta dónde llega.
+
+    None significa que los tramos cubren el periodo de corrido, sin un solo
+    día afuera. Es una función pura: la decisión de FE-29 ("¿se puede afirmar
+    bajo uso?") pasa por acá y por nada más, así que se prueba sola.
+
+    Si `desde > hasta` no hay nada que cubrir y responde None: pasa cuando la
+    suscripción nació después del corte, y ese caso lo rechaza el mínimo de
+    días de observación, no la cobertura.
+    """
+    cursor = desde
+    for tramo_desde, tramo_hasta in sorted(tramos):
+        if cursor > hasta:
+            break
+        if tramo_hasta < cursor:
+            continue  # termina antes de lo que falta: no aporta
+        if tramo_desde > cursor:
+            return (cursor, min(tramo_desde - UN_DIA, hasta))
+        cursor = tramo_hasta + UN_DIA
+    if cursor <= hasta:
+        return (cursor, hasta)
+    return None
 
 
 def _bloquear_agregado(organizacion_id, suscripcion_id, mes: dt.date) -> None:
@@ -426,27 +513,30 @@ def puntuar(
     # tenemos su uso. Una creación vieja que llega hoy daba 56 días y
     # clasificación `bajo` con `uso_cero_real`, sin que nada acreditara que la
     # proyección recibió ese periodo. Lo reprodujo la revisión de la PR.
-    cubierto_desde = observada.cobertura_desde
-    cubierto_hasta = observada.cobertura_hasta
+    tramos = tramos_acreditados(
+        organizacion_id=organizacion_id, suscripcion_id=suscripcion_id
+    )
     # El periodo que habría que tener acreditado: desde el inicio de la
-    # ventana (o desde que nació, lo que sea más tarde) hasta el corte.
-    necesario_desde = max(ventana[0], primer_dia(observada.observada_desde))
-    evidencia["cobertura_desde"] = (
-        f"{cubierto_desde:%Y-%m-%d}" if cubierto_desde else None
-    )
-    evidencia["cobertura_hasta"] = (
-        f"{cubierto_hasta:%Y-%m-%d}" if cubierto_hasta else None
-    )
+    # ventana o desde el DÍA en que nació, lo que sea más tarde, hasta el
+    # corte. El día real y no el 1 de su mes: una suscripción creada el 15 no
+    # puede tener uso del 1 al 14, y exigir cobertura de esos días la dejaba
+    # en `sin_datos` para siempre. Lo reprodujo la revisión de la PR. El
+    # límite mensual sigue existiendo, pero para la agregación
+    # (`meses_observados`), que es otra cosa.
+    necesario_desde = max(ventana[0], observada.observada_desde)
+    hueco = primer_hueco(tramos, necesario_desde, hasta)
+    evidencia["cobertura_tramos"] = [
+        {"desde": f"{d:%Y-%m-%d}", "hasta": f"{h:%Y-%m-%d}"} for d, h in tramos
+    ]
     evidencia["cobertura_necesaria_desde"] = f"{necesario_desde:%Y-%m-%d}"
-
-    sin_cobertura = (
-        cubierto_hasta is None
-        or cubierto_desde is None
-        or cubierto_desde > necesario_desde
-        or cubierto_hasta < hasta
+    evidencia["cobertura_faltante"] = (
+        {"desde": f"{hueco[0]:%Y-%m-%d}", "hasta": f"{hueco[1]:%Y-%m-%d}"}
+        if hueco
+        else None
     )
-    if sin_cobertura:
-        if cubierto_hasta is None:
+
+    if hueco is not None:
+        if not tramos:
             evidencia["motivo"] = (
                 "No hay cobertura acreditada: Analytics tiene la suscripción "
                 "registrada pero nadie confirmó que su uso del periodo haya "
@@ -454,10 +544,11 @@ def puntuar(
                 "demuestra."
             )
         else:
+            acreditado = ", ".join(f"{d:%Y-%m-%d}…{h:%Y-%m-%d}" for d, h in tramos)
             evidencia["motivo"] = (
-                f"Cobertura incompleta: acreditado "
-                f"{cubierto_desde:%Y-%m-%d}…{cubierto_hasta:%Y-%m-%d}, "
-                f"hace falta {necesario_desde:%Y-%m-%d}…{hasta:%Y-%m-%d}."
+                f"Cobertura incompleta: falta {hueco[0]:%Y-%m-%d}…{hueco[1]:%Y-%m-%d} "
+                f"de lo necesario ({necesario_desde:%Y-%m-%d}…{hasta:%Y-%m-%d}); "
+                f"acreditado: {acreditado}."
             )
         return Puntaje(
             suscripcion_id=str(suscripcion_id),

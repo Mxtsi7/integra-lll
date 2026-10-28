@@ -131,29 +131,9 @@ class SuscripcionObservada(ModeloTenant):
     # le falta el historial.
     #
     # Que el negocio sea viejo no demuestra que la proyección haya recibido
-    # el periodo. Son dos cosas distintas y ahora se guardan por separado:
-    # mientras no haya cobertura acreditada, la clasificación es `sin_datos`.
-    #
-    # Las llena quien pueda ACREDITAR la ingesta (ver `registrar_cobertura`).
-    # Hoy nadie lo hace todavía, porque el consumidor de uso no está
-    # cableado: la consecuencia correcta es que la API responda `sin_datos`,
-    # no que invente un cero.
-    cobertura_desde = models.DateField(
-        null=True,
-        blank=True,
-        verbose_name="Uso acreditado desde",
-        help_text="Primer día del periodo cuyo uso sabemos que llegó completo.",
-    )
-
-    cobertura_hasta = models.DateField(
-        null=True,
-        blank=True,
-        verbose_name="Uso acreditado hasta",
-        help_text=(
-            "Último día del periodo acreditado. NULL = no hay cobertura "
-            "acreditada, así que no se puede afirmar bajo uso."
-        ),
-    )
+    # el periodo. Son dos cosas distintas y se guardan por separado: la
+    # cobertura acreditada vive en `CoberturaUso`, y mientras no cubra el
+    # periodo completo la clasificación es `sin_datos`.
 
     class Meta(ModeloTenant.Meta):
         db_table = "suscripcion_observada"
@@ -168,6 +148,62 @@ class SuscripcionObservada(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.nombre or self.suscripcion_id} desde {self.observada_desde}"
+
+
+class CoberturaUso(ModeloTenant):
+    """Un tramo de fechas cuyo uso sabemos que llegó COMPLETO (FE-29).
+
+    ── Por qué tramos y no dos fechas ──────────────────────────────────────
+    La primera versión guardaba `cobertura_desde` y `cobertura_hasta` en
+    `SuscripcionObservada` y los ampliaba con mínimo y máximo. Eso certificaba
+    huecos que nadie acreditó: con el 1–10 de septiembre y el 20–31 de octubre
+    quedaba "acreditado" del 1 de septiembre al 31 de octubre, y el puntaje
+    afirmaba `bajo` con `uso_cero_real` sobre seis semanas de las que no sabía
+    nada. Lo reprodujo la revisión de la PR.
+
+    Con tramos se conserva exactamente lo que se acreditó. Los que se solapan
+    o son adyacentes se funden en uno al registrarlos (ver
+    `uso.registrar_cobertura`), así que entre dos filas de la misma suscripción
+    siempre hay al menos un día sin acreditar: un hueco de verdad.
+
+    Las escribe únicamente quien pueda ACREDITAR la ingesta: el proceso de
+    sincronización cuando la fuente confirma un rango. Hoy nadie lo hace
+    todavía, porque el consumidor de uso no está cableado; la consecuencia
+    correcta es que la API responda `sin_datos`, no que invente un cero.
+    """
+
+    suscripcion_id = models.UUIDField(
+        db_index=True,
+        verbose_name="Suscripción",
+    )
+
+    desde = models.DateField(verbose_name="Acreditado desde")
+
+    hasta = models.DateField(
+        verbose_name="Acreditado hasta",
+        help_text="Inclusive. Siempre >= desde; lo exige la base, no solo el código.",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "cobertura_uso"
+        ordering = ["suscripcion_id", "desde"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(desde__lte=models.F("hasta")),
+                name="cobertura_uso_desde_le_hasta",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organizacion_id", "suscripcion_id", "desde"],
+                name="cobertura_uso_org_susc_desde",
+            ),
+        ]
+        verbose_name = "Cobertura de uso"
+        verbose_name_plural = "Coberturas de uso"
+
+    def __str__(self) -> str:
+        return f"{self.suscripcion_id}: {self.desde}…{self.hasta}"
 
 
 class UsoProyectado(ModeloTenant):
