@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { configurarApi, ErrorDeApi } from "./cliente";
-import { crearSuscripcion, getSuscripcion, getSuscripciones, getUsos, registrarUso } from "./suscripciones";
+import {
+  crearSuscripcion,
+  getSuscripcion,
+  getSuscripciones,
+  getUsos,
+  registrarUso,
+  type OrdenSuscripciones,
+} from "./suscripciones";
 import { gastoProyectado } from "../calculos";
 import { validarUso } from "../validacionesSuscripcion";
 import { cancelarSuscripcion } from "./suscripciones";
@@ -185,6 +192,65 @@ describe("getSuscripciones y la paginacion", () => {
     await getSuscripciones();
 
     expect(fetchFalso).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getSuscripciones con filtros y orden (CH-11, CH-12)", () => {
+  const vacia = { count: 0, next: null, previous: null, results: [] };
+
+  function fetchQueResponde(...paginas: unknown[]) {
+    let llamada = 0;
+    const fetchFalso = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => paginas[Math.min(llamada++, paginas.length - 1)],
+    }));
+    vi.stubGlobal("fetch", fetchFalso);
+    return fetchFalso;
+  }
+  const parametros = (fetchFalso: ReturnType<typeof vi.fn>, llamada: number) =>
+    new URL(fetchFalso.mock.calls[llamada][0] as string).searchParams;
+
+  it("sin consulta pide solo la página, como antes", async () => {
+    const fetchFalso = fetchQueResponde(vacia);
+
+    await getSuscripciones();
+
+    expect(fetchFalso.mock.calls[0][0]).toBe("http://api.test/api/suscripciones/?page=1");
+  });
+
+  it("manda estado, fecha y orden a la API en TODAS las páginas, con los nombres del backend", async () => {
+    const fetchFalso = fetchQueResponde({ ...vacia, next: "http://subscriptions:8002/api/suscripciones/?page=2" }, vacia);
+
+    await getSuscripciones({ estado: "cancelado", fecha_cobro: "2026-11-10", orden: "-monto" });
+
+    expect(fetchFalso).toHaveBeenCalledTimes(2);
+    for (const [llamada, pagina] of [[0, "1"], [1, "2"]] as const) {
+      const p = parametros(fetchFalso, llamada);
+      expect(p.get("page")).toBe(pagina);
+      expect(p.get("estado")).toBe("cancelado");
+      expect(p.get("fecha_cobro")).toBe("2026-11-10");
+      expect(p.get("orden")).toBe("-monto");
+    }
+  });
+
+  it("un orden fuera de la lista no llega a la API", async () => {
+    const fetchFalso = fetchQueResponde(vacia);
+
+    const error = await getSuscripciones({ orden: "password" as OrdenSuscripciones }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(RangeError);
+    expect(fetchFalso).not.toHaveBeenCalled();
+  });
+
+  it("un valor no puede colar otro parámetro: se codifica", async () => {
+    const fetchFalso = fetchQueResponde(vacia);
+
+    await getSuscripciones({ fecha_cobro: "2026-11-10&page_size=100" });
+
+    const p = parametros(fetchFalso, 0);
+    expect(p.get("fecha_cobro")).toBe("2026-11-10&page_size=100");
+    expect(p.get("page_size")).toBeNull();
   });
 });
 

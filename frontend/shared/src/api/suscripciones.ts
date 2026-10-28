@@ -1,4 +1,4 @@
-import type { Suscripcion } from '../tipos';
+import type { EstadoSuscripcion, Suscripcion } from '../tipos';
 import { pedir, type Paginado } from './cliente';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './ejemplo';
 
@@ -49,7 +49,64 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
  */
 const MAX_PAGINAS = 20;
 
-export async function getSuscripciones(): Promise<Suscripcion[]> {
+/**
+ * Los órdenes que acepta GET /suscripciones/ (VI-02). Es una lista cerrada:
+ * el backend responde 400 a cualquier otro campo, y acá ni se arma la
+ * consulta (CH-12). El '-' es descendente; el backend desempata por id, así
+ * que el orden es el mismo en todas las páginas.
+ */
+export const ORDENES_SUSCRIPCIONES = [
+  'fecha_proximo_cobro',
+  '-fecha_proximo_cobro',
+  'nombre',
+  '-nombre',
+  'monto',
+  '-monto',
+] as const;
+
+export type OrdenSuscripciones = (typeof ORDENES_SUSCRIPCIONES)[number];
+
+/** true si `valor` está en la lista de órdenes permitidos. */
+export function esOrdenSuscripciones(valor: string): valor is OrdenSuscripciones {
+  return (ORDENES_SUSCRIPCIONES as readonly string[]).includes(valor);
+}
+
+/**
+ * Filtros y orden del listado (CH-11, CH-12). Viajan a la API, que filtra y
+ * ordena ANTES de paginar: el resultado sale bien en todas las páginas, no
+ * solo en la primera.
+ */
+export interface ConsultaSuscripciones {
+  /** Solo las que están en este estado. */
+  estado?: EstadoSuscripcion;
+  /** Solo las que tienen su próximo cobro ese día (YYYY-MM-DD). */
+  fecha_cobro?: string;
+  orden?: OrdenSuscripciones;
+}
+
+/**
+ * Arma el query string de una página. URLSearchParams codifica cada valor,
+ * así que un filtro no puede colar otro parámetro (p. ej. "&page_size=").
+ */
+function parametrosDePagina(consulta: ConsultaSuscripciones, pagina: number): string {
+  const parametros = new URLSearchParams({ page: String(pagina) });
+  if (consulta.estado) parametros.set('estado', consulta.estado);
+  if (consulta.fecha_cobro) parametros.set('fecha_cobro', consulta.fecha_cobro);
+  if (consulta.orden) parametros.set('orden', consulta.orden);
+  return parametros.toString();
+}
+
+/**
+ * Todas las suscripciones de la organización (todas las páginas). Con
+ * `consulta`, solo las que cumplen los filtros y en el orden pedido.
+ *
+ * Lanza RangeError, sin llamar a la API, si `orden` no está en
+ * ORDENES_SUSCRIPCIONES (p. ej. un valor que llegó por la URL).
+ */
+export async function getSuscripciones(consulta: ConsultaSuscripciones = {}): Promise<Suscripcion[]> {
+  if (consulta.orden !== undefined && !esOrdenSuscripciones(consulta.orden)) {
+    throw new RangeError(`Orden de suscripciones no permitido: ${String(consulta.orden)}`);
+  }
   if (USAR_DATOS_DE_EJEMPLO) return SUSCRIPCIONES_DE_EJEMPLO;
 
   const todas: SuscripcionDeApi[] = [];
@@ -61,7 +118,7 @@ export async function getSuscripciones(): Promise<Suscripcion[]> {
   // que hizo el navegador. Solo se usa para saber si queda otra pagina.
   for (let pagina = 1; pagina <= MAX_PAGINAS; pagina += 1) {
     const respuesta = await pedir<Paginado<SuscripcionDeApi>>(
-      `/suscripciones/?page=${pagina}`,
+      `/suscripciones/?${parametrosDePagina(consulta, pagina)}`,
     );
     todas.push(...respuesta.results);
     if (!respuesta.next) break;

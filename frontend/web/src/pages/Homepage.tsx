@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useBlocker, useNavigate, useSearchParams } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, FilterX, Plus, SearchX } from "lucide-react";
 import TarjetaSuscripcion from "../components/subscriptions/TarjetaSuscripcion";
 import AddSubscriptionForm from "../components/subscriptions/NuevaSuscripcionForm";
 import Pagination from "../components/subscriptions/pagination";
@@ -21,9 +21,13 @@ import {
   eliminarSuscripcion,
   equivalenteMensual,
   ErrorDeApi,
+  esFechaReal,
+  esOrdenSuscripciones,
+  formatearFecha,
   formatearMonto,
   gastoProyectado,
   getSuscripciones,
+  type OrdenSuscripciones,
   type Suscripcion,
 } from "@ojoalgasto/shared";
 
@@ -43,6 +47,59 @@ const FILTROS: { valor: Filtro; etiqueta: string }[] = [
   { valor: "cancelado", etiqueta: "Canceladas" },
 ];
 
+// CH-12: el orden con que se abre Inicio y al que vuelve "Limpiar filtros"
+// (CH-13): el cobro más cercano primero, que es lo primero que hay que mirar.
+const ORDEN_PREDETERMINADO: OrdenSuscripciones = "fecha_proximo_cobro";
+
+const ORDENES: { valor: OrdenSuscripciones; etiqueta: string }[] = [
+  { valor: "fecha_proximo_cobro", etiqueta: "Próximo cobro: más cercano primero" },
+  { valor: "-fecha_proximo_cobro", etiqueta: "Próximo cobro: más lejano primero" },
+  { valor: "nombre", etiqueta: "Nombre: de la A a la Z" },
+  { valor: "-nombre", etiqueta: "Nombre: de la Z a la A" },
+  { valor: "monto", etiqueta: "Monto: de menor a mayor" },
+  { valor: "-monto", etiqueta: "Monto: de mayor a menor" },
+];
+
+/**
+ * Filtros, orden y búsqueda de Inicio. Viven en la URL (?estado=,
+ * ?fecha_cobro=, ?orden=, ?q=): así se conservan al ir a un detalle y volver,
+ * o al recargar (CH-11).
+ */
+interface Vista {
+  filtro: Filtro;
+  /** YYYY-MM-DD, o "" sin filtro de fecha. */
+  fecha: string;
+  orden: OrdenSuscripciones;
+  busqueda: string;
+}
+
+/**
+ * Lee la vista de la URL. La URL la puede escribir cualquiera: un estado,
+ * una fecha o un orden que no existen vuelven al valor predeterminado en vez
+ * de viajar a la API (CH-12: nada fuera de la lista llega a la consulta).
+ */
+function leerVista(parametros: URLSearchParams): Vista {
+  const estado = parametros.get("estado");
+  const fecha = parametros.get("fecha_cobro") ?? "";
+  const orden = parametros.get("orden") ?? "";
+  return {
+    filtro: FILTROS.find((f) => f.valor !== "todas" && f.valor === estado)?.valor ?? "todas",
+    fecha: esFechaReal(fecha) ? fecha : "",
+    orden: esOrdenSuscripciones(orden) ? orden : ORDEN_PREDETERMINADO,
+    busqueda: parametros.get("q") ?? "",
+  };
+}
+
+/** "en Canceladas, con «net» en el nombre y con cobro el 10 nov 2026", para el mensaje sin coincidencias (CH-13). */
+function describirVista({ filtro, fecha, busqueda }: Vista): string {
+  const partes: string[] = [];
+  if (filtro !== "todas") partes.push(`en ${FILTROS.find((f) => f.valor === filtro)?.etiqueta ?? filtro}`);
+  if (busqueda.trim()) partes.push(`con «${busqueda.trim()}» en el nombre`);
+  if (fecha) partes.push(`con cobro el ${formatearFecha(fecha)}`);
+  if (partes.length <= 1) return partes.join("");
+  return `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+}
+
 /** Saca un mensaje legible de cualquier error que puedan tirar las llamadas a la API. */
 function mensajeDeError(e: unknown, fallback: string): string {
   if (e instanceof ErrorDeApi) return e.message;
@@ -59,15 +116,31 @@ function normalizar(texto: string): string {
 
 export const Homepage: React.FC = () => {
   const navigate = useNavigate();
-  const [parametros] = useSearchParams();
-  const busqueda = parametros.get("q") ?? "";
+  const [parametros, setParametros] = useSearchParams();
+  const vista = leerVista(parametros);
+  const { filtro, fecha, orden, busqueda } = vista;
+  // Identifica la consulta a la API: la grilla solo muestra resultados de la clave actual.
+  const clave = `${filtro}|${fecha}|${orden}`;
+  const idFecha = useId();
+  const idOrden = useId();
 
+  // Todas las suscripciones, sin filtros: el resumen, los conteos de cada
+  // estado y saber si la cuenta está vacía salen de acá (CH-13).
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [filtro, setFiltro] = useState<Filtro>("todas");
+
+  // CH-11/CH-12: la grilla muestra lo que devuelve la API con estos filtros y
+  // este orden, guardado junto a su clave. Mientras llega la respuesta de una
+  // clave nueva no se muestra la de la anterior (serían resultados inválidos).
+  const [listado, setListado] = useState<{ clave: string; recarga: number; items: Suscripcion[] } | null>(null);
+  const [errorListado, setErrorListado] = useState<string | null>(null);
+  const [recargaListado, setRecargaListado] = useState(0);
+  const recargarListado = useCallback(() => setRecargaListado((n) => n + 1), []);
+  // Al crear: la suscripción nueva y la recarga que la trae, para mostrar su página.
+  const mostrarAlCargar = useRef<{ id: string; recarga: number } | null>(null);
 
   // error propio de cada acción (no pisa el error de carga de la lista)
   const [addError, setAddError] = useState<string | null>(null);
@@ -150,32 +223,99 @@ export const Homepage: React.FC = () => {
     };
   }, []);
 
-  // Al cambiar la búsqueda se vuelve a la primera página.
+  // Estado, fecha y orden se mandan a la API, que filtra y ordena ANTES de
+  // paginar (CH-11, CH-12). Una respuesta de una consulta anterior se descarta.
+  useEffect(() => {
+    let cancelado = false;
+    setErrorListado(null);
+
+    getSuscripciones({
+      ...(filtro !== "todas" ? { estado: filtro } : {}),
+      ...(fecha ? { fecha_cobro: fecha } : {}),
+      orden,
+    })
+      .then((items) => {
+        if (!cancelado) setListado({ clave, recarga: recargaListado, items });
+      })
+      .catch(() => {
+        if (!cancelado) setErrorListado("No pudimos cargar tus suscripciones con estos filtros. Intenta de nuevo.");
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [clave, filtro, fecha, orden, recargaListado]);
+
+  // Cambiar un filtro, el orden o la búsqueda (también con Atrás/Adelante)
+  // vuelve a la primera página.
   useEffect(() => {
     setCurrentPage(1);
-  }, [busqueda]);
+  }, [busqueda, clave]);
 
-  const filtradas = useMemo(() => {
+  const itemsVigentes = listado?.clave === clave ? listado.items : null;
+  const cargandoGrilla = isLoading || (itemsVigentes === null && errorListado === null);
+
+  // La búsqueda se aplica acá, sobre lo que mandó la API: así "Netflíx" y
+  // "netflix" se encuentran igual, cosa que el filtro del backend no hace.
+  // Filtrar no cambia el orden.
+  const visibles = useMemo(() => {
+    if (!itemsVigentes) return [];
     const q = normalizar(busqueda.trim());
-    return suscripciones.filter(
-      (s) => (filtro === "todas" || s.estado === filtro) && (q === "" || normalizar(s.nombre).includes(q)),
-    );
-  }, [suscripciones, filtro, busqueda]);
+    return q === "" ? itemsVigentes : itemsVigentes.filter((s) => normalizar(s.nombre).includes(q));
+  }, [itemsVigentes, busqueda]);
 
   const paginadas = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
-    return filtradas.slice(start, start + PAGE_SIZE);
-  }, [filtradas, currentPage]);
+    return visibles.slice(start, start + PAGE_SIZE);
+  }, [visibles, currentPage]);
 
   // si al eliminar (o filtrar) la página actual queda fuera de rango, vuelve
   // a la última página válida en vez de dejar la lista vacía.
   useEffect(() => {
-    if (isLoading) return;
-    const totalPages = Math.max(1, Math.ceil(filtradas.length / PAGE_SIZE));
+    if (cargandoGrilla) return;
+    const totalPages = Math.max(1, Math.ceil(visibles.length / PAGE_SIZE));
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
-  }, [filtradas, currentPage, isLoading]);
+  }, [visibles, currentPage, cargandoGrilla]);
+
+  // Después de crear: cuando llega la lista que la incluye, se va a la página
+  // donde quedó según el orden elegido.
+  useEffect(() => {
+    const pendiente = mostrarAlCargar.current;
+    if (!pendiente || !listado || listado.clave !== clave || listado.recarga < pendiente.recarga) return;
+    mostrarAlCargar.current = null;
+    const indice = visibles.findIndex((s) => s.id === pendiente.id);
+    if (indice >= 0) setCurrentPage(Math.floor(indice / PAGE_SIZE) + 1);
+  }, [listado, clave, visibles]);
+
+  /** Cambia filtros, orden o búsqueda en la URL, sin sumar entradas al historial. */
+  const cambiarVista = useCallback(
+    (cambios: Partial<Vista>) => {
+      setParametros(
+        (actuales) => {
+          const nuevos = new URLSearchParams(actuales);
+          const fijar = (nombre: string, valor: string | undefined, predeterminado: string) => {
+            if (valor === undefined) return;
+            if (valor === predeterminado) nuevos.delete(nombre);
+            else nuevos.set(nombre, valor);
+          };
+          fijar("estado", cambios.filtro, "todas");
+          fijar("fecha_cobro", cambios.fecha, "");
+          fijar("orden", cambios.orden, ORDEN_PREDETERMINADO);
+          fijar("q", cambios.busqueda, "");
+          return nuevos;
+        },
+        { replace: true },
+      );
+    },
+    [setParametros],
+  );
+
+  // CH-13: vuelve a los valores acordados: todas, sin fecha, el orden
+  // predeterminado, sin búsqueda y (por el efecto de arriba) la página 1.
+  const hayFiltros = filtro !== "todas" || fecha !== "" || orden !== ORDEN_PREDETERMINADO || busqueda !== "";
+  const limpiarFiltros = () => cambiarVista({ filtro: "todas", fecha: "", orden: ORDEN_PREDETERMINADO, busqueda: "" });
 
   const conteoPorFiltro = useMemo(() => {
     const conteo: Record<Filtro, number> = {
@@ -201,13 +341,21 @@ export const Homepage: React.FC = () => {
     try {
       const creada = await crearSuscripcion(nueva);
       setSuscripciones((prev) => [...prev, creada]);
-      setFiltro("todas");
-      setCurrentPage(Math.ceil((suscripciones.length + 1) / PAGE_SIZE));
       // Guardado: ya no hay nada que perder. También se quita el aviso, por si
       // se guardó con él visible (antes quedaba pendiente al reabrir).
       hayCambiosSinGuardar.current = false;
       setConfirmandoDescarte(false);
-      continuarNavegacionPendiente();
+      if (navegacionActual.current.state === "blocked") {
+        // Se estaba yendo de Inicio: se completa esa navegación.
+        continuarNavegacionPendiente();
+      } else {
+        // La nueva podría no cumplir el estado o la fecha elegidos: se quitan
+        // esos filtros, se vuelve a pedir la lista (su lugar depende del
+        // orden) y se muestra la página donde quedó.
+        mostrarAlCargar.current = { id: creada.id, recarga: recargaListado + 1 };
+        cambiarVista({ filtro: "todas", fecha: "" });
+        recargarListado();
+      }
       setIsAdding(false);
       return true;
     } catch (e) {
@@ -243,6 +391,10 @@ export const Homepage: React.FC = () => {
         categoria: data.categoria,
       });
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
+      // Se ve el cambio de inmediato y se vuelve a pedir la lista: con otro
+      // monto o nombre puede quedar en otro lugar del orden.
+      setListado((l) => l && { ...l, items: l.items.map((s) => (s.id === data.id ? actualizada : s)) });
+      recargarListado();
       hayCambiosSinGuardar.current = false;
       setConfirmandoDescarte(false);
       continuarNavegacionPendiente();
@@ -270,6 +422,7 @@ export const Homepage: React.FC = () => {
 
       setTimeout(() => {
         setSuscripciones((prev) => prev.filter((s) => s.id !== idToRemove));
+        setListado((l) => l && { ...l, items: l.items.filter((s) => s.id !== idToRemove) });
         setRemovingId(null);
       }, FADE_OUT_MS);
     } catch (e) {
@@ -364,16 +517,14 @@ export const Homepage: React.FC = () => {
           </section>
 
           <div className={styles.filtros} role="group" aria-label="Filtrar por estado">
-            {FILTROS.filter((f) => f.valor === "todas" || conteoPorFiltro[f.valor] > 0).map((f) => (
+            {/* El filtro elegido se ve aunque hoy no tenga ninguna (p. ej. llegó por la URL). */}
+            {FILTROS.filter((f) => f.valor === "todas" || f.valor === filtro || conteoPorFiltro[f.valor] > 0).map((f) => (
               <button
                 key={f.valor}
                 type="button"
                 className={filtro === f.valor ? `${styles.filtro} ${styles.filtroActivo}` : styles.filtro}
                 aria-pressed={filtro === f.valor}
-                onClick={() => {
-                  setFiltro(f.valor);
-                  setCurrentPage(1);
-                }}
+                onClick={() => cambiarVista({ filtro: f.valor })}
               >
                 {f.etiqueta}
                 <span className={styles.filtroConteo}>{conteoPorFiltro[f.valor]}</span>
@@ -386,8 +537,69 @@ export const Homepage: React.FC = () => {
             )}
           </div>
 
+          <div className={styles.controles}>
+            <div className={styles.control}>
+              <label htmlFor={idFecha} className={styles.controlEtiqueta}>
+                Fecha de cobro
+              </label>
+              <input
+                id={idFecha}
+                type="date"
+                className={styles.controlCampo}
+                value={fecha}
+                onChange={(e) => cambiarVista({ fecha: e.target.value })}
+              />
+            </div>
+            <div className={styles.control}>
+              <label htmlFor={idOrden} className={styles.controlEtiqueta}>
+                Ordenar por
+              </label>
+              <span className={styles.campoOrden}>
+                {/* Indicador de la dirección; el texto de la opción dice el criterio. */}
+                {orden.startsWith("-") ? (
+                  <ArrowDownWideNarrow size={15} aria-hidden="true" />
+                ) : (
+                  <ArrowUpNarrowWide size={15} aria-hidden="true" />
+                )}
+                <select
+                  id={idOrden}
+                  className={styles.controlCampo}
+                  value={orden}
+                  // Las opciones salen de ORDENES; leerVista() igual lo vuelve a validar.
+                  onChange={(e) => cambiarVista({ orden: e.target.value as OrdenSuscripciones })}
+                >
+                  {ORDENES.map((o) => (
+                    <option key={o.valor} value={o.valor}>
+                      {o.etiqueta}
+                    </option>
+                  ))}
+                </select>
+              </span>
+            </div>
+            {hayFiltros && (
+              <Boton
+                variante="sutil"
+                tamano="s"
+                className={styles.limpiar}
+                icono={<FilterX size={15} aria-hidden="true" />}
+                onClick={limpiarFiltros}
+              >
+                Limpiar filtros
+              </Boton>
+            )}
+          </div>
+
+          {errorListado && (
+            <div className={styles.errorListado} role="alert">
+              <p>{errorListado}</p>
+              <Boton variante="secundario" tamano="s" onClick={recargarListado}>
+                Reintentar
+              </Boton>
+            </div>
+          )}
+
           <ul className={styles.grilla}>
-            {isLoading
+            {cargandoGrilla
               ? Array.from({ length: 6 }).map((_, i) => <TarjetaSuscripcion key={`placeholder-${i}`} isLoading />)
               : paginadas.map((s) => (
                   <TarjetaSuscripcion
@@ -407,16 +619,27 @@ export const Homepage: React.FC = () => {
                 ))}
           </ul>
 
-          {!isLoading && filtradas.length === 0 && (
-            <p className={styles.sinResultados}>
-              {busqueda ? `Nada se llama «${busqueda}».` : "No hay suscripciones en este estado por ahora."}
-            </p>
+          {/* CH-13: la cuenta tiene suscripciones, pero ninguna cumple los
+              filtros. No es la cuenta vacía: no invita a crear la primera. */}
+          {!cargandoGrilla && itemsVigentes !== null && visibles.length === 0 && (
+            <EmptyState
+              icon={<SearchX size={44} aria-hidden="true" />}
+              title="Ninguna suscripción coincide"
+              description={
+                hayFiltros
+                  ? `No hay suscripciones ${describirVista(vista) || "con estos filtros"}.`
+                  : "No encontramos suscripciones para mostrar."
+              }
+              actionLabel={hayFiltros ? "Limpiar filtros" : undefined}
+              onAction={hayFiltros ? limpiarFiltros : undefined}
+              actionIcon={<FilterX size={16} aria-hidden="true" />}
+            />
           )}
 
-          {!isLoading && (
+          {!cargandoGrilla && (
             <Pagination
               currentPage={currentPage}
-              totalItems={filtradas.length}
+              totalItems={visibles.length}
               pageSize={PAGE_SIZE}
               onPageChange={setCurrentPage}
             />
