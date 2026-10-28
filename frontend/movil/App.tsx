@@ -1,22 +1,34 @@
+import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
-import { configurarApi } from '@ojoalgasto/shared';
-configurarApi({ urlBase: process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api' });
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { NavigationContainer } from '@react-navigation/native';
+import { configurarApi, configureAuthApi, type Usuario } from '@ojoalgasto/shared';
+import { AuthProvider, type EstadoAuth } from './context/AuthContext';
+import { RootNavigator } from './src/navigation/RootNavigator';
 
-export default function App() {
+const urlBase = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000/api';
+configurarApi({ urlBase });
+configureAuthApi({ baseUrl: urlBase });
+
+export type AppProps = {
+  initialUsuario?: Usuario | null;
+  initialEstado?: EstadoAuth;
+  exp?: Record<string, unknown>;
+  shell?: boolean;
+  shellManifestUrl?: string;
+};
+
+export function App({ initialUsuario, initialEstado }: AppProps = {}) {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <AuthProvider initialUsuario={initialUsuario} initialEstado={initialEstado}>
+        <NavigationContainer>
+          <RootNavigator />
+          <StatusBar style="auto" />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default App;
