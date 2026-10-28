@@ -17,11 +17,12 @@ los datos, y recalcular puntajes viejos con la fórmula nueva.
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 from dataclasses import asdict, dataclass
 
 from django.conf import settings
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
+
+from shared.bloqueo import bloquear
 from django.db.models import Count, Max, Sum
 
 from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
@@ -80,53 +81,51 @@ def registrar_suscripcion(
     return fila
 
 
+def registrar_cobertura(
+    *, organizacion_id, suscripcion_id, desde: dt.date, hasta: dt.date
+) -> SuscripcionObservada | None:
+    """Acredita que el uso de ese periodo llegó COMPLETO.
+
+    Solo puede llamarla quien de verdad lo sepa: el proceso de sincronización
+    con la fuente, cuando esta confirma haber entregado un rango. **No** se
+    deduce de que hayan llegado algunos eventos: que lleguen tres usos de
+    octubre no prueba que octubre esté completo.
+
+    Por eso hoy no la llama nadie todavía: el consumidor de `uso.registrado`
+    no está cableado y la fuente no publica un marcador de sincronización. La
+    consecuencia correcta es que `puntuar` responda `sin_datos`, no que
+    invente un cero.
+
+    La cobertura se EXTIENDE, nunca se encoge: un rango nuevo que empieza
+    antes o termina después amplía el acreditado; uno más chico no lo recorta,
+    porque acreditar menos de lo que ya se sabía no es información nueva.
+    """
+    fila = SuscripcionObservada.objects.filter(
+        organizacion_id=organizacion_id, suscripcion_id=suscripcion_id
+    ).first()
+    if fila is None:
+        return None
+    cambios = []
+    if fila.cobertura_desde is None or desde < fila.cobertura_desde:
+        fila.cobertura_desde = desde
+        cambios.append("cobertura_desde")
+    if fila.cobertura_hasta is None or hasta > fila.cobertura_hasta:
+        fila.cobertura_hasta = hasta
+        cambios.append("cobertura_hasta")
+    if cambios:
+        fila.save(update_fields=cambios + ["actualizado_en"])
+    return fila
+
+
 def _bloquear_agregado(organizacion_id, suscripcion_id, mes: dt.date) -> None:
     """Serializa el recálculo de un (tenant, suscripción, mes).
 
-    ── Por qué no alcanza con `update_or_create` ────────────────────────────
-    El bloqueo de esa escritura protege la ESCRITURA, no el SUM que se leyó
-    antes. Con el nivel de aislamiento habitual de PostgreSQL (read committed)
-    dos recálculos del mismo mes se intercalan así:
-
-        A: SUM = 30
-        B: llega un evento, SUM = 50, guarda 50
-        A: guarda sus 30, que ya estaban viejos
-
-    y queda la fuente en 50 con el agregado en 30. Lo reprodujo la revisión de
-    la PR intercalando las llamadas, y era cierto.
-
-    El lock se toma ANTES del SUM, así que el segundo recálculo espera y
-    vuelve a leer la fuente ya completa.
-
-    ── Por qué un advisory lock y no `select_for_update` ────────────────────
-    La fila del agregado puede no existir todavía: la primera vez no hay nada
-    que bloquear. El advisory lock es sobre una CLAVE, exista la fila o no.
-    Es de transacción (`_xact_`), así que se suelta solo al terminar; por eso
-    esta función exige estar dentro de un atomic y lo comprueba.
-
-    En SQLite no existe y no hace falta: serializa las escrituras de por sí.
-    Las pruebas locales corren en SQLite, así que esta carrera **no la cubre
-    la suite**; hay que verificarla contra PostgreSQL.
+    La implementación vive en `shared/bloqueo.py`: es el MISMO patrón que
+    Subscriptions necesitó para el resumen por organización, y dos copias del
+    mismo lock se desincronizan igual que dos copias de una routing key.
+    Acá queda solo el nombre de la clave.
     """
-    if not transaction.get_connection().in_atomic_block:
-        raise RuntimeError(
-            "el lock del agregado es de transacción: hay que llamarlo dentro "
-            "de un atomic() o no protege nada"
-        )
-    if connection.vendor != "postgresql":
-        return
-    # Dos enteros de 32 bits: uno identifica la tabla, el otro la clave. Se
-    # usa un hash estable (no el hash() de Python, que cambia entre procesos
-    # por PYTHONHASHSEED y haría que dos workers tomaran llaves distintas).
-    semilla = f"{organizacion_id}|{suscripcion_id}|{mes:%Y-%m}".encode()
-    clave = int.from_bytes(hashlib.sha256(semilla).digest()[:4], "big") - 2**31
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_xact_lock(%s, %s)", [_ESPACIO_LOCK, clave])
-
-
-#: Identifica a qué "familia" de locks pertenece la clave, para no chocar con
-#: otro advisory lock del sistema que use el mismo número por casualidad.
-_ESPACIO_LOCK = 28  # FE-28
+    bloquear("uso_mensual", organizacion_id, suscripcion_id, f"{mes:%Y-%m}")
 
 
 def proyectar_uso(
@@ -417,6 +416,56 @@ def puntuar(
             minutos_totales=0,
             minutos_por_mes=0.0,
             dias_con_uso=0,
+            puntaje=0,
+            clasificacion=Clasificacion.SIN_DATOS,
+            evidencia=evidencia,
+        )
+
+    # ── La cobertura, antes que los días ────────────────────────────────────
+    # `dias_observados` cuenta desde que NACIÓ la suscripción, no desde que
+    # tenemos su uso. Una creación vieja que llega hoy daba 56 días y
+    # clasificación `bajo` con `uso_cero_real`, sin que nada acreditara que la
+    # proyección recibió ese periodo. Lo reprodujo la revisión de la PR.
+    cubierto_desde = observada.cobertura_desde
+    cubierto_hasta = observada.cobertura_hasta
+    # El periodo que habría que tener acreditado: desde el inicio de la
+    # ventana (o desde que nació, lo que sea más tarde) hasta el corte.
+    necesario_desde = max(ventana[0], primer_dia(observada.observada_desde))
+    evidencia["cobertura_desde"] = (
+        f"{cubierto_desde:%Y-%m-%d}" if cubierto_desde else None
+    )
+    evidencia["cobertura_hasta"] = (
+        f"{cubierto_hasta:%Y-%m-%d}" if cubierto_hasta else None
+    )
+    evidencia["cobertura_necesaria_desde"] = f"{necesario_desde:%Y-%m-%d}"
+
+    sin_cobertura = (
+        cubierto_hasta is None
+        or cubierto_desde is None
+        or cubierto_desde > necesario_desde
+        or cubierto_hasta < hasta
+    )
+    if sin_cobertura:
+        if cubierto_hasta is None:
+            evidencia["motivo"] = (
+                "No hay cobertura acreditada: Analytics tiene la suscripción "
+                "registrada pero nadie confirmó que su uso del periodo haya "
+                "llegado completo. La antigüedad de la suscripción no lo "
+                "demuestra."
+            )
+        else:
+            evidencia["motivo"] = (
+                f"Cobertura incompleta: acreditado "
+                f"{cubierto_desde:%Y-%m-%d}…{cubierto_hasta:%Y-%m-%d}, "
+                f"hace falta {necesario_desde:%Y-%m-%d}…{hasta:%Y-%m-%d}."
+            )
+        return Puntaje(
+            suscripcion_id=str(suscripcion_id),
+            mes_final=f"{mes_final:%Y-%m}",
+            meses_evaluados=0,
+            minutos_totales=minutos_totales,
+            minutos_por_mes=0.0,
+            dias_con_uso=dias_totales,
             puntaje=0,
             clasificacion=Clasificacion.SIN_DATOS,
             evidencia=evidencia,

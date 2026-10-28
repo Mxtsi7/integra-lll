@@ -90,7 +90,43 @@ class SuscripcionObservada(ModeloTenant):
         verbose_name="Observada desde",
         help_text=(
             "La fecha del evento `suscripcion.creada`, no la de hoy: si se "
-            "reprocesan los eventos, tiene que dar lo mismo."
+            "reprocesan los eventos, tiene que dar lo mismo. "
+            "OJO: dice cuándo NACIÓ la suscripción, NO desde cuándo tenemos "
+            "su uso. Para eso está la cobertura."
+        ),
+    )
+
+    # ── La antigüedad NO es cobertura ────────────────────────────────
+    # Esto salió de la revisión de la PR y es la corrección más importante
+    # de FE-29: `observada_desde` sale del `ocurrido_en` del evento
+    # `suscripcion.creada`. Si una creación de hace dos meses llega HOY —un
+    # backfill, un replay, el consumidor que estuvo caído—, la cuenta de
+    # días daba 56 y el puntaje afirmaba `bajo` con `uso_cero_real`, cuando
+    # Analytics recién se enteró de que la suscripción existe y no sabe si
+    # le falta el historial.
+    #
+    # Que el negocio sea viejo no demuestra que la proyección haya recibido
+    # el periodo. Son dos cosas distintas y ahora se guardan por separado:
+    # mientras no haya cobertura acreditada, la clasificación es `sin_datos`.
+    #
+    # Las llena quien pueda ACREDITAR la ingesta (ver `registrar_cobertura`).
+    # Hoy nadie lo hace todavía, porque el consumidor de uso no está
+    # cableado: la consecuencia correcta es que la API responda `sin_datos`,
+    # no que invente un cero.
+    cobertura_desde = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Uso acreditado desde",
+        help_text="Primer día del periodo cuyo uso sabemos que llegó completo.",
+    )
+
+    cobertura_hasta = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Uso acreditado hasta",
+        help_text=(
+            "Último día del periodo acreditado. NULL = no hay cobertura "
+            "acreditada, así que no se puede afirmar bajo uso."
         ),
     )
 

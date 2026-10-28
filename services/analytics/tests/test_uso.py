@@ -23,9 +23,10 @@ import pytest
 from analytics.models import SuscripcionObservada, UsoMensual, UsoProyectado
 from django.db import DataError, IntegrityError, connection
 
+from shared.bloqueo import ESPACIOS
+
 from analytics.uso import (
     Clasificacion,
-    _ESPACIO_LOCK as ESPACIO_LOCK,
     _bloquear_agregado,
     mes_siguiente,
     meses_hacia_atras,
@@ -34,6 +35,7 @@ from analytics.uso import (
     puntuar,
     puntuar_organizacion,
     recalcular_mes,
+    registrar_cobertura,
     registrar_suscripcion,
 )
 
@@ -58,10 +60,27 @@ def proyectar(fecha, minutos, *, org=ORG_A, susc=SUSC, registro=None):
     )
 
 
-def observar(*, org=ORG_A, susc=SUSC, desde=dt.date(2026, 1, 1), nombre="Netflix"):
-    return registrar_suscripcion(
+def observar(*, org=ORG_A, susc=SUSC, desde=dt.date(2026, 1, 1), nombre="Netflix",
+             cubierto=True, cubierto_hasta=dt.date(2026, 12, 31)):
+    """Registra la suscripción y, por omisión, ACREDITA su cobertura.
+
+    `cubierto=True` por omisión porque la mayoría de las pruebas miden la
+    fórmula, no la cobertura, y sin acreditarla todas darían `sin_datos` — que
+    es correcto pero no es lo que esas pruebas comprueban.
+
+    Las pruebas de `TestCobertura` la pasan en False a propósito: ahí lo que
+    se mide es justamente qué pasa SIN cobertura acreditada.
+    """
+    fila = registrar_suscripcion(
         organizacion_id=org, suscripcion_id=susc, observada_desde=desde, nombre=nombre
     )
+    if cubierto:
+        registrar_cobertura(
+            organizacion_id=org, suscripcion_id=susc,
+            desde=desde, hasta=cubierto_hasta,
+        )
+        fila.refresh_from_db()
+    return fila
 
 
 def mensual(*, org=ORG_A, susc=SUSC, mes=OCTUBRE):
@@ -655,7 +674,7 @@ class TestBloqueoDelAgregado:
                     "SELECT count(*) FROM pg_locks "
                     "WHERE locktype = 'advisory' AND classid = %s "
                     "AND pid = pg_backend_pid()",
-                    [ESPACIO_LOCK],
+                    [ESPACIOS["uso_mensual"]],
                 )
                 assert cursor.fetchone()[0] == 1
 
@@ -669,7 +688,7 @@ class TestBloqueoDelAgregado:
             cursor.execute(
                 "SELECT count(*) FROM pg_locks "
                 "WHERE locktype = 'advisory' AND classid = %s AND pid = pg_backend_pid()",
-                [ESPACIO_LOCK],
+                [ESPACIOS["uso_mensual"]],
             )
             # pytest-django envuelve la prueba en su propia transacción, así
             # que el atomic de arriba es un savepoint y el lock sigue hasta el
@@ -690,7 +709,7 @@ class TestBloqueoDelAgregado:
                 cursor.execute(
                     "SELECT count(DISTINCT objid) FROM pg_locks "
                     "WHERE locktype = 'advisory' AND classid = %s AND pid = pg_backend_pid()",
-                    [ESPACIO_LOCK],
+                    [ESPACIOS["uso_mensual"]],
                 )
                 assert cursor.fetchone()[0] == 4
 
@@ -815,3 +834,168 @@ class TestCorteTemporal:
         proyectar(dt.date(2026, 10, 20), 500)
         recalcular_mes(organizacion_id=ORG_A, suscripcion_id=SUSC, mes=OCTUBRE)
         assert mensual().minutos == 510
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FE-29 — la antigüedad NO es cobertura
+# (el hallazgo de la segunda revisión de #111)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestCobertura:
+    """Que la suscripción sea vieja no prueba que tengamos su uso.
+
+    `observada_desde` sale del `ocurrido_en` de `suscripcion.creada`. Si una
+    creación de hace dos meses llega HOY —backfill, replay, el consumidor
+    caído—, la cuenta de días daba 56 y el puntaje afirmaba `bajo` con
+    `uso_cero_real`, cuando Analytics recién se enteró de que existe.
+
+    Es el criterio de FE-29: «sin datos suficientes no se afirma bajo uso como
+    hecho».
+    """
+
+    def test_una_creacion_VIEJA_recibida_hoy_es_sin_datos(self):
+        """La reproducción de la revisión, exacta: creada el 01-09, puntuada
+        al 27-10, sin cobertura acreditada. Antes: 56 días y `bajo`."""
+        observar(desde=dt.date(2026, 9, 1), cubierto=False)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=dt.date(2026, 10, 27),
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert resultado.evidencia["uso_cero_real"] is False
+        assert "No hay cobertura acreditada" in resultado.evidencia["motivo"]
+        # Los días sí se informan, pero no deciden.
+        assert resultado.evidencia["dias_observados"] == 56
+
+    def test_sin_cobertura_no_se_afirma_uso_cero_real(self):
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert resultado.evidencia["uso_cero_real"] is False
+        assert resultado.evidencia["cobertura_hasta"] is None
+
+    def test_con_cobertura_del_periodo_y_cero_minutos_SI_es_bajo(self):
+        """El cero de verdad: sabemos que el periodo llegó completo y no hubo
+        un solo minuto. Ahí sí se puede afirmar."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=True)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.BAJO
+        assert resultado.evidencia["uso_cero_real"] is True
+
+    def test_un_backfill_INCOMPLETO_al_principio_es_sin_datos(self):
+        """Acreditado desde septiembre, pero la ventana empieza en agosto."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 9, 1), hasta=FIN_OCTUBRE,
+        )
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert "Cobertura incompleta" in resultado.evidencia["motivo"]
+        assert resultado.evidencia["cobertura_necesaria_desde"] == "2026-08-01"
+
+    def test_una_ingesta_ATRASADA_al_final_es_sin_datos(self):
+        """Acreditado hasta el 10 de octubre, pero el corte es el 31."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 1, 1), hasta=dt.date(2026, 10, 10),
+        )
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.SIN_DATOS
+        assert "Cobertura incompleta" in resultado.evidencia["motivo"]
+
+    def test_la_cobertura_justa_alcanza(self):
+        """Ni un día de más: acreditado exactamente el periodo que hace falta."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 8, 1), hasta=FIN_OCTUBRE,
+        )
+        proyectar(dt.date(2026, 10, 3), 30)
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        assert resultado.clasificacion == Clasificacion.BAJO
+        assert resultado.minutos_totales == 30
+
+    def test_para_una_suscripcion_NUEVA_basta_cubrir_desde_que_nacio(self):
+        """La ventana son 3 meses, pero no se puede exigir cobertura de meses
+        en los que la suscripción no existía."""
+        observar(desde=dt.date(2026, 10, 1), cubierto=False)
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 10, 1), hasta=FIN_OCTUBRE,
+        )
+        resultado = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        )
+        # Ya no es "sin cobertura"; cae en el mínimo de días de observación.
+        assert "cobertura" not in resultado.evidencia["motivo"].lower()
+
+    def test_la_cobertura_se_extiende_nunca_se_encoge(self):
+        """Acreditar menos de lo que ya se sabía no es información nueva."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 1, 1), hasta=dt.date(2026, 10, 31),
+        )
+        registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 6, 1), hasta=dt.date(2026, 9, 1),
+        )
+        fila = SuscripcionObservada.objects.get()
+        assert fila.cobertura_desde == dt.date(2026, 1, 1)
+        assert fila.cobertura_hasta == dt.date(2026, 10, 31)
+
+    def test_la_cobertura_de_una_suscripcion_desconocida_no_crea_nada(self):
+        """No se acredita cobertura de algo que no sabemos que existe."""
+        assert registrar_cobertura(
+            organizacion_id=ORG_A, suscripcion_id=SUSC,
+            desde=dt.date(2026, 1, 1), hasta=FIN_OCTUBRE,
+        ) is None
+        assert not SuscripcionObservada.objects.exists()
+
+    def test_la_evidencia_dice_que_periodo_haria_falta(self):
+        """Sin esto, quien reciba `sin_datos` no sabe qué le falta."""
+        observar(desde=dt.date(2026, 1, 1), cubierto=False)
+        evidencia = puntuar(
+            organizacion_id=ORG_A, suscripcion_id=SUSC, mes_final=OCTUBRE,
+            hasta=FIN_OCTUBRE,
+        ).evidencia
+        assert evidencia["cobertura_necesaria_desde"] == "2026-08-01"
+        assert evidencia["medido_hasta"] == "2026-10-31"
+        assert evidencia["cobertura_hasta"] is None
+
+    def test_el_listado_no_afirma_bajo_uso_sin_cobertura(self):
+        """La API pública es lo que consume VI-17: no puede afirmar un cero
+        sobre una proyección sin cobertura."""
+        observar(susc=SUSC, nombre="Sin cobertura", desde=dt.date(2026, 1, 1),
+                 cubierto=False)
+        observar(susc=OTRA, nombre="Con cobertura", desde=dt.date(2026, 1, 1),
+                 cubierto=True)
+
+        puntajes = puntuar_organizacion(
+            organizacion_id=ORG_A, mes_final=OCTUBRE, hasta=FIN_OCTUBRE
+        )
+        por_id = {p.suscripcion_id: p for p in puntajes}
+        assert por_id[str(SUSC)].clasificacion == Clasificacion.SIN_DATOS
+        assert por_id[str(SUSC)].evidencia["uso_cero_real"] is False
+        # La que sí tiene cobertura sigue pudiendo afirmarlo.
+        assert por_id[str(OTRA)].clasificacion == Clasificacion.BAJO
+        assert por_id[str(OTRA)].evidencia["uso_cero_real"] is True
