@@ -36,18 +36,67 @@ QPS="${QPS:-60}"
 SEMILLA="${SEMILLA:-500}"   # suscripciones precargadas por organización
 
 RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
-ORIGINAL="$(kubectl get deployment/subscriptions \
-  -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="EVENTOS_ASINCRONOS")].value}' 2>/dev/null || true)"
 
-restaurar() {
-  echo
-  echo "── restaurando la bandera ──"
-  if [ -n "$ORIGINAL" ]; then
-    kubectl set env deployment/subscriptions "EVENTOS_ASINCRONOS=$ORIGINAL" >/dev/null
+# Cuánto se espera a que se drene el trabajo entre corridas. Configurable para
+# que el arnés (probar-comparar-cola.sh) no tenga que esperar de verdad.
+DRENAR_INTENTOS="${DRENAR_INTENTOS:-60}"
+DRENAR_PAUSA="${DRENAR_PAUSA:-2}"
+
+# ── La bandera original de CADA deployment, incluida su ausencia ─────────────
+# La comparación cambia EVENTOS_ASINCRONOS en la API y en el worker (ahí vive
+# el consumidor). La primera versión guardaba y restauraba solo la de la API:
+# el worker quedaba con la bandera de la última corrida. Y tampoco distinguía
+# "no estaba" de "estaba vacía". Lo encontró la revisión de la PR.
+#
+# Se guarda "presente=<valor>" o "ausente", por deployment, y se restaura
+# exactamente eso: el valor, o la ausencia (`VAR-`).
+leer_bandera() {  # $1 = deployment
+  local valor
+  valor="$(kubectl get "deployment/$1" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="EVENTOS_ASINCRONOS")]}{"presente="}{.value}{end}' 2>/dev/null || true)"
+  if [ -n "$valor" ]; then printf '%s' "$valor"; else printf 'ausente'; fi
+}
+
+poner_bandera() {  # $1 = deployment, $2 = "presente=<valor>" o "ausente"
+  if [ "$2" = "ausente" ]; then
+    kubectl set env "deployment/$1" EVENTOS_ASINCRONOS- >/dev/null
   else
-    kubectl set env deployment/subscriptions EVENTOS_ASINCRONOS- >/dev/null
+    kubectl set env "deployment/$1" "EVENTOS_ASINCRONOS=${2#presente=}" >/dev/null
   fi
+}
+
+ORIGINAL_API="$(leer_bandera subscriptions)"
+ORIGINAL_WORKER="$(leer_bandera subscriptions-worker)"
+
+# ── Restaurar los dos, y COMPROBAR el rollout de la restauración ─────────────
+# Corre en el trap EXIT, o sea también si la comparación se interrumpe a la
+# mitad. Ningún comando de acá puede fallar "suelto": con `set -e`, un fallo
+# dentro del trap corta la restauración a medias y además decide el código
+# de salida (ya pasó en rotar-clave-postgres.sh). Por eso cada paso acumula
+# en `fallas` y al final se decide explícitamente con qué código salir.
+RESTAURADO=0
+restaurar() {
+  local codigo=$?
+  [ "$RESTAURADO" = "1" ] && exit "$codigo"
+  RESTAURADO=1
+  echo
+  echo "── restaurando la bandera en los dos deployments ──"
+  local fallas=0 d
+  poner_bandera subscriptions "$ORIGINAL_API" || fallas=$((fallas + 1))
+  poner_bandera subscriptions-worker "$ORIGINAL_WORKER" || fallas=$((fallas + 1))
+  for d in subscriptions subscriptions-worker; do
+    if ! kubectl rollout status "deployment/$d" --timeout=180s >/dev/null; then
+      echo "   AVISO: el rollout de $d tras restaurar no terminó"
+      fallas=$((fallas + 1))
+    fi
+  done
   kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
+  if [ "$fallas" -gt 0 ]; then
+    echo "   LA RESTAURACIÓN NO SE PUDO VERIFICAR ($fallas problema(s)). Revísala a mano:"
+    echo "   kubectl get deployment subscriptions subscriptions-worker -o yaml | grep -B1 -A1 EVENTOS_ASINCRONOS"
+    exit 1
+  fi
+  echo "   subscriptions: $ORIGINAL_API · subscriptions-worker: $ORIGINAL_WORKER (rollout comprobado)"
+  exit "$codigo"
 }
 trap restaurar EXIT
 
@@ -72,7 +121,7 @@ print('sembradas', Subscription.objects.filter(organizacion_id='$org').count())
 # todavía drenándose, así que medía su carga MÁS la cola de la anterior. Los
 # números no eran de corridas aisladas. Lo encontró la revisión de la PR #106.
 drenar() {
-  local limite=120 i=0
+  local limite="$DRENAR_INTENTOS" i=0
   printf "── esperando a que se drene el outbox y la cola "
   while [ "$i" -lt "$limite" ]; do
     local pendientes cola
@@ -84,12 +133,11 @@ drenar() {
       return 0
     fi
     printf "."
-    sleep 2
+    sleep "$DRENAR_PAUSA"
     i=$((i + 1))
   done
   echo
-  echo "   AVISO: no se drenó en $((limite * 2))s (outbox=$pendientes cola=$cola)."
-  echo "   Los numeros de la corrida siguiente pueden estar contaminados."
+  echo "   no se drenó en $((limite * DRENAR_PAUSA))s (outbox=$pendientes cola=$cola)."
   return 1
 }
 
@@ -137,7 +185,19 @@ correr() {
   # El trabajo derivado del modo asincrono ocurre DESPUES de que la carga
   # termino, asi que hay que esperarlo antes de contar y antes de la corrida
   # siguiente.
-  drenar || true
+  #
+  # Si NO se drena, se aborta. La version anterior seguia con `|| true`, y la
+  # corrida siguiente arrancaba con la cola de esta todavia drenandose: los
+  # numeros parecian de corridas aisladas y no lo eran. Lo encontro la
+  # revision de la PR. Una comparacion contaminada no sirve para nada, asi
+  # que mejor decirlo y parar (el trap restaura las banderas igual).
+  drenar || {
+    echo
+    echo "COMPARACION INVALIDA: el trabajo de '$etiqueta' no se dreno."
+    echo "No se sigue como si las corridas estuvieran aisladas. Revisa el"
+    echo "consumidor y el despachador del outbox, y vuelve a correr."
+    exit 1
+  }
   echo "── recalculos del resumen en esta corrida: $(contar_recalculos "$DESDE") ──"
   echo "   (tienen que ser ~iguales en los dos modos; si no, no se comparo lo mismo)"
 }

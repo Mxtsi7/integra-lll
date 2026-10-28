@@ -142,3 +142,23 @@ jobs:
       - name: Build
         run: npm run build
 
+
+  # ── Guiones de operación: la comparación con y sin cola ─────────────
+  # comparar-cola.sh cambia la bandera EVENTOS_ASINCRONOS en dos deployments
+  # de producción y tiene que dejarlos exactamente como estaban, pase lo que
+  # pase. El arnés lo ejercita con un kubectl doble CON ESTADO: salida normal,
+  # drenaje que no termina, carga interrumpida y rollout de la restauración
+  # fallido. No toca ningún cluster. Corre en segundos.
+  operacion-comparar:
+    name: operación · comparar cola
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sintaxis de los guiones
+        run: |
+          bash -n k8s/pruebas/comparar-cola.sh
+          bash -n k8s/pruebas/probar-comparar-cola.sh
+
+      - name: Arnés de la comparación (kubectl doble, sin cluster)
+        run: bash k8s/pruebas/probar-comparar-cola.sh
