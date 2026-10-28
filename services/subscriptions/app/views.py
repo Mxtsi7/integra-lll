@@ -20,7 +20,7 @@ from rest_framework.response import Response
 from events.outbox import registrar_actualizada, registrar_creada
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from app.models import Cobro, Presupuesto, Subscription
+from app.models import Cobro, Presupuesto, RegistroUso, Subscription
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,

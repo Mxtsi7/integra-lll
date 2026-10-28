@@ -661,4 +661,3 @@ class Presupuesto(ModeloTenant):
 
     def __str__(self) -> str:
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
-
