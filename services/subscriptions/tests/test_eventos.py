@@ -538,3 +538,157 @@ class TestValidarSobre:
         with pytest.raises(SobreInvalido) as caso:
             validar(self.sobre(version=999))
         assert str(caso.value)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# La carrera del resumen y el doble trabajo del modo 0
+# (hallazgos de la tercera revisión de #106)
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def solo_postgres():
+    """Salta la prueba si la base no es PostgreSQL, EN TIEMPO DE EJECUCIÓN.
+
+    Con `@pytest.mark.skipif(connection.vendor != ...)` no sirve: el decorador
+    se evalúa al importar el módulo y el conftest cambia la base después.
+    """
+    from django.db import connection
+
+    if connection.vendor != "postgresql":
+        pytest.skip("los advisory locks son de PostgreSQL; en SQLite es un no-op")
+
+
+@pytest.mark.django_db
+class TestBloqueoDelResumen:
+    """El recálculo se serializa por organización ANTES de leer la fuente.
+
+    El `atomic()` agrupaba las escrituras pero no serializaba la lectura: con
+    read committed, A leía 100, B insertaba 20 y guardaba 120, y A guardaba su
+    100 viejo. Reproducido en la revisión: fuente 120, agregado 100.
+
+    El modo síncrono corre desde varios workers, así que no es hipotético.
+    """
+
+    def test_el_lock_se_toma_antes_de_leer_la_fuente(self):
+        """Si alguien lo mueve después del SUM, esto falla."""
+        import inspect
+
+        from events import trabajo
+
+        fuente = inspect.getsource(trabajo.recalcular_resumen)
+        assert 'bloquear("resumen_organizacion"' in fuente
+        # Y dentro del atomic, antes de delegar el cálculo.
+        assert fuente.index("transaction.atomic()") < fuente.index("bloquear(")
+        assert fuente.index("bloquear(") < fuente.index("_recalcular_ya_bloqueado")
+
+    def test_el_calculo_no_se_llama_sin_el_lock(self):
+        """`_recalcular_ya_bloqueado` asume el lock tomado: el único camino
+        público tiene que pasar por `recalcular_resumen`."""
+        import inspect
+
+        from events import trabajo
+
+        fuente = inspect.getsource(trabajo)
+        # Una sola llamada, la de recalcular_resumen.
+        assert fuente.count("_recalcular_ya_bloqueado(") == 2  # def + 1 llamada
+
+    def test_en_postgres_el_lock_queda_tomado(self, solo_postgres, org):
+        """Que la función no reviente no prueba que el lock exista."""
+        from django.db import connection, transaction
+
+        from shared.bloqueo import ESPACIOS, bloquear
+
+        with transaction.atomic():
+            bloquear("resumen_organizacion", org)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                    "AND classid = %s AND pid = pg_backend_pid()",
+                    [ESPACIOS["resumen_organizacion"]],
+                )
+                assert cursor.fetchone()[0] == 1
+
+    def test_en_postgres_organizaciones_distintas_no_se_bloquean_entre_si(
+        self, solo_postgres
+    ):
+        """Si todas colapsaran en una clave, se serializaría el servicio entero."""
+        from django.db import connection, transaction
+
+        from shared.bloqueo import ESPACIOS, bloquear
+
+        with transaction.atomic():
+            for _ in range(4):
+                bloquear("resumen_organizacion", uuid.uuid4())
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(DISTINCT objid) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND classid = %s "
+                    "AND pid = pg_backend_pid()",
+                    [ESPACIOS["resumen_organizacion"]],
+                )
+                assert cursor.fetchone()[0] == 4
+
+    def test_el_espacio_de_locks_no_choca_con_el_de_analytics(self):
+        """Dos familias distintas tienen que tener números distintos."""
+        from shared.bloqueo import ESPACIOS
+
+        assert len(set(ESPACIOS.values())) == len(ESPACIOS)
+
+    def test_un_espacio_desconocido_revienta(self):
+        from django.db import transaction
+
+        from shared.bloqueo import bloquear
+
+        with pytest.raises(KeyError, match="desconocido"):
+            with transaction.atomic():
+                bloquear("no-declarado", "x")
+
+    def test_fuera_de_una_transaccion_revienta(self, monkeypatch):
+        """Un lock de transacción fuera de un atomic se suelta al tiro."""
+        from shared import bloqueo
+
+        class FueraDeTransaccion:
+            in_atomic_block = False
+
+        monkeypatch.setattr(
+            bloqueo.transaction, "get_connection", lambda *_a, **_k: FueraDeTransaccion()
+        )
+        with pytest.raises(RuntimeError, match="transacción"):
+            bloqueo.bloquear("resumen_organizacion", "x")
+
+
+@pytest.mark.django_db
+class TestSinTrabajoDuplicado:
+    """En modo 0 el trabajo tiene que hacerse UNA vez, no dos.
+
+    El POST recalcula y el evento igual va al outbox, así que el consumidor
+    recalculaba lo mismo otra vez. El modo 0 hacía el doble de trabajo que el
+    modo 1 y los números de la comparación no medían arquitectura.
+    """
+
+    def test_el_consumidor_omite_el_recalculo_en_modo_sincrono(self, settings):
+        """Lo decide mirando la bandera, igual que el POST."""
+        import inspect
+
+        from app.management.commands import consumir_eventos
+
+        fuente = inspect.getsource(consumir_eventos.Command.handle)
+        assert "if not settings.EVENTOS_ASINCRONOS:" in fuente
+        # Y confirma el mensaje: el trabajo está hecho, no pendiente.
+        assert fuente.index("if not settings.EVENTOS_ASINCRONOS:") < fuente.index(
+            "ultimo = None"
+        )
+
+    def test_los_dos_modos_cuentan_con_el_mismo_formato(self):
+        """`comparar-cola.sh` cuenta esas líneas en los dos lados; si los
+        formatos se separan, la comparación deja de poder comprobarse."""
+        import inspect
+
+        from app.management.commands import consumir_eventos
+        from events import modo
+
+        assert "resumen.recalculado modo=sincrono" in inspect.getsource(modo)
+        assert "resumen.recalculado modo=asincrono" in inspect.getsource(
+            consumir_eventos
+        )

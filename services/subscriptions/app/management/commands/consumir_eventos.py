@@ -165,6 +165,26 @@ class Command(BaseCommand):
                 a_la_cola_de_fallos(canal_, metodo, str(error), cuerpo)
                 return self._quizas_parar(canal_, opciones)
 
+            # ── En modo síncrono el POST ya hizo este trabajo ───────────────
+            # Con EVENTOS_ASINCRONOS=0 el recálculo ocurre dentro del POST, y
+            # el evento igual se registra en el outbox porque es parte del
+            # contrato y puede haber otros consumidores. Pero ESTE consumidor
+            # recalcularía lo mismo una segunda vez.
+            #
+            # Eso rompía la comparación: el modo 0 hacía el doble de trabajo
+            # que el modo 1, así que los números no medían arquitectura.
+            # Lo encontró la revisión de la PR.
+            #
+            # Se confirma el mensaje igual: el trabajo está hecho, no pendiente.
+            if not settings.EVENTOS_ASINCRONOS:
+                registro.info(
+                    "resumen.omitido modo=sincrono org=%s "
+                    "(el POST ya recalculó; el evento se confirma)",
+                    organizacion_id,
+                )
+                canal_.basic_ack(delivery_tag=metodo.delivery_tag)
+                return self._quizas_parar(canal_, opciones)
+
             ultimo = None
             espera = ESPERA_INICIAL
             for intento in range(1, INTENTOS + 1):
@@ -190,6 +210,12 @@ class Command(BaseCommand):
                     )
                     return self._quizas_parar(canal_, opciones)
                 else:
+                    # Se cuenta en el log para poder comprobar, al comparar,
+                    # que cada modo hizo la MISMA cantidad de trabajo.
+                    # comparar-cola.sh cuenta estas líneas.
+                    registro.info(
+                        "resumen.recalculado modo=asincrono org=%s", organizacion_id
+                    )
                     canal_.basic_ack(delivery_tag=metodo.delivery_tag)
                     return self._quizas_parar(canal_, opciones)
 

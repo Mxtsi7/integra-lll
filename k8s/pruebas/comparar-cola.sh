@@ -67,13 +67,59 @@ print('sembradas', Subscription.objects.filter(organizacion_id='$org').count())
 "
 }
 
+# ── Esperar a que no quede trabajo pendiente ─────────────────────────────────
+# Sin esto, la segunda corrida arrancaba con la cola y el outbox de la primera
+# todavía drenándose, así que medía su carga MÁS la cola de la anterior. Los
+# números no eran de corridas aisladas. Lo encontró la revisión de la PR #106.
+drenar() {
+  local limite=120 i=0
+  printf "── esperando a que se drene el outbox y la cola "
+  while [ "$i" -lt "$limite" ]; do
+    local pendientes cola
+    pendientes="$(kubectl exec deployment/subscriptions --       python manage.py shell -c       "from app.models import OutboxEvento; print(OutboxEvento.objects.filter(publicado_en__isnull=True).count())"       2>/dev/null | tr -d '
+' || echo "?")"
+    cola="$(kubectl exec statefulset/rabbitmq --       rabbitmqctl list_queues name messages --quiet 2>/dev/null       | awk '$1=="subscriptions.resumen"{print $2}' || echo "?")"
+    if [ "$pendientes" = "0" ] && [ "${cola:-0}" = "0" ]; then
+      echo " listo (outbox 0, cola 0)"
+      return 0
+    fi
+    printf "."
+    sleep 2
+    i=$((i + 1))
+  done
+  echo
+  echo "   AVISO: no se drenó en $((limite * 2))s (outbox=$pendientes cola=$cola)."
+  echo "   Los numeros de la corrida siguiente pueden estar contaminados."
+  return 1
+}
+
+# Cuenta cuantas veces se recalculo el resumen, para comprobar que los dos
+# modos hicieron la MISMA cantidad de trabajo. Si no calzan, la comparacion
+# no mide arquitectura: mide dos cargas distintas.
+contar_recalculos() {
+  local desde="$1"
+  local api cons
+  api="$(kubectl logs deployment/subscriptions --since-time="$desde" --all-containers 2>/dev/null     | grep -c "resumen.recalculado" || true)"
+  cons="$(kubectl logs deployment/subscriptions-worker --since-time="$desde" --all-containers 2>/dev/null     | grep -c "resumen.recalculado" || true)"
+  echo "$(( ${api:-0} + ${cons:-0} ))"
+}
+
 correr() {
   local modo="$1" etiqueta="$2" org="$3"
 
   echo
   echo "═══ $etiqueta (EVENTOS_ASINCRONOS=$modo) ═══"
   kubectl set env deployment/subscriptions "EVENTOS_ASINCRONOS=$modo" >/dev/null
+  # El consumidor vive en el pod del worker y tambien mira la bandera: hay que
+  # cambiarsela a los dos o el modo 0 seguiria recalculando por partida doble.
+  kubectl set env deployment/subscriptions-worker "EVENTOS_ASINCRONOS=$modo" >/dev/null
   kubectl rollout status deployment/subscriptions --timeout=180s
+  kubectl rollout status deployment/subscriptions-worker --timeout=180s
+
+  # Desde aca se cuentan los recalculos de ESTA corrida. Con --since-time, asi
+  # que tiene que ser UTC en el formato que acepta kubectl.
+  local DESDE
+  DESDE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   echo "── sembrando $SEMILLA suscripciones ──"
   sembrar "$org"
@@ -87,6 +133,13 @@ correr() {
   kubectl wait --for=condition=complete job/carga-comparar --timeout=300s >/dev/null
   kubectl logs job/carga-comparar | grep -E "^(Code |All errors|Sockets used)|target .* avg|percentile|Aggregated" || true
   kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
+
+  # El trabajo derivado del modo asincrono ocurre DESPUES de que la carga
+  # termino, asi que hay que esperarlo antes de contar y antes de la corrida
+  # siguiente.
+  drenar || true
+  echo "── recalculos del resumen en esta corrida: $(contar_recalculos "$DESDE") ──"
+  echo "   (tienen que ser ~iguales en los dos modos; si no, no se comparo lo mismo)"
 }
 
 echo "Comparación con y sin cola · $DURACION · $CONEXIONES conexiones · $QPS qps"

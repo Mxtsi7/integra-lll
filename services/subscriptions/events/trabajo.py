@@ -14,6 +14,8 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Case, Count, DecimalField, F, Sum, When
 
+from shared.bloqueo import bloquear
+
 from app.models import ResumenOrganizacion, Subscription
 
 
@@ -37,6 +39,24 @@ def recalcular_resumen(organizacion_id) -> list[ResumenOrganizacion]:
     se borran, para que no queden totales fantasma de una divisa sin
     suscripciones.
     """
+    # ── El atomic empieza ANTES de leer, y lo primero es el lock ──────────
+    # La versión anterior construía el queryset acá y abría el atomic recién
+    # para escribir. Las escrituras quedaban agrupadas, pero la LECTURA no
+    # estaba serializada: con read committed, otro recálculo podía confirmar
+    # entre nuestro SUM y nuestro UPDATE, y el nuestro pisaba su resultado con
+    # un total viejo. Reproducido en la revisión de la PR: fuente 120,
+    # agregado 100.
+    #
+    # El modo síncrono corre desde varios workers a la vez, así que no es
+    # hipotético. Y no se arregla solo porque después exista el outbox: el
+    # modo síncrono no debería depender de que la cola lo corrija.
+    with transaction.atomic():
+        bloquear("resumen_organizacion", organizacion_id)
+        return _recalcular_ya_bloqueado(organizacion_id)
+
+
+def _recalcular_ya_bloqueado(organizacion_id) -> list[ResumenOrganizacion]:
+    """El cálculo en sí. Asume que el lock de la organización ya está tomado."""
     activas = Subscription.objects.filter(
         organizacion_id=organizacion_id,
         activo=True,
@@ -60,25 +80,27 @@ def recalcular_resumen(organizacion_id) -> list[ResumenOrganizacion]:
         .order_by("moneda")
     )
 
-    # En una sola transacción: si algo falla, no queda media organización
-    # recalculada con monedas de dos momentos distintos.
-    with transaction.atomic():
-        resumenes = []
-        monedas_vigentes = []
-        for fila in por_moneda:
-            resumen, _ = ResumenOrganizacion.objects.update_or_create(
-                organizacion_id=organizacion_id,
-                moneda=fila["moneda"],
-                defaults={
-                    "total_mensual": fila["total"] or Decimal("0"),
-                    "cantidad_activas": fila["cantidad"] or 0,
-                },
-            )
-            resumenes.append(resumen)
-            monedas_vigentes.append(fila["moneda"])
+    # Ya estamos dentro del atomic del llamador, que abarca la lectura: si
+    # algo falla, no queda media organización recalculada con monedas de dos
+    # momentos distintos.
+    resumenes = []
+    monedas_vigentes = []
+    for fila in por_moneda:
+        resumen, _ = ResumenOrganizacion.objects.update_or_create(
+            organizacion_id=organizacion_id,
+            moneda=fila["moneda"],
+            defaults={
+                "total_mensual": fila["total"] or Decimal("0"),
+                "cantidad_activas": fila["cantidad"] or 0,
+            },
+        )
+        resumenes.append(resumen)
+        monedas_vigentes.append(fila["moneda"])
 
-        ResumenOrganizacion.objects.filter(
-            organizacion_id=organizacion_id
-        ).exclude(moneda__in=monedas_vigentes).delete()
+    # Las monedas que la organización dejó de usar se borran DENTRO del mismo
+    # lock, o un recálculo concurrente podría reinsertarlas en el intervalo.
+    ResumenOrganizacion.objects.filter(
+        organizacion_id=organizacion_id
+    ).exclude(moneda__in=monedas_vigentes).delete()
 
     return resumenes

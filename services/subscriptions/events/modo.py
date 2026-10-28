@@ -27,9 +27,14 @@ ventana real: si el publicar fallaba, el evento se perdía y el resumen quedaba
 viejo. Eso quedaba anotado como deuda. El outbox la pagó.)
 """
 
+import logging
+
 from django.conf import settings
 
 from events.trabajo import recalcular_resumen
+
+
+registro = logging.getLogger(__name__)
 
 
 def al_crear_suscripcion(suscripcion) -> str:
@@ -45,4 +50,10 @@ def al_crear_suscripcion(suscripcion) -> str:
         return "asincrono"
 
     recalcular_resumen(suscripcion.organizacion_id)
+    # Se cuenta igual que en el consumidor, con el mismo formato, para poder
+    # comprobar al comparar que los dos modos hicieron la MISMA cantidad de
+    # trabajo. comparar-cola.sh cuenta estas líneas en los dos lados.
+    registro.info(
+        "resumen.recalculado modo=sincrono org=%s", suscripcion.organizacion_id
+    )
     return "sincrono"
