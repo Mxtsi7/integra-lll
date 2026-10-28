@@ -90,6 +90,8 @@ RUTAS = {
     "/api/suscripciones/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
+    # FE-08: progreso de las importaciones (lo consulta CH-27).
+    "/api/importaciones/": "connectors",
     "/api/recomendaciones/": "analytics",
     # FE-28 y FE-29: uso por periodo y puntaje de bajo uso. No va bajo
     # "/api/usos/" (que es de subscriptions) porque son cosas distintas:
@@ -97,6 +99,8 @@ RUTAS = {
     "/api/analitica/": "analytics",
     "/api/asistente/": "analytics",
     "/api/alertas/": "notifications",
+    # FE-21: preferencias de notificación, por usuario.
+    "/api/preferencias-alertas/": "notifications",
 }
 
 # Coincidencias exactas sin access: Auth valida el refresh del body en

@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('analytics', '0002_limites_negocio_ia'),
+        ('analytics', '0005_merge_identidad_hallazgo_y_descarte_vi18'),
     ]
 
     operations = [

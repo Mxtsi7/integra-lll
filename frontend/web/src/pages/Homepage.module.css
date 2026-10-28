@@ -134,11 +134,77 @@
   }
 }
 
-.sinResultados {
-  padding: 48px 20px;
-  text-align: center;
-  font-size: 14.5px;
+/* CH-11 a CH-13: fecha de cobro, orden y limpiar, bajo los estados. */
+.controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.controlEtiqueta {
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--tinta-2);
+}
+
+.controlCampo {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--vidrio-borde-fuerte);
+  border-radius: var(--radio-m);
+  background: var(--vidrio);
+  font-size: 14px;
+  color: var(--tinta);
+  transition: border-color var(--rapido), box-shadow var(--rapido);
+}
+
+.controlCampo:focus-visible {
+  outline: none;
+  border-color: var(--acento);
+  box-shadow: 0 0 0 3px var(--acento-suave);
+}
+
+.controlCampo option {
+  background: var(--superficie-solida);
+  color: var(--tinta);
+}
+
+.controlCampo::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+}
+
+.campoOrden {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tinta-2);
+}
+
+.limpiar {
+  margin-left: auto;
+}
+
+.errorListado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13.5px;
 }
 
 @media (max-width: 1100px) {
@@ -172,5 +238,14 @@
 
   .busquedaActiva {
     display: none;
+  }
+
+  .control,
+  .controlCampo {
+    width: 100%;
+  }
+
+  .limpiar {
+    margin-left: 0;
   }
 }
