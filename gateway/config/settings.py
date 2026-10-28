@@ -90,9 +90,13 @@ RUTAS = {
     "/api/suscripciones/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
+    # FE-08: progreso de las importaciones (lo consulta CH-27).
+    "/api/importaciones/": "connectors",
     "/api/recomendaciones/": "analytics",
     "/api/asistente/": "analytics",
     "/api/alertas/": "notifications",
+    # FE-21: preferencias de notificación, por usuario.
+    "/api/preferencias-alertas/": "notifications",
 }
 
 # Coincidencias exactas sin access: Auth valida el refresh del body en

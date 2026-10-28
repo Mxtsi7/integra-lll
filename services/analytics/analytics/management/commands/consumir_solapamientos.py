@@ -62,8 +62,8 @@ class Command(BaseCommand):
                 queue=COLA_SALIDA,
                 durable=True,
                 arguments={
-                    # Límite de seguridad hasta que VI-17 las persista.
-                    # Los mensajes más viejos se descartan al llegar al tope.
+                    # Límite de seguridad para consumidores de la cola. La
+                    # persistencia de VI-17 ya no depende de ella.
                     "x-max-length": 10000,
                 },
             )
