@@ -24,6 +24,12 @@
 # conexión por petición (CONN_MAX_AGE=0), así que en la práctica el sitio
 # responde error durante el reinicio: alrededor de un minuto. No correr esto
 # durante la demo.
+#
+# ── Cómo se recupera de una corrida a medias ─────────────────────────────────
+# El archivo de recuperación guarda FASES, no solo la clave. Y antes de
+# saltarse un paso se COMPRUEBA el estado efectivo de la base, no se infiere
+# del archivo: que exista el archivo no demuestra que el ALTER haya ocurrido.
+# Ver `leer_pendiente` más abajo.
 set -euo pipefail
 
 APLICAR=0
@@ -32,9 +38,79 @@ APLICAR=0
 # Los que abren conexiones a la base. El gateway recibe el Secret pero no
 # consulta Postgres, así que no se reinicia: sería corte sin motivo.
 SERVICIOS=(auth subscriptions subscriptions-worker subscriptions-beat)
+SECRETO=ojoalgasto
 
 paso() { echo; echo "── $* ──"; }
 mal()  { echo "ERROR: $*" >&2; exit 1; }
+huella() { printf %s "$1" | sha256sum | cut -d' ' -f1; }
+
+# ── El archivo de recuperación ───────────────────────────────────────────────
+# Guarda la clave nueva (600) Y en qué fase quedó la operación. Sin las fases,
+# la sola existencia del archivo hacía que la corrida siguiente se saltara el
+# ALTER: si el ALTER había fallado, el Secret terminaba con una clave que la
+# base nunca recibió. Justo la desincronización que este script evita.
+#
+# Guarda también a QUÉ destino pertenece (contexto, namespace, Secret) y la
+# huella de la clave anterior, para no reanudar sobre otro cluster ni perder
+# la referencia de cuál era la vieja.
+RECUPERACION="${HOME}/.ojoalgasto-rotacion-pendiente"
+
+FASE_GENERADA=generada      # hay clave nueva; el ALTER puede o no haber corrido
+FASE_ALTER=alter_ok         # la base YA acepta la clave nueva
+FASE_SECRET=secret_ok       # el Secret ya está en sincronía
+FASE_ROLLOUT=rollout_ok     # los servicios ya reiniciaron
+
+CONTEXTO="$(kubectl config current-context 2>/dev/null || echo desconocido)"
+NAMESPACE="$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/null || true)"
+NAMESPACE="${NAMESPACE:-default}"
+DESTINO="${CONTEXTO}|${NAMESPACE}|${SECRETO}"
+
+escribir_pendiente() {  # $1 = fase, $2 = clave, $3 = huella de la anterior
+  ( umask 077
+    {
+      echo "version=1"
+      echo "destino=$DESTINO"
+      echo "fase=$1"
+      echo "anterior_sha256=$3"
+      echo "clave=$2"
+    } > "$RECUPERACION"
+  )
+}
+
+leer_pendiente() {  # deja PEND_FASE, PEND_CLAVE, PEND_ANTERIOR o devuelve 1
+  [ -f "$RECUPERACION" ] || return 1
+  PEND_FASE=""; PEND_CLAVE=""; PEND_ANTERIOR=""; local destino=""
+  while IFS='=' read -r llave valor; do
+    case "$llave" in
+      fase)            PEND_FASE="$valor" ;;
+      clave)           PEND_CLAVE="$valor" ;;
+      anterior_sha256) PEND_ANTERIOR="$valor" ;;
+      destino)         destino="$valor" ;;
+    esac
+  done < "$RECUPERACION"
+  [ -n "$PEND_CLAVE" ] || mal "el archivo de recuperación no tiene clave; revísalo a mano"
+  if [ "$destino" != "$DESTINO" ]; then
+    mal "el archivo de recuperación es de OTRO destino ($destino), no de $DESTINO.
+  No se reanuda a ciegas sobre un cluster distinto. Revísalo a mano."
+  fi
+  return 0
+}
+
+# ── Comprobar la clave CONTRA LA BASE, no contra el Secret ───────────────────
+# El Secret dice lo que creemos, la base dice lo que es. Distinguirlos es lo
+# que permite saber si un ALTER a medias llegó a ocurrir.
+#
+# La clave va por stdin a un `sh -c` que la mete en el entorno de psql, no en
+# sus argumentos: así no aparece en ningún `ps`. Queda en el entorno de ese
+# proceso mientras dure, que es lo menos malo disponible con kubectl exec; se
+# dice para que nadie crea que es hermético.
+entra_en_la_base() {  # $1 = clave. 0 si entra, 1 si no
+  printf %s "$1" | kubectl exec -i statefulset/postgres -- sh -c '
+    read -r p
+    PGPASSWORD="$p" psql -h 127.0.0.1 -U postgres -d suscripciones \
+      -q -v ON_ERROR_STOP=1 -c "select 1" >/dev/null 2>&1
+  '
+}
 
 paso "comprobaciones previas"
 
@@ -42,21 +118,65 @@ kubectl get statefulset postgres >/dev/null 2>&1 || mal "no veo el StatefulSet d
 [ "$(kubectl get statefulset postgres -o jsonpath='{.status.readyReplicas}')" = "1" ] \
   || mal "postgres no está listo; no se rota con la base caída"
 
-ACTUAL="$(kubectl get secret ojoalgasto -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
+ACTUAL="$(kubectl get secret "$SECRETO" -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
 [ -n "$ACTUAL" ] || mal "el Secret no tiene POSTGRES_PASSWORD"
-echo "   clave actual: ${#ACTUAL} caracteres"
+echo "   clave del Secret: ${#ACTUAL} caracteres"
+echo "   destino: $DESTINO"
 
-# Se confirma que la que está viva es la publicada, para no rotar a ciegas una
-# que alguien ya rotó. La huella se compara, el valor no se imprime nunca.
-FILTRADA="$(git show 4e2af2c:k8s/00-configuracion.yaml 2>/dev/null \
-  | grep -oE 'postgres://[^:]+:[^@]+@' | sed -E 's|postgres://[^:]+:||; s|@$||' | tr -d '\n' || true)"
-if [ -n "$FILTRADA" ]; then
-  if [ "$(printf %s "$ACTUAL" | sha256sum)" = "$(printf %s "$FILTRADA" | sha256sum)" ]; then
-    echo "   coincide con la publicada en el historial: HAY QUE ROTARLA"
-  else
-    echo "   NO coincide con la publicada: parece que ya se rotó"
-    echo "   si igual quieres rotarla, borra esta comprobación a mano"
+# ── Lo PRIMERO: ¿hay una operación a medias? ─────────────────────────────────
+# Antes esta comprobación venía DESPUÉS de la de "ya se rotó", y eso dejaba un
+# caso sin salida: ALTER correcto + Secret correcto + rollout o health
+# fallido. En la corrida siguiente el Secret ya tiene la clave nueva, así que
+# no coincide con la publicada, el script decía "ya se rotó" y salía con 0 sin
+# reanudar los reinicios ni las verificaciones.
+REANUDANDO=0
+NUEVA=""
+ANTERIOR_HUELLA=""
+FASE="$FASE_GENERADA"
+
+if leer_pendiente; then
+  paso "hay una rotación a medias"
+  echo "   $RECUPERACION, fase anotada: $PEND_FASE"
+  REANUDANDO=1
+  NUEVA="$PEND_CLAVE"
+  ANTERIOR_HUELLA="$PEND_ANTERIOR"
+  FASE="$PEND_FASE"
+
+  if [ "$APLICAR" != "1" ]; then
+    echo "   en modo ensayo no se reanuda. Para continuarla: $0 --aplicar"
     exit 0
+  fi
+
+  # ── No se CREE la fase: se COMPRUEBA ───────────────────────────────────────
+  # `fase=generada` significa "se generó la clave", no "el ALTER ocurrió": el
+  # archivo se escribe antes de tocar la base a propósito, para no perderla.
+  # Así que se le pregunta a la base cuál acepta.
+  echo "   comprobando contra la base qué clave acepta…"
+  if entra_en_la_base "$NUEVA"; then
+    echo "   la base YA acepta la clave nueva"
+    [ "$FASE" = "$FASE_GENERADA" ] && FASE="$FASE_ALTER"
+  else
+    echo "   la base todavía NO acepta la clave nueva: el ALTER no llegó a ocurrir"
+    if [ "$FASE" != "$FASE_GENERADA" ]; then
+      mal "el archivo dice fase=$FASE pero la base no acepta esa clave.
+  Estado inconsistente: no se toca nada. Revísalo a mano antes de seguir."
+    fi
+  fi
+else
+  if [ "$APLICAR" = "1" ]; then
+    # Solo se exige esto en una rotación NUEVA. Si hay uno a medias, la clave
+    # del Secret ya puede ser la nueva y esta comprobación no aplica.
+    FILTRADA="$(git show 4e2af2c:k8s/00-configuracion.yaml 2>/dev/null \
+      | grep -oE 'postgres://[^:]+:[^@]+@' | sed -E 's|postgres://[^:]+:||; s|@$||' | tr -d '\n' || true)"
+    if [ -n "$FILTRADA" ]; then
+      if [ "$(huella "$ACTUAL")" = "$(huella "$FILTRADA")" ]; then
+        echo "   coincide con la publicada en el historial: HAY QUE ROTARLA"
+      else
+        echo "   NO coincide con la publicada: parece que ya se rotó"
+        echo "   (y no hay ninguna operación pendiente que reanudar)"
+        exit 0
+      fi
+    fi
   fi
 fi
 
@@ -73,49 +193,33 @@ if [ "$APLICAR" != "1" ]; then
   exit 0
 fi
 
-# ── El archivo de recuperación ───────────────────────────────────────────────
-# La clave nueva se escribe EN DISCO, con permisos 600, ANTES de tocar Postgres.
-#
-# Sin esto había un agujero que podía dejar al equipo sin base: el ALTER USER
-# ocurre antes de actualizar el Secret, y si el `kubectl patch` fallaba, la
-# clave nueva solo existía en una variable del shell. El script moría por
-# `set -e` y nadie quedaba sabiendo la contraseña: la base con una clave
-# desconocida y el Secret con la vieja. Lo encontró la revisión de la PR.
-#
-# Si el archivo existe al arrancar, es que una corrida anterior quedó a medias:
-# se REANUDA con esa clave en vez de generar otra a ciegas. Generar una nueva
-# dejaría la primera huérfana para siempre.
-#
-# Se borra recién cuando todo verificó.
-RECUPERACION="${HOME}/.ojoalgasto-rotacion-pendiente"
+# Los temporales llevan la clave adentro: se limpian pase lo que pase.
+TEMPORALES=()
+limpiar() {
+  # El `return 0` NO es decorativo: esta funcion corre en un trap EXIT, y el
+  # estado con que termina PASA A SER el del script. Con `[ 0 -gt 0 ] && rm`,
+  # cuando no habia temporales el test fallaba, el && cortaba, la funcion
+  # devolvia 1 y el script salia con 1 despues de haber impreso "Listo".
+  # Pasaba justo al reanudar, que es cuando el patch se omite y no hay
+  # temporales. Lo encontro el arnes con dobles con estado.
+  if [ "${#TEMPORALES[@]}" -gt 0 ]; then
+    rm -f "${TEMPORALES[@]}"
+  fi
+  return 0
+}
+trap limpiar EXIT
 
-if [ -f "$RECUPERACION" ]; then
-  paso "hay una rotación a medias"
-  echo "   $RECUPERACION existe: una corrida anterior no terminó."
-  echo "   Se REANUDA con esa clave; no se genera otra."
-  echo "   (si estás seguro de que no hace falta, borra el archivo a mano)"
-  NUEVA="$(cat "$RECUPERACION")"
-  [ -n "$NUEVA" ] || mal "el archivo de recuperación está vacío; revísalo a mano"
-  REANUDANDO=1
-else
+if [ "$REANUDANDO" != "1" ]; then
   # hex: sin comillas ni escapes que romper en el SQL ni en el JSON
   NUEVA="$(openssl rand -hex 16)"
-  REANUDANDO=0
-  ( umask 077; printf %s "$NUEVA" > "$RECUPERACION" )
+  ANTERIOR_HUELLA="$(huella "$ACTUAL")"
+  escribir_pendiente "$FASE_GENERADA" "$NUEVA" "$ANTERIOR_HUELLA"
   echo
   echo "   clave nueva guardada en $RECUPERACION (permisos 600)"
   echo "   se borra sola cuando todo verifique"
 fi
 
-# Los temporales llevan la clave adentro: se limpian pase lo que pase.
-TEMPORALES=()
-limpiar() { [ "${#TEMPORALES[@]}" -gt 0 ] && rm -f "${TEMPORALES[@]}"; }
-trap limpiar EXIT
-
-if [ "$REANUDANDO" = "1" ]; then
-  paso "1/5 · el ALTER USER ya se había hecho; se omite"
-  echo "   (la clave del archivo de recuperación ya está en la base)"
-else
+if [ "$FASE" = "$FASE_GENERADA" ]; then
   paso "1/5 · cambiando la clave dentro de Postgres"
   # Va por stdin y no como argumento: así no queda en la lista de procesos del
   # pod ni en el historial del shell.
@@ -123,27 +227,31 @@ else
   # ON_ERROR_STOP=1 es obligatorio: sin eso, psql leyendo un script por stdin
   # puede terminar con código 0 aunque la sentencia haya sido rechazada, y el
   # `|| mal` no se dispara. Entonces el Secret se actualizaba con una clave que
-  # la base nunca llegó a tener. Lo encontró la revisión de la PR.
+  # la base nunca llegó a tener.
   printf "ALTER USER postgres WITH PASSWORD '%s';\n" "$NUEVA" \
     | kubectl exec -i statefulset/postgres -- \
         psql -U postgres -d suscripciones -q -v ON_ERROR_STOP=1 \
-    || mal "el ALTER USER falló; no se tocó el Secret, el sistema sigue como estaba"
+    || mal "el ALTER USER falló; no se tocó el Secret, el sistema sigue como estaba.
+  La clave generada quedó en $RECUPERACION con fase=$FASE_GENERADA; al volver a
+  correr se comprueba contra la base y se reintenta el ALTER."
+  # La fase se anota DESPUÉS de que la base lo confirmó.
+  escribir_pendiente "$FASE_ALTER" "$NUEVA" "$ANTERIOR_HUELLA"
+  FASE="$FASE_ALTER"
   echo "   hecho"
+else
+  paso "1/5 · el ALTER USER ya está hecho (comprobado contra la base); se omite"
 fi
 
-paso "2/5 · actualizando el Secret"
-# ── Por qué un archivo y no `-p "$json"` ─────────────────────────────────────
-# `kubectl patch -p "$json"` pone la contraseña en los ARGUMENTOS del proceso,
-# visibles en el `ps` de cualquiera en esta máquina. Lo mismo pasaba al armar
-# el JSON con `python -c ... "$NUEVA"`. Las dos cosas las encontró la revisión
-# de la PR, y eran ciertas: el ALTER USER iba por stdin, pero estos dos no.
-#
-# Ahora el JSON se arma leyendo la clave por STDIN y se aplica desde un archivo
-# con permisos 600 que se borra en el trap.
-PATCH="$(mktemp)"
-TEMPORALES+=("$PATCH")
-chmod 600 "$PATCH"
-printf %s "$NUEVA" | python -c "
+if [ "$FASE" = "$FASE_ALTER" ]; then
+  paso "2/5 · actualizando el Secret"
+  # ── Por qué un archivo y no `-p "$json"` ───────────────────────────────────
+  # `kubectl patch -p "$json"` pone la contraseña en los ARGUMENTOS del
+  # proceso, visibles en el `ps` de cualquiera en esta máquina. Lo mismo pasaba
+  # al armar el JSON con `python -c ... "$NUEVA"`.
+  PATCH="$(mktemp)"
+  TEMPORALES+=("$PATCH")
+  chmod 600 "$PATCH"
+  printf %s "$NUEVA" | python -c "
 import json, sys
 clave = sys.stdin.read()
 # Los dos campos juntos en un solo patch: si quedaran desincronizados, los
@@ -154,34 +262,44 @@ print(json.dumps({'stringData': {
 }}))
 " > "$PATCH" || mal "no se pudo armar el patch; la clave nueva está en $RECUPERACION"
 
-kubectl patch secret ojoalgasto --type=merge --patch-file "$PATCH" >/dev/null \
-  || mal "el patch del Secret falló. La base YA tiene la clave nueva y el Secret no.
+  kubectl patch secret "$SECRETO" --type=merge --patch-file "$PATCH" >/dev/null \
+    || mal "el patch del Secret falló. La base YA tiene la clave nueva y el Secret no.
   La clave está en $RECUPERACION — NO borres ese archivo.
   Vuelve a correr este script: detecta el estado a medias y reanuda."
-echo "   POSTGRES_PASSWORD y DATABASE_URL al día"
+  escribir_pendiente "$FASE_SECRET" "$NUEVA" "$ANTERIOR_HUELLA"
+  FASE="$FASE_SECRET"
+  echo "   POSTGRES_PASSWORD y DATABASE_URL al día"
+else
+  paso "2/5 · el Secret ya está en sincronía; se omite"
+fi
 
-paso "3/5 · reiniciando los servicios que conectan a la base"
-for s in "${SERVICIOS[@]}"; do
-  deseadas="$(kubectl get "deployment/$s" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
-  if [ "${deseadas:-0}" = "0" ]; then
-    echo "   $s: en 0 réplicas, se omite"
-    continue
-  fi
-  kubectl rollout restart "deployment/$s" >/dev/null
-done
-for s in "${SERVICIOS[@]}"; do
-  deseadas="$(kubectl get "deployment/$s" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
-  [ "${deseadas:-0}" = "0" ] && continue
-  kubectl rollout status "deployment/$s" --timeout=180s \
-    || mal "el reinicio de $s no terminó. La clave está en $RECUPERACION — NO lo borres.
-  Revisa los pods y vuelve a correr este script para reanudar."
-done
+if [ "$FASE" = "$FASE_SECRET" ]; then
+  paso "3/5 · reiniciando los servicios que conectan a la base"
+  for s in "${SERVICIOS[@]}"; do
+    deseadas="$(kubectl get "deployment/$s" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+    if [ "${deseadas:-0}" = "0" ]; then
+      echo "   $s: en 0 réplicas, se omite"
+      continue
+    fi
+    kubectl rollout restart "deployment/$s" >/dev/null
+  done
+  for s in "${SERVICIOS[@]}"; do
+    deseadas="$(kubectl get "deployment/$s" -o jsonpath='{.spec.replicas}' 2>/dev/null || true)"
+    [ "${deseadas:-0}" = "0" ] && continue
+    kubectl rollout status "deployment/$s" --timeout=180s \
+      || mal "el reinicio de $s no terminó. La clave está en $RECUPERACION — NO lo borres.
+  Revisa los pods y vuelve a correr este script para reanudar desde acá."
+  done
+  escribir_pendiente "$FASE_ROLLOUT" "$NUEVA" "$ANTERIOR_HUELLA"
+  FASE="$FASE_ROLLOUT"
+else
+  paso "3/5 · los servicios ya reiniciaron; se omite"
+fi
 
 # ── A partir de acá se ACUMULAN fallos ───────────────────────────────────────
 # Antes, un /health/ caído solo imprimía "no responde" y el script seguía hasta
 # anunciar "Listo. La clave publicada ya no sirve." con código 0. O sea que
-# decía que todo estaba bien justo cuando no lo estaba. Lo encontró la revisión
-# de la PR. Ahora cada fallo suma y el código de salida lo refleja.
+# decía que todo estaba bien justo cuando no lo estaba.
 FALLOS=0
 
 paso "4/5 · comprobando que cada servicio llega a su esquema"
@@ -202,38 +320,42 @@ except Exception as e:
   fi
 done
 
-paso "5/5 · comprobando que la clave VIEJA ya no entra"
-# La comparación del principio lee el Secret; eso no prueba qué acepta la base.
-# Acá se intenta autenticar de verdad con la clave anterior: tiene que fallar.
-#
-# La clave va por stdin a un `sh -c` que la mete en el entorno de psql, no en
-# sus argumentos: así no aparece en ningún `ps`. Queda en el entorno de ese
-# proceso mientras dure, que es lo menos malo disponible con kubectl exec; se
-# dice para que nadie crea que es hermético.
-printf "   clave anterior… "
-if printf %s "$ACTUAL" | kubectl exec -i statefulset/postgres -- sh -c '
-  read -r p
-  PGPASSWORD="$p" psql -h 127.0.0.1 -U postgres -d suscripciones \
-    -q -v ON_ERROR_STOP=1 -c "select 1" >/dev/null 2>&1
-' ; then
-  echo "TODAVÍA ENTRA"
-  echo "   ↑ la rotación no surtió efecto: la clave publicada sigue sirviendo"
-  FALLOS=$((FALLOS + 1))
-else
-  echo "rechazada (correcto)"
-fi
-
-printf "   clave nueva…    "
-if printf %s "$NUEVA" | kubectl exec -i statefulset/postgres -- sh -c '
-  read -r p
-  PGPASSWORD="$p" psql -h 127.0.0.1 -U postgres -d suscripciones \
-    -q -v ON_ERROR_STOP=1 -c "select 1" >/dev/null 2>&1
-' ; then
+paso "5/5 · comprobando contra la base qué clave entra"
+# ── Por qué la huella viene del archivo y no de $ACTUAL ──────────────────────
+# Al reanudar, el Secret YA puede tener la clave nueva, así que `$ACTUAL` sería
+# la nueva y comprobar "la anterior" con ella no probaría nada. La huella de la
+# verdadera anterior se guardó en el archivo cuando todavía se sabía cuál era.
+printf "   clave nueva…      "
+if entra_en_la_base "$NUEVA"; then
   echo "entra (correcto)"
 else
   echo "NO ENTRA"
   echo "   ↑ la base no acepta la clave nueva; algo quedó a medias"
   FALLOS=$((FALLOS + 1))
+fi
+
+printf "   clave anterior…   "
+if [ "$REANUDANDO" = "1" ] && [ "$(huella "$ACTUAL")" = "$ANTERIOR_HUELLA" ]; then
+  ANTERIOR="$ACTUAL"
+elif [ "$REANUDANDO" != "1" ]; then
+  ANTERIOR="$ACTUAL"
+else
+  ANTERIOR=""
+fi
+
+if [ -z "$ANTERIOR" ]; then
+  # Reanudando después de parchear el Secret: ya no tenemos el valor de la
+  # anterior, solo su huella. Se dice en vez de comprobar la que no es.
+  echo "no se puede comprobar"
+  echo "   ↑ al reanudar, el Secret ya tiene la clave nueva y el valor de la"
+  echo "     anterior no se guarda (solo su huella). Lo que sí está verificado"
+  echo "     es que la base acepta la nueva, y el ALTER reemplaza la anterior."
+elif entra_en_la_base "$ANTERIOR"; then
+  echo "TODAVÍA ENTRA"
+  echo "   ↑ la rotación no surtió efecto: la clave publicada sigue sirviendo"
+  FALLOS=$((FALLOS + 1))
+else
+  echo "rechazada (correcto)"
 fi
 
 echo
@@ -245,6 +367,11 @@ if [ "$FALLOS" -gt 0 ]; then
 fi
 
 rm -f "$RECUPERACION"
-echo "Listo, y verificado: la clave publicada ya no entra a la base."
-echo "Sigue en el historial del repo, pero no abre nada."
+if [ -n "$ANTERIOR" ]; then
+  echo "Listo, y verificado: la base acepta la clave nueva y rechaza la anterior."
+else
+  echo "Listo. Verificado que la base acepta la clave nueva."
+  echo "El rechazo de la anterior no se pudo comprobar en esta corrida (ver 5/5)."
+fi
+echo "La publicada sigue en el historial del repo, pero no abre nada."
 echo "($RECUPERACION borrado.)"

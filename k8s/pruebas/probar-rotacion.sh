@@ -6,17 +6,22 @@
 # Nunca toca un cluster ni una base: todo son stubs y la clave es sintetica.
 #
 # Existe porque ese script puede dejar al equipo sin base de datos y no se
-# puede "probar en produccion a ver que pasa". Lo que comprueba:
+# puede "probar en produccion a ver que pasa".
 #
-#   · que ninguna clave aparezca en los ARGUMENTOS de un proceso (`ps`)
-#   · que si falla el patch del Secret quede el archivo de recuperacion, el
-#     script avise y NO anuncie exito
-#   · que una segunda corrida REANUDE con esa clave y no genere otra
-#   · que un /health/ caido, un rollout fallido o una clave vieja que todavia
-#     entra den codigo de salida distinto de 0
-#   · que el modo ensayo no llame a patch ni a exec
+# ── Los dobles tienen ESTADO ─────────────────────────────────────────────────
+# La primera version devolvia siempre la misma clave en `get secret`, aunque
+# el patch hubiera funcionado. O sea que no modelaba la mutacion que decide el
+# comportamiento de la segunda corrida, y por eso NO detectaba el caso en que
+# una rotacion a medias quedaba sin poder reanudarse. Lo señalo la revision de
+# la PR #108 y era cierto.
 #
-# Los cinco salieron de la revision de la PR #108; los cinco eran reales.
+# Ahora hay dos estados independientes, como en la realidad:
+#
+#   $ESTADO/bd      la clave que ACEPTA la base      (la cambia el ALTER)
+#   $ESTADO/secret  la clave que dice el Secret      (la cambia el patch)
+#
+# Que puedan diverger es justamente el problema que el script evita, asi que
+# el arnes tiene que poder representarlo.
 set -uo pipefail
 
 AQUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,12 +29,17 @@ GUION="$AQUI/../rotar-clave-postgres.sh"
 BASE="$(mktemp -d)"
 trap 'rm -rf "$BASE"' EXIT
 DOBLES="$BASE/bin"
-mkdir -p "$DOBLES"
+ESTADO="$BASE/estado"
+mkdir -p "$DOBLES" "$ESTADO"
 
 CLAVE_VIEJA="aaaaaaaa"
 CLAVE_NUEVA="b1b2b3b4b5b6b7b8b9c0c1c2c3c4c5c6"
 export HOME="$BASE/home"; mkdir -p "$HOME"
 PENDIENTE="$HOME/.ojoalgasto-rotacion-pendiente"
+
+export REGISTRO_ARGV="$BASE/argv.txt"
+export REGISTRO_PATCH="$BASE/patch.txt"
+export ESTADO
 
 cat > "$DOBLES/openssl" <<EOF
 #!/usr/bin/env bash
@@ -46,45 +56,58 @@ fi
 exec /usr/bin/git "\$@"
 EOF
 
-cat > "$DOBLES/kubectl" <<EOF
+cat > "$DOBLES/kubectl" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "\$REGISTRO_ARGV"
-case "\$1 \${2:-}" in
-  "get statefulset") echo 1; exit 0 ;;
-  "get secret")      printf %s "$CLAVE_VIEJA" | base64 -w0; exit 0 ;;
-  "get deployment"*)  echo 1; exit 0 ;;
+printf '%s\n' "$*" >> "$REGISTRO_ARGV"
+case "$1 ${2:-}" in
+  "config current-context") echo "cluster-de-prueba"; exit 0 ;;
+  "config view")            echo "pruebas"; exit 0 ;;
+  "get statefulset")        echo 1; exit 0 ;;
+  "get secret")             printf %s "$(cat "$ESTADO/secret")" | base64 -w0; exit 0 ;;
+  "get deployment"*)        echo 1; exit 0 ;;
   "patch secret")
-      for a in "\$@"; do
-        [ -f "\$a" ] && cat "\$a" >> "\$REGISTRO_PATCH"
+      for a in "$@"; do
+        if [ -f "$a" ]; then
+          cat "$a" >> "$REGISTRO_PATCH"
+          # El patch MUTA el Secret. Modelarlo es el punto de este arnes.
+          if [ "${FALLA_PATCH:-0}" = "0" ]; then
+            python -c "
+import json,sys
+print(json.load(open(sys.argv[1]))['stringData']['POSTGRES_PASSWORD'], end='')
+" "$a" > "$ESTADO/secret"
+          fi
+        fi
       done
-      exit \${FALLA_PATCH:-0} ;;
+      exit ${FALLA_PATCH:-0} ;;
   "rollout restart") exit 0 ;;
-  "rollout status")  exit \${FALLA_ROLLOUT:-0} ;;
+  "rollout status")  exit ${FALLA_ROLLOUT:-0} ;;
   "exec -i")
-      recibido="\$(cat)"
-      # El ALTER USER va con psql directo; las comprobaciones de clave con
-      # `sh -c`. Y entre esas dos hay que distinguir CUAL clave se probo:
-      # la vieja tiene que ser rechazada y la nueva aceptada. El doble lo
-      # decide mirando lo que le llega por stdin, igual que haria la base.
-      case "\$*" in
+      recibido="$(cat)"
+      case "$*" in
         *"sh -c"*)
-            if [ "\$recibido" = "$CLAVE_VIEJA" ]; then
-              exit \${FALLA_EXEC_I:-1}   # 1 = rechazada (lo correcto)
-            else
-              exit \${FALLA_CLAVE_NUEVA:-0}   # 0 = entra (lo correcto)
-            fi ;;
-        *) exit \${FALLA_ALTER:-0} ;;
+            # Comprobacion de clave: entra si es la que acepta la BASE.
+            [ "$recibido" = "$(cat "$ESTADO/bd")" ] && exit 0 || exit 1 ;;
+        *)
+            # ALTER USER: muta la clave de la BASE, si no se fuerza un fallo.
+            if [ "${FALLA_ALTER:-0}" != "0" ]; then exit "${FALLA_ALTER}"; fi
+            printf %s "$(printf '%s' "$recibido" | sed -E "s/.*PASSWORD '([^']*)'.*/\1/")" \
+              > "$ESTADO/bd"
+            exit 0 ;;
       esac ;;
   "exec deployment/auth"|"exec deployment/subscriptions")
-      echo "ok . esquema x"; exit \${FALLA_HEALTH:-0} ;;
+      echo "ok . esquema x"; exit ${FALLA_HEALTH:-0} ;;
 esac
 exit 0
 EOF
 chmod +x "$DOBLES"/*
 export PATH="$DOBLES:$PATH"
 
-export REGISTRO_ARGV="$BASE/argv.txt"
-export REGISTRO_PATCH="$BASE/patch.txt"
+reiniciar_estado() {
+  printf %s "$CLAVE_VIEJA" > "$ESTADO/bd"
+  printf %s "$CLAVE_VIEJA" > "$ESTADO/secret"
+  rm -f "$PENDIENTE"
+  export FALLA_ALTER=0 FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=0
+}
 
 correr() {
   : > "$REGISTRO_ARGV"
@@ -98,91 +121,161 @@ juzgar() {
   if [ "$2" = "1" ]; then echo "  [ OK    ] $1"; ok=$((ok+1))
   else echo "  [ FALLA ] $1"; mal=$((mal+1)); fi
 }
-# OJO: `test "$@"` y no `[ "$1" ]`. La primera version ignoraba la
-# comparacion y devolvia 1 siempre, asi que varias aserciones pasaban en
-# vacio. El arnes mentia.
+# OJO: `test "$@"` y no `[ "$1" ]`. La primera version ignoraba la comparacion
+# y devolvia 1 siempre, asi que varias aserciones pasaban en vacio.
 si() { if test "$@"; then echo 1; else echo 0; fi; }
+bd()     { cat "$ESTADO/bd"; }
+secreto() { cat "$ESTADO/secret"; }
+dice()   { grep -q "$1" "$BASE/salida.txt"; }
 
 echo "=== 1. camino feliz ==="
-rm -f "$PENDIENTE"
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=0 FALLA_EXEC_I=1
+reiniciar_estado
 codigo="$(correr)"
 juzgar "sale con 0" "$(si "$codigo" = "0")"
+juzgar "la BASE quedo con la clave nueva" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "el SECRET quedo con la clave nueva" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
 juzgar "borra el archivo de recuperacion" "$(si ! -f "$PENDIENTE")"
-if grep -qF "$CLAVE_NUEVA" "$REGISTRO_ARGV"; then fuga_n=0; else fuga_n=1; fi
-juzgar "la clave NUEVA no aparece en ningun argv" "$fuga_n"
-if grep -qF "$CLAVE_VIEJA" "$REGISTRO_ARGV"; then fuga_v=0; else fuga_v=1; fi
-juzgar "la clave VIEJA no aparece en ningun argv" "$fuga_v"
-if grep -qF "$CLAVE_NUEVA" "$REGISTRO_PATCH"; then en_patch=1; else en_patch=0; fi
-juzgar "la clave nueva SI viaja en el archivo de patch" "$en_patch"
-if grep -q -- "--patch-file" "$REGISTRO_ARGV"; then pf=1; else pf=0; fi
-juzgar "usa --patch-file" "$pf"
-if grep -q "ON_ERROR_STOP=1" "$REGISTRO_ARGV"; then oes=1; else oes=0; fi
-juzgar "pasa ON_ERROR_STOP=1 a psql" "$oes"
+if grep -qF "$CLAVE_NUEVA" "$REGISTRO_ARGV"; then v=0; else v=1; fi
+juzgar "la clave NUEVA no aparece en ningun argv" "$v"
+if grep -qF "$CLAVE_VIEJA" "$REGISTRO_ARGV"; then v=0; else v=1; fi
+juzgar "la clave VIEJA no aparece en ningun argv" "$v"
+if grep -qF "$CLAVE_NUEVA" "$REGISTRO_PATCH"; then v=1; else v=0; fi
+juzgar "la clave nueva viaja en el ARCHIVO de patch" "$v"
+if grep -q -- "--patch-file" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "usa --patch-file" "$v"
+if grep -q "ON_ERROR_STOP=1" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "pasa ON_ERROR_STOP=1 a psql" "$v"
 
 echo
-echo "=== 2. falla el patch del Secret (el caso grave) ==="
-rm -f "$PENDIENTE"
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=1 FALLA_ROLLOUT=0 FALLA_HEALTH=0 FALLA_EXEC_I=1
+echo "=== 2. el ALTER falla (el caso nuevo: NO debe adelantar el Secret) ==="
+reiniciar_estado
+export FALLA_ALTER=1
 codigo="$(correr)"
 juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
-juzgar "CONSERVA el archivo de recuperacion" "$(si -f "$PENDIENTE")"
-juzgar "el archivo tiene la clave nueva" "$(si "$(cat "$PENDIENTE" 2>/dev/null)" = "$CLAVE_NUEVA")"
-if grep -q "NO borres" "$BASE/salida.txt"; then avisa=1; else avisa=0; fi
-juzgar "avisa que no se borre" "$avisa"
-if grep -q "ya no entra a la base" "$BASE/salida.txt"; then exito=0; else exito=1; fi
-juzgar "no anuncia exito" "$exito"
+juzgar "la BASE sigue con la clave vieja" "$(si "$(bd)" = "$CLAVE_VIEJA")"
+juzgar "el SECRET sigue con la clave vieja" "$(si "$(secreto)" = "$CLAVE_VIEJA")"
+juzgar "queda el archivo de recuperacion" "$(si -f "$PENDIENTE")"
+if grep -q "^fase=generada" "$PENDIENTE" 2>/dev/null; then v=1; else v=0; fi
+juzgar "anotado con fase=generada, no alter_ok" "$v"
 
 echo
-echo "=== 3. reanudacion con el archivo presente ==="
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=0 FALLA_EXEC_I=1
+echo "=== 3. reanudar tras ALTER fallido: NO debe saltarse el ALTER ==="
+# Este es el caso que la version anterior rompia: la sola existencia del
+# archivo activaba REANUDANDO y se saltaba el ALTER, dejando el Secret con una
+# clave que la base nunca recibio.
+export FALLA_ALTER=0
 codigo="$(correr)"
 juzgar "sale con 0" "$(si "$codigo" = "0")"
-if grep -q "a medias" "$BASE/salida.txt"; then rea=1; else rea=0; fi
-juzgar "dice que reanuda" "$rea"
-if grep -q "ya se" "$BASE/salida.txt"; then omite=1; else omite=0; fi
-juzgar "NO repite el ALTER USER" "$omite"
-juzgar "ahora si borra el archivo" "$(si ! -f "$PENDIENTE")"
+if dice "NO acepta la clave nueva"; then v=1; else v=0; fi
+juzgar "detecta que la base NO tenia la clave nueva" "$v"
+juzgar "ahora SI hace el ALTER: la base tiene la nueva" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "y el Secret quedo en sincronia" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+juzgar "borra el archivo" "$(si ! -f "$PENDIENTE")"
 
 echo
-echo "=== 4. el /health/ falla ==="
-rm -f "$PENDIENTE"
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=1 FALLA_EXEC_I=1
+echo "=== 4. falla el patch del Secret ==="
+reiniciar_estado
+export FALLA_PATCH=1
 codigo="$(correr)"
 juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
-if grep -q "ya no entra a la base" "$BASE/salida.txt"; then e4=0; else e4=1; fi
-juzgar "NO anuncia exito" "$e4"
+juzgar "la BASE ya tiene la nueva" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "el SECRET se quedo atras (la desincronia real)" "$(si "$(secreto)" = "$CLAVE_VIEJA")"
+juzgar "conserva el archivo" "$(si -f "$PENDIENTE")"
+if grep -q "^fase=alter_ok" "$PENDIENTE" 2>/dev/null; then v=1; else v=0; fi
+juzgar "anotado con fase=alter_ok" "$v"
+if dice "NO borres"; then v=1; else v=0; fi
+juzgar "avisa que no se borre" "$v"
+
+echo
+echo "=== 5. reanudar tras patch fallido: omite el ALTER y parchea ==="
+export FALLA_PATCH=0
+codigo="$(correr)"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if dice "YA acepta la clave nueva"; then v=1; else v=0; fi
+juzgar "comprueba contra la base y ve que el ALTER ya estaba" "$v"
+juzgar "el Secret quedo en sincronia" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+
+echo
+echo "=== 6. falla el rollout (ALTER y Secret YA aplicados) ==="
+reiniciar_estado
+export FALLA_ROLLOUT=1
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+juzgar "la BASE tiene la nueva" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "el SECRET tiene la nueva" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+juzgar "conserva el archivo" "$(si -f "$PENDIENTE")"
+if grep -q "^fase=secret_ok" "$PENDIENTE" 2>/dev/null; then v=1; else v=0; fi
+juzgar "anotado con fase=secret_ok" "$v"
+
+echo
+echo "=== 7. reanudar tras rollout fallido (el caso que antes NO se reanudaba) ==="
+# Aca el Secret YA tiene la clave nueva, asi que la comprobacion de "coincide
+# con la publicada" NO calza. La version anterior decia "ya se roto" y salia
+# con 0 sin reanudar los reinicios ni las verificaciones.
+export FALLA_ROLLOUT=0
+codigo="$(correr)"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if dice "ya se rotó"; then v=0; else v=1; fi
+juzgar "NO dice 'ya se roto' y abandona" "$v"
+if dice "hay una rotación a medias"; then v=1; else v=0; fi
+juzgar "detecta la operacion pendiente" "$v"
+if grep -q "rollout restart" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "SI reanuda los reinicios" "$v"
+juzgar "borra el archivo al terminar" "$(si ! -f "$PENDIENTE")"
+
+echo
+echo "=== 8. falla el /health/ (todo lo demas aplicado) ==="
+reiniciar_estado
+export FALLA_HEALTH=1
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+if dice "la base acepta la clave nueva y rechaza"; then v=0; else v=1; fi
+juzgar "NO anuncia exito" "$v"
 juzgar "conserva el archivo" "$(si -f "$PENDIENTE")"
 
 echo
-echo "=== 5. la clave vieja TODAVIA entra ==="
-rm -f "$PENDIENTE"
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=0 FALLA_EXEC_I=0
+echo "=== 9. reanudar tras health fallido ==="
+export FALLA_HEALTH=0
 codigo="$(correr)"
-juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
-if grep -q "ENTRA" "$BASE/salida.txt"; then av5=1; else av5=0; fi
-juzgar "avisa que la publicada sigue sirviendo" "$av5"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if grep -q "exec deployment/auth" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "vuelve a comprobar los health" "$v"
+juzgar "borra el archivo" "$(si ! -f "$PENDIENTE")"
 
 echo
-echo "=== 6. falla el rollout ==="
-rm -f "$PENDIENTE"
-export FALLA_ALTER=${FALLA_ALTER:-0} FALLA_PATCH=0 FALLA_ROLLOUT=1 FALLA_HEALTH=0 FALLA_EXEC_I=1
+echo "=== 10. sin nada pendiente y ya rotada: no hace nada ==="
+reiniciar_estado
+printf %s "$CLAVE_NUEVA" > "$ESTADO/bd"
+printf %s "$CLAVE_NUEVA" > "$ESTADO/secret"
 codigo="$(correr)"
-juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
-juzgar "conserva el archivo" "$(si -f "$PENDIENTE")"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if dice "ya se rotó"; then v=1; else v=0; fi
+juzgar "dice que ya se roto" "$v"
+if grep -q "exec -i" "$REGISTRO_ARGV"; then v=0; else v=1; fi
+juzgar "no toca la base" "$v"
 
 echo
-echo "=== 7. modo ensayo no toca nada ==="
-rm -f "$PENDIENTE"
-REGISTRO_ARGV="$BASE/argv2.txt"; : > "$REGISTRO_ARGV"
-REGISTRO_PATCH="$BASE/patch2.txt"; : > "$REGISTRO_PATCH"
+echo "=== 11. el archivo es de OTRO destino: no reanuda a ciegas ==="
+reiniciar_estado
+( umask 077; printf 'version=1\ndestino=otro-cluster|otro-ns|ojoalgasto\nfase=alter_ok\nanterior_sha256=x\nclave=zzz\n' > "$PENDIENTE" )
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+if dice "OTRO destino"; then v=1; else v=0; fi
+juzgar "avisa que es de otro destino" "$v"
+juzgar "no toca la base" "$(si "$(bd)" = "$CLAVE_VIEJA")"
+
+echo
+echo "=== 12. modo ensayo no toca nada ==="
+reiniciar_estado
+: > "$REGISTRO_ARGV"; : > "$REGISTRO_PATCH"
 bash "$GUION" > "$BASE/ensayo.txt" 2>&1; codigo=$?
 juzgar "sale con 0" "$(si "$codigo" = "0")"
 juzgar "no crea archivo de recuperacion" "$(si ! -f "$PENDIENTE")"
-if grep -q "patch secret" "$REGISTRO_ARGV"; then p7=0; else p7=1; fi
-juzgar "no llama a patch" "$p7"
-if grep -q "^exec" "$REGISTRO_ARGV"; then e7=0; else e7=1; fi
-juzgar "no llama a exec" "$e7"
+juzgar "la base no cambia" "$(si "$(bd)" = "$CLAVE_VIEJA")"
+if grep -q "patch secret" "$REGISTRO_ARGV"; then v=0; else v=1; fi
+juzgar "no llama a patch" "$v"
+if grep -q "exec -i" "$REGISTRO_ARGV"; then v=0; else v=1; fi
+juzgar "no llama a exec" "$v"
 
 echo
 echo "--------------------------------"
