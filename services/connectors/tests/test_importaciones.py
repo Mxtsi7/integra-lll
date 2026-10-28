@@ -134,6 +134,88 @@ class TestMaquinaDeEstados:
         assert not faltan, f"estados sin transiciones declaradas: {sorted(faltan)}"
 
 
+class TestInstanciasObsoletas:
+    """Dos instancias leídas de la misma fila no pueden pisarse.
+
+    La guarda de `avanzar_a` se evaluaba en memoria: con A y B leídas de la
+    misma importación en `procesando`, las dos creen que pueden avanzar, las
+    dos pasan la guarda, y la segunda pisa a la primera. Una importación que
+    ya había reportado `completada` terminaba `fallida`.
+
+    No hacen falta hilos: basta con dos instancias viejas. Lo reprodujo la
+    revisión de la PR.
+    """
+
+    def test_la_segunda_instancia_NO_pisa_la_terminal_de_la_primera(self):
+        """La reproducción exacta de la revisión."""
+        imp = crear()
+        imp.avanzar_a(Importacion.Estado.PROCESANDO)
+
+        a = Importacion.objects.get(pk=imp.pk)
+        b = Importacion.objects.get(pk=imp.pk)
+
+        assert a.avanzar_a(Importacion.Estado.COMPLETADA) is True
+        # B todavía cree que está procesando, así que pasa la guarda en
+        # memoria. Lo que la detiene es la condición en el WHERE.
+        assert b.avanzar_a(Importacion.Estado.FALLIDA) is False
+
+        imp.refresh_from_db()
+        assert imp.estado == Importacion.Estado.COMPLETADA, "la vieja piso a la nueva"
+
+    def test_la_instancia_perdedora_queda_con_el_estado_REAL(self):
+        """Si siguiera con el suyo, el llamador operaría sobre una mentira."""
+        imp = crear()
+        imp.avanzar_a(Importacion.Estado.PROCESANDO)
+        a = Importacion.objects.get(pk=imp.pk)
+        b = Importacion.objects.get(pk=imp.pk)
+
+        a.avanzar_a(Importacion.Estado.COMPLETADA)
+        b.avanzar_a(Importacion.Estado.FALLIDA)
+        assert b.estado == Importacion.Estado.COMPLETADA
+
+    def test_la_fecha_terminal_es_la_de_la_que_gano(self):
+        imp = crear()
+        imp.avanzar_a(Importacion.Estado.PROCESANDO)
+        a = Importacion.objects.get(pk=imp.pk)
+        b = Importacion.objects.get(pk=imp.pk)
+
+        a.avanzar_a(Importacion.Estado.COMPLETADA)
+        primera = Importacion.objects.get(pk=imp.pk).terminada_en
+        b.avanzar_a(Importacion.Estado.FALLIDA)
+        assert Importacion.objects.get(pk=imp.pk).terminada_en == primera
+
+    def test_dos_instancias_no_confirman_dos_veces(self):
+        """`confirmar_candidatos` decidía igual desde memoria: una reentrega
+        del mismo evento movía la fecha de confirmación."""
+        imp = crear()
+        imp.avanzar_a(Importacion.Estado.PROCESANDO)
+        imp.avanzar_a(Importacion.Estado.COMPLETADA)
+
+        a = Importacion.objects.get(pk=imp.pk)
+        b = Importacion.objects.get(pk=imp.pk)
+
+        assert a.confirmar_candidatos() is True
+        primera = Importacion.objects.get(pk=imp.pk).confirmada_en
+        assert b.confirmar_candidatos() is False
+        assert Importacion.objects.get(pk=imp.pk).confirmada_en == primera
+
+    def test_el_polling_nunca_ve_retroceder_una_terminal(self, cliente):
+        """La consecuencia que importa: lo que ve quien consulta."""
+        imp = crear()
+        imp.avanzar_a(Importacion.Estado.PROCESANDO)
+        a = Importacion.objects.get(pk=imp.pk)
+        b = Importacion.objects.get(pk=imp.pk)
+
+        a.avanzar_a(Importacion.Estado.COMPLETADA)
+        visto = cliente.get(f"{LISTA}{imp.id}/", headers=cabecera()).data
+        assert visto["estado"] == "completada"
+
+        b.avanzar_a(Importacion.Estado.FALLIDA)
+        otra_vez = cliente.get(f"{LISTA}{imp.id}/", headers=cabecera()).data
+        assert otra_vez["estado"] == "completada", "el polling vio retroceder el estado"
+        assert otra_vez["terminada"] is True
+
+
 # ── terminar ≠ confirmar ─────────────────────────────────────────────
 
 

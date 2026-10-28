@@ -25,7 +25,7 @@ Lo que hay que mirar acá son tres cosas:
 
 from __future__ import annotations
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from shared.cifrado import SECRETO_ILEGIBLE, CampoCifrado
@@ -377,12 +377,35 @@ class Importacion(ModeloTenant):
                 f"desde {self.estado!r} solo se puede a {sorted(permitidos) or 'ningún estado'}"
             )
         ahora = cuando or timezone.now()
-        campos = ["estado", "actualizado_en"]
-        self.estado = estado
+        valores = {"estado": estado, "actualizado_en": ahora}
         if estado in self.ESTADOS_TERMINALES:
+            valores["terminada_en"] = ahora
+
+        # ── La guarda va en el WHERE, no solo en memoria ───────────────────
+        # La versión anterior comprobaba `self.estado` —lo que ESTA instancia
+        # cree— y después hacía `save()`. Con dos instancias leídas de la
+        # misma fila, las dos creen "procesando", las dos pasan la guarda y la
+        # segunda pisa a la primera: una importación que ya había reportado
+        # `completada` terminaba `fallida`. No hacen falta hilos; lo reprodujo
+        # la revisión de la PR con dos instancias viejas.
+        #
+        # Con el estado esperado en el filtro, solo gana una. La otra recibe 0
+        # filas, relee y devuelve False: no se movió, y el estado terminal
+        # sigue siendo estable, que es el criterio de FE-08.
+        with transaction.atomic():
+            cambiadas = type(self).objects.filter(
+                pk=self.pk, estado=self.estado
+            ).update(**valores)
+
+        if not cambiadas:
+            # Otra instancia la movió primero. Se recarga para que el llamador
+            # vea el estado real en vez de seguir con el suyo.
+            self.refresh_from_db()
+            return False
+
+        self.estado = estado
+        if "terminada_en" in valores:
             self.terminada_en = ahora
-            campos.append("terminada_en")
-        self.save(update_fields=campos)
         return True
 
     def anotar_error(self, codigo: str, mensaje: str, fila: int | None = None) -> None:
@@ -408,10 +431,22 @@ class Importacion(ModeloTenant):
                 f"solo se confirman los candidatos de una importación "
                 f"completada; esta está en {self.estado!r}"
             )
-        if self.confirmada_en is not None:
+        ahora = cuando or timezone.now()
+        # Misma idea que `avanzar_a`: la condición va en el WHERE. Comprobar
+        # `self.confirmada_en` en memoria dejaba que una reentrega del mismo
+        # evento moviera la fecha de confirmación.
+        with transaction.atomic():
+            cambiadas = type(self).objects.filter(
+                pk=self.pk,
+                estado=self.Estado.COMPLETADA,
+                confirmada_en__isnull=True,
+            ).update(confirmada_en=ahora, actualizado_en=ahora)
+
+        if not cambiadas:
+            self.refresh_from_db()
             return False
-        self.confirmada_en = cuando or timezone.now()
-        self.save(update_fields=["confirmada_en", "actualizado_en"])
+
+        self.confirmada_en = ahora
         return True
 
     class Meta(ModeloTenant.Meta):
