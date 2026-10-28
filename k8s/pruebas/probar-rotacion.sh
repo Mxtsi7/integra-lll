@@ -41,6 +41,22 @@ export REGISTRO_ARGV="$BASE/argv.txt"
 export REGISTRO_PATCH="$BASE/patch.txt"
 export ESTADO
 
+# ── Un `mv` que puede "morir" ────────────────────────────────────────────────
+# El archivo de recuperacion se escribe entero en un temporal y se renombra
+# encima. Este doble deja simular que el proceso muere JUSTO antes del rename
+# de una fase dada (MUERE_MV_EN_FASE=alter_ok, por ejemplo): sale con 137,
+# como un SIGKILL, sin tocar nada. Lo que tiene que sobrevivir es la version
+# anterior del archivo, integra y con la clave.
+MV_REAL="$(command -v mv)"
+cat > "$DOBLES/mv" <<EOF
+#!/usr/bin/env bash
+if [ -n "\${MUERE_MV_EN_FASE:-}" ] && [ -f "\${2:-}" ] \\
+   && grep -q "^fase=\${MUERE_MV_EN_FASE}\$" "\$2" 2>/dev/null; then
+  exit 137
+fi
+exec "$MV_REAL" "\$@"
+EOF
+
 cat > "$DOBLES/openssl" <<EOF
 #!/usr/bin/env bash
 [ "\$1" = "rand" ] && { echo "$CLAVE_NUEVA"; exit 0; }
@@ -105,8 +121,10 @@ export PATH="$DOBLES:$PATH"
 reiniciar_estado() {
   printf %s "$CLAVE_VIEJA" > "$ESTADO/bd"
   printf %s "$CLAVE_VIEJA" > "$ESTADO/secret"
-  rm -f "$PENDIENTE"
+  chmod -R u+w "$HOME"
+  rm -f "$PENDIENTE" "$PENDIENTE.tmp"
   export FALLA_ALTER=0 FALLA_PATCH=0 FALLA_ROLLOUT=0 FALLA_HEALTH=0
+  export MUERE_MV_EN_FASE=""
 }
 
 correr() {
@@ -116,10 +134,19 @@ correr() {
   echo $?
 }
 
-ok=0; mal=0
+ok=0; mal=0; saltados=0
 juzgar() {
   if [ "$2" = "1" ]; then echo "  [ OK    ] $1"; ok=$((ok+1))
   else echo "  [ FALLA ] $1"; mal=$((mal+1)); fi
+}
+saltar() { echo "  [ SALTA ] $1"; saltados=$((saltados+1)); }
+# El archivo de recuperacion tiene que estar entero: con fase, clave y sin
+# haber quedado en 0 bytes. Se comprueba el contenido, no solo que exista.
+pendiente_integro() {  # $1 = fase esperada
+  [ -s "$PENDIENTE" ] \
+    && grep -q "^fase=$1\$" "$PENDIENTE" \
+    && grep -q "^clave=$CLAVE_NUEVA\$" "$PENDIENTE" \
+    && grep -q "^anterior_sha256=.\+" "$PENDIENTE"
 }
 # OJO: `test "$@"` y no `[ "$1" ]`. La primera version ignoraba la comparacion
 # y devolvia 1 siempre, asi que varias aserciones pasaban en vacio.
@@ -278,6 +305,103 @@ if grep -q "exec -i" "$REGISTRO_ARGV"; then v=0; else v=1; fi
 juzgar "no llama a exec" "$v"
 
 echo
+echo "=== 13. muere al anotar alter_ok (el ALTER YA corrio): el archivo sobrevive ==="
+# El caso de la revision: con `> archivo` en cada fase, morir entre truncar y
+# escribir dejaba 0 bytes, y con la base ya cambiada se perdia la unica copia
+# de la clave. Aca el proceso muere justo antes del rename de alter_ok.
+reiniciar_estado
+export MUERE_MV_EN_FASE=alter_ok
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+juzgar "la BASE ya tiene la nueva (el ALTER ocurrio antes de morir)" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "el SECRET sigue con la vieja" "$(si "$(secreto)" = "$CLAVE_VIEJA")"
+juzgar "el archivo NO quedo en 0 bytes" "$(si -s "$PENDIENTE")"
+if pendiente_integro generada; then v=1; else v=0; fi
+juzgar "conserva la version anterior integra: fase=generada y la clave" "$v"
+
+echo
+echo "=== 14. reanudar: comprueba contra la base, omite el ALTER y termina ==="
+export MUERE_MV_EN_FASE=""
+codigo="$(correr)"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if dice "YA acepta la clave nueva"; then v=1; else v=0; fi
+juzgar "ve que el ALTER ya estaba (no lo infiere del archivo)" "$v"
+if grep -q "ALTER USER" "$REGISTRO_ARGV" 2>/dev/null; then v=0; else v=1; fi
+juzgar "NO repite el ALTER" "$v"
+juzgar "el Secret quedo en sincronia" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+juzgar "borra el archivo" "$(si ! -f "$PENDIENTE")"
+juzgar "y tambien el temporal" "$(si ! -f "$PENDIENTE.tmp")"
+
+echo
+echo "=== 15. muere al anotar secret_ok (ALTER y patch YA corrieron) ==="
+reiniciar_estado
+export MUERE_MV_EN_FASE=secret_ok
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+juzgar "la BASE tiene la nueva" "$(si "$(bd)" = "$CLAVE_NUEVA")"
+juzgar "el SECRET tiene la nueva" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+juzgar "el archivo NO quedo en 0 bytes" "$(si -s "$PENDIENTE")"
+if pendiente_integro alter_ok; then v=1; else v=0; fi
+juzgar "conserva la version anterior integra: fase=alter_ok y la clave" "$v"
+
+echo
+echo "=== 16. reanudar con base y Secret ya al dia: solo falta el rollout ==="
+export MUERE_MV_EN_FASE=""
+codigo="$(correr)"
+juzgar "sale con 0" "$(si "$codigo" = "0")"
+if grep -q "ALTER USER" "$REGISTRO_ARGV" 2>/dev/null; then v=0; else v=1; fi
+juzgar "NO repite el ALTER" "$v"
+if grep -q "rollout restart" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "SI hace los reinicios" "$v"
+juzgar "borra el archivo" "$(si ! -f "$PENDIENTE")"
+
+echo
+echo "=== 17. el archivo vigente NUNCA se abre para escribir ==="
+# Se deja el archivo de solo lectura. Una implementacion que lo trunque con
+# `>` revienta aqui (y si no reventara, lo habria vaciado); el rename lo
+# reemplaza sin abrirlo. Es la propiedad que evita el 0 bytes, probada directo.
+reiniciar_estado
+export FALLA_PATCH=1
+codigo="$(correr)"          # deja fase=alter_ok, base nueva, Secret viejo
+export FALLA_PATCH=0
+chmod 400 "$PENDIENTE"
+codigo="$(correr)"
+chmod 600 "$PENDIENTE" 2>/dev/null
+juzgar "sale con 0 aunque el archivo vigente sea de solo lectura" "$(si "$codigo" = "0")"
+juzgar "el Secret quedo en sincronia" "$(si "$(secreto)" = "$CLAVE_NUEVA")"
+juzgar "borra el archivo al terminar" "$(si ! -f "$PENDIENTE")"
+
+echo
+echo "=== 18. no se puede crear el temporal (directorio sin escritura) ==="
+# Error de escritura, no muerte: el script tiene que fallar con mensaje y
+# dejar el archivo vigente intacto. Solo en Linux: en Windows quitar el
+# permiso de escritura a un directorio no impide crear archivos adentro, y
+# como root tampoco.
+reiniciar_estado
+if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" != "0" ]; then
+  export FALLA_PATCH=1
+  codigo="$(correr)"          # deja fase=alter_ok, base nueva, Secret viejo
+  export FALLA_PATCH=0
+  chmod 500 "$HOME"
+  codigo="$(correr)"
+  chmod 700 "$HOME"
+  juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+  if dice "no se pudo escribir el archivo de recuperación"; then v=1; else v=0; fi
+  juzgar "dice que no pudo escribir y que el anterior sigue intacto" "$v"
+  if pendiente_integro alter_ok; then v=1; else v=0; fi
+  juzgar "el archivo vigente sigue integro: fase=alter_ok y la clave" "$v"
+  codigo="$(correr)"
+  juzgar "al volver a correr, reanuda y termina con 0" "$(si "$codigo" = "0")"
+  juzgar "borra el archivo" "$(si ! -f "$PENDIENTE")"
+else
+  saltar "solo en Linux sin root (aqui: $(uname -s), uid $(id -u))"
+fi
+
+echo
 echo "--------------------------------"
-echo "  $ok bien, $mal mal"
+if [ "$saltados" != "0" ]; then
+  echo "  $ok bien, $mal mal, $saltados saltados"
+else
+  echo "  $ok bien, $mal mal"
+fi
 [ "$mal" = "0" ] || exit 1

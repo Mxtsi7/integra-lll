@@ -65,7 +65,26 @@ NAMESPACE="$(kubectl config view --minify -o jsonpath='{..namespace}' 2>/dev/nul
 NAMESPACE="${NAMESPACE:-default}"
 DESTINO="${CONTEXTO}|${NAMESPACE}|${SECRETO}"
 
+# ── Se escribe COMPLETO en un temporal y se reemplaza con un rename ─────────
+# La primera versión hacía `> "$RECUPERACION"` en cada fase. Esa redirección
+# TRUNCA antes de escribir: si el proceso moría entre truncar y terminar (la
+# revisión lo reprodujo con un SIGKILL: archivo de 0 bytes), se perdía la
+# única copia de la clave nueva con la base ya cambiada y el Secret viejo.
+# Justo el estado que este archivo existe para poder recuperar.
+#
+# Ahora el archivo vigente NUNCA se abre para escribir. La versión nueva se
+# escribe entera en `$RECUPERACION.tmp` (mismo directorio, permisos 600) y
+# recién cuando está completa se renombra encima: en el mismo sistema de
+# archivos `mv` es un rename, y un rename es atómico. Si el proceso muere en
+# cualquier punto, sobrevive la versión anterior íntegra, con la misma clave
+# (la clave no cambia entre fases; solo cambia la fase anotada).
+#
+# El temporal que pueda quedar de una muerte anterior no hace falta para
+# recuperar —la clave ya está en el archivo vigente— y se pisa en la escritura
+# siguiente; al terminar bien se borra junto con el archivo.
 escribir_pendiente() {  # $1 = fase, $2 = clave, $3 = huella de la anterior
+  local temporal="$RECUPERACION.tmp"
+  rm -f "$temporal"
   ( umask 077
     {
       echo "version=1"
@@ -73,8 +92,18 @@ escribir_pendiente() {  # $1 = fase, $2 = clave, $3 = huella de la anterior
       echo "fase=$1"
       echo "anterior_sha256=$3"
       echo "clave=$2"
-    } > "$RECUPERACION"
-  )
+    } > "$temporal"
+  ) || { rm -f "$temporal"
+         mal "no se pudo escribir el archivo de recuperación (fase $1).
+  El anterior sigue intacto en $RECUPERACION; no se tocó."; }
+  grep -q '^clave=.' "$temporal" \
+    || { rm -f "$temporal"
+         mal "el archivo de recuperación quedó incompleto al escribir la fase $1.
+  El anterior sigue intacto en $RECUPERACION; no se tocó."; }
+  mv -f "$temporal" "$RECUPERACION" \
+    || { rm -f "$temporal"
+         mal "no se pudo reemplazar el archivo de recuperación (fase $1).
+  El anterior sigue intacto en $RECUPERACION; no se tocó."; }
 }
 
 leer_pendiente() {  # deja PEND_FASE, PEND_CLAVE, PEND_ANTERIOR o devuelve 1
@@ -366,7 +395,7 @@ if [ "$FALLOS" -gt 0 ]; then
   exit 1
 fi
 
-rm -f "$RECUPERACION"
+rm -f "$RECUPERACION" "$RECUPERACION.tmp"
 if [ -n "$ANTERIOR" ]; then
   echo "Listo, y verificado: la base acepta la clave nueva y rechaza la anterior."
 else

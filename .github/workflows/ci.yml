@@ -126,8 +126,9 @@ jobs:
   # "probar en producción a ver qué pasa". El arnés lo ejercita con
   # kubectl/openssl/git dobles CON ESTADO (la base y el Secret son dos
   # estados independientes, que es lo que permite representar una
-  # desincronización), cubriendo los doce caminos: feliz, fallo de cada
-  # paso, y la reanudación después de cada uno.
+  # desincronización), cubriendo los dieciocho caminos: feliz, fallo de cada
+  # paso, la reanudación después de cada uno, y la muerte del proceso o un
+  # error de escritura al anotar una fase (el archivo vigente sobrevive).
   #
   # No toca ningún cluster ni ninguna base. Corre en segundos.
   operacion:
