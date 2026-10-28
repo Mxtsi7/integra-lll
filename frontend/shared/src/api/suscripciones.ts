@@ -1,4 +1,4 @@
-import type { Suscripcion } from '../tipos';
+import type { EstadoSuscripcion, Suscripcion } from '../tipos';
 import { pedir, type Paginado } from './cliente';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './ejemplo';
 
@@ -17,8 +17,12 @@ export const USAR_DATOS_DE_EJEMPLO = false;
  *   asi para no perder precision, pero el dominio lo declara `number` y lo
  *   suma. Sin convertirlo, `0 + "5990.00"` concatena en vez de sumar y el
  *   gasto proyectado del panel termina en $NaN.
- * - `fin_prueba` y `horas_uso_mes` llegan como `null`; el dominio los declara
- *   opcionales, o sea `undefined`.
+ * - `fin_prueba` puede llegar como `null`; el dominio lo declara opcional,
+ *   o sea `undefined`.
+ * - `horas_uso_mes` también es un Decimal: desde VI-10 llega siempre como
+ *   texto ("0.00", "0.50"), calculado con los usos del mes actual. Sin
+ *   convertirlo, "0.00" es un texto no vacío y la pantalla lo trataba como
+ *   uso registrado ("0.00 h" en vez de "Sin registrar").
  *
  * La traduccion vive aca, en el borde con la API, para que ninguna pantalla
  * tenga que saber estas diferencias.
@@ -26,7 +30,7 @@ export const USAR_DATOS_DE_EJEMPLO = false;
 type SuscripcionDeApi = Omit<Suscripcion, 'monto' | 'fin_prueba' | 'horas_uso_mes'> & {
   monto: string | number;
   fin_prueba?: string | null;
-  horas_uso_mes?: number | null;
+  horas_uso_mes?: string | number | null;
 };
 
 function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
@@ -34,7 +38,7 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
     ...s,
     monto: Number(s.monto),
     fin_prueba: s.fin_prueba ?? undefined,
-    horas_uso_mes: s.horas_uso_mes ?? undefined,
+    horas_uso_mes: s.horas_uso_mes == null ? undefined : Number(s.horas_uso_mes),
   };
 }
 
@@ -45,7 +49,64 @@ function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
  */
 const MAX_PAGINAS = 20;
 
-export async function getSuscripciones(): Promise<Suscripcion[]> {
+/**
+ * Los órdenes que acepta GET /suscripciones/ (VI-02). Es una lista cerrada:
+ * el backend responde 400 a cualquier otro campo, y acá ni se arma la
+ * consulta (CH-12). El '-' es descendente; el backend desempata por id, así
+ * que el orden es el mismo en todas las páginas.
+ */
+export const ORDENES_SUSCRIPCIONES = [
+  'fecha_proximo_cobro',
+  '-fecha_proximo_cobro',
+  'nombre',
+  '-nombre',
+  'monto',
+  '-monto',
+] as const;
+
+export type OrdenSuscripciones = (typeof ORDENES_SUSCRIPCIONES)[number];
+
+/** true si `valor` está en la lista de órdenes permitidos. */
+export function esOrdenSuscripciones(valor: string): valor is OrdenSuscripciones {
+  return (ORDENES_SUSCRIPCIONES as readonly string[]).includes(valor);
+}
+
+/**
+ * Filtros y orden del listado (CH-11, CH-12). Viajan a la API, que filtra y
+ * ordena ANTES de paginar: el resultado sale bien en todas las páginas, no
+ * solo en la primera.
+ */
+export interface ConsultaSuscripciones {
+  /** Solo las que están en este estado. */
+  estado?: EstadoSuscripcion;
+  /** Solo las que tienen su próximo cobro ese día (YYYY-MM-DD). */
+  fecha_cobro?: string;
+  orden?: OrdenSuscripciones;
+}
+
+/**
+ * Arma el query string de una página. URLSearchParams codifica cada valor,
+ * así que un filtro no puede colar otro parámetro (p. ej. "&page_size=").
+ */
+function parametrosDePagina(consulta: ConsultaSuscripciones, pagina: number): string {
+  const parametros = new URLSearchParams({ page: String(pagina) });
+  if (consulta.estado) parametros.set('estado', consulta.estado);
+  if (consulta.fecha_cobro) parametros.set('fecha_cobro', consulta.fecha_cobro);
+  if (consulta.orden) parametros.set('orden', consulta.orden);
+  return parametros.toString();
+}
+
+/**
+ * Todas las suscripciones de la organización (todas las páginas). Con
+ * `consulta`, solo las que cumplen los filtros y en el orden pedido.
+ *
+ * Lanza RangeError, sin llamar a la API, si `orden` no está en
+ * ORDENES_SUSCRIPCIONES (p. ej. un valor que llegó por la URL).
+ */
+export async function getSuscripciones(consulta: ConsultaSuscripciones = {}): Promise<Suscripcion[]> {
+  if (consulta.orden !== undefined && !esOrdenSuscripciones(consulta.orden)) {
+    throw new RangeError(`Orden de suscripciones no permitido: ${String(consulta.orden)}`);
+  }
   if (USAR_DATOS_DE_EJEMPLO) return SUSCRIPCIONES_DE_EJEMPLO;
 
   const todas: SuscripcionDeApi[] = [];
@@ -57,7 +118,7 @@ export async function getSuscripciones(): Promise<Suscripcion[]> {
   // que hizo el navegador. Solo se usa para saber si queda otra pagina.
   for (let pagina = 1; pagina <= MAX_PAGINAS; pagina += 1) {
     const respuesta = await pedir<Paginado<SuscripcionDeApi>>(
-      `/suscripciones/?page=${pagina}`,
+      `/suscripciones/?${parametrosDePagina(consulta, pagina)}`,
     );
     todas.push(...respuesta.results);
     if (!respuesta.next) break;
@@ -130,8 +191,27 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
-  /** Fecha calendario del uso (YYYY-MM-DD); por defecto, la fecha local actual. */
+  /**
+   * Fecha calendario del uso (YYYY-MM-DD). Opcional: sin fecha el backend usa
+   * la fecha local de hoy. No puede ser futura (RegistrarUsoSerializer.validate_fecha).
+   */
   fecha?: string;
+}
+
+/** Un registro del historial de uso (RegistroUsoSerializer). */
+export interface RegistroUso {
+  /** ISO (YYYY-MM-DD). */
+  fecha: string;
+  minutos: number;
+}
+
+/**
+ * GET /suscripciones/<id>/uso/ -> 200 OK / 404 (CH-15).
+ * Historial de uso de UNA suscripción, del más reciente al más antiguo (así
+ * lo ordena el backend). No está paginado.
+ */
+export async function getUsos(id: string): Promise<RegistroUso[]> {
+  return pedir<RegistroUso[]>(`/suscripciones/${id}/uso/`);
 }
 
 /**
@@ -143,9 +223,13 @@ export async function registrarUso(
   id: string,
   datos: UsoPayload,
 ): Promise<Suscripcion> {
+  // Una fecha vacía no se manda: RegistrarUsoSerializer rechaza "" pero
+  // acepta la propiedad ausente (usa hoy). Así ningún llamador puede mandar
+  // un body inválido por un campo de fecha borrado.
+  const cuerpo: UsoPayload = datos.fecha ? datos : { minutos: datos.minutos };
   const actualizada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/uso/`, {
     method: 'POST',
-    body: datos,
+    body: cuerpo,
   });
   return desdeLaApi(actualizada);
 }

@@ -17,6 +17,14 @@ export type EstadoSesion =
 
 type Tokens = { access_token: string; refresh_token: string };
 
+/**
+ * Identifica una sesión: cambia al entrar, al salir y cuando otra pestaña
+ * inicia sesión. Una operación que tarda (guardar el nombre, cambiar la
+ * contraseña) la anota al empezar con `capturarSesion()` y se la pasa al
+ * contexto al terminar, para que su respuesta no toque otra sesión.
+ */
+export type MarcaSesion = number;
+
 type ApiAuth = {
   estado: EstadoSesion;
   usuario: Usuario | null;
@@ -36,10 +44,26 @@ type ApiAuth = {
    * Borra la sesión de este navegador SIN llamar al backend. Es para cuando
    * el backend ya la invalidó por su cuenta: p. ej. al restablecer la
    * contraseña (CH-07), que revoca todas las sesiones abiertas.
+   *
+   * Con `sesion`, solo la borra si sigue siendo esa: la respuesta tardía de
+   * una sesión que ya se fue no puede echar a la que entró después. Devuelve
+   * si la borró.
    */
-  cerrarSesionLocal: () => void;
+  cerrarSesionLocal: (sesion?: MarcaSesion) => boolean;
   /** Si el token venció mientras la pestaña estaba abierta, cierra la sesión. */
   verificarSesion: () => void;
+  /** La sesión de este momento, para anotarla al empezar una operación. */
+  capturarSesion: () => MarcaSesion;
+  /**
+   * Reemplaza los datos del usuario con los que confirmó el backend (p. ej.
+   * después de editar el nombre en Perfil, CH-08), para que la barra
+   * superior y el resto de la app muestren lo guardado sin recargar.
+   *
+   * No hace nada (y devuelve false) si `sesion` ya no es la vigente o si el
+   * usuario confirmado no es el de la sesión: quien llama no debe mostrar
+   * el resultado como propio.
+   */
+  actualizarUsuario: (usuario: Usuario, sesion: MarcaSesion) => boolean;
 };
 
 /** El login respondió 200 pero con un token que no sirve. */
@@ -97,6 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // pestaña lo cambió (otro login) aunque la sesión siga siendo válida.
   const tokenConocido = useRef<string | null>(null);
 
+  // Número de la sesión vigente (MarcaSesion). No es `ultimaPeticion`: ese
+  // cambia también al reintentar /usuarios/me/ dentro de la misma sesión,
+  // y eso no debe descartar un guardado (revisión CH-08 en #99).
+  const sesionVigente = useRef(0);
+
   const cargarUsuario = useCallback(async () => {
     const id = ++ultimaPeticion.current;
     tokenConocido.current = obtenerAccessToken();
@@ -136,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Pasa a "anonimo" e invalida cualquier /usuarios/me/ que siga en vuelo.
   const quedarAnonimo = useCallback(() => {
     ultimaPeticion.current++;
+    sesionVigente.current++;
     tokenConocido.current = null;
     cambiarEstado({ tipo: "anonimo" });
   }, [cambiarEstado]);
@@ -173,11 +203,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (actual !== "anonimo") quedarAnonimo();
       } else if (actual === "anonimo") {
         // Se inició sesión en otra pestaña.
+        sesionVigente.current++;
         cambiarEstado({ tipo: "verificando" });
         void cargarUsuario();
       } else if (obtenerAccessToken() !== tokenConocido.current) {
         // Sigue habiendo sesión, pero con otro token: en otra pestaña entró
         // otra cuenta. Se recarga el usuario para no mostrar el anterior.
+        sesionVigente.current++;
         void cargarUsuario();
       }
       // Cualquier otra clave (p. ej. el tema claro/oscuro) no afecta la sesión.
@@ -218,6 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout();
         throw new TokenInvalidoError();
       }
+      sesionVigente.current++;
       cambiarEstado({ tipo: "autenticado", usuario: null });
       void cargarUsuario();
     },
@@ -236,10 +269,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { revocada };
   }, [quedarAnonimo]);
 
-  const cerrarSesionLocal = useCallback(() => {
-    logout();
-    if (estadoRef.current.tipo !== "anonimo") quedarAnonimo();
-  }, [quedarAnonimo]);
+  const cerrarSesionLocal = useCallback(
+    (sesion?: MarcaSesion) => {
+      if (sesion !== undefined && sesion !== sesionVigente.current) return false;
+      logout();
+      if (estadoRef.current.tipo !== "anonimo") quedarAnonimo();
+      return true;
+    },
+    [quedarAnonimo],
+  );
+
+  const capturarSesion = useCallback(() => sesionVigente.current, []);
+
+  const actualizarUsuario = useCallback(
+    (usuario: Usuario, sesion: MarcaSesion) => {
+      const actual = estadoRef.current;
+      if (sesion !== sesionVigente.current || actual.tipo !== "autenticado") return false;
+      // Además de la marca, el usuario confirmado tiene que ser el de la
+      // sesión (si ya se sabe quién es): nunca se mezclan dos cuentas.
+      if (actual.usuario !== null && actual.usuario.id !== usuario.id) return false;
+      cambiarEstado({ tipo: "autenticado", usuario });
+      return true;
+    },
+    [cambiarEstado],
+  );
 
   const verificarSesion = useCallback(() => {
     if (estadoRef.current.tipo === "anonimo") return;
@@ -261,8 +314,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cerrarSesion,
       cerrarSesionLocal,
       verificarSesion,
+      capturarSesion,
+      actualizarUsuario,
     }),
-    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion],
+    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion, capturarSesion, actualizarUsuario],
   );
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
