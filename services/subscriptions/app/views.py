@@ -1,13 +1,13 @@
 """Vistas del servicio de suscripciones."""
 
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 import re
 import uuid
 
 from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -20,7 +20,12 @@ from rest_framework.response import Response
 from events.outbox import registrar_actualizada, registrar_creada
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from app.models import Cobro, Presupuesto, RegistroUso, Subscription
+from app.models import (
+    Cobro,
+    Presupuesto,
+    RegistroUso,
+    Subscription,
+)
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,
@@ -749,3 +754,4 @@ class SubscriptionViewSet(TenantViewSet):
             SubscriptionSerializer(subscription).data,
             status=status.HTTP_200_OK,
         )
+

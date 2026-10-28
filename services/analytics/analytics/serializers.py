@@ -1,6 +1,11 @@
 from rest_framework import serializers
 
-from analytics.models import RecomendacionConsolidacion
+from analytics.models import (
+    DIAS_VIGENCIA_DESCARTE_DEFAULT,
+    DIAS_VIGENCIA_DESCARTE_MAX,
+    RecomendacionConsolidacion,
+    RecomendacionDescartada,
+)
 
 
 class RecomendacionConsolidacionSerializer(serializers.ModelSerializer):
@@ -61,3 +66,53 @@ class ListaRecomendacionesSerializer(serializers.Serializer):
         child=serializers.CharField(),
         read_only=True,
     )
+
+
+class SolicitarDescarteSerializer(serializers.Serializer):
+    """Parámetros opcionales para descartar una recomendación (VI-18)."""
+
+    motivo = serializers.CharField(
+        max_length=200,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Motivo opcional del descarte",
+    )
+    dias_vigencia = serializers.IntegerField(
+        required=False,
+        min_value=1,
+        max_value=DIAS_VIGENCIA_DESCARTE_MAX,
+        default=DIAS_VIGENCIA_DESCARTE_DEFAULT,
+        help_text=(
+            "Días de vigencia del descarte antes de volver a mostrarla "
+            f"(máx. {DIAS_VIGENCIA_DESCARTE_MAX})"
+        ),
+    )
+
+
+class RecomendacionDescartadaSerializer(serializers.ModelSerializer):
+    """Confirmación del descarte de una recomendación (VI-18)."""
+
+    recomendacion_id = serializers.UUIDField(read_only=True)
+    suscripcion_id = serializers.UUIDField(
+        source="recomendacion.suscripcion_id",
+        read_only=True,
+    )
+    descartado = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RecomendacionDescartada
+        fields = (
+            "id",
+            "recomendacion_id",
+            "suscripcion_id",
+            "motivo",
+            "descartado_por",
+            "vigente_hasta",
+            "creado_en",
+            "descartado",
+        )
+        read_only_fields = fields
+
+    def get_descartado(self, obj) -> bool:
+        return True

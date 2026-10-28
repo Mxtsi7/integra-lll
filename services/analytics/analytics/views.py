@@ -1,5 +1,8 @@
+from datetime import timedelta
 from uuid import UUID
 
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers, status
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework.decorators import api_view, permission_classes
@@ -10,9 +13,14 @@ from rest_framework.response import Response
 from analytics.models import (
     ESTADO_RECOMENDACION_VIGENTE,
     RecomendacionConsolidacion,
+    RecomendacionDescartada,
 )
 from analytics.reglas import normalizar_moneda, umbrales_activos
-from analytics.serializers import ListaRecomendacionesSerializer
+from analytics.serializers import (
+    ListaRecomendacionesSerializer,
+    RecomendacionDescartadaSerializer,
+    SolicitarDescarteSerializer,
+)
 
 
 @extend_schema(responses={200: inline_serializer(name="SaludAnalytics", fields={"status": serializers.CharField(), "service": serializers.CharField()})})
@@ -82,6 +90,16 @@ def recomendaciones_list(request):
     ).order_by("-ocurrido_en")
     if moneda_solicitada:
         consulta = consulta.filter(moneda=moneda_solicitada)
+
+    # VI-18: un descarte vigente oculta la recomendación; al expirar vuelve a
+    # mostrarse. Un descarte sin fecha se considera vigente indefinidamente.
+    descartes_vigentes = RecomendacionDescartada.objects.filter(
+        organizacion_id=organizacion_id,
+    ).filter(
+        Q(vigente_hasta__isnull=True) | Q(vigente_hasta__gt=timezone.now())
+    ).values("recomendacion_id")
+    consulta = consulta.exclude(id__in=descartes_vigentes)
+
     filas = list(consulta)
 
     monedas_con_datos = {fila.moneda for fila in filas}
@@ -130,3 +148,73 @@ def recomendaciones_list(request):
         "umbrales_no_configurados": sin_umbral,
     }
     return Response(ListaRecomendacionesSerializer(datos).data)
+
+
+@extend_schema(
+    request=SolicitarDescarteSerializer,
+    responses={200: RecomendacionDescartadaSerializer},
+    description=(
+        "Descarta una recomendación con vigencia temporal e idempotencia (VI-18)."
+    ),
+)
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def recomendaciones_dismiss(request, pk):
+    """POST /api/recomendaciones/{id}/dismiss/ (VI-18).
+
+    El identificador debe ser un UUID y pertenecer a la organización de la
+    petición; en cualquier otro caso responde 404. Un ``pk`` no UUID nunca
+    produce 500.
+    """
+    organizacion_id = _contexto_organizacion(request)
+
+    try:
+        recomendacion_id = UUID(str(pk))
+    except (TypeError, ValueError, AttributeError):
+        return Response(
+            {"detail": "Recomendación no encontrada para la organización autenticada."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        recomendacion = RecomendacionConsolidacion.objects.get(
+            pk=recomendacion_id,
+            organizacion_id=organizacion_id,
+        )
+    except RecomendacionConsolidacion.DoesNotExist:
+        return Response(
+            {"detail": "Recomendación no encontrada para la organización autenticada."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    entrada = SolicitarDescarteSerializer(data=request.data or {})
+    entrada.is_valid(raise_exception=True)
+    dias_vigencia = entrada.validated_data["dias_vigencia"]
+    motivo = entrada.validated_data["motivo"]
+
+    actor_id = getattr(request, "usuario_id", None)
+    descartado_por = None
+    if actor_id not in (None, ""):
+        try:
+            descartado_por = int(actor_id)
+        except (TypeError, ValueError):
+            descartado_por = None
+
+    vigente_hasta = timezone.now() + timedelta(days=dias_vigencia)
+
+    # Idempotente: repetir el descarte actualiza la misma fila y no duplica el
+    # registro. Si ya expiró, la nueva petición renueva la vigencia.
+    descarte, _ = RecomendacionDescartada.objects.update_or_create(
+        organizacion_id=organizacion_id,
+        recomendacion=recomendacion,
+        defaults={
+            "motivo": motivo,
+            "descartado_por": descartado_por,
+            "vigente_hasta": vigente_hasta,
+        },
+    )
+
+    return Response(
+        RecomendacionDescartadaSerializer(descarte).data,
+        status=status.HTTP_200_OK,
+    )

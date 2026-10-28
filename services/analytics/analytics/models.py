@@ -70,17 +70,16 @@ class ConsumoMensualIA(models.Model):
 class RecomendacionConsolidacion(ModeloTenant):
     """Recomendación emitida por VI-20, persistida para su consulta y descarte.
 
-    El ``id`` es el identificador determinista del evento
-    ``recomendacion.consolidacion_generada``: un replay del mismo evento reusa
-    la misma fila en vez de duplicarla. El ``estado`` pertenece a la
-    recomendación (no a la suscripción) y VI-18 podrá cambiarlo sin perder el
-    resto del registro.
-
-    La identidad de negocio es ``(organizacion_id, tipo, suscripcion_id,
-    evidencia_id)``. Un nuevo snapshot del mismo hallazgo actualiza esta fila
-    en vez de crear otra vigente; una evidencia distinta sí es otro hallazgo.
+    El ``id`` es el identificador determinista del evento que creó la fila: un
+    replay del mismo evento reusa la misma fila en vez de duplicarla. La
+    identidad de negocio es ``(organizacion_id, tipo, suscripcion_id,
+    evidencia_id)``; un nuevo snapshot del mismo hallazgo actualiza esta fila
+    conservando el ``id``, para que el descarte temporal de VI-18 siga
+    apuntando al mismo hallazgo. Una evidencia distinta sí es otro hallazgo.
     ``ocurrido_en_origen`` conserva la fecha del snapshot para que una entrega
-    fuera de orden no reemplace datos más recientes.
+    fuera de orden no reemplace datos más recientes. El descarte es una
+    preferencia temporal en ``RecomendacionDescartada``, no un cambio de
+    ``estado``.
     """
 
     id = models.UUIDField(primary_key=True, editable=False)
@@ -166,3 +165,54 @@ class UmbralAhorro(ModeloBase):
 
         self.moneda = normalizar_moneda(self.moneda)
         super().save(*args, **kwargs)
+
+
+DIAS_VIGENCIA_DESCARTE_DEFAULT = 30
+DIAS_VIGENCIA_DESCARTE_MAX = 365
+
+
+class RecomendacionDescartada(ModeloTenant):
+    """Descarte de una recomendación con vigencia y actor (VI-18).
+
+    El descarte es una preferencia de la organización, no un cambio de estado
+    de la recomendación: mientras ``vigente_hasta`` esté en el futuro la
+    recomendación se excluye del listado y, al expirar, vuelve a mostrarse sin
+    perder el registro de quién la descartó ni por qué.
+    """
+
+    recomendacion = models.ForeignKey(
+        RecomendacionConsolidacion,
+        on_delete=models.CASCADE,
+        related_name="descartes",
+        verbose_name="Recomendación",
+    )
+    motivo = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name="Motivo del descarte",
+    )
+    descartado_por = models.BigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Usuario que descartó",
+    )
+    vigente_hasta = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Vigente hasta",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "recomendacion_descartada"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "recomendacion"],
+                name="recomendacion_descartada_unica_org_rec",
+            ),
+        ]
+        verbose_name = "Recomendación descartada"
+        verbose_name_plural = "Recomendaciones descartadas"
+
+    def __str__(self) -> str:
+        return f"Descarte de {self.recomendacion_id} (Org: {self.organizacion_id})"
