@@ -86,7 +86,7 @@ El nombre histórico del exchange `suscripciones` también abarca alertas y los 
 |---|---|---|---|
 | `recomendacion.generada` | El puntaje supera el umbral | `suscripcion_id`, `puntaje`, `motivo`, `ahorro_estimado` | notifications |
 | `solapamiento.detectado` v1 | Dos servicios cubren lo mismo | `suscripcion_ids`, `categoria` | notifications |
-| `recomendacion.consolidacion_generada` v1 | Un solapamiento explícito y evidencia reciente de uso/costo habilitan una revisión de consolidación | `tipo`, `categoria`, `suscripcion_candidata`, `suscripciones_relacionadas`, `motivo`, `ahorro_potencial`, `evidencia`, `evento_origen_id` | notifications |
+| `recomendacion.consolidacion_generada` v1 | Un solapamiento explícito y evidencia reciente de uso/costo habilitan una revisión de consolidación | `tipo`, `categoria`, `suscripcion_candidata`, `suscripciones_relacionadas`, `motivo`, `ahorro_potencial`, `evidencia`, `evento_origen_id`, `ocurrido_en_origen` | notifications |
 
 Para `solapamiento.detectado` v2, el routing key es
 `solapamiento.detectado.v2`; `suscripciones` contiene el snapshot completo del
@@ -106,6 +106,12 @@ grupo y cada registro lleva `id`, `organizacion_id`, `nombre`, `categoria`,
 La versión 1 sigue disponible para sus consumidores existentes, pero no habilita
 recomendaciones de consolidación. La salida se publica con el routing key
 `recomendacion.consolidacion_generada.v1`.
+
+El `id` del evento identifica la entrega y cambia si el productor vuelve a
+detectar el mismo hallazgo. Para consolidar snapshots equivalentes, Analytics
+usa como identidad de negocio `(organizacion_id, tipo, suscripcion_candidata.id
+y evidencia.id)` y `ocurrido_en_origen` para no reemplazar datos con un snapshot
+fuera de orden. Una evidencia distinta es un hallazgo distinto.
 
 ### Publica `auth`
 

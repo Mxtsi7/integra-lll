@@ -6,21 +6,30 @@ Escenarios cubiertos:
 - repetición idempotente;
 - exclusión durante la vigencia y reaparición al expirar;
 - entradas inválidas (pk no UUID, UUID inexistente, días fuera de rango);
-- contrato rico: motivo, actor y vigencia.
+- contrato rico: motivo, actor y vigencia;
+- nuevo snapshot equivalente (y entrega fuera de orden) sobre un hallazgo
+  descartado, conservando el id estable y la vigencia del descarte.
 """
 
-from datetime import timedelta
+import json
+from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 from django.test import TestCase
 from django.utils import timezone
 
+from analytics.event_consumer import procesar_mensaje
 from analytics.models import (
     ESTADO_RECOMENDACION_VIGENTE,
     RecomendacionConsolidacion,
     RecomendacionDescartada,
     UmbralAhorro,
+)
+from analytics.test_recommendation_jobs import (
+    EVENTO_2_ID,
+    CanalFalso,
+    evento_solapamiento,
 )
 
 ORG = "11111111-1111-4111-8111-111111111111"
@@ -72,6 +81,11 @@ class DescartarRecomendacionesTests(TestCase):
             content_type="application/json",
             **cabeceras,
         )
+
+    def _procesar(self, evento, delivery_tag):
+        canal = CanalFalso()
+        procesar_mensaje(canal, delivery_tag, json.dumps(evento).encode("utf-8"))
+        return canal
 
     def test_listado_definitivo_muestra_la_recomendacion(self):
         recomendacion = crear_recomendacion()
@@ -238,3 +252,67 @@ class DescartarRecomendacionesTests(TestCase):
 
         self.assertEqual(respuesta.status_code, 200)
         self.assertIsNone(respuesta.json()["descartado_por"])
+
+    def test_descartado_con_nuevo_snapshot_equivalente_sigue_oculto_y_reaparece_al_expirar_con_mismo_id(self):
+        self._procesar(evento_solapamiento(), 1)
+        listado = self._get().json()["results"]
+        self.assertEqual(len(listado), 1)
+        recomendacion_id = listado[0]["id"]
+
+        respuesta = self._dismiss(recomendacion_id, datos={"dias_vigencia": 30})
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(self._get().json()["results"], [])
+
+        canal = self._procesar(
+            evento_solapamiento(
+                evento_id=EVENTO_2_ID,
+                ocurrido_en="2026-10-18T12:00:00Z",
+                monto_candidata="12000.00",
+            ),
+            2,
+        )
+        publicado = json.loads(canal.publicados[0]["body"])
+        self.assertNotEqual(publicado["id"], recomendacion_id)
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(str(actual.id), recomendacion_id)
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+        self.assertEqual(
+            RecomendacionDescartada.objects.filter(
+                recomendacion_id=recomendacion_id
+            ).count(),
+            1,
+        )
+        self.assertEqual(self._get().json()["results"], [])
+
+        descarte = RecomendacionDescartada.objects.get(recomendacion_id=recomendacion_id)
+        descarte.vigente_hasta = timezone.now() - timedelta(seconds=1)
+        descarte.save(update_fields=["vigente_hasta"])
+
+        listado = self._get().json()["results"]
+        self.assertEqual(len(listado), 1)
+        self.assertEqual(listado[0]["id"], recomendacion_id)
+        self.assertEqual(float(listado[0]["ahorro_estimado"]), 12000.0)
+
+    def test_snapshot_anterior_no_reemplaza_datos_ni_revive_el_descarte(self):
+        self._procesar(
+            evento_solapamiento(
+                evento_id=EVENTO_2_ID,
+                ocurrido_en="2026-10-18T12:00:00Z",
+                monto_candidata="12000.00",
+            ),
+            3,
+        )
+        recomendacion = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(self._dismiss(recomendacion.id).status_code, 200)
+        self.assertEqual(self._get().json()["results"], [])
+
+        # Entrega fuera de orden: describe el mismo hallazgo con fecha previa.
+        self._procesar(evento_solapamiento(), 4)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(actual.id, recomendacion.id)
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+        self.assertEqual(actual.ocurrido_en_origen.date(), date(2026, 10, 18))
+        self.assertEqual(self._get().json()["results"], [])

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from shared.tenant.base import ModeloTenant, ModeloBase
 
@@ -17,6 +18,13 @@ ESTADOS_RECOMENDACION = [
     (ESTADO_RECOMENDACION_VIGENTE, "Vigente"),
     (ESTADO_RECOMENDACION_DESCARTADA, "Descartada"),
 ]
+# Identidad de negocio del hallazgo, independiente del id de entrega del evento.
+CAMPOS_IDENTIDAD_RECOMENDACION = (
+    "organizacion_id",
+    "tipo",
+    "suscripcion_id",
+    "evidencia_id",
+)
 
 
 class CupoIngesta(ModeloTenant):
@@ -62,17 +70,23 @@ class ConsumoMensualIA(models.Model):
 class RecomendacionConsolidacion(ModeloTenant):
     """Recomendación emitida por VI-20, persistida para su consulta y descarte.
 
-    El ``id`` es el identificador determinista del evento
-    ``recomendacion.consolidacion_generada``: un replay del mismo evento reusa
-    la misma fila en vez de duplicarla. El ``estado`` pertenece a la
-    recomendación (no a la suscripción) y VI-18 podrá cambiarlo sin perder el
-    resto del registro.
+    El ``id`` es el identificador determinista del evento que creó la fila: un
+    replay del mismo evento reusa la misma fila en vez de duplicarla. La
+    identidad de negocio es ``(organizacion_id, tipo, suscripcion_id,
+    evidencia_id)``; un nuevo snapshot del mismo hallazgo actualiza esta fila
+    conservando el ``id``, para que el descarte temporal de VI-18 siga
+    apuntando al mismo hallazgo. Una evidencia distinta sí es otro hallazgo.
+    ``ocurrido_en_origen`` conserva la fecha del snapshot para que una entrega
+    fuera de orden no reemplace datos más recientes. El descarte es una
+    preferencia temporal en ``RecomendacionDescartada``, no un cambio de
+    ``estado``.
     """
 
     id = models.UUIDField(primary_key=True, editable=False)
     evento_origen_id = models.UUIDField(db_index=True)
     correlation_id = models.UUIDField()
     ocurrido_en = models.DateTimeField()
+    ocurrido_en_origen = models.DateTimeField(default=timezone.now)
 
     tipo = models.CharField(max_length=40, default="consolidacion_categoria")
     categoria = models.CharField(max_length=40)
@@ -107,6 +121,10 @@ class RecomendacionConsolidacion(ModeloTenant):
             models.CheckConstraint(
                 condition=Q(ahorro_estimado__gt=0),
                 name="recomendacion_ahorro_positivo",
+            ),
+            models.UniqueConstraint(
+                fields=CAMPOS_IDENTIDAD_RECOMENDACION,
+                name="recomendacion_hallazgo_unico",
             ),
         ]
 
