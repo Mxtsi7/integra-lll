@@ -28,17 +28,7 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
 
     try {
       const res = await login({ correo: correo.trim(), password });
-      iniciarSesion(
-        { access_token: res.access_token, refresh_token: res.refresh_token },
-        {
-          id: String(res.usuario.id),
-          nombre: res.usuario.nombre,
-          correo: res.usuario.correo,
-          rol: 'titular',
-          organizacion_id: '',
-          plan: 'gratuito',
-        }
-      );
+      iniciarSesion({ access_token: res.access_token, refresh_token: res.refresh_token });
     } catch (err: unknown) {
       if (err instanceof AuthError && err.status === 401) {
         setError('Usuario o contraseña inválidos');
@@ -57,10 +47,6 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
   return (
     <ScrollView contentContainerStyle={styles.container} testID="screen-login">
       <View style={styles.card}>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>SE-09 · Sebastian Mena</Text>
-        </View>
-
         <Text style={styles.titulo}>Bienvenido de nuevo</Text>
         <Text style={styles.subtitulo}>Entra para ver cómo van tus suscripciones.</Text>
 
@@ -163,19 +149,6 @@ const styles = StyleSheet.create({
     padding: 24,
     borderWidth: 1,
     borderColor: '#e2e8f0',
-  },
-  badge: {
-    alignSelf: 'center',
-    backgroundColor: '#e2e8f0',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 16,
-    marginBottom: 12,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#334155',
   },
   titulo: {
     fontSize: 24,

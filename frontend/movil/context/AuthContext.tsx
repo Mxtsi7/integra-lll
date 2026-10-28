@@ -1,14 +1,18 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   guardarTokens,
   haySesionValida,
   logout,
   revocarSesion,
   getUsuarioActual,
+  configurarManejador401,
+  ErrorDeApi,
   type Usuario,
 } from '@ojoalgasto/shared';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
+
+export type EstadoPerfil = 'inactivo' | 'cargando' | 'cargado' | 'error';
 
 export type Tokens = { access_token: string; refresh_token: string };
 
@@ -16,8 +20,11 @@ type AuthValue = {
   usuario: Usuario | null;
   estado: EstadoAuth;
   haySesion: boolean;
+  estadoPerfil: EstadoPerfil;
+  errorPerfil: string | null;
   iniciarSesion: (tokens: Tokens, usuario?: Usuario) => void;
   cerrarSesion: () => Promise<void>;
+  recargarPerfil: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -35,44 +42,98 @@ export function AuthProvider({
   const [estado, setEstado] = useState<EstadoAuth>(
     initialEstado ?? (initialUsuario ? 'autenticado' : 'cargando')
   );
+  const [estadoPerfil, setEstadoPerfil] = useState<EstadoPerfil>(
+    initialUsuario
+      ? 'cargado'
+      : initialEstado === 'anonimo'
+      ? 'inactivo'
+      : initialEstado === 'autenticado'
+      ? 'cargando'
+      : 'inactivo'
+  );
+  const [errorPerfil, setErrorPerfil] = useState<string | null>(null);
+
+  // Contador de generación de sesión para invalidar respuestas tardías (race conditions)
+  const sesionVigente = useRef(0);
+  const ultimaPeticion = useRef(0);
+
+  const cargarPerfil = useCallback(async (idSesion: number) => {
+    const idPeticion = ++ultimaPeticion.current;
+    const esVigente = () =>
+      idSesion === sesionVigente.current && idPeticion === ultimaPeticion.current;
+
+    setEstadoPerfil('cargando');
+    setErrorPerfil(null);
+
+    try {
+      const u = await getUsuarioActual();
+      if (!esVigente()) return;
+
+      setUsuario(u);
+      setEstadoPerfil('cargado');
+      setErrorPerfil(null);
+    } catch (err: unknown) {
+      if (!esVigente()) return;
+
+      if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
+        // Token revocado o usuario inexistente: la sesión no sirve
+        logout();
+        setUsuario(null);
+        setEstado('anonimo');
+        setEstadoPerfil('inactivo');
+        setErrorPerfil(null);
+        return;
+      }
+
+      // Error transitorio (red/servidor): el token sigue vigente, pero el perfil no se inventa
+      setUsuario(null);
+      setEstadoPerfil('error');
+      setErrorPerfil(err instanceof Error ? err.message : 'Error al cargar perfil');
+    }
+  }, []);
 
   // Bootstrap al arrancar la app: valida si hay sesión guardada en shared
   useEffect(() => {
     if (initialEstado || initialUsuario) return;
 
-    let activo = true;
+    const idSesion = ++sesionVigente.current;
 
     async function verificarSesionInicial() {
-      try {
-        if (!haySesionValida()) {
-          logout();
-          if (activo) {
-            setUsuario(null);
-            setEstado('anonimo');
-          }
-          return;
-        }
-
-        const u = await getUsuarioActual();
-        if (activo) {
-          setUsuario(u);
-          setEstado('autenticado');
-        }
-      } catch {
-        // En caso de fallo de red se mantiene como anónimo de forma segura
-        if (activo) {
+      if (!haySesionValida()) {
+        logout();
+        if (idSesion === sesionVigente.current) {
           setUsuario(null);
           setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
         }
+        return;
       }
+
+      if (idSesion === sesionVigente.current) {
+        setEstado('autenticado');
+      }
+      await cargarPerfil(idSesion);
     }
 
     void verificarSesionInicial();
+  }, [initialEstado, initialUsuario, cargarPerfil]);
 
+  // Interceptor 401 de cliente API: si un endpoint protegido devuelve 401, limpia la sesión
+  useEffect(() => {
+    configurarManejador401(() => {
+      sesionVigente.current++;
+      ultimaPeticion.current++;
+      logout();
+      setUsuario(null);
+      setEstado('anonimo');
+      setEstadoPerfil('inactivo');
+      setErrorPerfil(null);
+    });
     return () => {
-      activo = false;
+      configurarManejador401(() => {});
     };
-  }, [initialEstado, initialUsuario]);
+  }, []);
 
   const iniciarSesion = useCallback(
     (tokens: Tokens, u?: Usuario) => {
@@ -81,26 +142,31 @@ export function AuthProvider({
         logout();
         setUsuario(null);
         setEstado('anonimo');
+        setEstadoPerfil('inactivo');
+        setErrorPerfil(null);
         throw new Error('Token inválido o expirado');
       }
 
-      setUsuario(u ?? null);
+      const idSesion = ++sesionVigente.current;
       setEstado('autenticado');
 
-      if (!u) {
-        void getUsuarioActual()
-          .then((usuarioCargado) => {
-            setUsuario(usuarioCargado);
-          })
-          .catch(() => {
-            // Se mantiene autenticado si falla getUsuarioActual por red
-          });
+      if (u) {
+        setUsuario(u);
+        setEstadoPerfil('cargado');
+        setErrorPerfil(null);
+      } else {
+        setUsuario(null);
+        void cargarPerfil(idSesion);
       }
     },
-    []
+    [cargarPerfil]
   );
 
   const cerrarSesion = useCallback(async () => {
+    // Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
+    sesionVigente.current++;
+    ultimaPeticion.current++;
+
     try {
       await revocarSesion();
     } catch {
@@ -109,18 +175,35 @@ export function AuthProvider({
       logout();
       setUsuario(null);
       setEstado('anonimo');
+      setEstadoPerfil('inactivo');
+      setErrorPerfil(null);
     }
   }, []);
+
+  const recargarPerfil = useCallback(async () => {
+    if (!haySesionValida()) {
+      logout();
+      setUsuario(null);
+      setEstado('anonimo');
+      setEstadoPerfil('inactivo');
+      setErrorPerfil(null);
+      return;
+    }
+    await cargarPerfil(sesionVigente.current);
+  }, [cargarPerfil]);
 
   const value = useMemo<AuthValue>(
     () => ({
       usuario,
       estado,
       haySesion: estado === 'autenticado',
+      estadoPerfil,
+      errorPerfil,
       iniciarSesion,
       cerrarSesion,
+      recargarPerfil,
     }),
-    [usuario, estado, iniciarSesion, cerrarSesion]
+    [usuario, estado, estadoPerfil, errorPerfil, iniciarSesion, cerrarSesion, recargarPerfil]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

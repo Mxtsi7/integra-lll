@@ -50,9 +50,9 @@ Se implementó la arquitectura de navegación principal para la aplicación móv
     * `EliminarCuenta` (AN-19)
 
 ### 3. Integración con `@ojoalgasto/shared`
-* **Cliente API:** Inicializado con `configurarApi({ urlBase: ... })` en `App.tsx`.
-* **Autenticación y Sesión:** `AuthContext.tsx` valida la vigencia del JWT con `haySesionValida()`, obtiene el usuario actual con `getUsuarioActual()`, guarda credenciales con `guardarTokens()` y revoca la sesión en backend con `revocarSesion()` + `logout()`.
-* **Cálculos y Formato:** Se integró reactivamente en `SuscripcionDetalleScreen` la función de dominio `costoPorHora()` junto con `formatearMonto()` de `shared` para validar el cálculo en vivo desde la app móvil.
+* **Cliente API:** Inicializado con `configurarApi({ urlBase: ... })` y `configureAuthApi({ baseUrl: ... })` en `App.tsx`.
+* **Autenticación y Sesión:** `AuthContext.tsx` valida la vigencia del JWT con `haySesionValida()`, obtiene el usuario actual con `getUsuarioActual()`, guarda credenciales con `guardarTokens()`, revoca la sesión en backend con `revocarSesion()` + `logout()` y captura 401 globales con `configurarManejador401()`.
+* **Placeholders y Tipado:** Las pantallas de suscripciones (`HomeScreen` - SE-17, `SuscripcionDetalleScreen` - SE-21, `SuscripcionNuevaScreen` - SE-22) se mantienen como placeholders limpios en blanco para estructurar la navegación y su tipado (`{ id: string }`), dejando la lógica de negocio y consumo de API para sus respectivas tarjetas.
 
 ---
 

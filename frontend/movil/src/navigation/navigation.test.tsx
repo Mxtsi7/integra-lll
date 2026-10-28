@@ -104,19 +104,36 @@ describe('Navegación Móvil (SE-06)', () => {
     });
 
     it('inicia sesión con éxito con credenciales válidas y conmuta a Home', async () => {
-      const fetchMock = vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: jwtValido(),
-            refresh_token: 'refresh-real-123',
-            usuario: { id: 42, nombre: 'Sebastian Mena', correo: 'sebastian@ojoalgasto.cl' },
-          }),
-          {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          }
-        )
-      );
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/auth/login/')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: jwtValido(),
+                refresh_token: 'refresh-real-123',
+                usuario: { id: 42, nombre: 'Sebastian Mena', correo: 'sebastian@ojoalgasto.cl' },
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
+        if (url.includes('/usuarios/me/')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                id: '42',
+                nombre: 'Sebastian Mena',
+                correo: 'sebastian@ojoalgasto.cl',
+                rol: 'titular',
+                organizacion_id: 'org-test',
+                plan: 'gratuito',
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
+        return Promise.reject(new Error(`URL no manejada en mock: ${url}`));
+      });
       vi.stubGlobal('fetch', fetchMock);
 
       render(<App initialEstado="anonimo" />);
@@ -128,8 +145,65 @@ describe('Navegación Móvil (SE-06)', () => {
 
       expect(await screen.findByTestId('screen-home')).toBeTruthy();
       expect(screen.getByText('Home de Suscripciones')).toBeTruthy();
-      expect(screen.getByText(/Usuario: Sebastian Mena/)).toBeTruthy();
+      expect(await screen.findByText(/Usuario: Sebastian Mena/)).toBeTruthy();
       expect(screen.queryByTestId('screen-login')).toBeNull();
+    });
+
+    it('login integrado de integrante con plan premium y organización real muestra perfil autorizado [P2]', async () => {
+      const USUARIO_INTEGRANTE: Usuario = {
+        id: 'usr-val-9',
+        nombre: 'Valeria Integrante',
+        correo: 'valeria@empresa.cl',
+        rol: 'integrante',
+        organizacion_id: 'org-empresa-real-9',
+        plan: 'premium',
+      };
+
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/auth/login/')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: jwtValido(),
+                refresh_token: 'refresh-valeria-99',
+                usuario: { id: 9, nombre: 'Valeria Integrante', correo: 'valeria@empresa.cl' },
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
+        if (url.includes('/usuarios/me/')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(USUARIO_INTEGRANTE), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
+        return Promise.reject(new Error(`URL no manejada en mock: ${url}`));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App initialEstado="anonimo" />);
+
+      fireEvent.change(screen.getByTestId('input-correo'), { target: { value: 'valeria@empresa.cl' } });
+      fireEvent.change(screen.getByTestId('input-password'), { target: { value: 'claveSeguraValeria1' } });
+
+      fireEvent.click(screen.getByTestId('login-submit'));
+
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+      expect(await screen.findByText(/Usuario: Valeria Integrante/)).toBeTruthy();
+
+      // Navegar a Configuración -> Perfil para verificar que no inventa titular ni gratuito
+      fireEvent.click(screen.getByTestId('tab-configuracion'));
+      expect(await screen.findByTestId('screen-configuracion')).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId('go-perfil'));
+      expect(await screen.findByTestId('screen-perfil')).toBeTruthy();
+      expect(screen.getByText('Nombre: Valeria Integrante')).toBeTruthy();
+      expect(screen.getByText('Correo: valeria@empresa.cl')).toBeTruthy();
+      expect(screen.getByText('Rol: integrante')).toBeTruthy();
+      expect(screen.getByText('Plan: premium')).toBeTruthy();
     });
 
     it('permite alternar visibilidad de contraseña (Ver/Ocultar)', async () => {
@@ -201,10 +275,6 @@ describe('Navegación Móvil (SE-06)', () => {
       fireEvent.click(screen.getByTestId('go-detalle'));
       expect(await screen.findByTestId('screen-suscripcion-detalle')).toBeTruthy();
       expect(screen.getByText('ID Suscripción: 1')).toBeTruthy();
-
-      // Validación de integración con cálculo en vivo de shared
-      expect(screen.getByTestId('card-costo-por-hora')).toBeTruthy();
-      expect(screen.getByTestId('resultado-costo-hora')).toBeTruthy();
 
       fireEvent.click(screen.getByTestId('go-back'));
       expect(await screen.findByTestId('screen-home')).toBeTruthy();
