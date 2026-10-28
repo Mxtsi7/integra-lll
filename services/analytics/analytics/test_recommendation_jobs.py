@@ -2,13 +2,18 @@ import json
 from datetime import date
 from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from analytics.jobs import (
     generar_recomendaciones_consolidacion,
     procesar_evento_solapamiento,
 )
 from analytics.event_consumer import procesar_mensaje
+from analytics.models import (
+    ESTADO_RECOMENDACION_DESCARTADA,
+    ESTADO_RECOMENDACION_VIGENTE,
+    RecomendacionConsolidacion,
+)
 
 
 HOY = date(2026, 10, 17)
@@ -372,7 +377,9 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         with self.assertRaisesMessage(ValueError, "correlation_id"):
             procesar_evento_solapamiento(evento)
 
-    def test_rabbit_message_publishes_results_before_acknowledging_input(self):
+
+class RabbitMessageConsumerTests(TestCase):
+    def test_rabbit_message_persists_and_publishes_before_acknowledging_input(self):
         canal = CanalFalso()
         procesar_mensaje(
             canal,
@@ -396,6 +403,25 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
             publicado["id"],
         )
 
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        persistida = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(str(persistida.id), publicado["id"])
+        self.assertEqual(str(persistida.organizacion_id), ORG)
+        self.assertEqual(str(persistida.suscripcion_id), SUBSCRIPCION_1_ID)
+        self.assertEqual(persistida.suscripcion_nombre, "Servicio A")
+        self.assertEqual(persistida.estado, ESTADO_RECOMENDACION_VIGENTE)
+        self.assertEqual(str(persistida.ahorro_estimado), "9990.00")
+        self.assertEqual(persistida.moneda, "CLP")
+        self.assertEqual(persistida.evidencia_id, "catalogo:overlap:1")
+        self.assertEqual(
+            persistida.evidencia_url,
+            "https://catalogo.example/overlap/1",
+        )
+        self.assertEqual(
+            persistida.suscripciones_relacionadas,
+            [{"id": SUBSCRIPCION_2_ID, "nombre": "Servicio B"}],
+        )
+
     def test_invalid_rabbit_message_is_dead_lettered(self):
         canal = CanalFalso()
         procesar_mensaje(canal, 18, b"not-json")
@@ -403,6 +429,27 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         self.assertEqual(canal.confirmados, [])
         self.assertEqual(canal.rechazados, [(18, False)])
         self.assertEqual(canal.publicados, [])
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 0)
+
+    def test_replay_is_idempotent_and_does_not_revive_a_discarded_recommendation(self):
+        body = json.dumps(evento_solapamiento()).encode("utf-8")
+        procesar_mensaje(CanalFalso(), 30, body)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        recomendacion = RecomendacionConsolidacion.objects.get()
+        identificador_original = recomendacion.id
+        recomendacion.estado = ESTADO_RECOMENDACION_DESCARTADA
+        recomendacion.save(update_fields=["estado", "actualizado_en"])
+
+        replay = CanalFalso()
+        procesar_mensaje(replay, 31, body)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        recomendacion.refresh_from_db()
+        self.assertEqual(recomendacion.id, identificador_original)
+        self.assertEqual(recomendacion.estado, ESTADO_RECOMENDACION_DESCARTADA)
+        self.assertEqual(replay.confirmados, [31])
+        self.assertEqual(len(replay.publicados), 1)
 
     def test_replayed_event_uses_snapshot_date_not_delivery_date(self):
         evento = evento_solapamiento()
@@ -435,3 +482,4 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         self.assertEqual(replay_tardio.publicados, [])
         self.assertEqual(primera_entrega.rechazados, [])
         self.assertEqual(replay_tardio.rechazados, [])
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 0)
