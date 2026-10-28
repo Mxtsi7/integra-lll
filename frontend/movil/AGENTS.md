@@ -25,9 +25,15 @@ Run lint and typecheck before declaring any task done.
 
 ## Navigation & Routing
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+> [!NOTE]
+> **Decisión Técnica Oficial (SE-06):**
+> Para el cliente móvil se acordó e implementó **React Navigation v7** (`@react-navigation/native`, `@react-navigation/native-stack`, `@react-navigation/bottom-tabs`) en lugar de Expo Router.
+> Esta decisión consolida los flujos en un único contenedor raíz (`<NavigationContainer>` en `App.tsx`), navegación fuertemente tipada en `src/navigation/types.ts`, y una separación reactiva entre el flujo público (`AuthNavigator`) y las 4 pestañas privadas (`AppTabNavigator`).
+> Consultar directrices completas, matriz de tareas y ejemplos de integración en [CONTRATO_NAVEGACION.md](CONTRATO_NAVEGACION.md).
+
+- **Regla de oro:** Nunca instanciar un `<NavigationContainer>` adicional; el único contenedor vive en `App.tsx`.
+- Usar `useNavigation()` y `useRoute()` con los tipos auxiliares definidos en `src/navigation/types.ts`.
+- La separación entre rutas públicas y privadas es puramente reactiva a través de `useAuth()` en `RootNavigator.tsx`.
 
 ## Building with EAS
 

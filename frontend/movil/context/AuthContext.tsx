@@ -10,11 +10,13 @@ import {
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
+export type Tokens = { access_token: string; refresh_token: string };
+
 type AuthValue = {
   usuario: Usuario | null;
   estado: EstadoAuth;
   haySesion: boolean;
-  iniciarSesion: (usuario: Usuario, tokens?: { access_token: string; refresh_token: string }) => void;
+  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => void;
   cerrarSesion: () => Promise<void>;
 };
 
@@ -73,12 +75,27 @@ export function AuthProvider({
   }, [initialEstado, initialUsuario]);
 
   const iniciarSesion = useCallback(
-    (u: Usuario, tokens?: { access_token: string; refresh_token: string }) => {
-      if (tokens) {
-        guardarTokens(tokens);
+    (tokens: Tokens, u?: Usuario) => {
+      guardarTokens(tokens);
+      if (!haySesionValida()) {
+        logout();
+        setUsuario(null);
+        setEstado('anonimo');
+        throw new Error('Token inválido o expirado');
       }
-      setUsuario(u);
+
+      setUsuario(u ?? null);
       setEstado('autenticado');
+
+      if (!u) {
+        void getUsuarioActual()
+          .then((usuarioCargado) => {
+            setUsuario(usuarioCargado);
+          })
+          .catch(() => {
+            // Se mantiene autenticado si falla getUsuarioActual por red
+          });
+      }
     },
     []
   );
