@@ -12,7 +12,6 @@ from app.models import (
     Moneda,
     Cobro,
     Presupuesto,
-    RecomendacionDescartada,
     RegistroUso,
     Subscription,
     TransicionEstado,
@@ -317,85 +316,3 @@ class ResumenPanelSerializer(serializers.Serializer):
     gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
     conteo_estados = ConteoEstadosSerializer()
-
-
-class RecomendacionSerializer(serializers.Serializer):
-    """Contrato de una recomendación de optimización de gasto (VI-17 / VI-20 / VI-21).
-
-    Campos:
-    - id: UUID de la recomendación (coincide con la suscripción base).
-    - suscripcion_id: UUID de la suscripción base de la sugerencia.
-    - nombre: nombre descriptivo de la suscripción o grupo de categoría.
-    - motivo: código de razón (p.ej. «uso_bajo», «duplicado_categoria»).
-    - descripcion: texto legible del motivo.
-    - ahorro_estimado: importe estimado de ahorro si se aplica la recomendación.
-    - moneda: ISO 4217 del importe.
-    - evidencia: lista de fragmentos de evidencia que respaldan la sugerencia.
-    - estado: estado actual de la suscripción base.
-    """
-
-    id = serializers.UUIDField()
-    suscripcion_id = serializers.UUIDField()
-    nombre = serializers.CharField()
-    motivo = serializers.CharField()
-    descripcion = serializers.CharField()
-    ahorro_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
-    moneda = serializers.CharField(max_length=3)
-    evidencia = serializers.ListField(child=serializers.CharField(), default=list)
-    estado = serializers.CharField()
-
-
-class ListaRecomendacionesSerializer(serializers.Serializer):
-    """Envoltorio de la respuesta del endpoint de recomendaciones (VI-17).
-
-    Siempre devuelve una estructura válida, incluso cuando no hay sugerencias.
-    """
-
-    organizacion_id = serializers.UUIDField()
-    moneda = serializers.CharField(max_length=3)
-    umbral_aplicado = serializers.DecimalField(max_digits=10, decimal_places=2)
-    total = serializers.IntegerField()
-    recomendaciones = RecomendacionSerializer(many=True)
-    motivo_sin_sugerencias = serializers.CharField(allow_null=True, default=None)
-
-
-class SolicitarDescarteSerializer(serializers.Serializer):
-    """Parámetros opcionales para descartar una recomendación (VI-18)."""
-
-    motivo = serializers.CharField(
-        max_length=100,
-        required=False,
-        allow_blank=True,
-        default="",
-        help_text="Motivo opcional del descarte",
-    )
-    dias_vigencia = serializers.IntegerField(
-        required=False,
-        min_value=1,
-        default=30,
-        help_text="Días de vigencia del descarte antes de volver a recalcular (default: 30)",
-    )
-
-
-class DescarteRecomendacionSerializer(serializers.ModelSerializer):
-    """Serializa la confirmación del descarte de recomendación (VI-18)."""
-
-    suscripcion_id = serializers.UUIDField(source="suscripcion.id", read_only=True)
-    descartado = serializers.SerializerMethodField()
-
-    class Meta:
-        model = RecomendacionDescartada
-        fields = (
-            "id",
-            "suscripcion_id",
-            "motivo",
-            "descartado_por",
-            "vigente_hasta",
-            "creado_en",
-            "descartado",
-        )
-        read_only_fields = fields
-
-    def get_descartado(self, obj) -> bool:
-        return True
-
