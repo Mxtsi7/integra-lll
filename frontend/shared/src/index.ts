@@ -1,9 +1,14 @@
 export type * from './tipos';
 export * from './calculos';
 export * from './formato';
+export * from './validacionesSuscripcion';
 export { configurarApi, configurarManejador401, ErrorDeApi, type Paginado} from './api/cliente';
 export {
   getSuscripciones,
+  esOrdenSuscripciones,
+  ORDENES_SUSCRIPCIONES,
+  type ConsultaSuscripciones,
+  type OrdenSuscripciones,
   USAR_DATOS_DE_EJEMPLO,
   crearSuscripcion,
   getSuscripcion,
@@ -11,6 +16,8 @@ export {
   actualizarSuscripcion,
   eliminarSuscripcion,
   registrarUso,
+  getUsos,
+  type RegistroUso,
   type SuscripcionPayload,
   type SuscripcionPayloadParcial,
   type UsoPayload,
@@ -26,3 +33,4 @@ export * from './api/planes';
 export * from './api/eliminarCuenta';
 export * from './api/verificacionCorreo';
 export * from './estadoCarga';
+export * from './api/calendario';
