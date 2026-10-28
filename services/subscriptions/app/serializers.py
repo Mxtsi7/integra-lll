@@ -238,6 +238,10 @@ class SolicitarTransicionSerializer(serializers.Serializer):
                 Subscription.EventoEstado.CONFIRMACION_USUARIO,
                 Subscription.EventoEstado.CONFIRMACION_USUARIO.label,
             ),
+            (
+                Subscription.EventoEstado.REACTIVACION_USUARIO,
+                Subscription.EventoEstado.REACTIVACION_USUARIO.label,
+            ),
         )
     )
 

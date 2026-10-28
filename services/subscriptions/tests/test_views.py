@@ -55,7 +55,7 @@ class TestSubscriptionUpdateDeleteViews:
             format="json",
             headers={
                 "X-Organizacion-Id": str(org_a),
-                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Usuario-Id": "42",
                 "X-Rol": "titular",
             },
         )
@@ -78,7 +78,7 @@ class TestSubscriptionUpdateDeleteViews:
             format="json",
             headers={
                 "X-Organizacion-Id": str(org_a),
-                "X-Usuario-Id": str(uuid.uuid4()),
+                "X-Usuario-Id": "42",
                 "X-Rol": "titular",
             },
         )

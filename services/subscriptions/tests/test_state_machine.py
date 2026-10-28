@@ -97,7 +97,7 @@ def test_transicion_permitida_actualiza_estado_y_audita(
 
     transicion = suscripcion.transicionar(
         evento,
-        actor_id=uuid.uuid4(),
+        actor_id=42,
         actor_rol="sistema",
     )
 
@@ -219,7 +219,7 @@ def test_patch_obsoleto_conserva_transicion_y_campos_de_uso_concurrentes() -> No
     instancia_transicion = Subscription.objects.get(pk=original.pk)
     instancia_transicion.transicionar(
         Subscription.EventoEstado.CANCELACION_USUARIO,
-        actor_id=uuid.uuid4(),
+        actor_id=42,
         actor_rol="titular",
     )
 
@@ -298,7 +298,7 @@ def test_serializer_patch_no_revert_e_transicion_concurrente() -> None:
 
     suscripcion.transicionar(
         Subscription.EventoEstado.CANCELACION_USUARIO,
-        actor_id=uuid.uuid4(),
+        actor_id=42,
         actor_rol="titular",
     )
     suscripcion.refresh_from_db()
@@ -338,7 +338,7 @@ def test_fin_gracia_requiere_30_dias_en_estado_y_90_sin_cobros() -> None:
 @pytest.mark.django_db
 def test_api_confirma_vigencia_y_expone_auditoria() -> None:
     suscripcion = crear_suscripcion(Subscription.Estado.POR_CONFIRMAR)
-    actor_id = uuid.uuid4()
+    actor_id = 42
     client = APIClient()
     headers = {
         "X-Organizacion-Id": str(suscripcion.organizacion_id),
@@ -356,7 +356,7 @@ def test_api_confirma_vigencia_y_expone_auditoria() -> None:
     assert response.status_code == status.HTTP_200_OK
     assert response.data["estado_anterior"] == Subscription.Estado.POR_CONFIRMAR
     assert response.data["estado_nuevo"] == Subscription.Estado.ACTIVO
-    assert str(response.data["actor_id"]) == str(actor_id)
+    assert response.data["actor_id"] == actor_id
 
     historial = client.get(
         f"/api/suscripciones/{suscripcion.id}/transiciones/",
