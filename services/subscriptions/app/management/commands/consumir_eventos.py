@@ -7,10 +7,10 @@ tráfico HTTP: se queda escuchando la cola y procesando lo que llega.
 
 ── Idempotencia ─────────────────────────────────────────────────────────────
 El catálogo (regla 1) exige que los consumidores lo sean, porque RabbitMQ
-garantiza *al menos una* entrega. Acá sale gratis: `recalcular_resumen` lee el
-estado actual de la base y hace `update_or_create`. Procesar el mismo evento
-dos veces deja exactamente el mismo resultado, así que no hace falta guardar
-los ids ya vistos.
+garantiza *al menos una* entrega. `recalcular_resumen` ya lo es por
+construcción (lee el estado actual y hace `update_or_create`), y además cada
+evento deja EVIDENCIA de que su trabajo se hizo (`TrabajoDerivado`): una
+reentrega la encuentra y confirma sin repetir.
 
 ── Por qué prefetch_count=1 ─────────────────────────────────────────────────
 Sin eso RabbitMQ le manda al consumidor todos los mensajes de una, y se
@@ -27,7 +27,8 @@ La versión anterior tenía dos y los dos estaban mal:
 
 Ahora son tres y ninguno pierde el mensaje:
 
-    correcto    → ack
+    correcto    → ack, y SOLO después de que el trabajo quedó confirmado
+                  en la base (o de encontrar la evidencia de que ya estaba)
     pasajero    → se reintenta en el proceso, con espera creciente; si el
                   problema sigue, se manda a la cola de fallos
     definitivo  → derecho a la cola de fallos
@@ -35,6 +36,19 @@ Ahora son tres y ninguno pierde el mensaje:
 "Definitivo" es un sobre que no va a mejorar por reintentarlo: no es un
 objeto JSON, le falta la organización, el evento no es de los que escuchamos.
 "Pasajero" es la base caída, que vuelve.
+
+── El consumidor NO mira la bandera ─────────────────────────────────────────
+La versión anterior confirmaba sin recalcular cuando SU `EVENTOS_ASINCRONOS`
+estaba en 0, dando por hecho que el POST ya había recalculado. Pero la
+bandera del proceso que consume no dice nada de lo que hizo el que produjo:
+un evento producido en asíncrono (sin resumen) y consumido con la bandera en
+0 recibía ACK y el resumen no existía nunca. Pasa al cambiar de modo con
+mensajes pendientes, o con API y worker configurados distinto durante un
+despliegue. Lo reprodujo la revisión de la PR.
+
+Ahora la decisión sale de la evidencia durable vinculada al evento: si el
+POST acreditó el trabajo de ESTE evento, se omite; si no, se hace. Sea cual
+sea la bandera de este proceso. Ver `events/trabajo.py`.
 """
 
 import json
@@ -42,6 +56,7 @@ import logging
 import signal
 import time
 import uuid
+from dataclasses import dataclass
 
 import pika
 from django.conf import settings
@@ -58,7 +73,7 @@ from events.topologia import (
     EXCHANGE,
     declarar,
 )
-from events.trabajo import recalcular_resumen
+from events.trabajo import HECHO_POR_CONSUMIDOR, recalcular_resumen_por_evento
 
 
 registro = logging.getLogger(__name__)
@@ -84,10 +99,10 @@ class SobreInvalido(ValueError):
     """El mensaje no cumple el contrato. Reintentarlo no lo va a arreglar."""
 
 
-def validar(cuerpo: bytes) -> str:
-    """Comprueba el sobre y devuelve la organización. Lanza `SobreInvalido`.
+def leer_sobre(cuerpo: bytes) -> tuple[str, str]:
+    """Comprueba el sobre y devuelve `(evento_id, organizacion_id)`.
 
-    Se valida ANTES de tocar la base, en tres pasos:
+    Lanza `SobreInvalido`. Se valida ANTES de tocar la base, en tres pasos:
 
     1. **Que sea JSON.** Antes se leía `sobre["organizacion_id"]` capturando
        `ValueError/KeyError`, así que un cuerpo `[]` reventaba con
@@ -118,8 +133,88 @@ def validar(cuerpo: bytes) -> str:
     if (nombre, version) not in EVENTOS_DEL_RESUMEN:
         raise SobreInvalido(f"evento no admitido en esta cola: {nombre!r} v{version!r}")
 
-    # El esquema ya comprobó que sea un UUID; se devuelve normalizado.
-    return str(uuid.UUID(str(sobre["organizacion_id"])))
+    # El esquema ya comprobó que sean UUID; se devuelven normalizados.
+    return (
+        str(uuid.UUID(str(sobre["id"]))),
+        str(uuid.UUID(str(sobre["organizacion_id"]))),
+    )
+
+
+def validar(cuerpo: bytes) -> str:
+    """Comprueba el sobre y devuelve la organización. Lanza `SobreInvalido`."""
+    return leer_sobre(cuerpo)[1]
+
+
+@dataclass(frozen=True)
+class Desenlace:
+    """Qué hacer con el mensaje después de procesarlo."""
+
+    #: True → ack. False → a la cola de fallos, con el motivo.
+    confirmar: bool
+    motivo: str = ""
+    #: True si ESTE proceso recalculó; False si el trabajo ya estaba acreditado.
+    recalculado: bool = False
+
+
+def procesar(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
+    """Hace el trabajo de un mensaje y dice si se confirma o se aparta.
+
+    No toca el canal: devolver el desenlace y que el llamador haga el ack es
+    lo que garantiza que el ack venga SIEMPRE después de que el trabajo quedó
+    confirmado en la base. Y permite probarlo sin broker.
+    """
+    avisar = avisar or (lambda _texto: None)
+    try:
+        evento_id, organizacion_id = leer_sobre(cuerpo)
+    except SobreInvalido as error:
+        return Desenlace(confirmar=False, motivo=str(error))
+
+    ultimo = None
+    espera = ESPERA_INICIAL
+    for intento in range(1, INTENTOS + 1):
+        try:
+            hecho = recalcular_resumen_por_evento(
+                evento_id, organizacion_id, hecho_por=HECHO_POR_CONSUMIDOR
+            )
+        except ERRORES_PASAJEROS as error:
+            ultimo = error
+            if intento < INTENTOS:
+                avisar(
+                    f"base no disponible (intento {intento}/{INTENTOS}), "
+                    f"reintento en {espera}s: {error}"
+                )
+                dormir(espera)
+                espera *= 2
+                # La conexión quedó rota: hay que soltarla o el reintento la
+                # vuelve a usar y falla igual.
+                close_old_connections()
+                continue
+        except Exception as error:  # noqa: BLE001
+            # Un fallo que no es de conexión no mejora reintentando.
+            return Desenlace(confirmar=False, motivo=f"error al recalcular: {error}")
+        else:
+            if hecho:
+                # Se cuenta en el log para poder comprobar, al comparar, que
+                # cada modo hizo la MISMA cantidad de trabajo.
+                # comparar-cola.sh cuenta estas líneas.
+                registro.info(
+                    "resumen.recalculado modo=asincrono org=%s evento=%s",
+                    organizacion_id, evento_id,
+                )
+            else:
+                # Ya estaba acreditado: lo hizo el POST (modo síncrono) o es
+                # una reentrega. Se confirma porque el trabajo ESTÁ hecho, y
+                # eso lo dice la evidencia, no la bandera de este proceso.
+                registro.info(
+                    "resumen.omitido ya_acreditado org=%s evento=%s",
+                    organizacion_id, evento_id,
+                )
+            return Desenlace(confirmar=True, recalculado=hecho)
+
+    return Desenlace(
+        confirmar=False,
+        motivo=f"base no disponible tras {INTENTOS} intentos: {ultimo}",
+    )
 
 
 class Command(BaseCommand):
@@ -146,83 +241,13 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, apagar)
         signal.signal(signal.SIGINT, apagar)
 
-        def a_la_cola_de_fallos(canal_, metodo, motivo: str, cuerpo: bytes):
-            """Rechaza sin reencolar: la cola tiene DLX, así que el mensaje se
-            va a `COLA_FALLIDOS` en vez de borrarse."""
-            self.stderr.write(f"a {COLA_FALLIDOS}: {motivo} | {cuerpo[:200]!r}")
-            registro.warning("evento apartado (%s): %r", motivo, cuerpo[:500])
-            canal_.basic_reject(delivery_tag=metodo.delivery_tag, requeue=False)
-
         def al_recibir(canal_, metodo, _propiedades, cuerpo):
-            # Django cierra las conexiones a la base por petición HTTP; acá no
-            # hay peticiones, así que hay que limpiarlas a mano o se quedan
-            # conexiones muertas después de un corte.
-            close_old_connections()
-
-            try:
-                organizacion_id = validar(cuerpo)
-            except SobreInvalido as error:
-                a_la_cola_de_fallos(canal_, metodo, str(error), cuerpo)
-                return self._quizas_parar(canal_, opciones)
-
-            # ── En modo síncrono el POST ya hizo este trabajo ───────────────
-            # Con EVENTOS_ASINCRONOS=0 el recálculo ocurre dentro del POST, y
-            # el evento igual se registra en el outbox porque es parte del
-            # contrato y puede haber otros consumidores. Pero ESTE consumidor
-            # recalcularía lo mismo una segunda vez.
-            #
-            # Eso rompía la comparación: el modo 0 hacía el doble de trabajo
-            # que el modo 1, así que los números no medían arquitectura.
-            # Lo encontró la revisión de la PR.
-            #
-            # Se confirma el mensaje igual: el trabajo está hecho, no pendiente.
-            if not settings.EVENTOS_ASINCRONOS:
-                registro.info(
-                    "resumen.omitido modo=sincrono org=%s "
-                    "(el POST ya recalculó; el evento se confirma)",
-                    organizacion_id,
-                )
-                canal_.basic_ack(delivery_tag=metodo.delivery_tag)
-                return self._quizas_parar(canal_, opciones)
-
-            ultimo = None
-            espera = ESPERA_INICIAL
-            for intento in range(1, INTENTOS + 1):
-                try:
-                    recalcular_resumen(organizacion_id)
-                except ERRORES_PASAJEROS as error:
-                    ultimo = error
-                    if intento < INTENTOS:
-                        self.stderr.write(
-                            f"base no disponible (intento {intento}/{INTENTOS}), "
-                            f"reintento en {espera}s: {error}"
-                        )
-                        time.sleep(espera)
-                        espera *= 2
-                        # La conexión quedó rota: hay que soltarla o el
-                        # reintento la vuelve a usar y falla igual.
-                        close_old_connections()
-                        continue
-                except Exception as error:  # noqa: BLE001
-                    # Un fallo que no es de conexión no mejora reintentando.
-                    a_la_cola_de_fallos(
-                        canal_, metodo, f"error al recalcular: {error}", cuerpo
-                    )
-                    return self._quizas_parar(canal_, opciones)
-                else:
-                    # Se cuenta en el log para poder comprobar, al comparar,
-                    # que cada modo hizo la MISMA cantidad de trabajo.
-                    # comparar-cola.sh cuenta estas líneas.
-                    registro.info(
-                        "resumen.recalculado modo=asincrono org=%s", organizacion_id
-                    )
-                    canal_.basic_ack(delivery_tag=metodo.delivery_tag)
-                    return self._quizas_parar(canal_, opciones)
-
-            a_la_cola_de_fallos(
-                canal_, metodo, f"base no disponible tras {INTENTOS} intentos: {ultimo}", cuerpo
-            )
-            return self._quizas_parar(canal_, opciones)
+            self.atender(canal_, metodo, cuerpo)
+            if opciones["uno"]:
+                # Con --uno se corta después del primer mensaje, sea cual sea
+                # el desenlace. Si solo cortara al tener éxito, una prueba de
+                # un mensaje inválido se quedaría colgada para siempre.
+                canal_.stop_consuming()
 
         canal.basic_consume(queue=COLA_RESUMEN, on_message_callback=al_recibir)
         self.stdout.write(
@@ -233,13 +258,29 @@ class Command(BaseCommand):
         canal.start_consuming()
         conexion.close()
 
-    @staticmethod
-    def _quizas_parar(canal, opciones) -> None:
-        """Con --uno se corta después del primer mensaje, sea cual sea el
-        desenlace. Si solo cortara al tener éxito, una prueba de un mensaje
-        inválido se quedaría colgada esperando para siempre."""
-        if opciones["uno"]:
-            canal.stop_consuming()
+    def atender(self, canal_, metodo, cuerpo) -> Desenlace:
+        """Procesa UN mensaje y lo confirma o lo aparta. Devuelve el desenlace.
+
+        El ack va después de `procesar`, nunca antes: `procesar` solo devuelve
+        `confirmar=True` cuando el trabajo quedó confirmado en la base o
+        cuando encontró la evidencia de que ya estaba. Si se cae entre medio,
+        el mensaje sigue sin confirmar y RabbitMQ lo vuelve a entregar.
+        """
+        # Django cierra las conexiones a la base por petición HTTP; acá no
+        # hay peticiones, así que hay que limpiarlas a mano o se quedan
+        # conexiones muertas después de un corte.
+        close_old_connections()
+
+        desenlace = procesar(cuerpo, avisar=self.stderr.write)
+        if desenlace.confirmar:
+            canal_.basic_ack(delivery_tag=metodo.delivery_tag)
+        else:
+            # Rechaza sin reencolar: la cola tiene DLX, así que el mensaje se
+            # va a `COLA_FALLIDOS` en vez de borrarse.
+            self.stderr.write(f"a {COLA_FALLIDOS}: {desenlace.motivo} | {cuerpo[:200]!r}")
+            registro.warning("evento apartado (%s): %r", desenlace.motivo, cuerpo[:500])
+            canal_.basic_reject(delivery_tag=metodo.delivery_tag, requeue=False)
+        return desenlace
 
 
 class _Clave:

@@ -724,3 +724,73 @@ class ResumenOrganizacion(ModeloTenant):
             f"{self.organizacion_id}: {self.total_mensual} {self.moneda} "
             f"en {self.cantidad_activas} activas"
         )
+
+
+class TrabajoDerivado(ModeloTenant):
+    """Evidencia durable de que el trabajo derivado de UN evento ya se hizo.
+
+    ── Por qué existe ───────────────────────────────────────────────────────
+    En modo síncrono el POST recalcula el resumen y el evento igual va al
+    outbox (es parte del contrato). El consumidor lo recibe después y tiene
+    que decidir si el trabajo está hecho o pendiente. La primera versión lo
+    decidía mirando SU PROPIA bandera `EVENTOS_ASINCRONOS`: si estaba en 0,
+    confirmaba sin recalcular. Pero la bandera del proceso que consume no
+    dice nada de lo que hizo el proceso que produjo: un evento producido en
+    asíncrono (sin resumen) y consumido con la bandera en 0 recibía ACK y el
+    resumen no existía nunca. Lo reprodujo la revisión de la PR. Pasa al
+    cambiar de modo con mensajes pendientes, o cuando API y worker tienen
+    configuraciones distintas durante un despliegue.
+
+    La decisión tiene que salir de evidencia **durable y vinculada al
+    evento**, no de una bandera. Esto es esa evidencia: una fila por
+    (evento, trabajo), escrita en la MISMA transacción que el trabajo. Quien
+    la encuentra puede omitir; quien no, tiene que hacer el trabajo, sea
+    cual sea su bandera.
+
+    De paso resuelve la idempotencia del consumidor ante una reentrega: si
+    la fila existe, el evento ya se procesó.
+    """
+
+    class Trabajo(models.TextChoices):
+        RESUMEN = "resumen_organizacion", "Recalcular el resumen de la organización"
+
+    evento_id = models.UUIDField(
+        verbose_name="Evento del outbox",
+        help_text=(
+            "El `id` del sobre (regla 1 del catálogo). UUID suelto y no FK: "
+            "el evento puede venir de otro productor, y la evidencia tiene "
+            "que poder existir aunque el outbox se purgue."
+        ),
+    )
+
+    trabajo = models.CharField(
+        max_length=40,
+        choices=Trabajo.choices,
+        default=Trabajo.RESUMEN,
+        verbose_name="Qué trabajo",
+    )
+
+    hecho_en = models.DateTimeField(default=timezone.now, verbose_name="Hecho el")
+
+    hecho_por = models.CharField(
+        max_length=20,
+        verbose_name="Quién lo hizo",
+        help_text="`api` (dentro del POST, modo síncrono) o `consumidor`.",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "trabajo_derivado"
+        ordering = ["-hecho_en"]
+        constraints = [
+            # Un trabajo se acredita una vez por evento. Si dos consumidores
+            # reciben la misma entrega, el segundo choca acá y se da cuenta.
+            models.UniqueConstraint(
+                fields=["evento_id", "trabajo"],
+                name="trabajo_derivado_unico_por_evento",
+            ),
+        ]
+        verbose_name = "Trabajo derivado hecho"
+        verbose_name_plural = "Trabajos derivados hechos"
+
+    def __str__(self) -> str:
+        return f"{self.trabajo} de {self.evento_id} por {self.hecho_por}"

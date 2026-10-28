@@ -221,7 +221,7 @@ class SubscriptionViewSet(TenantViewSet):
     def perform_create(self, serializer) -> None:
         with transaction.atomic():
             super().perform_create(serializer)
-            registrar_creada(
+            evento = registrar_creada(
                 serializer.instance,
                 correlation_id=self._correlation_id(self.request),
             )
@@ -229,7 +229,9 @@ class SubscriptionViewSet(TenantViewSet):
             # cuando EVENTOS_ASINCRONOS=0: ese acoplamiento es exactamente
             # lo que el modo asíncrono elimina, y es lo que la prueba de
             # comparación mide. Con la bandera en 1 no hace nada acá.
-            self._modo_despacho = al_crear_suscripcion(serializer.instance)
+            # Recibe el evento para acreditar el trabajo CONTRA ese evento,
+            # en esta misma transacción (ver events/modo.py).
+            self._modo_despacho = al_crear_suscripcion(serializer.instance, evento)
 
     @staticmethod
     def _correlation_id(request) -> uuid.UUID:

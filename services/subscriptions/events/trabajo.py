@@ -16,7 +16,49 @@ from django.db.models import Case, Count, DecimalField, F, Sum, When
 
 from shared.bloqueo import bloquear
 
-from app.models import ResumenOrganizacion, Subscription
+from app.models import ResumenOrganizacion, Subscription, TrabajoDerivado
+
+#: Quién hizo el trabajo, para la evidencia.
+HECHO_POR_API = "api"
+HECHO_POR_CONSUMIDOR = "consumidor"
+
+
+def ya_acreditado(evento_id) -> bool:
+    """Si el resumen de ESTE evento ya se recalculó (por quien sea)."""
+    return TrabajoDerivado.objects.filter(
+        evento_id=evento_id, trabajo=TrabajoDerivado.Trabajo.RESUMEN
+    ).exists()
+
+
+def recalcular_resumen_por_evento(evento_id, organizacion_id, *, hecho_por: str) -> bool:
+    """Hace el trabajo de un evento, salvo que ya esté acreditado. True si lo hizo.
+
+    ── La evidencia va en la MISMA transacción que el trabajo ─────────────
+    O quedan las dos cosas, o ninguna. Si el recálculo falla no queda una
+    fila diciendo que se hizo; si el acreditar falla, el recálculo se
+    deshace y la reentrega vuelve a encontrar el trabajo pendiente.
+
+    Esto es lo que mira el consumidor en vez de su bandera: la primera
+    versión confirmaba sin recalcular cuando `EVENTOS_ASINCRONOS=0`, y un
+    evento producido en asíncrono —sin resumen— que llegaba con la bandera
+    en 0 se perdía con ACK. La bandera del proceso que consume no demuestra
+    lo que hizo el proceso que produjo; esta fila sí. Lo reprodujo la
+    revisión de la PR.
+
+    `get_or_create` y no `create`: si dos consumidores reciben la misma
+    entrega, los dos recalculan (es idempotente) y el segundo encuentra la
+    fila del primero en vez de reventar con la restricción única.
+    """
+    with transaction.atomic():
+        if ya_acreditado(evento_id):
+            return False
+        recalcular_resumen(organizacion_id)
+        TrabajoDerivado.objects.get_or_create(
+            evento_id=evento_id,
+            trabajo=TrabajoDerivado.Trabajo.RESUMEN,
+            defaults={"organizacion_id": organizacion_id, "hecho_por": hecho_por},
+        )
+    return True
 
 
 def recalcular_resumen(organizacion_id) -> list[ResumenOrganizacion]:

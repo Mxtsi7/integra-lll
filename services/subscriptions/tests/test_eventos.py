@@ -14,7 +14,7 @@ import pytest
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from app.models import OutboxEvento, ResumenOrganizacion, Subscription
+from app.models import OutboxEvento, ResumenOrganizacion, Subscription, TrabajoDerivado
 from app.management.commands.consumir_eventos import SobreInvalido, validar
 from events import publicador, topologia
 from events.outbox import registrar_creada
@@ -261,7 +261,7 @@ class TestInterruptor:
             raise RuntimeError("se cayó el recálculo")
 
         settings.EVENTOS_ASINCRONOS = False
-        monkeypatch.setattr("events.modo.recalcular_resumen", explotar)
+        monkeypatch.setattr("events.modo.recalcular_resumen_por_evento", explotar)
         with pytest.raises(RuntimeError):
             self._crear(cliente, org)
         assert not Subscription.objects.filter(organizacion_id=org).exists()
@@ -658,6 +658,208 @@ class TestBloqueoDelResumen:
             bloqueo.bloquear("resumen_organizacion", "x")
 
 
+def sobre_de(evento) -> bytes:
+    """El cuerpo que el consumidor recibiría por ESE evento del outbox."""
+    return json.dumps(publicador.crear_payload(evento)).encode()
+
+
+class CanalQueMiraLaBase:
+    """Un canal falso que, al recibir el ack, comprueba que el trabajo YA esté
+    en la base. Así "no se confirma antes de completar" se prueba de verdad y
+    no por el orden de dos líneas."""
+
+    def __init__(self, org):
+        self.org = org
+        self.acks = 0
+        self.rechazos = []
+        self.resumen_existia_al_confirmar = None
+
+    def basic_ack(self, *, delivery_tag):
+        self.acks += 1
+        self.resumen_existia_al_confirmar = ResumenOrganizacion.objects.filter(
+            organizacion_id=self.org
+        ).exists()
+
+    def basic_reject(self, *, delivery_tag, requeue):
+        self.rechazos.append(requeue)
+
+
+class _Metodo:
+    delivery_tag = 1
+
+
+@pytest.mark.django_db
+class TestLaEvidenciaDecideNoLaBandera:
+    """El consumidor no puede dar por hecho el trabajo mirando SU bandera.
+
+    La versión anterior confirmaba sin recalcular con `EVENTOS_ASINCRONOS=0`.
+    Un evento producido en asíncrono (sin resumen) y consumido con la bandera
+    en 0 recibía ACK y el resumen no existía nunca. Lo reprodujo la revisión
+    de la PR: pasa al cambiar de modo con mensajes pendientes, o con API y
+    worker configurados distinto durante un despliegue.
+
+    Ahora decide la evidencia durable vinculada al evento (`TrabajoDerivado`).
+    """
+
+    def _crear_por_api(self, cliente, org, settings, *, asincrono):
+        settings.EVENTOS_ASINCRONOS = asincrono
+        respuesta = cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert respuesta.status_code == status.HTTP_201_CREATED
+        return OutboxEvento.objects.get(organizacion_id=org)
+
+    @pytest.fixture(autouse=True)
+    def sin_reciclar_conexiones(self, monkeypatch):
+        """`atender` limpia las conexiones viejas en cada mensaje, con razón
+        (es un proceso largo sin peticiones). Dentro de pytest eso cierra la
+        conexión que sostiene la transacción de la prueba; se neutraliza,
+        igual que en las pruebas de recorrido completo."""
+        from app.management.commands import consumir_eventos
+
+        monkeypatch.setattr(consumir_eventos, "close_old_connections", lambda: None)
+
+    def _consumir(self, evento, org, settings, *, bandera):
+        from app.management.commands.consumir_eventos import Command
+
+        settings.EVENTOS_ASINCRONOS = bandera
+        canal = CanalQueMiraLaBase(org)
+        desenlace = Command().atender(canal, _Metodo(), sobre_de(evento))
+        return desenlace, canal
+
+    def test_producido_en_asincrono_y_consumido_con_la_bandera_en_0_SI_recalcula(
+        self, cliente, org, settings
+    ):
+        """La reproducción de la revisión. Antes: ACK y ningún resumen."""
+        evento = self._crear_por_api(cliente, org, settings, asincrono=True)
+        assert not ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+
+        desenlace, canal = self._consumir(evento, org, settings, bandera=False)
+
+        assert desenlace.confirmar is True and desenlace.recalculado is True
+        resumen = ResumenOrganizacion.objects.get(organizacion_id=org)
+        assert resumen.total_mensual == Decimal("9990.00")
+        assert canal.acks == 1 and canal.resumen_existia_al_confirmar is True
+        assert TrabajoDerivado.objects.get(evento_id=evento.id).hecho_por == "consumidor"
+
+    def test_api_en_sincrono_y_worker_en_asincrono_no_duplica_el_trabajo(
+        self, cliente, org, settings, monkeypatch
+    ):
+        """Banderas distintas al revés: el POST ya recalculó y lo acreditó.
+        El consumidor, con la bandera en 1, lo encuentra y no repite."""
+        evento = self._crear_por_api(cliente, org, settings, asincrono=False)
+        acreditado = TrabajoDerivado.objects.get(evento_id=evento.id)
+        assert acreditado.hecho_por == "api"
+
+        from events import trabajo
+
+        llamadas = []
+        real = trabajo.recalcular_resumen
+        monkeypatch.setattr(
+            trabajo, "recalcular_resumen", lambda o: llamadas.append(o) or real(o)
+        )
+        desenlace, canal = self._consumir(evento, org, settings, bandera=True)
+
+        assert desenlace.confirmar is True and desenlace.recalculado is False
+        assert llamadas == [], "recalculó de nuevo lo que el POST ya había hecho"
+        assert canal.acks == 1
+        assert TrabajoDerivado.objects.filter(evento_id=evento.id).count() == 1
+
+    def test_el_consumidor_ya_no_mira_la_bandera(self):
+        """La decisión no puede salir de la configuración del proceso que
+        consume: no demuestra nada de lo que hizo el que produjo."""
+        import inspect
+
+        from app.management.commands import consumir_eventos
+
+        fuente = inspect.getsource(consumir_eventos)
+        assert "settings.EVENTOS_ASINCRONOS" not in fuente
+        assert "if not settings.EVENTOS_ASINCRONOS" not in fuente
+
+    def test_no_confirma_si_el_recalculo_falla(self, cliente, org, settings, monkeypatch):
+        """Sin evidencia y sin trabajo no hay ACK: va a la cola de fallos."""
+        from app.management.commands import consumir_eventos
+
+        evento = self._crear_por_api(cliente, org, settings, asincrono=True)
+
+        def explota(*_a, **_k):
+            raise RuntimeError("se cayó el recálculo")
+
+        monkeypatch.setattr(consumir_eventos, "recalcular_resumen_por_evento", explota)
+        desenlace, canal = self._consumir(evento, org, settings, bandera=False)
+        assert desenlace.confirmar is False
+        assert canal.acks == 0 and canal.rechazos == [False]
+        assert not TrabajoDerivado.objects.filter(evento_id=evento.id).exists()
+
+    def test_la_evidencia_y_el_recalculo_van_en_la_misma_transaccion(
+        self, org, monkeypatch
+    ):
+        """Si acreditar falla, el recálculo se deshace: la reentrega vuelve a
+        encontrar el trabajo pendiente en vez de un resumen sin evidencia."""
+        from events import trabajo
+
+        crear(org, "1000")
+        evento = registrar_creada(Subscription.objects.get(organizacion_id=org))
+
+        def explota(*_a, **_k):
+            raise RuntimeError("no se pudo acreditar")
+
+        monkeypatch.setattr(trabajo.TrabajoDerivado.objects, "get_or_create", explota)
+        with pytest.raises(RuntimeError):
+            trabajo.recalcular_resumen_por_evento(evento.id, org, hecho_por="consumidor")
+        assert not ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+        assert not TrabajoDerivado.objects.filter(evento_id=evento.id).exists()
+
+    def test_una_reentrega_del_mismo_evento_no_recalcula_de_nuevo(
+        self, cliente, org, settings
+    ):
+        """Al menos una entrega: la segunda encuentra la evidencia de la
+        primera y confirma sin repetir."""
+        evento = self._crear_por_api(cliente, org, settings, asincrono=True)
+        primero, _ = self._consumir(evento, org, settings, bandera=True)
+        segundo, canal = self._consumir(evento, org, settings, bandera=True)
+        assert primero.recalculado is True
+        assert segundo.confirmar is True and segundo.recalculado is False
+        assert canal.acks == 1
+        assert TrabajoDerivado.objects.filter(evento_id=evento.id).count() == 1
+
+    def test_un_evento_que_no_esta_en_el_outbox_igual_se_recalcula(self, org, settings):
+        """El de otro productor, o uno ya purgado: sin evidencia, se hace."""
+        from app.management.commands.consumir_eventos import procesar
+
+        crear(org, "1000")
+        sobre = {
+            "evento": "suscripcion.creada", "version": 2, "id": str(uuid.uuid4()),
+            "ocurrido_en": "2026-10-28T12:00:00Z", "correlation_id": str(uuid.uuid4()),
+            "organizacion_id": str(org),
+            "datos": publicador.crear_payload(
+                registrar_creada(Subscription.objects.get(organizacion_id=org))
+            )["datos"],
+        }
+        desenlace = procesar(json.dumps(sobre).encode())
+        assert desenlace.confirmar is True and desenlace.recalculado is True
+        assert ResumenOrganizacion.objects.filter(organizacion_id=org).exists()
+
+    def test_si_falla_el_resumen_en_sincrono_tampoco_queda_evidencia(
+        self, cliente, org, settings, monkeypatch
+    ):
+        """El acoplamiento del modo síncrono: o entra todo, o nada. Incluida
+        la evidencia, o el consumidor omitiría un trabajo que no se hizo."""
+        def explotar(*_a, **_k):
+            raise RuntimeError("se cayó el recálculo")
+
+        settings.EVENTOS_ASINCRONOS = False
+        monkeypatch.setattr("events.trabajo.recalcular_resumen", explotar)
+        with pytest.raises(RuntimeError):
+            cliente.post(
+                "/api/suscripciones/", CUERPO, format="json",
+                headers={"X-Organizacion-Id": str(org)},
+            )
+        assert not TrabajoDerivado.objects.filter(organizacion_id=org).exists()
+        assert not OutboxEvento.objects.filter(organizacion_id=org).exists()
+
+
 @pytest.mark.django_db
 class TestSinTrabajoDuplicado:
     """En modo 0 el trabajo tiene que hacerse UNA vez, no dos.
@@ -665,20 +867,50 @@ class TestSinTrabajoDuplicado:
     El POST recalcula y el evento igual va al outbox, así que el consumidor
     recalculaba lo mismo otra vez. El modo 0 hacía el doble de trabajo que el
     modo 1 y los números de la comparación no medían arquitectura.
+
+    Se resuelve con evidencia, no con la bandera del consumidor: ver
+    `TestLaEvidenciaDecideNoLaBandera`.
     """
 
-    def test_el_consumidor_omite_el_recalculo_en_modo_sincrono(self, settings):
-        """Lo decide mirando la bandera, igual que el POST."""
-        import inspect
+    def test_en_modo_0_el_recalculo_ocurre_una_sola_vez(
+        self, cliente, org, settings, monkeypatch
+    ):
+        from app.management.commands.consumir_eventos import procesar
+        from events import trabajo
 
-        from app.management.commands import consumir_eventos
-
-        fuente = inspect.getsource(consumir_eventos.Command.handle)
-        assert "if not settings.EVENTOS_ASINCRONOS:" in fuente
-        # Y confirma el mensaje: el trabajo está hecho, no pendiente.
-        assert fuente.index("if not settings.EVENTOS_ASINCRONOS:") < fuente.index(
-            "ultimo = None"
+        llamadas = []
+        real = trabajo.recalcular_resumen
+        monkeypatch.setattr(
+            trabajo, "recalcular_resumen", lambda o: llamadas.append(o) or real(o)
         )
+        settings.EVENTOS_ASINCRONOS = False
+        cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        evento = OutboxEvento.objects.get(organizacion_id=org)
+        procesar(sobre_de(evento))
+        assert len(llamadas) == 1, "el modo 0 hizo el trabajo dos veces"
+
+    def test_en_modo_1_tambien_una_sola_vez_y_la_hace_el_consumidor(
+        self, cliente, org, settings, monkeypatch
+    ):
+        from app.management.commands.consumir_eventos import procesar
+        from events import trabajo
+
+        llamadas = []
+        real = trabajo.recalcular_resumen
+        monkeypatch.setattr(
+            trabajo, "recalcular_resumen", lambda o: llamadas.append(o) or real(o)
+        )
+        settings.EVENTOS_ASINCRONOS = True
+        cliente.post(
+            "/api/suscripciones/", CUERPO, format="json",
+            headers={"X-Organizacion-Id": str(org)},
+        )
+        assert llamadas == []
+        procesar(sobre_de(OutboxEvento.objects.get(organizacion_id=org)))
+        assert len(llamadas) == 1
 
     def test_los_dos_modos_cuentan_con_el_mismo_formato(self):
         """`comparar-cola.sh` cuenta esas líneas en los dos lados; si los

@@ -356,15 +356,15 @@ class TestRecorridoReal:
         from app.management.commands import consumir_eventos as comando
 
         llamadas = {"n": 0}
-        real = comando.recalcular_resumen
+        real = comando.recalcular_resumen_por_evento
 
-        def a_veces_falla(organizacion_id):
+        def a_veces_falla(evento_id, organizacion_id, **kw):
             llamadas["n"] += 1
             if llamadas["n"] == 1:
                 raise OperationalError("la base se fue un segundo")
-            return real(organizacion_id)
+            return real(evento_id, organizacion_id, **kw)
 
-        monkeypatch.setattr(comando, "recalcular_resumen", a_veces_falla)
+        monkeypatch.setattr(comando, "recalcular_resumen_por_evento", a_veces_falla)
         # Sin espera: la prueba no tiene por qué dormir 1 s de verdad.
         monkeypatch.setattr(comando.time, "sleep", lambda _s: None)
 
@@ -388,10 +388,10 @@ class TestRecorridoReal:
 
         from app.management.commands import consumir_eventos as comando
 
-        def siempre_falla(_organizacion_id):
+        def siempre_falla(_evento_id, _organizacion_id, **_kw):
             raise OperationalError("la base no vuelve")
 
-        monkeypatch.setattr(comando, "recalcular_resumen", siempre_falla)
+        monkeypatch.setattr(comando, "recalcular_resumen_por_evento", siempre_falla)
         monkeypatch.setattr(comando.time, "sleep", lambda _s: None)
 
         call_command("consumir_eventos", uno=True)

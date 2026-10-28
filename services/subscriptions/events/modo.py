@@ -31,25 +31,33 @@ import logging
 
 from django.conf import settings
 
-from events.trabajo import recalcular_resumen
+from events.trabajo import HECHO_POR_API, recalcular_resumen_por_evento
 
 
 registro = logging.getLogger(__name__)
 
 
-def al_crear_suscripcion(suscripcion) -> str:
+def al_crear_suscripcion(suscripcion, evento) -> str:
     """Hace el trabajo derivado si toca. Devuelve "sincrono" o "asincrono".
 
     El valor de retorno es para la prueba de comparación: deja constancia en
     la respuesta de por qué camino se fue, así la medición no depende de
     recordar cómo quedó la variable de entorno.
+
+    `evento` es la fila del outbox que acaba de registrar `perform_create`.
+    En modo síncrono el recálculo se ACREDITA contra ese evento, en la misma
+    transacción: es lo que después le permite al consumidor saber que el
+    trabajo de ese mensaje ya está hecho, sin mirar ninguna bandera.
     """
     if settings.EVENTOS_ASINCRONOS:
         # El evento ya está en el outbox. El consumidor
-        # (`manage.py consumir_eventos`) recalcula cuando lo reciba.
+        # (`manage.py consumir_eventos`) recalcula cuando lo reciba, y como
+        # acá no se acredita nada, lo va a encontrar pendiente.
         return "asincrono"
 
-    recalcular_resumen(suscripcion.organizacion_id)
+    recalcular_resumen_por_evento(
+        evento.id, suscripcion.organizacion_id, hecho_por=HECHO_POR_API
+    )
     # Se cuenta igual que en el consumidor, con el mismo formato, para poder
     # comprobar al comparar que los dos modos hicieron la MISMA cantidad de
     # trabajo. comparar-cola.sh cuenta estas líneas en los dos lados.
