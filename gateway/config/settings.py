@@ -90,6 +90,8 @@ RUTAS = {
     "/api/suscripciones/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
+    # FE-08: progreso de las importaciones (lo consulta CH-27).
+    "/api/importaciones/": "connectors",
     "/api/recomendaciones/": "analytics",
     "/api/asistente/": "analytics",
     "/api/alertas/": "notifications",
