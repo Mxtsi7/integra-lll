@@ -1025,6 +1025,237 @@ class TestReconexionConcurrente:
         assert cuenta.access_token is None
 
 
+# ══════════════════════════════════════════════════════════════════════
+# El reintento revoca la VERSIÓN que seleccionó, no lo que haya después
+# (el hallazgo de la tercera revisión de #107)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def desconectada_pendiente(*, token="ya29.token-viejo", org=ORG_A):
+    """Una cuenta desconectada cuyo proveedor nunca confirmó: tiene token."""
+    return CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="gmail", cuenta_externa="p@gmail.com",
+        access_token=token,
+        estado=CuentaConectada.Estado.DESCONECTADA,
+    )
+
+
+def reconectar_por_detras(cuenta, *, token="ya29.TOKEN-NUEVO"):
+    """Lo que deja un callback de OAuth: credenciales nuevas, versión nueva,
+    conectada y sin evidencia. Escrito directo, sin pasar por la vista, para
+    poder meterlo en el punto exacto del intercalado."""
+    CuentaConectada.objects.filter(pk=cuenta.pk).update(
+        access_token=token,
+        refresh_token="1//REFRESH-NUEVO",
+        estado=CuentaConectada.Estado.CONECTADA,
+        credenciales_version=cuenta.credenciales_version + 1,
+        revocado_en=None,
+    )
+
+
+class TestElReintentoNoRevocaLasCredencialesNuevas:
+    """Reconectar ENTRE seleccionar las pendientes y releer.
+
+    La relectura por pk encontraba la cuenta conectada, con versión nueva y
+    sin `revocado_en`: pasaba la guarda, y `revocar_y_desconectar` recibía la
+    concesión nueva. Su escritura condicional calzaba con esa versión y la
+    revocaba. Lo reprodujo la revisión: el proveedor recibía el token NUEVO.
+
+    La escritura condicional cubre una reconexión DESPUÉS de leer. Esta es
+    antes, y por eso se compara contra la versión que se seleccionó.
+    """
+
+    def _comando(self, monkeypatch, *, antes_de_releer=None):
+        """Corre el comando con --aplicar. `antes_de_releer` se ejecuta justo
+        después de materializar las pendientes y antes de la relectura."""
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from connectors.management.commands import reintentar_revocaciones as cmd
+
+        real = cmd.pendientes_de_revocar
+
+        def seleccionar_y_mientras_tanto(organizacion_id=None):
+            seleccionadas = list(real(organizacion_id))
+            if antes_de_releer:
+                antes_de_releer(seleccionadas)
+            return seleccionadas
+
+        monkeypatch.setattr(cmd, "pendientes_de_revocar", seleccionar_y_mientras_tanto)
+        salida = StringIO()
+        call_command("reintentar_revocaciones", aplicar=True, stdout=salida)
+        return salida.getvalue()
+
+    def test_reconectar_ANTES_de_releer_no_llama_al_proveedor(self, claves, monkeypatch):
+        """La reproducción de la revisión, tal cual."""
+        cuenta = desconectada_pendiente(token="ya29.token-viejo")
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+
+        salida = self._comando(
+            monkeypatch,
+            antes_de_releer=lambda _: reconectar_por_detras(cuenta, token="ya29.TOKEN-NUEVO"),
+        )
+
+        assert llamadas == [], f"le mandó al proveedor: {[l['access_token'] for l in llamadas]}"
+        cuenta.refresh_from_db()
+        assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+        assert str(cuenta.access_token) == "ya29.TOKEN-NUEVO"
+        assert str(cuenta.refresh_token) == "1//REFRESH-NUEVO"
+        assert cuenta.revocado_en is None
+        assert "no se tocó" in salida
+
+    def test_reconectada_y_vuelta_a_desconectar_ANTES_de_releer_tampoco(self, claves, monkeypatch):
+        """La variante que una guarda de estado sola no ve: reconectó Y volvió
+        a desconectar antes de la relectura. Está desconectada, pendiente y sin
+        evidencia, igual que antes… pero es OTRA concesión, con otro token. No
+        es el trabajo que se seleccionó: se omite y la toma la corrida siguiente
+        como pendiente nueva."""
+        from connectors.revocacion import pendientes_de_revocar
+
+        cuenta = desconectada_pendiente(token="ya29.token-viejo")
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+
+        def reconectar_y_desconectar_de_nuevo(_):
+            reconectar_por_detras(cuenta, token="ya29.TOKEN-NUEVO")
+            CuentaConectada.objects.filter(pk=cuenta.pk).update(
+                estado=CuentaConectada.Estado.DESCONECTADA,
+            )
+
+        salida = self._comando(monkeypatch, antes_de_releer=reconectar_y_desconectar_de_nuevo)
+
+        assert llamadas == [], "revocó una concesión que no era la seleccionada"
+        cuenta.refresh_from_db()
+        assert str(cuenta.access_token) == "ya29.TOKEN-NUEVO"
+        assert cuenta.revocado_en is None
+        assert "no se tocó" in salida
+        # Y sigue pendiente, para la próxima corrida, ya con su versión nueva.
+        assert list(pendientes_de_revocar()) == [cuenta]
+
+    def test_reconectar_DURANTE_el_proveedor_no_toca_las_nuevas(self, claves, monkeypatch):
+        """La otra ventana: ya se releyó, se está hablando con el proveedor.
+        Acá sí se llama, con el token VIEJO, y la escritura condicional es la
+        que impide tocar las credenciales nuevas."""
+        cuenta = desconectada_pendiente(token="ya29.token-viejo")
+        tocados = []
+
+        def revocar_y_mientras_tanto_reconectan(proveedor, *, access_token):
+            tocados.append(access_token)
+            reconectar_por_detras(cuenta, token="ya29.TOKEN-NUEVO")
+            return True  # confirma… el token viejo
+
+        monkeypatch.setattr(proveedores, "revocar", revocar_y_mientras_tanto_reconectan)
+        salida = self._comando(monkeypatch)
+
+        assert tocados == ["ya29.token-viejo"]
+        cuenta.refresh_from_db()
+        assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+        assert str(cuenta.access_token) == "ya29.TOKEN-NUEVO"
+        assert cuenta.revocado_en is None, "acreditó la revocación de las nuevas"
+        assert "se reconectó mientras tanto" in salida
+
+    def test_sin_reconexion_de_por_medio_SI_revoca(self, claves, monkeypatch):
+        """El control: la guarda no puede dejar pendientes para siempre."""
+        cuenta = desconectada_pendiente(token="ya29.token-viejo")
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        salida = self._comando(monkeypatch)
+        assert [l["access_token"] for l in llamadas] == ["ya29.token-viejo"]
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is not None
+        assert cuenta.access_token is None
+        assert "confirmada" in salida
+
+    def test_una_reconexion_entre_dos_pendientes_solo_salta_esa(self, claves, monkeypatch):
+        """Dos pendientes; la segunda se reconecta mientras se procesa la
+        primera. La primera se revoca, la segunda se salta."""
+        primera = desconectada_pendiente(token="ya29.token-a")
+        segunda = CuentaConectada.objects.create(
+            organizacion_id=ORG_A, proveedor="outlook", cuenta_externa="b@outlook.com",
+            access_token="ya29.token-b", estado=CuentaConectada.Estado.DESCONECTADA,
+        )
+        tocados = []
+
+        def revocar_y_reconectar_la_otra(proveedor, *, access_token):
+            tocados.append(access_token)
+            if access_token == "ya29.token-a":
+                reconectar_por_detras(segunda, token="ya29.TOKEN-B-NUEVO")
+            return True
+
+        monkeypatch.setattr(proveedores, "revocar", revocar_y_reconectar_la_otra)
+        self._comando(monkeypatch)
+        assert tocados == ["ya29.token-a"]
+        primera.refresh_from_db(); segunda.refresh_from_db()
+        assert primera.revocado_en is not None
+        assert segunda.revocado_en is None
+        assert str(segunda.access_token) == "ya29.TOKEN-B-NUEVO"
+        assert segunda.estado == CuentaConectada.Estado.CONECTADA
+
+
+class TestReintentarPendiente:
+    """La guarda, pieza por pieza: se omite sin tocar nada si la cuenta ya
+    no es la misma concesión, no está desconectada o ya tiene evidencia."""
+
+    def _resultado_sin_tocar(self, cuenta, monkeypatch):
+        from connectors.revocacion import reintentar_pendiente
+
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        resultado = reintentar_pendiente(cuenta)
+        assert llamadas == [], "llamó al proveedor"
+        return resultado
+
+    def test_si_cambio_la_version_se_omite(self, claves, monkeypatch):
+        cuenta = desconectada_pendiente()
+        seleccionada = CuentaConectada.objects.get(pk=cuenta.pk)
+        # Reconectada y vuelta a desconectar: misma situación, OTRA concesión.
+        CuentaConectada.objects.filter(pk=cuenta.pk).update(
+            access_token="ya29.OTRA", credenciales_version=cuenta.credenciales_version + 1,
+        )
+        assert self._resultado_sin_tocar(seleccionada, monkeypatch) is None
+        cuenta.refresh_from_db()
+        assert str(cuenta.access_token) == "ya29.OTRA"
+
+    def test_si_ya_esta_conectada_se_omite(self, claves, monkeypatch):
+        cuenta = desconectada_pendiente()
+        seleccionada = CuentaConectada.objects.get(pk=cuenta.pk)
+        CuentaConectada.objects.filter(pk=cuenta.pk).update(
+            estado=CuentaConectada.Estado.CONECTADA,
+        )
+        assert self._resultado_sin_tocar(seleccionada, monkeypatch) is None
+        cuenta.refresh_from_db()
+        assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+
+    def test_si_ya_tiene_evidencia_se_omite(self, claves, monkeypatch):
+        cuenta = desconectada_pendiente()
+        seleccionada = CuentaConectada.objects.get(pk=cuenta.pk)
+        CuentaConectada.objects.filter(pk=cuenta.pk).update(revocado_en=timezone.now())
+        assert self._resultado_sin_tocar(seleccionada, monkeypatch) is None
+
+    def test_si_ya_no_existe_se_omite(self, claves, monkeypatch):
+        cuenta = desconectada_pendiente()
+        seleccionada = CuentaConectada.objects.get(pk=cuenta.pk)
+        cuenta.delete()
+        assert self._resultado_sin_tocar(seleccionada, monkeypatch) is None
+
+    def test_si_sigue_igual_revoca(self, claves, monkeypatch):
+        from connectors.revocacion import reintentar_pendiente
+
+        cuenta = desconectada_pendiente(token="ya29.token-viejo")
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+        resultado = reintentar_pendiente(CuentaConectada.objects.get(pk=cuenta.pk))
+        assert resultado is not None and resultado.confirmada is True
+        assert [l["access_token"] for l in llamadas] == ["ya29.token-viejo"]
+
+    def test_la_guarda_va_antes_de_cualquier_llamada_externa(self):
+        """Si alguien mueve la comprobación después del proveedor, esto falla."""
+        import inspect
+
+        from connectors import revocacion
+
+        fuente = inspect.getsource(revocacion.reintentar_pendiente)
+        assert fuente.index("credenciales_version != pendiente.credenciales_version") \
+            < fuente.index("revocar_y_desconectar(actual)")
+
+
 class TestCredencialesIlegibles:
     """Un secreto que no se puede descifrar NO es un secreto ausente.
 

@@ -21,8 +21,7 @@ límite, el lugar es `revocacion.pendientes_de_revocar`.
 
 from django.core.management.base import BaseCommand
 
-from connectors.models import CuentaConectada
-from connectors.revocacion import pendientes_de_revocar, revocar_y_desconectar
+from connectors.revocacion import pendientes_de_revocar, reintentar_pendiente
 
 
 class Command(BaseCommand):
@@ -58,32 +57,34 @@ class Command(BaseCommand):
 
         confirmadas = 0
         for pendiente in pendientes:
-            # ── Se vuelve a leer antes de cada intento ──────────────────────
-            # La lista se materializó al principio y puede quedar vieja: basta
-            # con que alguien reconecte una cuenta en el intervalo. Releerla
-            # hace que `revocar_y_desconectar` vea la versión actual de las
-            # credenciales y su escritura condicional funcione.
-            cuenta = CuentaConectada.objects.filter(pk=pendiente.pk).first()
-            if cuenta is None or cuenta.revocado_en is not None:
-                self.stdout.write(f"  ya no aplica: {pendiente.cuenta_externa}")
+            # ── Lo que se reintenta es la VERSIÓN que se seleccionó ─────────
+            # La lista se materializó al principio y queda vieja apenas
+            # alguien reconecta. Releer por pk no alcanzaba: una cuenta
+            # reconectada en el intervalo volvía conectada, con versión nueva
+            # y sin `revocado_en`, pasaba la guarda y se revocaban las
+            # credenciales NUEVAS. `reintentar_pendiente` exige que siga
+            # siendo la misma concesión antes de hablar con el proveedor.
+            resultado = reintentar_pendiente(pendiente)
+            nombre = pendiente.cuenta_externa
+            if resultado is None:
+                self.stdout.write(
+                    f"  ya no aplica (reconectada o ya acreditada), no se tocó: {nombre}"
+                )
                 continue
 
-            resultado = revocar_y_desconectar(cuenta)
             if resultado.confirmada:
                 confirmadas += 1
-                self.stdout.write(
-                    self.style.SUCCESS(f"  confirmada: {cuenta.cuenta_externa}")
-                )
+                self.stdout.write(self.style.SUCCESS(f"  confirmada: {nombre}"))
             elif resultado.reconectada_mientras_tanto:
                 self.stdout.write(
-                    f"  se reconectó mientras tanto, no se tocó: {cuenta.cuenta_externa}"
+                    f"  se reconectó mientras tanto, no se tocó: {nombre}"
                 )
             elif resultado.ilegible:
                 self.stdout.write(
-                    f"  credenciales ilegibles (¿falta la clave?): {cuenta.cuenta_externa}"
+                    f"  credenciales ilegibles (¿falta la clave?): {nombre}"
                 )
             else:
-                self.stdout.write(f"  sigue pendiente: {cuenta.cuenta_externa}")
+                self.stdout.write(f"  sigue pendiente: {nombre}")
 
         self.stdout.write(
             f"Confirmadas {confirmadas} de {len(pendientes)}; "

@@ -186,6 +186,51 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
     )
 
 
+def reintentar_pendiente(pendiente: CuentaConectada) -> Resultado | None:
+    """Reintenta UNA revocación pendiente. None = ya no corresponde; no se tocó nada.
+
+    `pendiente` es la fila tal como se SELECCIONÓ, y su `credenciales_version`
+    identifica qué concesión se iba a revocar. Eso es lo que hay que
+    conservar: el trabajo pendiente es "revocar la versión N", no "revocar lo
+    que tenga la cuenta cuando le toque".
+
+    ── La carrera que esto cierra ──────────────────────────────────────────
+    La versión anterior del comando releía la cuenta por pk y solo la
+    descartaba si ya no existía o tenía `revocado_en`. Si alguien reconectaba
+    ENTRE seleccionar las pendientes y releer, la relectura la encontraba
+    conectada, con versión nueva y `revocado_en` en NULL: pasaba la guarda, y
+    `revocar_y_desconectar` recibía justamente la concesión nueva. Su
+    escritura condicional calzaba con esa versión nueva y terminaba
+    revocándola y desconectándola. Lo reprodujo la revisión de la PR: el
+    proveedor recibía el token NUEVO.
+
+    La escritura condicional protege una reconexión que ocurra DESPUÉS de
+    leer, mientras se habla con el proveedor. No protege una que ocurra
+    antes. Para esa hay que comparar contra lo que se seleccionó, y por eso
+    la comprobación es sobre la versión del trabajo pendiente y va ANTES de
+    cualquier llamada externa.
+
+    Se omite, sin tocar las credenciales actuales, si la cuenta:
+      · ya no existe,
+      · cambió de versión (alguien reconectó),
+      · ya no está desconectada,
+      · o ya tiene evidencia de revocación.
+    """
+    actual = CuentaConectada.objects.filter(pk=pendiente.pk).first()
+    if actual is None:
+        return None
+    if actual.credenciales_version != pendiente.credenciales_version:
+        return None
+    if actual.estado != CuentaConectada.Estado.DESCONECTADA:
+        return None
+    if actual.revocado_en is not None:
+        return None
+    # Desde acá, `revocar_y_desconectar` lee el token de `actual` (la misma
+    # versión que se seleccionó) y su escritura condicional cubre lo que
+    # pase mientras se habla con el proveedor.
+    return revocar_y_desconectar(actual)
+
+
 def registrar_credenciales_nuevas(cuenta: CuentaConectada) -> None:
     """Sube la versión e invalida la evidencia de revocación anterior.
 
