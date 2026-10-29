@@ -128,6 +128,30 @@ def test_gmail_sin_evidencia_sigue_bloqueando(monkeypatch):
     assert cuenta.revocado_en is None
 
 
+def test_proveedor_desconocido_bloquea_y_conserva_credenciales(monkeypatch, claves):
+    """Un proveedor sin configuración OAuth no puede destruir ciphertext en un 409."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org,
+        proveedor="desconocido",
+        cuenta_externa="rara@test.cl",
+        access_token="token-raro",
+        refresh_token="refresh-raro",
+    )
+    revocar = Mock()
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+
+    assert limpiar(org).status_code == 409
+
+    revocar.assert_not_called()
+    cuenta.refresh_from_db()
+    assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+    assert cuenta.revocado_en is None
+    assert cuenta.access_token == "token-raro"
+    assert cuenta.refresh_token == "refresh-raro"
+
+
 def test_firma_invalida_no_intenta_revocar(monkeypatch, claves):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org = uuid.uuid4()

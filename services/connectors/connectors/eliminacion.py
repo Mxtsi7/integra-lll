@@ -57,6 +57,13 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
                     # acá; sus credenciales se destruyen con la fila en el
                     # borrado final, después de validar toda la organización.
                     continue
+                try:
+                    proveedores.configuracion_de(cuenta.proveedor)
+                except proveedores.ProveedorNoSoportado:
+                    # Proveedor desconocido: no hay forma segura de revocar.
+                    # El validador lo bloqueará y no se destruyen credenciales
+                    # en una ruta que termina en 409.
+                    continue
                 with transaction.atomic():
                     resultado = revocar_y_desconectar(cuenta)
                     if not resultado.confirmada or resultado.reconectada_mientras_tanto:

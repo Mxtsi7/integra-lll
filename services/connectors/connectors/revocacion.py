@@ -260,6 +260,12 @@ def reintentar_pendiente(pendiente: CuentaConectada) -> Resultado | None:
         return None
     if actual.revocado_en is not None:
         return None
+    try:
+        proveedores.configuracion_de(actual.proveedor)
+    except proveedores.ProveedorNoSoportado:
+        # Sin configuración OAuth no hay nada que reintentar ni credenciales
+        # que destruir en este camino.
+        return None
     if not proveedores.soporta_revocacion(actual.proveedor):
         # Outlook: no hay nada que reintentar. La limpieza lo trata como
         # limitación conocida y borra sus credenciales con la fila.
