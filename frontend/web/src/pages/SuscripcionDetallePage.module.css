@@ -85,6 +85,24 @@
   line-height: 1.5;
 }
 
+/* CH-10: cancelar va al pie de la tarjeta, separado de los datos. */
+.acciones {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.notaCancelada {
+  margin-right: auto;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--tinta-2);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
