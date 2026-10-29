@@ -5,12 +5,14 @@ import re
 
 from django.db.models import Sum
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema_serializer
 from rest_framework import serializers
 
 from app.models import (
     CategoriaSuscripcion,
     Moneda,
     Cobro,
+    HallazgoCobro,
     Presupuesto,
     RegistroUso,
     Subscription,
@@ -316,3 +318,117 @@ class ResumenPanelSerializer(serializers.Serializer):
     gasto_proyectado = serializers.DecimalField(max_digits=10, decimal_places=2)
     total_estimado = serializers.DecimalField(max_digits=10, decimal_places=2)
     conteo_estados = ConteoEstadosSerializer()
+
+
+class RegistrarCobroSerializer(serializers.Serializer):
+    """Entrada para registrar un cobro real y disparar la detección de VI-19."""
+
+    monto = serializers.DecimalField(max_digits=10, decimal_places=2)
+    fecha = serializers.DateField()
+    moneda = serializers.RegexField(
+        regex=r"^[A-Z]{3}$",
+        required=False,
+        allow_blank=False,
+    )
+
+    def validate_monto(self, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise serializers.ValidationError("El monto debe ser mayor a 0.")
+        return value
+
+    def validate_moneda(self, value: str) -> str:
+        codigo = value.strip().upper()
+        if not Moneda.objects.filter(codigo=codigo, activo=True).exists():
+            raise serializers.ValidationError(
+                "Debe ser un código del catálogo activo de monedas."
+            )
+        return codigo
+
+    def validate(self, attrs):
+        """Valida también la moneda efectiva cuando se hereda de la suscripción.
+
+        Si el cliente omite ``moneda``, el cobro usará la de la suscripción.
+        Comprobar solo el campo explícito dejaría pasar una moneda heredada
+        que ya no esté activa y el error aparecería después, al guardar.
+        """
+        suscripcion = self.context.get("suscripcion")
+        if suscripcion is not None and "moneda" not in attrs:
+            if not Moneda.objects.filter(
+                codigo=suscripcion.moneda, activo=True
+            ).exists():
+                raise serializers.ValidationError(
+                    {
+                        "moneda": (
+                            "La moneda de la suscripción no está activa en el catálogo."
+                        )
+                    }
+                )
+        return attrs
+
+
+class HallazgoCobroSerializer(serializers.ModelSerializer):
+    """Contrato de una alerta de alza de tarifa o posible doble cobro (VI-19)."""
+
+    suscripcion_id = serializers.UUIDField(read_only=True)
+    cobro_id = serializers.UUIDField(read_only=True)
+    cobro_relacionado_id = serializers.UUIDField(
+        read_only=True, allow_null=True
+    )
+    tipo_display = serializers.CharField(source="get_tipo_display", read_only=True)
+    estado_display = serializers.CharField(
+        source="get_estado_display", read_only=True
+    )
+
+    class Meta:
+        model = HallazgoCobro
+        fields = (
+            "id",
+            "tipo",
+            "tipo_display",
+            "suscripcion_id",
+            "cobro_id",
+            "cobro_relacionado_id",
+            "monto",
+            "monto_referencia",
+            "moneda",
+            "porcentaje_variacion",
+            "fecha_cobro",
+            "fecha_referencia",
+            "detalle",
+            "estado",
+            "estado_display",
+            "revisado_en",
+            "revisado_por",
+            "creado_en",
+        )
+        read_only_fields = fields
+
+
+@extend_schema_serializer(many=False)
+class PaginatedSubscriptionSerializer(serializers.Serializer):
+    """Contrato documentado de la paginación de suscripciones (VI-12)."""
+
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    results = SubscriptionSerializer(many=True)
+
+
+@extend_schema_serializer(many=False)
+class PaginatedCobroSerializer(serializers.Serializer):
+    """Contrato documentado de la paginación del histórico de cobros (VI-12)."""
+
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    results = CobroSerializer(many=True)
+
+
+@extend_schema_serializer(many=False)
+class PaginatedHallazgoSerializer(serializers.Serializer):
+    """Contrato documentado de la paginación de hallazgos (VI-12 / VI-19)."""
+
+    count = serializers.IntegerField()
+    next = serializers.URLField(allow_null=True)
+    previous = serializers.URLField(allow_null=True)
+    results = HallazgoCobroSerializer(many=True)
