@@ -18,6 +18,7 @@ import {
   guardarTokensSeguros,
   limpiarSesionSegura,
   inicializarStorageSeguro,
+  adaptadorStorageSincrono,
   CLAVES_SEGURAS,
 } from '../src/services/storageSeguro';
 import { AuthProvider, useAuth, type Tokens } from './AuthContext';
@@ -83,8 +84,8 @@ describe('AuthContext móvil', () => {
     expect(result.current.haySesion).toBe(false);
     expect(result.current.estado).toBe('anonimo');
 
-    act(() => {
-      result.current.iniciarSesion(tokens, USUARIO_PRUEBA);
+    await act(async () => {
+      await result.current.iniciarSesion(tokens, USUARIO_PRUEBA);
     });
 
     expect(result.current.haySesion).toBe(true);
@@ -108,11 +109,11 @@ describe('AuthContext móvil', () => {
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
-    expect(() => {
-      act(() => {
-        result.current.iniciarSesion(tokensInvalidos);
-      });
-    }).toThrow('Token inválido o expirado');
+    await expect(
+      act(async () => {
+        await result.current.iniciarSesion(tokensInvalidos);
+      })
+    ).rejects.toThrow('Token inválido o expirado');
 
     expect(result.current.haySesion).toBe(false);
     expect(result.current.estado).toBe('anonimo');
@@ -310,7 +311,7 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
-        result.current.iniciarSesion(tokens);
+        await result.current.iniciarSesion(tokens);
       });
 
       expect(result.current.haySesion).toBe(true);
@@ -360,7 +361,7 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
-        result.current.iniciarSesion(tokens);
+        await result.current.iniciarSesion(tokens);
       });
 
       expect(result.current.haySesion).toBe(true);
@@ -386,7 +387,7 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       await act(async () => {
-        result.current.iniciarSesion(tokens);
+        await result.current.iniciarSesion(tokens);
       });
 
       // La sesión es válida por token JWT, pero el perfil no se inventa
@@ -441,8 +442,8 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
 
       // Inicia sesión A
-      act(() => {
-        result.current.iniciarSesion(tokensA);
+      await act(async () => {
+        await result.current.iniciarSesion(tokensA);
       });
 
       expect(result.current.haySesion).toBe(true);
@@ -487,8 +488,8 @@ describe('AuthContext móvil', () => {
       // Petición de A2
       fetchMock.mockReturnValueOnce(promesaMeA2);
 
-      act(() => {
-        result.current.iniciarSesion(tokensA);
+      await act(async () => {
+        await result.current.iniciarSesion(tokensA);
       });
 
       // Antes de que resuelva A2, entra B
@@ -500,7 +501,7 @@ describe('AuthContext móvil', () => {
       );
 
       await act(async () => {
-        result.current.iniciarSesion(tokensB);
+        await result.current.iniciarSesion(tokensB);
       });
 
       expect(result.current.usuario).toEqual(USUARIO_B);
@@ -559,6 +560,136 @@ describe('AuthContext móvil', () => {
       expect(haySesionValida()).toBe(false);
       expect(obtenerAccessToken()).toBeNull();
       expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeNull();
+    });
+  });
+
+  describe('Regresiones de Persistencia y Orden de Mutaciones (Revisión SE-08 / SE-10)', () => {
+    it('iniciarSesion espera la persistencia antes de confirmar autenticado (escritura lenta) [P2]', async () => {
+      let resolverEscritura: () => void;
+      const promesaEscritura = new Promise<void>((r) => {
+        resolverEscritura = r;
+      });
+
+      // Simular backend con escritura lenta en SecureStore
+      const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync').mockImplementation(async () => {
+        await promesaEscritura;
+      });
+
+      const tokens: Tokens = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-lento',
+      };
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      // Disparar login sin esperar la resolución de la escritura
+      let loginTerminado = false;
+      const promesaLogin = act(async () => {
+        await result.current.iniciarSesion(tokens, USUARIO_PRUEBA);
+        loginTerminado = true;
+      });
+
+      // Antes de que resuelva la escritura persistente:
+      // El estado NO debe ser 'autenticado' prematuramente
+      expect(loginTerminado).toBe(false);
+      expect(result.current.estado).toBe('anonimo');
+      expect(result.current.haySesion).toBe(false);
+
+      // Ahora resolvemos la escritura en hardware
+      resolverEscritura!();
+      await promesaLogin;
+
+      // Tras la confirmación de la persistencia:
+      expect(loginTerminado).toBe(true);
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.haySesion).toBe(true);
+
+      setItemSpy.mockRestore();
+    });
+
+    it('rechazo de persistencia en access, refresh o desfase aborta login con rollback sin promesas sin manejar [P2]', async () => {
+      const setItemSpy = vi
+        .spyOn(SecureStore, 'setItemAsync')
+        .mockRejectedValue(new Error('Keystore hardware error'));
+
+      try {
+        const tokens: Tokens = {
+          access_token: jwtValido(),
+          refresh_token: 'refresh-fallido',
+        };
+
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+        );
+
+        const { result } = renderHook(() => useAuth(), { wrapper });
+
+        let errorCapturado: any;
+        try {
+          await act(async () => {
+            await result.current.iniciarSesion(tokens, USUARIO_PRUEBA);
+          });
+        } catch (e) {
+          errorCapturado = e;
+        }
+        expect(errorCapturado?.message).toMatch('Fallo al persistir tokens en almacenamiento seguro');
+
+        // Memoria y estado de contexto deben quedar totalmente limpios (rollback)
+        expect(result.current.haySesion).toBe(false);
+        expect(result.current.estado).toBe('anonimo');
+        expect(result.current.usuario).toBeNull();
+        expect(haySesionValida()).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+
+    it('fallo de borrado persistente en cerrarSesion propaga error pero garantiza navegación pública en RAM [P1]', async () => {
+      const deleteItemSpy = vi
+        .spyOn(SecureStore, 'deleteItemAsync')
+        .mockRejectedValue(new Error('Hardware delete error'));
+
+      try {
+        const tokens: Tokens = {
+          access_token: jwtValido(),
+          refresh_token: 'refresh-error-delete',
+        };
+
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <AuthProvider initialEstado="autenticado" initialUsuario={USUARIO_PRUEBA}>
+            {children}
+          </AuthProvider>
+        );
+
+        const { result } = renderHook(() => useAuth(), { wrapper });
+
+        expect(result.current.haySesion).toBe(true);
+
+        let errorCerrar: any;
+        try {
+          await act(async () => {
+            await result.current.cerrarSesion();
+          });
+        } catch (e) {
+          errorCerrar = e;
+        }
+        await act(async () => {});
+        expect(errorCerrar?.message).toMatch('Fallo al limpiar sesión en almacenamiento seguro');
+
+        // A pesar del fallo en hardware, la memoria síncrona se limpió inmediatamente (navegación pública)
+        expect(result.current.haySesion).toBe(false);
+        expect(result.current.estado).toBe('anonimo');
+        expect(result.current.usuario).toBeNull();
+        expect(haySesionValida()).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+      } finally {
+        deleteItemSpy.mockRestore();
+      }
     });
   });
 });

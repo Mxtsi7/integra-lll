@@ -8,6 +8,7 @@ import {
   CLAVES_SEGURAS,
   IBackendStorageSeguro,
   configurarBackendStorage,
+  adaptadorStorageSincrono,
   hidratarSesionSegura,
   guardarTokensSeguros,
   inicializarStorageSeguro,
@@ -206,6 +207,211 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
       expect(resultado.hidratado).toBe(false);
       expect(resultado.hayTokens).toBe(false);
       expect(haySesionValida()).toBe(false);
+    });
+  });
+
+  describe('5. Orden de mutaciones, concurrencia y fallos de borrado (Revisión SE-08)', () => {
+    it('escritura tardía después del cierre no sobrevive al reiniciar e hidratar [P1]', async () => {
+      let resolverEscritura: () => void;
+      const promesaEscritura = new Promise<void>((r) => {
+        resolverEscritura = r;
+      });
+
+      // Backend donde setItemAsync queda pendiente de resolver
+      const backendLento: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          await promesaEscritura;
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendLento);
+
+      const tokens = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-escritura-tardia',
+      };
+
+      // 1. Iniciar guardado de login (escritura queda pendiente en hardware)
+      const pLogin = guardarTokensSeguros(tokens);
+
+      // 2. Ejecutar y completar limpiarSesionSegura()
+      await limpiarSesionSegura();
+
+      // 3. Terminar las escrituras anteriores pendientes
+      resolverEscritura!();
+      // pLogin debe resolver o rechazar sin crash
+      await pLogin.catch(() => {});
+
+      // Simular reinicio vaciando la memoria RAM
+      __reiniciarEstadoParaPruebas();
+      configurarBackendStorage(backendLento);
+
+      // 4. Hidratar: NO debe reaparecer el access token de la sesión cerrada
+      const resultado = await hidratarSesionSegura();
+      expect(resultado.hayTokens).toBe(false);
+      expect(obtenerAccessToken()).toBeNull();
+      expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeFalsy();
+    });
+
+    it('borrado tardío de sesión anterior no elimina los tokens de un nuevo login posterior [P1]', async () => {
+      let resolverBorrado: () => void;
+      const promesaBorrado = new Promise<void>((r) => {
+        resolverBorrado = r;
+      });
+
+      const backendBorradoLento: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          await promesaBorrado;
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendBorradoLento);
+
+      const tokensA = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-A',
+      };
+      const tokensB = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-B',
+      };
+
+      // 1. Sesión A activa
+      almacenamientoSimulado.set(CLAVES_SEGURAS.ACCESS_TOKEN, tokensA.access_token);
+      almacenamientoSimulado.set(CLAVES_SEGURAS.REFRESH_TOKEN, tokensA.refresh_token);
+
+      // 2. Se dispara limpiarSesionSegura() (borrado pendiente en hardware)
+      const pLogout = limpiarSesionSegura();
+
+      // 3. Usuario inicia sesión con B
+      const pLoginB = guardarTokensSeguros(tokensB);
+
+      // 4. Se completa el borrado viejo
+      resolverBorrado!();
+      await pLogout.catch(() => {});
+      await pLoginB;
+
+      // 5. Reinicio simulado
+      __reiniciarEstadoParaPruebas();
+      configurarBackendStorage(backendBorradoLento);
+
+      // Al rehidratar, los tokens nuevos de B deben estar presentes e intactos
+      const resultado = await hidratarSesionSegura();
+      expect(resultado.hayTokens).toBe(true);
+      expect(obtenerAccessToken()).toBe(tokensB.access_token);
+      expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(tokensB.access_token);
+    });
+
+    it('401 seguido de nuevo login preserva la sesión nueva tras reinicio [P1]', async () => {
+      const tokensViejos = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-401',
+      };
+      await guardarTokensSeguros(tokensViejos);
+
+      // 401 disparado por cliente shared: invoca adaptadorStorageSincrono.removeItem
+      // a través de logout()
+      adaptadorStorageSincrono.removeItem(CLAVES_SEGURAS.ACCESS_TOKEN);
+      adaptadorStorageSincrono.removeItem(CLAVES_SEGURAS.REFRESH_TOKEN);
+
+      // Nuevo login inmediato
+      const tokensNuevos = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-nuevo-login',
+      };
+      await guardarTokensSeguros(tokensNuevos);
+
+      // Reinicio
+      __reiniciarEstadoParaPruebas();
+      inicializarStorageSeguro(backendMock);
+
+      const res = await hidratarSesionSegura();
+      expect(res.hayTokens).toBe(true);
+      expect(obtenerAccessToken()).toBe(tokensNuevos.access_token);
+      expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(tokensNuevos.access_token);
+    });
+
+    it('fallo total de borrado en limpiarSesionSegura rechaza y política durable evita rehidratar [P1]', async () => {
+      const backendFalloBorrado: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn().mockRejectedValue(new Error('Hardware delete failed')),
+      };
+      configurarBackendStorage(backendFalloBorrado);
+
+      try {
+        const tokens = {
+          access_token: jwtValido(),
+          refresh_token: 'refresh-no-borrable',
+        };
+        almacenamientoSimulado.set(CLAVES_SEGURAS.ACCESS_TOKEN, tokens.access_token);
+        almacenamientoSimulado.set(CLAVES_SEGURAS.REFRESH_TOKEN, tokens.refresh_token);
+
+        // limpiarSesionSegura NO debe reportar éxito si el borrado falló
+        await expect(limpiarSesionSegura()).rejects.toThrow(
+          'Fallo al limpiar sesión en almacenamiento seguro'
+        );
+
+        // Memoria síncrona debe estar limpia
+        expect(obtenerAccessToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+
+        // Reinicio simulado
+        __reiniciarEstadoParaPruebas();
+        configurarBackendStorage(backendFalloBorrado);
+
+        // Al rehidratar, la política durable impide recuperar la sesión pendiente de cierre
+        const res = await hidratarSesionSegura();
+        expect(res.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('fallo de escritura en cualquiera de las claves (access, refresh o desfase) ejecuta rollback completo [P2]', async () => {
+      const backendFalloDesfase: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          if (k === CLAVES_SEGURAS.DESFASE_RELOJ) {
+            throw new Error('Disk full on clock offset write');
+          }
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendFalloDesfase);
+
+      try {
+        const tokens = {
+          access_token: jwtValido(),
+          refresh_token: 'refresh-fallo-desfase',
+        };
+
+        await expect(guardarTokensSeguros(tokens)).rejects.toThrow(
+          'Fallo al persistir tokens en almacenamiento seguro'
+        );
+
+        // Rollback en memoria
+        expect(obtenerAccessToken()).toBeNull();
+        expect(obtenerRefreshToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
     });
   });
 });

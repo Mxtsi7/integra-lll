@@ -257,7 +257,7 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
 
     try {
       const res = await login({ correo: credenciales.correo, password: credenciales.password });
-      iniciarSesion({ access_token: res.access_token, refresh_token: res.refresh_token });
+      await iniciarSesion({ access_token: res.access_token, refresh_token: res.refresh_token });
     } catch (err: unknown) {
       if (err instanceof AuthError && err.status === 401) {
         setError('Usuario o contraseña inválidos');
@@ -269,7 +269,9 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
             'No se pudo conectar con el servidor. Intenta de nuevo en un momento.'
         );
       } else {
-        setError('No se pudo iniciar sesión. Intenta de nuevo.');
+        setError(
+          err instanceof Error ? err.message : 'No se pudo iniciar sesión. Intenta de nuevo.'
+        );
       }
     } finally {
       setLoading(false);

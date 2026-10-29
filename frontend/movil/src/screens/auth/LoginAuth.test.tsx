@@ -299,5 +299,116 @@ describe('Conectar Login móvil con Auth (SE-10)', () => {
       expect(peticionMeHeaders).not.toBeNull();
       expect(peticionMeHeaders?.get('Authorization')).toMatch(/^Bearer /);
     });
+
+    it('formulario permanece bloqueado y en estado de carga mientras la persistencia está en progreso [P2]', async () => {
+      let resolverPersistencia: () => void;
+      const promesaPersistencia = new Promise<void>((r) => {
+        resolverPersistencia = r;
+      });
+
+      const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync').mockImplementation(async () => {
+        await promesaPersistencia;
+      });
+
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/auth/login/')) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                access_token: jwtValido(),
+                refresh_token: 'refresh-bloqueo',
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
+        if (url.includes('/usuarios/me/')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(USUARIO_BACKEND), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
+        return Promise.reject(new Error(`URL no manejada: ${url}`));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<App initialEstado="anonimo" />);
+
+      fireEvent.change(screen.getByTestId('input-correo'), {
+        target: { value: 'bloqueo@test.cl' },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: 'password123' },
+      });
+
+      fireEvent.click(screen.getByTestId('login-submit'));
+
+      // Mientras la persistencia está en progreso, el botón debe estar deshabilitado
+      await waitFor(() => {
+        expect(screen.getByTestId('login-submit').getAttribute('aria-disabled')).toBe('true');
+      });
+
+      // Todavía no debe navegar a home
+      expect(screen.queryByTestId('screen-home')).toBeNull();
+
+      // Resolver persistencia
+      resolverPersistencia!();
+
+      // Ahora sí conmuta a Home
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+      setItemSpy.mockRestore();
+    });
+
+    it('fallo al persistir tokens en almacenamiento seguro muestra error y desbloquea el formulario [P2]', async () => {
+      const setItemSpy = vi
+        .spyOn(SecureStore, 'setItemAsync')
+        .mockRejectedValue(new Error('Almacenamiento protegido no disponible'));
+
+      try {
+        const fetchMock = vi.fn().mockImplementation((url: string) => {
+          if (url.includes('/auth/login/')) {
+            return Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  access_token: jwtValido(),
+                  refresh_token: 'refresh-fallido',
+                }),
+                { status: 200, headers: { 'Content-Type': 'application/json' } }
+              )
+            );
+          }
+          return Promise.reject(new Error(`URL no manejada: ${url}`));
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(<App initialEstado="anonimo" />);
+
+        fireEvent.change(screen.getByTestId('input-correo'), {
+          target: { value: 'fallo@test.cl' },
+        });
+        fireEvent.change(screen.getByTestId('input-password'), {
+          target: { value: 'password123' },
+        });
+
+        fireEvent.click(screen.getByTestId('login-submit'));
+
+        // Debe mostrar el error del storage
+        expect(await screen.findByTestId('login-error')).toBeTruthy();
+        expect(
+          screen.getByText(/Fallo al persistir tokens en almacenamiento seguro/)
+        ).toBeTruthy();
+
+        // Debe permanecer en login
+        expect(screen.queryByTestId('screen-home')).toBeNull();
+
+        // Botón debe estar desbloqueado para reintentar
+        expect(screen.getByTestId('login-submit').getAttribute('aria-disabled')).not.toBe('true');
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
   });
 });

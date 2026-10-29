@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   haySesionValida,
+  tokenExpirado,
   revocarSesion,
   getUsuarioActual,
   configurarManejador401,
@@ -25,7 +26,7 @@ type AuthValue = {
   haySesion: boolean;
   estadoPerfil: EstadoPerfil;
   errorPerfil: string | null;
-  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => void;
+  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => Promise<void>;
   cerrarSesion: () => Promise<void>;
   recargarPerfil: () => Promise<void>;
 };
@@ -80,7 +81,7 @@ export function AuthProvider({
 
       if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
         // Token revocado o usuario inexistente: la sesión no sirve
-        void limpiarSesionSegura();
+        void limpiarSesionSegura().catch(() => {});
         setUsuario(null);
         setEstado('anonimo');
         setEstadoPerfil('inactivo');
@@ -109,7 +110,9 @@ export function AuthProvider({
 
       // 2. Verificación de vigencia y desfase de reloj del token recuperado
       if (!haySesionValida()) {
-        await limpiarSesionSegura();
+        try {
+          await limpiarSesionSegura();
+        } catch {}
         if (idSesion === sesionVigente.current) {
           setUsuario(null);
           setEstado('anonimo');
@@ -133,11 +136,13 @@ export function AuthProvider({
     configurarManejador401(() => {
       sesionVigente.current++;
       ultimaPeticion.current++;
-      void limpiarSesionSegura();
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
       setErrorPerfil(null);
+      void limpiarSesionSegura().catch((err) => {
+        console.warn('[AuthContext] Error al limpiar sesión en interceptor 401:', err);
+      });
     });
     return () => {
       configurarManejador401(() => {});
@@ -145,10 +150,9 @@ export function AuthProvider({
   }, []);
 
   const iniciarSesion = useCallback(
-    (tokens: Tokens, u?: Usuario) => {
-      void guardarTokensSeguros(tokens);
-      if (!haySesionValida()) {
-        void limpiarSesionSegura();
+    async (tokens: Tokens, u?: Usuario) => {
+      // 1. Validación previa de vigencia/formato del token recibido
+      if (!tokens.access_token || tokenExpirado(tokens.access_token)) {
         setUsuario(null);
         setEstado('anonimo');
         setEstadoPerfil('inactivo');
@@ -156,6 +160,31 @@ export function AuthProvider({
         throw new Error('Token inválido o expirado');
       }
 
+      // 2. Persistencia segura atómica en hardware esperando su confirmación
+      try {
+        await guardarTokensSeguros(tokens);
+      } catch (err) {
+        // Rollback completo del contexto en caso de rechazo del almacenamiento
+        setUsuario(null);
+        setEstado('anonimo');
+        setEstadoPerfil('inactivo');
+        setErrorPerfil(null);
+        throw err;
+      }
+
+      // 3. Validación de vigencia del token guardado
+      if (!haySesionValida()) {
+        try {
+          await limpiarSesionSegura();
+        } catch {}
+        setUsuario(null);
+        setEstado('anonimo');
+        setEstadoPerfil('inactivo');
+        setErrorPerfil(null);
+        throw new Error('Token inválido o expirado');
+      }
+
+      // 4. Transicionar a autenticado SOLO tras persistencia y validación exitosas
       const idSesion = ++sesionVigente.current;
       setEstado('autenticado');
 
@@ -172,26 +201,32 @@ export function AuthProvider({
   );
 
   const cerrarSesion = useCallback(async () => {
-    // Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
+    // 1. Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
     sesionVigente.current++;
     ultimaPeticion.current++;
 
+    // 2. Cierre inmediato en memoria para navegación pública instantánea
+    setUsuario(null);
+    setEstado('anonimo');
+    setEstadoPerfil('inactivo');
+    setErrorPerfil(null);
+
+    // 3. Revocación remota (con o sin respuesta del backend)
     try {
       await revocarSesion();
     } catch {
       // Ignorar error si el backend no responde
-    } finally {
-      await limpiarSesionSegura();
-      setUsuario(null);
-      setEstado('anonimo');
-      setEstadoPerfil('inactivo');
-      setErrorPerfil(null);
     }
+
+    // 4. Limpieza persistente en hardware seguro (propaga error si la eliminación física falla)
+    await limpiarSesionSegura();
   }, []);
 
   const recargarPerfil = useCallback(async () => {
     if (!haySesionValida()) {
-      await limpiarSesionSegura();
+      try {
+        await limpiarSesionSegura();
+      } catch {}
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
