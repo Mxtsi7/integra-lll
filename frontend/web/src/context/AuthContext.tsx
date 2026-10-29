@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from "react";
-import { configurarManejador401, ErrorDeApi, getUsuarioActual, guardarTokens, haySesionValida, logout, obtenerAccessToken, revocarSesion, type Usuario} from "@ojoalgasto/shared";
+import { configurarManejador401, ErrorDeApi, getUsuarioActual, guardarTokens, haySesionValida, logout, obtenerAccessToken, revocarSesion, sesionDelToken, type Usuario} from "@ojoalgasto/shared";
 import { useToast } from "./ToastContext";
 
 // Las pantallas nunca leen localStorage: preguntan acá. Los tokens siguen
@@ -22,12 +22,20 @@ type Tokens = { access_token: string; refresh_token: string };
  * inicia sesión. Una operación que tarda (guardar el nombre, cambiar la
  * contraseña) la anota al empezar con `capturarSesion()` y se la pasa al
  * contexto al terminar, para que su respuesta no toque otra sesión.
+ * Un refresh del access token no la cambia: sigue siendo la misma sesión.
  */
 export type MarcaSesion = number;
 
 type ApiAuth = {
   estado: EstadoSesion;
   usuario: Usuario | null;
+  /**
+   * La marca de la sesión vigente, como estado: cuando cambia, React vuelve
+   * a renderizar. <RutaPrivada> la usa de `key` para que lo que mostraba una
+   * cuenta no siga montado con otra (revisión de #128). Para decidir al
+   * terminar una operación se usa `capturarSesion()`, que cambia al instante.
+   */
+  sesion: MarcaSesion;
   estaAutenticado: boolean;
   /**
    * Guarda los tokens del login y carga el usuario. Lanza TokenInvalidoError
@@ -90,6 +98,13 @@ function esErrorTemporal(err: unknown): boolean {
   return err instanceof TypeError; // fetch() sin red o servidor caído
 }
 
+/** true si los dos tokens son de la misma sesión (uno es el refresh del otro). Si no se sabe, false. */
+function esLaMismaSesion(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  const sesion = sesionDelToken(a);
+  return sesion !== null && sesion === sesionDelToken(b);
+}
+
 function estadoInicial(): EstadoSesion {
   return haySesionValida() ? { tipo: "verificando" } : { tipo: "anonimo" };
 }
@@ -125,6 +140,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // cambia también al reintentar /usuarios/me/ dentro de la misma sesión,
   // y eso no debe descartar un guardado (revisión CH-08 en #99).
   const sesionVigente = useRef(0);
+  // La misma marca como estado (`sesion` del contexto). La ref se lee al
+  // instante; el estado es lo que hace volver a montar las pantallas.
+  const [sesion, setSesion] = useState<MarcaSesion>(0);
+  const nuevaSesion = useCallback(() => {
+    sesionVigente.current++;
+    setSesion(sesionVigente.current);
+  }, []);
 
   const cargarUsuario = useCallback(async () => {
     const id = ++ultimaPeticion.current;
@@ -133,7 +155,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // cerrado sesión): el mismo número sirve para cortar los reintentos.
     const vigente = () => id === ultimaPeticion.current && estadoRef.current.tipo !== "anonimo";
 
-    for (let intento = 0; ; intento++) {
+    // Cuántas esperas de reintento van. Volver a preguntar tras un refresh
+    // (más abajo) no gasta ninguna: no es una falla del servidor.
+    let intento = 0;
+    for (;;) {
+      // El access con que sale esta consulta: pedir() lo lee al enviarla.
+      const tokenDeLaConsulta = obtenerAccessToken();
       try {
         const usuario = await getUsuarioActual();
         if (vigente()) cambiarEstado({ tipo: "autenticado", usuario });
@@ -141,8 +168,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err: unknown) {
         if (!vigente()) return;
         if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
-          // 401: el gateway rechazó el token. 404: el usuario del token ya no
-          // existe. En ambos casos la sesión no sirve.
+          const tokenActual = obtenerAccessToken();
+          if (tokenActual !== tokenDeLaConsulta) {
+            // Revisión de #128: el rechazo es del token con que salió la
+            // consulta y, mientras viajaba, se guardó otro. No puede borrar
+            // el nuevo. Si es un refresh de la misma sesión, se vuelve a
+            // preguntar con el vigente: cada repetición necesita otra
+            // renovación, así que no queda dando vueltas. Si es otra sesión,
+            // su carga la lanza quien la detecta (evento `storage` o
+            // iniciarSesion) y esta termina sin tocar nada.
+            if (esLaMismaSesion(tokenActual, tokenDeLaConsulta)) continue;
+            return;
+          }
+          // 401: el gateway rechazó el token vigente. 404: el usuario del
+          // token ya no existe. En ambos casos la sesión no sirve.
           logout();
           cambiarEstado({ tipo: "anonimo" });
           return;
@@ -156,7 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // …y se reintenta solo, sin pedir un nuevo login (revisión CH-02).
         // Un 403 u otro 4xx no se arregla reintentando: ahí se para.
         if (!esErrorTemporal(err) || intento >= ESPERAS_REINTENTO_MS.length) return;
-        await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento]));
+        await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento++]));
         if (!vigente()) return;
       }
     }
@@ -165,10 +204,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Pasa a "anonimo" e invalida cualquier /usuarios/me/ que siga en vuelo.
   const quedarAnonimo = useCallback(() => {
     ultimaPeticion.current++;
-    sesionVigente.current++;
+    nuevaSesion();
     tokenConocido.current = null;
     cambiarEstado({ tipo: "anonimo" });
-  }, [cambiarEstado]);
+  }, [cambiarEstado, nuevaSesion]);
 
   // Bootstrap al montar (= al cargar o recargar la página).
   useEffect(() => {
@@ -203,20 +242,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (actual !== "anonimo") quedarAnonimo();
       } else if (actual === "anonimo") {
         // Se inició sesión en otra pestaña.
-        sesionVigente.current++;
+        nuevaSesion();
         cambiarEstado({ tipo: "verificando" });
         void cargarUsuario();
       } else if (obtenerAccessToken() !== tokenConocido.current) {
-        // Sigue habiendo sesión, pero con otro token: en otra pestaña entró
-        // otra cuenta. Se recarga el usuario para no mostrar el anterior.
-        sesionVigente.current++;
-        void cargarUsuario();
+        const token = obtenerAccessToken();
+        if (esLaMismaSesion(token, tokenConocido.current)) {
+          // Solo se renovó el access (refresh): misma cuenta, misma sesión.
+          // No se recarga nada, para no vaciar las pantallas abiertas.
+          tokenConocido.current = token;
+        } else {
+          // Sigue habiendo sesión, pero es otra: en otra pestaña entró otra
+          // cuenta. Se recarga el usuario para no mostrar el anterior.
+          nuevaSesion();
+          void cargarUsuario();
+        }
       }
       // Cualquier otra clave (p. ej. el tema claro/oscuro) no afecta la sesión.
     }
     window.addEventListener("storage", alCambiarStorage);
     return () => window.removeEventListener("storage", alCambiarStorage);
-  }, [cargarUsuario, cambiarEstado, quedarAnonimo]);
+  }, [cargarUsuario, cambiarEstado, quedarAnonimo, nuevaSesion]);
 
   // Si se agotaron los reintentos sin red, se vuelve a probar apenas el
   // navegador avisa que hay conexión, también sin pedir login.
@@ -250,11 +296,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout();
         throw new TokenInvalidoError();
       }
-      sesionVigente.current++;
+      nuevaSesion();
       cambiarEstado({ tipo: "autenticado", usuario: null });
       void cargarUsuario();
     },
-    [cargarUsuario, cambiarEstado],
+    [cargarUsuario, cambiarEstado, nuevaSesion],
   );
 
   const cerrarSesion = useCallback(async () => {
@@ -310,6 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       estado,
       usuario: estado.tipo === "autenticado" ? estado.usuario : null,
       estaAutenticado: estado.tipo === "autenticado",
+      sesion,
       iniciarSesion,
       cerrarSesion,
       cerrarSesionLocal,
@@ -317,7 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       capturarSesion,
       actualizarUsuario,
     }),
-    [estado, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion, capturarSesion, actualizarUsuario],
+    [estado, sesion, iniciarSesion, cerrarSesion, cerrarSesionLocal, verificarSesion, capturarSesion, actualizarUsuario],
   );
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;
