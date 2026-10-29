@@ -121,3 +121,31 @@ jobs:
       - name: Build
         run: npm run build
 
+  # ── Guiones de operación: el de rotar la clave de Postgres ──────────
+  # Ese script puede dejar al equipo sin base de datos, y no se puede
+  # "probar en producción a ver qué pasa". El arnés lo ejercita con
+  # kubectl/openssl/git dobles CON ESTADO (la base y el Secret son dos
+  # estados independientes, que es lo que permite representar una
+  # desincronización), cubriendo los dieciocho caminos: feliz, fallo de cada
+  # paso, la reanudación después de cada uno, y la muerte del proceso o un
+  # error de escritura al anotar una fase (el archivo vigente sobrevive).
+  #
+  # No toca ningún cluster ni ninguna base. Corre en segundos.
+  operacion:
+    name: operación · rotar clave
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sintaxis de los guiones
+        run: |
+          bash -n k8s/rotar-clave-postgres.sh
+          bash -n k8s/pruebas/probar-rotacion.sh
+          bash -n k8s/desplegar.sh
+
+      - name: Arnés de la rotación (dobles con estado, sin cluster)
+        run: bash k8s/pruebas/probar-rotacion.sh

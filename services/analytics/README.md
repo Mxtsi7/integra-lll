@@ -38,6 +38,66 @@ normaliza el costo recurrente de la candidata a un monto mensual (un costo anual
 se divide por 12), pero no se convierten ni suman monedas distintas. No se
 afirma equivalencia entre los proveedores.
 
+La regla de bajo uso por horas pertenece a FE-29 y **no** está implementada acá.
+Tampoco se recomienda por compartir categoría: sin solapamiento explícito el job
+no produce salidas.
+
+## Persistencia y listado (VI-17)
+
+`analytics.event_consumer.procesar_mensaje()` persiste cada salida antes de
+publicarla:
+
+- tabla `recomendacion_consolidacion`, aislada por `organizacion_id`;
+- `id` = identificador determinista del evento de salida, por lo que una
+  reentrega actualiza la misma fila;
+- `estado` (`vigente` o `descartada`) pertenece a la recomendación, no a la
+  suscripción. Una reentrega nunca revive una recomendación descartada. El
+  endpoint de descarte y su auditoría son parte de VI-18 (#109); acá solo se
+  reserva el estado para que el listado no muestre descartadas.
+
+`GET /api/recomendaciones/` (ruta que el gateway ya envía a Analytics) devuelve
+una envoltura compatible con el cliente compartido de AN-20:
+
+```json
+{
+  "results": [
+    {
+      "id": "uuid",
+      "suscripcion_id": "uuid",
+      "nombre": "Servicio A",
+      "categoria": "streaming",
+      "motivo": "…",
+      "ahorro_estimado": 9990.0,
+      "moneda": "CLP",
+      "estado": "vigente",
+      "evidencia": {"id": "…", "url": "https://…", "descripcion": "…"}
+    }
+  ],
+  "total": 1,
+  "moneda": null,
+  "umbral_aplicado": null,
+  "disponible": true,
+  "motivo_sin_sugerencias": null,
+  "umbrales_no_configurados": []
+}
+```
+
+La petición debe traer `X-Organizacion-Id`; sin cabecera responde `403`. El
+filtro opcional `?moneda=CLP` se normaliza a mayúsculas y un código inválido
+responde `400`.
+
+## RN-REC-001: umbral de ahorro por moneda (VI-21)
+
+El umbral vive en la tabla global `umbral_ahorro` (`moneda`, `monto`, `activo`).
+`analytics.reglas.umbral_minimo()` es la única regla de lectura. **No hay valor
+por defecto**: una moneda sin fila activa no habilita recomendaciones. En ese
+caso el listado excluye esas filas, responde `disponible: false`, las informa en
+`umbrales_no_configurados` y explica el motivo en `motivo_sin_sugerencias`.
+
+No se cargan valores semilla. La configuración es una decisión operativa
+documentada en
+[`docs/investigacion/VI-21-regla-umbral-ahorro.md`](../../docs/investigacion/VI-21-regla-umbral-ahorro.md).
+
 ## Ejemplo de evento (datos de prueba)
 
 ```python
@@ -99,7 +159,7 @@ para que los consumidores puedan deduplicar reentregas. El contrato de ambos
 eventos está en [`shared/events/catalogo.md`](../../shared/events/catalogo.md).
 
 El worker se ejecuta con `python manage.py consumir_solapamientos`; consume la
-ruta `solapamiento.detectado.v2` del exchange `suscripciones` y publica
+ruta `solapamiento.detectado.v2` del exchange `suscripciones`, persiste y publica
 `recomendacion.consolidacion_generada.v1`. Los mensajes con contrato inválido se
 rechazan hacia la cola durable de mensajes inválidos. `RABBITMQ_URL` debe estar
 configurada.
@@ -119,6 +179,6 @@ ejemplos y fixtures de prueba son mocks, no evidencia de servicios reales.
 Desde `services/analytics/`:
 
 ```bash
-python manage.py test analytics
+python -m pytest analytics
 python manage.py consumir_solapamientos
 ```

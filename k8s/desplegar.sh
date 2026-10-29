@@ -74,6 +74,17 @@ elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -
 else
   echo "   ya existía, se deja como está"
 fi
+# OJO con lo de arriba: el `if` solo genera una clave aleatoria cuando el
+# Secret NO existe. Eso es correcto —regenerarla en cada despliegue dejaría la
+# base sin poder conectar— pero tiene una consecuencia que ya nos costó:
+#
+# Si el Secret se creó alguna vez con una clave mala (la nuestra estuvo en
+# 00-configuracion.yaml, en un repo público), este script NUNCA la va a
+# cambiar. Y como POSTGRES_PASSWORD solo se aplica en el primer arranque de
+# Postgres, editar el Secret a mano tampoco alcanza: hay que cambiarla dentro
+# de la base.
+#
+# Para eso está k8s/rotar-clave-postgres.sh.
 
 # CLAVES_CIFRADO: clave Fernet con la que shared/cifrado guarda los tokens de
 # los conectores (FE-06). Una clave Fernet son 32 bytes en base64 url-safe.

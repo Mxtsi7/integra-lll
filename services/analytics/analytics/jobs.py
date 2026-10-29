@@ -363,6 +363,10 @@ def procesar_evento_solapamiento(evento: Mapping) -> list[dict]:
             if llave != "organizacion_id"
         }
         datos_salida["evento_origen_id"] = evento_id
+        # El id de salida incluye el id del evento de entrada y, por tanto,
+        # cambia con cada reentrega. La fecha del snapshot permite consolidar
+        # el mismo hallazgo y descartar entregas fuera de orden.
+        datos_salida["ocurrido_en_origen"] = ocurrido_en
         candidata_id = recomendacion["suscripcion_candidata"]["id"]
         salida_id = uuid5(
             NAMESPACE_URL,
