@@ -31,7 +31,11 @@ from drf_spectacular.utils import (
 )
 
 from app.anomalias import marcar_hallazgo_revisado
-from app.exportacion import construir_csv_cobros
+from app.exportacion import (
+    construir_csv_cobros,
+    normalizar_moneda,
+    normalizar_origen,
+)
 from app.models import (
     Cobro,
     HallazgoCobro,
@@ -178,12 +182,44 @@ def _resolver_rango_exportacion(request) -> tuple[date, date]:
     return desde, hasta
 
 
-def _respuesta_csv_cobros(request, desde: date, hasta: date) -> HttpResponse:
+def _resolver_filtros_exportacion(
+    request,
+) -> tuple[date, date, str | None, str | None]:
+    """Valida y normaliza todos los filtros del CSV en un solo lugar.
+
+    Ambas rutas de exportación comparten esta función para que el contrato no
+    diverja: rango inclusivo obligatorio, moneda contra el catálogo activo y
+    origen contra los valores soportados. Un filtro inválido es 400.
+    """
+    desde, hasta = _resolver_rango_exportacion(request)
+    try:
+        moneda = normalizar_moneda(request.query_params.get("moneda"))
+        origen = normalizar_origen(request.query_params.get("origen"))
+    except DjangoValidationError as exc:
+        raise ValidationError(
+            getattr(exc, "message_dict", None) or {"detail": exc.messages}
+        ) from exc
+    return desde, hasta, moneda, origen
+
+
+def _respuesta_csv_cobros(
+    request,
+    desde: date,
+    hasta: date,
+    moneda: str | None = None,
+    origen: str | None = None,
+) -> HttpResponse:
     """Construye la respuesta HTTP del CSV con los cobros del tenant."""
     if not getattr(request, "organizacion_id", None):
         raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
 
-    contenido = construir_csv_cobros(request.organizacion_id, desde, hasta)
+    contenido = construir_csv_cobros(
+        request.organizacion_id,
+        desde,
+        hasta,
+        moneda=moneda,
+        origen=origen,
+    )
     respuesta = HttpResponse(
         contenido,
         content_type="text/csv; charset=utf-8",
@@ -1197,7 +1233,9 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
             "fórmula de hoja de cálculo se prefijan con un apóstrofo; los "
             "montos numéricos se mantienen numéricos.\n\n"
             "Ambos extremos son obligatorios y deben cumplir "
-            "``desde <= hasta``. También disponible como "
+            "``desde <= hasta``. Filtros opcionales: ``moneda`` contra el "
+            "catálogo activo y ``origen=manual`` (único origen registrado "
+            "hoy; otros valores devuelven 400). También disponible como "
             "``GET /api/export/cobros/`` con los mismos parámetros."
         ),
         parameters=[
@@ -1217,6 +1255,20 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
                 description="Fecha final inclusiva (YYYY-MM-DD).",
                 examples=[OpenApiExample("Agosto", value="2026-08-31")],
             ),
+            OpenApiParameter(
+                name="moneda",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Código del catálogo activo de monedas (p. ej. CLP).",
+            ),
+            OpenApiParameter(
+                name="origen",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Origen del cobro. Solo 'manual' está soportado.",
+            ),
         ],
         responses={
             (200, "text/csv"): OpenApiResponse(
@@ -1234,7 +1286,11 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
                 ],
             ),
             400: OpenApiResponse(
-                description="Falta un extremo del rango, la fecha es inválida o ``desde > hasta``."
+                description=(
+                    "Falta un extremo del rango, la fecha es inválida, "
+                    "``desde > hasta``, la moneda no está en el catálogo "
+                    "activo o el origen no está soportado."
+                )
             ),
             403: OpenApiResponse(
                 description="Falta la cabecera X-Organizacion-Id."
@@ -1244,8 +1300,8 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
     @action(detail=False, methods=["get"], url_path="exportar-csv")
     def exportar_csv(self, request):
         """GET /api/suscripciones/exportar-csv/?desde=YYYY-MM-DD&hasta=YYYY-MM-DD."""
-        desde, hasta = _resolver_rango_exportacion(request)
-        return _respuesta_csv_cobros(request, desde, hasta)
+        desde, hasta, moneda, origen = _resolver_filtros_exportacion(request)
+        return _respuesta_csv_cobros(request, desde, hasta, moneda, origen)
 
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
@@ -1305,7 +1361,8 @@ class ExportarCobrosCSVView(APIView):
         summary="Exportar cobros a CSV (alias)",
         description=(
             "Misma operación que ``GET /api/suscripciones/exportar-csv/``. "
-            "Rango inclusivo obligatorio y aislamiento por organización."
+            "Rango inclusivo obligatorio, filtros opcionales ``moneda`` y "
+            "``origen=manual``, y aislamiento por organización."
         ),
         parameters=[
             OpenApiParameter(
@@ -1322,12 +1379,37 @@ class ExportarCobrosCSVView(APIView):
                 required=True,
                 description="Fecha final inclusiva (YYYY-MM-DD).",
             ),
+            OpenApiParameter(
+                name="moneda",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Código del catálogo activo de monedas (p. ej. CLP).",
+            ),
+            OpenApiParameter(
+                name="origen",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Origen del cobro. Solo 'manual' está soportado.",
+            ),
         ],
-        responses={(200, "text/csv"): OpenApiTypes.BINARY},
+        responses={
+            (200, "text/csv"): OpenApiTypes.BINARY,
+            400: OpenApiResponse(
+                description=(
+                    "Rango inválido, moneda fuera del catálogo activo u "
+                    "origen no soportado."
+                )
+            ),
+            403: OpenApiResponse(
+                description="Falta la cabecera X-Organizacion-Id."
+            ),
+        },
     )
     def get(self, request):
-        desde, hasta = _resolver_rango_exportacion(request)
-        return _respuesta_csv_cobros(request, desde, hasta)
+        desde, hasta, moneda, origen = _resolver_filtros_exportacion(request)
+        return _respuesta_csv_cobros(request, desde, hasta, moneda, origen)
 
 
 class HallazgoPagination(PageNumberPagination):

@@ -69,17 +69,22 @@ def _promedio(montos: list[Decimal]) -> Decimal:
 
 
 def _cobros_previos(cobro: Cobro) -> list[Cobro]:
-    """Cobros del mismo servicio anteriores al cobro, dentro de 3 meses.
+    """Cobros del mismo servicio y **misma moneda** anteriores al cobro.
 
     Se ordenan del más reciente al más antiguo y se usan como máximo 3. La
     suscripción representa al servicio: los cargos de otra suscripción no
     entran en el promedio aunque compartan nombre, para no mezclar planes.
+
+    La moneda es parte de la comparabilidad: sin una tasa de cambio no se
+    puede comparar un importe en CLP con uno en USD. Un antecedente en otra
+    moneda no cuenta para el mínimo de evidencia ni entra en el promedio.
     """
     desde = _restar_meses(cobro.fecha, MESES_PROMEDIO)
     return list(
         Cobro.objects.filter(
             organizacion_id=cobro.organizacion_id,
             suscripcion_id=cobro.suscripcion_id,
+            moneda=cobro.moneda,
             fecha__gte=desde,
             fecha__lt=cobro.fecha,
         )

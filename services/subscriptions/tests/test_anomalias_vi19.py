@@ -43,12 +43,14 @@ def crear_cobro(
     suscripcion: Subscription,
     fecha: date,
     monto: str,
+    *,
+    moneda: str = "CLP",
 ) -> Cobro:
     return Cobro.objects.create(
         organizacion_id=suscripcion.organizacion_id,
         suscripcion=suscripcion,
         monto=Decimal(monto),
-        moneda="CLP",
+        moneda=moneda,
         fecha=fecha,
     )
 
@@ -133,6 +135,111 @@ class TestAlzaTarifa:
 
         assert not HallazgoCobro.objects.filter(
             suscripcion=propia,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        ).exists()
+
+
+@pytest.mark.django_db
+class TestComparabilidadPorMoneda:
+    """Sin tasa de cambio, solo se comparan importes de la misma moneda."""
+
+    def test_historial_usd_no_genera_alza_en_cobro_clp(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 8, 5), "10.00", moneda="USD")
+        crear_cobro(suscripcion, date(2026, 9, 5), "10.00", moneda="USD")
+        nuevo = crear_cobro(suscripcion, date(2026, 10, 5), "10000.00")
+
+        assert nuevo.moneda == "CLP"
+        assert not HallazgoCobro.objects.filter(
+            suscripcion=suscripcion,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        ).exists()
+
+    def test_dos_antecedentes_clp_si_generan_alza(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 8, 5), "10000.00")
+        crear_cobro(suscripcion, date(2026, 9, 5), "10000.00")
+        nuevo = crear_cobro(suscripcion, date(2026, 10, 5), "10600.00")
+
+        hallazgo = HallazgoCobro.objects.get(
+            suscripcion=suscripcion,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        )
+        assert hallazgo.cobro_id == nuevo.id
+        assert hallazgo.monto_referencia == Decimal("10000.00")
+
+    def test_cinco_por_ciento_en_clp_no_alerta(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 8, 5), "10000.00")
+        crear_cobro(suscripcion, date(2026, 9, 5), "10000.00")
+        crear_cobro(suscripcion, date(2026, 10, 5), "10500.00")
+
+        assert not HallazgoCobro.objects.filter(
+            suscripcion=suscripcion,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        ).exists()
+
+    def test_antecedentes_de_otra_moneda_no_completan_el_minimo(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 8, 5), "10000.00", moneda="CLP")
+        crear_cobro(suscripcion, date(2026, 9, 5), "10.00", moneda="USD")
+        # Con un solo antecedente comparable no hay alza, por alto que sea.
+        crear_cobro(suscripcion, date(2026, 10, 5), "50000.00", moneda="CLP")
+
+        assert not HallazgoCobro.objects.filter(
+            suscripcion=suscripcion,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        ).exists()
+
+    def test_otra_moneda_no_entra_en_el_promedio_ni_en_la_evidencia(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 8, 5), "10000.00", moneda="CLP")
+        crear_cobro(suscripcion, date(2026, 9, 5), "10.00", moneda="USD")
+        crear_cobro(suscripcion, date(2026, 9, 20), "10000.00", moneda="CLP")
+        nuevo = crear_cobro(suscripcion, date(2026, 10, 5), "10600.00")
+
+        hallazgo = HallazgoCobro.objects.get(
+            suscripcion=suscripcion,
+            tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
+        )
+        assert hallazgo.monto_referencia == Decimal("10000.00")
+        assert hallazgo.detalle["cantidad_previos"] == 2
+        assert [p["monto"] for p in hallazgo.detalle["cobros_previos"]] == [
+            "10000.00",
+            "10000.00",
+        ]
+        assert hallazgo.cobro_id == nuevo.id
+
+    def test_api_real_no_genera_alza_al_pasar_de_usd_a_clp(self) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        cliente = APIClient()
+        headers = {
+            "X-Organizacion-Id": str(org),
+            "X-Usuario-Id": "42",
+            "X-Rol": "titular",
+        }
+
+        for fecha, monto, moneda in (
+            ("2026-08-05", "10.00", "USD"),
+            ("2026-09-05", "10.00", "USD"),
+            ("2026-10-05", "10000.00", "CLP"),
+        ):
+            respuesta = cliente.post(
+                f"/api/suscripciones/{suscripcion.id}/cobros/",
+                data={"fecha": fecha, "monto": monto, "moneda": moneda},
+                format="json",
+                headers=headers,
+            )
+            assert respuesta.status_code == status.HTTP_201_CREATED
+
+        assert not HallazgoCobro.objects.filter(
+            suscripcion=suscripcion,
             tipo=HallazgoCobro.Tipo.ALZA_TARIFA,
         ).exists()
 

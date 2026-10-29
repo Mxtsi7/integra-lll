@@ -45,12 +45,14 @@ def crear_cobro(
     suscripcion: Subscription,
     fecha: date,
     monto: str = "9990.00",
+    *,
+    moneda: str = "CLP",
 ) -> Cobro:
     return Cobro.objects.create(
         organizacion_id=suscripcion.organizacion_id,
         suscripcion=suscripcion,
         monto=Decimal(monto),
-        moneda="CLP",
+        moneda=moneda,
         fecha=fecha,
     )
 
@@ -62,9 +64,16 @@ def exportar(
     desde: str = "2026-03-01",
     hasta: str = "2026-03-31",
     url: str = "/api/suscripciones/exportar-csv/",
+    moneda: str | None = None,
+    origen: str | None = None,
 ):
+    consulta = f"desde={desde}&hasta={hasta}"
+    if moneda is not None:
+        consulta += f"&moneda={moneda}"
+    if origen is not None:
+        consulta += f"&origen={origen}"
     return client.get(
-        f"{url}?desde={desde}&hasta={hasta}",
+        f"{url}?{consulta}",
         headers={"X-Organizacion-Id": str(org_id)},
     )
 
@@ -239,3 +248,129 @@ class TestValidacionDeParametros:
             "?desde=2026-03-01&hasta=2026-03-31"
         )
         assert respuesta.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
+class TestFiltrosMonedaYOrigen:
+    RUTAS = ("/api/suscripciones/exportar-csv/", "/api/export/cobros/")
+
+    def test_moneda_clp_solo_devuelve_clp(self, client: APIClient) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 3, 10), "10000.00", moneda="CLP")
+        crear_cobro(suscripcion, date(2026, 3, 11), "10.00", moneda="USD")
+
+        filas = filas_csv(exportar(client, org, moneda="CLP"))[1:]
+
+        assert len(filas) == 1
+        assert filas[0][3] == "CLP"
+        assert filas[0][2] == "10000.00"
+
+    def test_moneda_usd_solo_devuelve_usd(self, client: APIClient) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 3, 10), "10000.00", moneda="CLP")
+        crear_cobro(suscripcion, date(2026, 3, 11), "10.00", moneda="USD")
+
+        filas = filas_csv(exportar(client, org, moneda="usd"))[1:]
+
+        assert len(filas) == 1
+        assert filas[0][3] == "USD"
+
+    @pytest.mark.parametrize("ruta", RUTAS)
+    def test_moneda_fuera_del_catalogo_responde_400_en_ambas_rutas(
+        self, client: APIClient, ruta: str
+    ) -> None:
+        org = uuid.uuid4()
+        respuesta = exportar(client, org, url=ruta, moneda="XXX")
+
+        assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
+        assert "moneda" in respuesta.data
+
+    @pytest.mark.parametrize("ruta", RUTAS)
+    def test_origen_manual_es_aceptado_en_ambas_rutas(
+        self, client: APIClient, ruta: str
+    ) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 3, 10))
+
+        respuesta = exportar(client, org, url=ruta, origen="manual")
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        filas = filas_csv(respuesta)[1:]
+        assert len(filas) == 1
+        assert filas[0][5] == "manual"
+
+    @pytest.mark.parametrize("origen", ["csv", "correo", "pdf", "automatico"])
+    @pytest.mark.parametrize("ruta", RUTAS)
+    def test_origen_no_soportado_responde_400_en_ambas_rutas(
+        self, client: APIClient, ruta: str, origen: str
+    ) -> None:
+        org = uuid.uuid4()
+        respuesta = exportar(client, org, url=ruta, origen=origen)
+
+        assert respuesta.status_code == status.HTTP_400_BAD_REQUEST
+        assert "origen" in respuesta.data
+
+    def test_ambas_rutas_producen_el_mismo_csv_con_los_mismos_filtros(
+        self, client: APIClient
+    ) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 3, 10), "10000.00", moneda="CLP")
+        crear_cobro(suscripcion, date(2026, 3, 11), "10.00", moneda="USD")
+
+        canonica = exportar(
+            client, org, url=self.RUTAS[0], moneda="CLP", origen="manual"
+        )
+        alias = exportar(
+            client, org, url=self.RUTAS[1], moneda="CLP", origen="manual"
+        )
+
+        assert canonica.status_code == alias.status_code == status.HTTP_200_OK
+        assert canonica.content == alias.content
+
+    def test_filtros_se_combinan_con_rango_y_tenant(
+        self, client: APIClient
+    ) -> None:
+        org_a = uuid.uuid4()
+        org_b = uuid.uuid4()
+        propia = crear_suscripcion(org_a, nombre="Propia")
+        ajena = crear_suscripcion(org_b, nombre="Ajena")
+
+        crear_cobro(propia, date(2026, 2, 28), "10000.00", moneda="CLP")
+        crear_cobro(propia, date(2026, 3, 10), "10000.00", moneda="CLP")
+        crear_cobro(propia, date(2026, 3, 11), "10.00", moneda="USD")
+        crear_cobro(propia, date(2026, 4, 1), "10000.00", moneda="CLP")
+        crear_cobro(ajena, date(2026, 3, 10), "10000.00", moneda="CLP")
+
+        filas = filas_csv(
+            exportar(client, org_a, moneda="CLP", origen="manual")
+        )[1:]
+
+        assert len(filas) == 1
+        assert filas[0][0] == "Propia"
+        assert filas[0][3] == "CLP"
+        assert filas[0][4] == "2026-03-10"
+        assert "Ajena" not in "\n".join(fila[0] for fila in filas)
+
+    def test_filtro_exporta_mas_de_una_pagina(self, client: APIClient) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        for dia in range(1, 26):
+            crear_cobro(
+                suscripcion,
+                date(2026, 3, dia),
+                "10000.00",
+                moneda="CLP" if dia % 2 else "USD",
+            )
+
+        filas = filas_csv(
+            exportar(client, org, moneda="CLP", origen="manual")
+        )[1:]
+
+        # Días impares: 1, 3, …, 25 → 13 filas CLP, más que una página de 10.
+        assert len(filas) == 13
+        assert {fila[3] for fila in filas} == {"CLP"}
+
