@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorDeApi, getImportacion, type Importacion } from "@ojoalgasto/shared";
+import { AuthProvider } from "../context/AuthContext";
+import { ToastProvider } from "../context/ToastContext";
 import { useProgresoImportacion } from "./useProgresoImportacion";
 
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
@@ -51,8 +54,16 @@ const COMPLETADA: Importacion = {
 
 /** Avanza el reloj falso y deja correr las promesas que eso suelta. */
 const pasar = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+// El hook anota la sesión con que se montó (revisión de #130): necesita el AuthProvider real.
+function Proveedores({ children }: { children: ReactNode }) {
+  return (
+    <ToastProvider>
+      <AuthProvider>{children}</AuthProvider>
+    </ToastProvider>
+  );
+}
 const montar = async (id: string | undefined = "imp-1") => {
-  const hook = renderHook(({ id: actual }) => useProgresoImportacion(actual), { initialProps: { id } });
+  const hook = renderHook(({ id: actual }) => useProgresoImportacion(actual), { initialProps: { id }, wrapper: Proveedores });
   await pasar(0);
   return hook;
 };

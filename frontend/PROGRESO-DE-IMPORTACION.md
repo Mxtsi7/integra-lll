@@ -65,6 +65,23 @@ Rutas relativas a `frontend/`.
 - **Listado:** de a 10, como la API. "Ver más" pide la página siguiente sin repetir la que se corrió si
   entró una nueva mientras tanto. Tiene estado vacío y error con reintento.
 
+## Cambio de sesión (revisión de #130)
+
+Si otra pestaña entraba como B, el detalle terminal de A seguía a la vista. El polling ya se había
+detenido, así que no llegaba ninguna consulta que diera 404, y la ruta y el id no cambiaban.
+
+- **El límite común de #128**, ya en main. `<RutaPrivada>` usa la marca de sesión de `AuthContext` como
+  `key`: al cambiar de cuenta, detalle y listado se vuelven a montar desde cero.
+  - El detalle empieza de nuevo aunque sea el mismo id y ya haya terminado, y pregunta con la sesión
+    vigente.
+  - El cleanup del montaje anterior corta sus peticiones y temporizadores.
+  - El listado vuelve a sus primeras filas, y una página o un error de A que llegan tarde quedan en la
+    página desmontada.
+  - Un refresh del token no cambia la marca, así que no reinicia nada.
+- **Lo que llega antes del nuevo montaje.** El polling y el listado anotan la sesión con que se montó
+  la página. Un temporizador de A que vence con la sesión ya cambiada no consulta, y "Ver más" no pide
+  la página siguiente con el token de B.
+
 ## Cómo se comprobó
 
 - `shared/src/api/importaciones.test.ts`: las URLs, con el id codificado y `?mias=true&page=N`.
@@ -86,6 +103,24 @@ Rutas relativas a `frontend/`.
   - el 404;
   - la actualización sola hasta terminar, y el aviso de desactualizado con reintento;
   - el listado, el vacío con error y "Ver más" sin repetir.
+- `web/src/pages/ImportacionPage.sesion.test.tsx` (revisión de #130): `AuthProvider`, guarda privada y
+  tokens reales; solo se simula la red. Son 8 pruebas:
+  - A→B por `storage` en la misma ruta, con la importación de A ya terminada: se retira al instante,
+    con `/usuarios/me/` de B pendiente, y el 404 de B no deja nada de A;
+  - la consulta de A pendiente que responde tarde;
+  - el temporizador del polling que vence en el mismo instante del cambio;
+  - el refresh del token, que no reinicia el detalle;
+  - en el listado: filas y paginación al cambiar, la segunda página de A (o su error) que llega tarde,
+    y "Ver más" en el mismo instante del cambio.
+- **Mutaciones de la revisión:**
+  - sin `key` en la guarda;
+  - el polling sin revisar la sesión antes de consultar, o revisando solo el montaje;
+  - "Ver más" sin revisar la sesión;
+  - un refresh como cambio de cuenta.
+
+  En las 5 falla alguna prueba.
+- **Sobre `main` actualizado** (con #128 y #129): shared 221, web 416 y móvil 37 pruebas, typecheck y
+  build.
 - `web/src/pages/CuentasConectadasPage.test.tsx`: el enlace a `/importaciones`.
 - **Contrato con las vistas reales** de `services/connectors` (código de main, SQLite), con las URLs que
   arma la web: 4 pruebas temporales, fuera del repo, más las 48 de FE-08, todas pasan.
@@ -114,7 +149,12 @@ Rutas relativas a `frontend/`.
   - el correo sin total (barra indeterminada que habla de mensajes, no de filas: se corrigió aquí);
   - fallida con "Y 24 más.";
   - tema claro;
-  - 375 px sin scroll horizontal.
+  - 375 px sin scroll horizontal;
+  - dos pestañas (revisión de #130), con importaciones distintas por cuenta:
+    - con el detalle terminal de A a la vista, la otra pestaña entró como B; en la misma ruta
+      desaparecieron el archivo, los candidatos y el error de A, y quedó "No encontramos esta
+      importación";
+    - en el listado, las tres filas de A pasaron solas a la única de B.
 - CI local desde `frontend/`: typecheck, pruebas de todos los paquetes y build.
 
 ## Fuera de esta tarea

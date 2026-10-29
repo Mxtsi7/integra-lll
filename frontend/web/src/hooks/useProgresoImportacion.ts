@@ -1,5 +1,6 @@
 import { ErrorDeApi, getImportacion, type Importacion } from '@ojoalgasto/shared';
 import { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
 /** Cada cuánto se pregunta (CH-27). Empieza rápido y se espacia mientras no cambia nada. */
@@ -38,10 +39,17 @@ export function useProgresoImportacion(id: string | undefined) {
   const [estado, setEstado] = useState<EstadoProgreso>({ tipo: 'cargando' });
   // Cambiarlo vuelve a empezar (botón Reintentar tras detenerse).
   const [intento, setIntento] = useState(0);
+  // La sesión con que se montó la página. Si cambia, <RutaPrivada> la vuelve
+  // a montar y el detalle empieza de cero, aunque sea el mismo id y ya haya
+  // terminado (revisión de #130). Esto cubre el instante antes de ese nuevo
+  // montaje: un temporizador que vence ahí no pregunta con el token nuevo.
+  const { capturarSesion } = useAuth();
+  const [sesion] = useState(capturarSesion);
 
   useEffect(() => {
     if (!id) return;
     let activo = true;
+    const vigente = () => activo && capturarSesion() === sesion;
     let temporizador: ReturnType<typeof setTimeout> | undefined;
     // true si tocaba preguntar con la pestaña oculta: se pregunta al volver.
     let enPausa = false;
@@ -61,6 +69,7 @@ export function useProgresoImportacion(id: string | undefined) {
     };
 
     const consultar = async () => {
+      if (!vigente()) return;
       try {
         const actual = await getImportacion(id);
         if (!activo) return;
@@ -105,7 +114,7 @@ export function useProgresoImportacion(id: string | undefined) {
       if (temporizador !== undefined) clearTimeout(temporizador);
       document.removeEventListener('visibilitychange', alCambiarVisibilidad);
     };
-  }, [id, intento]);
+  }, [id, intento, capturarSesion, sesion]);
 
   return { estado, reintentar: () => setIntento((n) => n + 1) };
 }

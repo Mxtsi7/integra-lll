@@ -7,6 +7,7 @@ import EmptyState from '../components/subscriptions/EmptyState';
 import { Boton } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia } from '../components/ui/Insignia';
+import { useAuth } from '../context/AuthContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 import { TONO_ESTADO } from './ImportacionPage';
 import styles from './ImportacionesPage.module.css';
@@ -23,6 +24,11 @@ const mensajeError = (err: unknown) =>
 export function ImportacionesPage() {
   const [estado, setEstado] = useState<Estado>({ tipo: 'cargando' });
   const [intento, setIntento] = useState(0);
+  // La sesión con que se montó la página. Si cambia, <RutaPrivada> la vuelve
+  // a montar: filas y paginación empiezan de cero, y una página de la sesión
+  // anterior que llega tarde queda en la página desmontada (revisión de #130).
+  const { capturarSesion } = useAuth();
+  const [sesion] = useState(capturarSesion);
 
   useEffect(() => {
     let vigente = true;
@@ -43,6 +49,9 @@ export function ImportacionesPage() {
 
   const verMas = async () => {
     if (estado.tipo !== 'listo' || estado.cargandoMas) return;
+    // Con la sesión ya cambiada, la lista es de la cuenta anterior: no se pide
+    // su página siguiente con el token de la nueva.
+    if (capturarSesion() !== sesion) return;
     const siguiente = estado.pagina + 1;
     setEstado({ ...estado, cargandoMas: true, errorMas: null });
     try {
