@@ -5,10 +5,15 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
-from app.views import SubscriptionViewSet
+from app.views import (
+    ExportarCobrosCSVView,
+    HallazgoCobroViewSet,
+    SubscriptionViewSet,
+)
 
 router = DefaultRouter()
 router.register(r"suscripciones", SubscriptionViewSet, basename="subscription")
+router.register(r"hallazgos", HallazgoCobroViewSet, basename="hallazgo")
 
 def salud(request):
     """
@@ -33,6 +38,11 @@ urlpatterns = [
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
+    path(
+        "api/export/cobros/",
+        ExportarCobrosCSVView.as_view(),
+        name="exportar-cobros-csv",
+    ),
     path("api/", include(router.urls)),
 ]
 
