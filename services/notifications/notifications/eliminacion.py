@@ -1,4 +1,5 @@
 from django.db import transaction
+from drf_spectacular.utils import extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -16,6 +17,7 @@ class LimpiezaUsuarioNotificationsView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    @extend_schema(exclude=True)
     def delete(self, request, organizacion_id, usuario_id):
         validar_solicitud_eliminacion(request, f"notifications:usuario:{usuario_id}", organizacion_id)
         with transaction.atomic():
