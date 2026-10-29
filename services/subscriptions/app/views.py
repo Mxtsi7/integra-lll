@@ -9,6 +9,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
 from django.db.models import Sum
+from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status
@@ -16,13 +17,29 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from events.outbox import registrar_actualizada, registrar_creada
 from events.modo import al_crear_suscripcion
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 
+from app.anomalias import marcar_hallazgo_revisado
+from app.exportacion import (
+    construir_csv_cobros,
+    normalizar_moneda,
+    normalizar_origen,
+)
 from app.models import (
     Cobro,
+    HallazgoCobro,
+    Moneda,
     Presupuesto,
     RegistroUso,
     Subscription,
@@ -30,8 +47,13 @@ from app.models import (
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,
+    HallazgoCobroSerializer,
+    PaginatedCobroSerializer,
+    PaginatedHallazgoSerializer,
+    PaginatedSubscriptionSerializer,
     PresupuestoComparacionSerializer,
     PresupuestoSerializer,
+    RegistrarCobroSerializer,
     RegistrarUsoSerializer,
     RegistroUsoSerializer,
     ResumenPanelSerializer,
@@ -39,7 +61,26 @@ from app.serializers import (
     SubscriptionSerializer,
     TransicionEstadoSerializer,
 )
-from shared.tenant.base import TenantViewSet
+from shared.tenant.base import SoloLecturaTenantViewSet, TenantViewSet
+
+
+class PaginacionExplicitaMixin:
+    """Documenta el sobre paginado sin que drf-spectacular lo envuelva dos veces.
+
+    Los serializers ``Paginated*`` ya describen ``count``/``next``/``previous``/
+    ``results``. Durante la introspección del esquema (``swagger_fake_view``)
+    se desactiva la paginación automática para que no genere un
+    ``PaginatedPaginated...``; en runtime se sigue usando la clase indicada en
+    ``_pagination_class``.
+    """
+
+    _pagination_class = None
+
+    @property
+    def pagination_class(self):
+        if getattr(self, "swagger_fake_view", False):
+            return None
+        return self._pagination_class
 
 
 def _resolver_rango_mes(mes: str | None = None) -> tuple[date, date, str]:
@@ -104,6 +145,103 @@ def _fecha_proyectada_en_mes(
         periodos += 1
 
 
+def _resolver_rango_exportacion(request) -> tuple[date, date]:
+    """Valida el rango inclusivo ``desde``/``hasta`` de la exportación CSV.
+
+    Se aceptan también los alias ``fecha_desde`` y ``fecha_hasta`` para que el
+    cliente pueda reutilizar los nombres del histórico de cobros. Ambos
+    extremos son obligatorios: exportar "todo" sin rango es una operación
+    costosa y fácil de pedir por accidente.
+    """
+    desde_raw = request.query_params.get("desde") or request.query_params.get(
+        "fecha_desde"
+    )
+    hasta_raw = request.query_params.get("hasta") or request.query_params.get(
+        "fecha_hasta"
+    )
+
+    errores = {}
+    try:
+        desde = parse_date(desde_raw) if desde_raw else None
+        hasta = parse_date(hasta_raw) if hasta_raw else None
+    except (TypeError, ValueError):
+        # ``parse_date`` lanza ValueError para una fecha bien formada pero
+        # imposible (2026-13-45); el contrato de la API es 400, no 500.
+        desde = hasta = None
+    if not desde:
+        errores["desde"] = "Es obligatorio y debe tener el formato YYYY-MM-DD."
+    if not hasta:
+        errores["hasta"] = "Es obligatorio y debe tener el formato YYYY-MM-DD."
+    if errores:
+        raise ValidationError(errores)
+
+    if desde > hasta:
+        raise ValidationError(
+            {"hasta": "Debe ser igual o posterior a la fecha 'desde'."}
+        )
+    return desde, hasta
+
+
+def _resolver_filtros_exportacion(
+    request,
+) -> tuple[date, date, str | None, str | None]:
+    """Valida y normaliza todos los filtros del CSV en un solo lugar.
+
+    Ambas rutas de exportación comparten esta función para que el contrato no
+    diverja: rango inclusivo obligatorio, moneda contra el catálogo activo y
+    origen contra los valores soportados. Un filtro inválido es 400.
+    """
+    desde, hasta = _resolver_rango_exportacion(request)
+    try:
+        moneda = normalizar_moneda(request.query_params.get("moneda"))
+        origen = normalizar_origen(request.query_params.get("origen"))
+    except DjangoValidationError as exc:
+        raise ValidationError(
+            getattr(exc, "message_dict", None) or {"detail": exc.messages}
+        ) from exc
+    return desde, hasta, moneda, origen
+
+
+def _respuesta_csv_cobros(
+    request,
+    desde: date,
+    hasta: date,
+    moneda: str | None = None,
+    origen: str | None = None,
+) -> HttpResponse:
+    """Construye la respuesta HTTP del CSV con los cobros del tenant."""
+    if not getattr(request, "organizacion_id", None):
+        raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
+
+    contenido = construir_csv_cobros(
+        request.organizacion_id,
+        desde,
+        hasta,
+        moneda=moneda,
+        origen=origen,
+    )
+    respuesta = HttpResponse(
+        contenido,
+        content_type="text/csv; charset=utf-8",
+    )
+    respuesta["Content-Disposition"] = (
+        f'attachment; filename="cobros_{desde.isoformat()}_{hasta.isoformat()}.csv"'
+    )
+    return respuesta
+
+
+def _actor_id_opcional(request) -> int | None:
+    """Convierte X-Usuario-Id a entero sin impedir una revisión sin auditoría."""
+    actor_id = getattr(request, "usuario_id", None)
+    if not actor_id:
+        return None
+    try:
+        valor = int(actor_id)
+    except (TypeError, ValueError):
+        return None
+    return valor if valor > 0 else None
+
+
 class SubscriptionPagination(PageNumberPagination):
     """
     Paginación estándar para suscripciones (DRF PageNumberPagination).
@@ -119,7 +257,167 @@ class SubscriptionPagination(PageNumberPagination):
     max_page_size = 100
 
 
-class SubscriptionViewSet(TenantViewSet):
+_EJEMPLO_SUSCRIPCION = {
+    "id": "6f1c2a7e-8b4d-4c1a-9f2e-3a5b7c9d1e2f",
+    "organizacion_id": "11111111-1111-4111-8111-111111111111",
+    "nombre": "Netflix Premium",
+    "monto": "12990.00",
+    "moneda": "CLP",
+    "frecuencia": "mensual",
+    "fecha_proximo_cobro": "2026-11-05",
+    "categoria": "streaming",
+    "proveedor": None,
+    "estado": "activo",
+    "activo": True,
+    "fin_prueba": None,
+    "horas_uso_mes": "12.50",
+    "ultima_actividad": "2026-10-20T18:30:00-03:00",
+    "creado_en": "2026-09-01T10:00:00-03:00",
+    "actualizado_en": "2026-10-20T18:30:00-03:00",
+}
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Listar suscripciones activas",
+        description=(
+            "Devuelve las suscripciones **no eliminadas** de la organización "
+            "autenticada. Las canceladas siguen apareciendo (``activo=true``); "
+            "las que se dieron de baja con ``DELETE`` no (``activo=false``).\n\n"
+            "**Combinaciones de filtros**\n\n"
+            "| Parámetros | Resultado |\n"
+            "|---|---|\n"
+            "| *(ninguno)* | Todas las activas de la organización. |\n"
+            "| ``estado=activo`` | Solo ese estado. |\n"
+            "| ``fecha_cobro=2026-11-05`` | Cobros en esa fecha exacta. |\n"
+            "| ``nombre=net`` | Nombre que contiene el texto (sin distinguir mayúsculas). |\n"
+            "| ``nombre=net&estado=activo`` | Ambos filtros a la vez. |\n"
+            "| ``nombre=net&orden=-monto&page=2`` | Filtro, orden y página. |\n\n"
+            "``search`` es alias de ``nombre``; ``ordering`` es alias de "
+            "``orden``; ``fecha_proximo_cobro`` es alias de ``fecha_cobro``.\n\n"
+            "**Paginación:** ``page`` empieza en 1. ``page_size`` vale 10 por "
+            "defecto y admite hasta 100. La respuesta siempre tiene "
+            "``count``, ``next``, ``previous`` y ``results``. Los ejemplos usan "
+            "rutas relativas para no exponer hosts internos ni IPs de Docker."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="estado",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=[e.value for e in Subscription.Estado],
+                description="Filtra por estado del ciclo de vida.",
+                examples=[OpenApiExample("Activas", value="activo")],
+            ),
+            OpenApiParameter(
+                name="nombre",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Búsqueda parcial por nombre, insensible a mayúsculas. "
+                    "Se recortan los espacios y se usan como máximo 100 "
+                    "caracteres."
+                ),
+                examples=[OpenApiExample("Netflix", value="netflix")],
+            ),
+            OpenApiParameter(
+                name="search",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Alias de ``nombre``.",
+            ),
+            OpenApiParameter(
+                name="fecha_cobro",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Fecha exacta del próximo cobro (YYYY-MM-DD).",
+                examples=[OpenApiExample("Noviembre", value="2026-11-05")],
+            ),
+            OpenApiParameter(
+                name="fecha_proximo_cobro",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Alias de ``fecha_cobro``.",
+            ),
+            OpenApiParameter(
+                name="orden",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=[
+                    "nombre",
+                    "-nombre",
+                    "monto",
+                    "-monto",
+                    "fecha_proximo_cobro",
+                    "-fecha_proximo_cobro",
+                    "fecha_cobro",
+                    "-fecha_cobro",
+                ],
+                description=(
+                    "Orden server-side. El prefijo ``-`` indica descendente. "
+                    "Los empates se resuelven por ``id`` para que la "
+                    "paginación sea estable."
+                ),
+                examples=[OpenApiExample("Mayor monto", value="-monto")],
+            ),
+            OpenApiParameter(
+                name="ordering",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Alias de ``orden``.",
+            ),
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Número de página, desde 1.",
+            ),
+            OpenApiParameter(
+                name="page_size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Tamaño de página (1 a 100; por defecto 10).",
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=PaginatedSubscriptionSerializer,
+                description="Página de suscripciones de la organización.",
+                examples=[
+                    OpenApiExample(
+                        "Página 1 con dos resultados",
+                        value={
+                            "count": 2,
+                            "next": "/api/suscripciones/?page=2",
+                            "previous": None,
+                            "results": [_EJEMPLO_SUSCRIPCION],
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description=(
+                    "Parámetro inválido, por ejemplo una fecha mal formada o "
+                    "un campo de orden fuera de la lista permitida."
+                )
+            ),
+            403: OpenApiResponse(
+                description="Falta la cabecera X-Organizacion-Id."
+            ),
+        },
+    ),
+)
+class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
     """
     CRUD completo de suscripciones con aislamiento multi-tenant estricto.
 
@@ -134,12 +432,19 @@ class SubscriptionViewSet(TenantViewSet):
         ?estado=activo
         ?fecha_cobro=2026-10-01   (alias de fecha_proximo_cobro)
         ?estado=activo&fecha_cobro=2026-10-01
-    - Expone GET y POST /api/suscripciones/<id>/uso/ para consultar el histórico y registrar minutos de uso.
+        ?nombre=netflix           (alias search; VI-01)
+        ?orden=-monto             (alias ordering; VI-02)
+    - Expone GET y POST /api/suscripciones/<id>/cobros/ para el histórico y
+      el registro de cobros (VI-04 / VI-19).
+    - Expone GET y POST /api/suscripciones/<id>/uso/ para consultar el
+      histórico y registrar minutos de uso.
+    - Expone GET /api/suscripciones/exportar-csv/ (VI-25) y el alias
+      /api/export/cobros/.
     """
 
     queryset = Subscription.objects.all()
     serializer_class = SubscriptionSerializer
-    pagination_class = SubscriptionPagination
+    _pagination_class = SubscriptionPagination
 
     def get_queryset(self):
         """Filtra por tenant, suscripciones activas y parámetros de listado."""
@@ -255,11 +560,39 @@ class SubscriptionViewSet(TenantViewSet):
                 description="Mes del calendario en formato YYYY-MM, por ejemplo 2026-12.",
             )
         ],
-        responses=CalendarioCobroSerializer(many=True),
+        responses={
+            200: OpenApiResponse(
+                response=CalendarioCobroSerializer(many=True),
+                description="Eventos del mes ordenados por fecha y servicio.",
+                examples=[
+                    OpenApiExample(
+                        "Mes con un cobro confirmado y una proyección",
+                        value=[
+                            {
+                                "id": "0d6f7e8a-1b2c-4d3e-8f90-1a2b3c4d5e6f",
+                                "suscripcion_id": "6f1c2a7e-8b4d-4c1a-9f2e-3a5b7c9d1e2f",
+                                "fecha": "2026-11-05",
+                                "servicio": "Netflix Premium",
+                                "importe": "12990.00",
+                                "moneda": "CLP",
+                                "tipo": "confirmado",
+                            }
+                        ],
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description="``mes`` ausente o con formato distinto de YYYY-MM."
+            ),
+        },
         description=(
             "Devuelve cobros confirmados y proyecciones mensuales/anuales de la "
-            "organización. Solo incluye proyecciones desde hoy en adelante; si una "
-            "suscripción ya tiene un cobro confirmado en el mes, no la proyecta."
+            "organización (VI-07). ``mes`` es obligatorio y usa el formato "
+            "``YYYY-MM``. Solo incluye proyecciones desde hoy en adelante; si "
+            "una suscripción ya tiene un cobro confirmado en el mes, no la "
+            "proyecta. Los cobros históricos de suscripciones dadas de baja "
+            "siguen apareciendo como ``confirmado``."
         ),
     )
     @action(detail=False, methods=["get"], url_path="calendario-cobros")
@@ -332,25 +665,158 @@ class SubscriptionViewSet(TenantViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        responses=CobroSerializer(many=True),
-        description="Consulta el histórico de cobros reales de una suscripción propia (VI-04 / RF-05).",
+        summary="Consultar o registrar cobros de una suscripción",
+        description=(
+            "**GET** devuelve el histórico real de una suscripción propia, "
+            "del más reciente al más antiguo (VI-04 / RF-05). Admite "
+            "``desde`` y ``hasta`` inclusivos y usa la misma paginación del "
+            "listado (``page``/``page_size``, máximo 100). La respuesta tiene "
+            "``count``, ``next``, ``previous`` y ``results``.\n\n"
+            "**POST** registra un cobro con ``monto`` y ``fecha`` "
+            "obligatorios. La moneda es opcional y, si no se envía, hereda la "
+            "de la suscripción. Al crear el cobro se ejecuta la detección de "
+            "alzas y posibles dobles cobros (VI-19).\n\n"
+            "Un recurso de otra organización responde 404."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="desde",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Fecha inicial inclusiva (YYYY-MM-DD).",
+            ),
+            OpenApiParameter(
+                name="hasta",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Fecha final inclusiva (YYYY-MM-DD).",
+            ),
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Número de página, desde 1.",
+            ),
+            OpenApiParameter(
+                name="page_size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Tamaño de página (1 a 100; por defecto 10).",
+            ),
+        ],
+        request=RegistrarCobroSerializer,
+        responses={
+            200: OpenApiResponse(
+                response=PaginatedCobroSerializer,
+                description="Histórico paginado de cobros.",
+                examples=[
+                    OpenApiExample(
+                        "GET con dos cobros",
+                        value={
+                            "count": 2,
+                            "next": None,
+                            "previous": None,
+                            "results": [
+                                {
+                                    "id": "0d6f7e8a-1b2c-4d3e-8f90-1a2b3c4d5e6f",
+                                    "suscripcion_id": "6f1c2a7e-8b4d-4c1a-9f2e-3a5b7c9d1e2f",
+                                    "monto": "12990.00",
+                                    "moneda": "CLP",
+                                    "fecha": "2026-10-05",
+                                    "creado_en": "2026-10-05T09:15:00-03:00",
+                                }
+                            ],
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            201: OpenApiResponse(
+                response=CobroSerializer,
+                description="Cobro registrado; la detección de anomalías ya se ejecutó.",
+                examples=[
+                    OpenApiExample(
+                        "Cobro creado",
+                        value={
+                            "id": "0d6f7e8a-1b2c-4d3e-8f90-1a2b3c4d5e6f",
+                            "suscripcion_id": "6f1c2a7e-8b4d-4c1a-9f2e-3a5b7c9d1e2f",
+                            "monto": "12990.00",
+                            "moneda": "CLP",
+                            "fecha": "2026-10-05",
+                            "creado_en": "2026-10-05T09:15:00-03:00",
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description="Monto, fecha o rango de fechas inválido."
+            ),
+            404: OpenApiResponse(
+                description="La suscripción no existe o pertenece a otra organización."
+            ),
+        },
     )
-    @action(detail=True, methods=["get"], url_path="cobros")
+    @action(detail=True, methods=["get", "post"], url_path="cobros")
     def cobros(self, request, pk=None):
-        """GET /api/suscripciones/<id>/cobros/ (VI-04 / RF-05)."""
+        """GET/POST /api/suscripciones/<id>/cobros/ (VI-04 / RF-05 / VI-19)."""
         suscripcion = self.get_object()
+
+        if request.method == "POST":
+            entrada = RegistrarCobroSerializer(
+                data=request.data,
+                context={"suscripcion": suscripcion},
+            )
+            entrada.is_valid(raise_exception=True)
+            try:
+                # El cobro y la detección que dispara su señal post_save
+                # comparten transacción: si la detección falla, no queda un
+                # cobro persistido con un error visible para el cliente (un
+                # reintento no debe duplicarlo).
+                with transaction.atomic():
+                    cobro = Cobro.objects.create(
+                        organizacion_id=request.organizacion_id,
+                        suscripcion=suscripcion,
+                        monto=entrada.validated_data["monto"],
+                        moneda=(
+                            entrada.validated_data.get("moneda")
+                            or suscripcion.moneda
+                        ),
+                        fecha=entrada.validated_data["fecha"],
+                    )
+            except DjangoValidationError as exc:
+                # El catálogo también valida en el ORM (por ejemplo, si la
+                # moneda se desactiva entre la validación y el guardado).
+                raise ValidationError(
+                    getattr(exc, "message_dict", None) or exc.messages
+                ) from exc
+            return Response(
+                CobroSerializer(cobro).data,
+                status=status.HTTP_201_CREATED,
+            )
+
         qs = suscripcion.cobros.all().order_by("-fecha", "-id")
 
         desde = request.query_params.get("desde")
         if desde:
-            fecha_desde = parse_date(desde)
+            try:
+                fecha_desde = parse_date(desde)
+            except ValueError:
+                fecha_desde = None
             if not fecha_desde:
                 raise ValidationError({"desde": "Debe tener el formato YYYY-MM-DD."})
             qs = qs.filter(fecha__gte=fecha_desde)
 
         hasta = request.query_params.get("hasta")
         if hasta:
-            fecha_hasta = parse_date(hasta)
+            try:
+                fecha_hasta = parse_date(hasta)
+            except ValueError:
+                fecha_hasta = None
             if not fecha_hasta:
                 raise ValidationError({"hasta": "Debe tener el formato YYYY-MM-DD."})
             qs = qs.filter(fecha__lte=fecha_hasta)
@@ -412,6 +878,7 @@ class SubscriptionViewSet(TenantViewSet):
         suscripciones_tenant = TenantViewSet.get_queryset(self).filter(moneda=moneda)
         cobros = Cobro.objects.filter(
             organizacion_id=request.organizacion_id,
+            suscripcion__activo=True,
             moneda=moneda,
             fecha__range=(inicio, fin),
         )
@@ -457,11 +924,62 @@ class SubscriptionViewSet(TenantViewSet):
 
     @extend_schema(
         parameters=[
-            OpenApiParameter(name="mes", type=str, location=OpenApiParameter.QUERY, required=False),
-            OpenApiParameter(name="moneda", type=str, location=OpenApiParameter.QUERY, required=False),
+            OpenApiParameter(
+                name="mes",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Periodo en formato YYYY-MM. Si se omite, se usa el mes "
+                    "local actual."
+                ),
+                examples=[OpenApiExample("Noviembre 2026", value="2026-11")],
+            ),
+            OpenApiParameter(
+                name="moneda",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=["CLP", "USD"],
+                description="Moneda del resumen (por defecto CLP).",
+            ),
         ],
-        responses=ResumenPanelSerializer,
-        description="Resumen agregado del panel con gasto real, proyección y conteo por estado (VI-06).",
+        responses={
+            200: OpenApiResponse(
+                response=ResumenPanelSerializer,
+                description="Gasto real, proyectado y conteo por estado.",
+                examples=[
+                    OpenApiExample(
+                        "Resumen de noviembre",
+                        value={
+                            "periodo": "2026-11",
+                            "moneda": "CLP",
+                            "gasto_real": "25000.00",
+                            "gasto_proyectado": "12990.00",
+                            "total_estimado": "37990.00",
+                            "conteo_estados": {
+                                "activo": 2,
+                                "prueba": 0,
+                                "por_confirmar": 0,
+                                "cancelado": 1,
+                                "fantasma": 0,
+                                "total": 3,
+                            },
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description="``mes`` o ``moneda`` inválidos."
+            ),
+        },
+        description=(
+            "Resumen agregado del panel con gasto real, proyección y conteo "
+            "por estado (VI-06 / RF-11 / RF-09). Excluye suscripciones con "
+            "``activo=false`` (eliminadas lógicamente); las canceladas sí "
+            "cuentan en ``conteo_estados.cancelado``."
+        ),
     )
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
@@ -475,6 +993,7 @@ class SubscriptionViewSet(TenantViewSet):
 
         cobros = Cobro.objects.filter(
             organizacion_id=request.organizacion_id,
+            suscripcion__activo=True,
             moneda=moneda,
             fecha__range=(inicio, fin),
         )
@@ -719,6 +1238,89 @@ class SubscriptionViewSet(TenantViewSet):
 
         return Response(SubscriptionSerializer(suscripcion_bloqueada).data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        summary="Exportar cobros a CSV",
+        description=(
+            "Descarga **todos** los cobros de la organización en el rango "
+            "inclusivo ``desde``..``hasta`` (VI-25 / RF-15). No aplica la "
+            "paginación de la API: una exportación de marzo a agosto incluye "
+            "todas las filas, no solo la primera página.\n\n"
+            "Columnas: ``servicio,categoria,monto,moneda,fecha,origen,estado``. "
+            "El filtro por organización se aplica al cobro y a su "
+            "suscripción. Las celdas de texto que podrían interpretarse como "
+            "fórmula de hoja de cálculo se prefijan con un apóstrofo; los "
+            "montos numéricos se mantienen numéricos.\n\n"
+            "Ambos extremos son obligatorios y deben cumplir "
+            "``desde <= hasta``. Filtros opcionales: ``moneda`` contra el "
+            "catálogo activo y ``origen=manual`` (único origen registrado "
+            "hoy; otros valores devuelven 400). También disponible como "
+            "``GET /api/export/cobros/`` con los mismos parámetros."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="desde",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Fecha inicial inclusiva (YYYY-MM-DD).",
+                examples=[OpenApiExample("Marzo", value="2026-03-01")],
+            ),
+            OpenApiParameter(
+                name="hasta",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Fecha final inclusiva (YYYY-MM-DD).",
+                examples=[OpenApiExample("Agosto", value="2026-08-31")],
+            ),
+            OpenApiParameter(
+                name="moneda",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Código del catálogo activo de monedas (p. ej. CLP).",
+            ),
+            OpenApiParameter(
+                name="origen",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Origen del cobro. Solo 'manual' está soportado.",
+            ),
+        ],
+        responses={
+            (200, "text/csv"): OpenApiResponse(
+                response=OpenApiTypes.BINARY,
+                description="Archivo CSV con encabezados y una fila por cobro.",
+                examples=[
+                    OpenApiExample(
+                        "CSV de ejemplo",
+                        value=(
+                            "servicio,categoria,monto,moneda,fecha,origen,estado\n"
+                            "Netflix,streaming,12990.00,CLP,2026-03-05,manual,activo"
+                        ),
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(
+                description=(
+                    "Falta un extremo del rango, la fecha es inválida, "
+                    "``desde > hasta``, la moneda no está en el catálogo "
+                    "activo o el origen no está soportado."
+                )
+            ),
+            403: OpenApiResponse(
+                description="Falta la cabecera X-Organizacion-Id."
+            ),
+        },
+    )
+    @action(detail=False, methods=["get"], url_path="exportar-csv")
+    def exportar_csv(self, request):
+        """GET /api/suscripciones/exportar-csv/?desde=YYYY-MM-DD&hasta=YYYY-MM-DD."""
+        desde, hasta, moneda, origen = _resolver_filtros_exportacion(request)
+        return _respuesta_csv_cobros(request, desde, hasta, moneda, origen)
+
     @action(detail=True, methods=["get", "post"], url_path="uso")
     def uso(self, request, pk=None):
         """
@@ -763,3 +1365,249 @@ class SubscriptionViewSet(TenantViewSet):
             status=status.HTTP_200_OK,
         )
 
+
+class ExportarCobrosCSVView(APIView):
+    """Alias de la exportación CSV en ``/api/export/cobros/`` (VI-25).
+
+    Reutiliza exactamente el mismo contrato, validación y constructor que la
+    acción ``/api/suscripciones/exportar-csv/``. Existe porque la tarjeta
+    admite cualquiera de las dos rutas y algunos clientes prefieren una ruta
+    de exportación separada del recurso de suscripciones.
+    """
+
+    @extend_schema(
+        summary="Exportar cobros a CSV (alias)",
+        description=(
+            "Misma operación que ``GET /api/suscripciones/exportar-csv/``. "
+            "Rango inclusivo obligatorio, filtros opcionales ``moneda`` y "
+            "``origen=manual``, y aislamiento por organización."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="desde",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Fecha inicial inclusiva (YYYY-MM-DD).",
+            ),
+            OpenApiParameter(
+                name="hasta",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Fecha final inclusiva (YYYY-MM-DD).",
+            ),
+            OpenApiParameter(
+                name="moneda",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Código del catálogo activo de monedas (p. ej. CLP).",
+            ),
+            OpenApiParameter(
+                name="origen",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Origen del cobro. Solo 'manual' está soportado.",
+            ),
+        ],
+        responses={
+            (200, "text/csv"): OpenApiTypes.BINARY,
+            400: OpenApiResponse(
+                description=(
+                    "Rango inválido, moneda fuera del catálogo activo u "
+                    "origen no soportado."
+                )
+            ),
+            403: OpenApiResponse(
+                description="Falta la cabecera X-Organizacion-Id."
+            ),
+        },
+    )
+    def get(self, request):
+        desde, hasta, moneda, origen = _resolver_filtros_exportacion(request)
+        return _respuesta_csv_cobros(request, desde, hasta, moneda, origen)
+
+
+class HallazgoPagination(PageNumberPagination):
+    """Paginación de hallazgos: 10 por defecto, máximo 100."""
+
+    page_size = 10
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Listar hallazgos de cobro",
+        description=(
+            "Alertas detectadas por VI-19 para la organización autenticada: "
+            "``alza_tarifa`` (más de 5 % sobre el promedio de los 3 meses "
+            "previos) y ``doble_cobro`` (otro cargo del mismo servicio a "
+            "menos de 5 días).\n\n"
+            "Filtros opcionales: ``estado``, ``tipo`` y ``suscripcion``. La "
+            "respuesta está paginada con ``count``, ``next``, ``previous`` y "
+            "``results``. Marcar una alerta como revisada no cambia el estado "
+            "de la suscripción."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="estado",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=[e.value for e in HallazgoCobro.Estado],
+                description="Estado de revisión de la alerta.",
+            ),
+            OpenApiParameter(
+                name="tipo",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                enum=[t.value for t in HallazgoCobro.Tipo],
+                description="Tipo de anomalía.",
+            ),
+            OpenApiParameter(
+                name="suscripcion",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="UUID de la suscripción a la que pertenece el hallazgo.",
+            ),
+            OpenApiParameter(
+                name="page",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Número de página, desde 1.",
+            ),
+            OpenApiParameter(
+                name="page_size",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Tamaño de página (1 a 100; por defecto 10).",
+            ),
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=PaginatedHallazgoSerializer,
+                description="Página de hallazgos.",
+                examples=[
+                    OpenApiExample(
+                        "Alerta de alza",
+                        value={
+                            "count": 1,
+                            "next": None,
+                            "previous": None,
+                            "results": [
+                                {
+                                    "id": "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d",
+                                    "tipo": "alza_tarifa",
+                                    "tipo_display": "Alza de tarifa",
+                                    "suscripcion_id": "6f1c2a7e-8b4d-4c1a-9f2e-3a5b7c9d1e2f",
+                                    "cobro_id": "0d6f7e8a-1b2c-4d3e-8f90-1a2b3c4d5e6f",
+                                    "cobro_relacionado_id": None,
+                                    "monto": "10600.00",
+                                    "monto_referencia": "10000.00",
+                                    "moneda": "CLP",
+                                    "porcentaje_variacion": "6.00",
+                                    "fecha_cobro": "2026-10-05",
+                                    "fecha_referencia": None,
+                                    "detalle": {
+                                        "promedio": "10000.00",
+                                        "umbral": "10500.00",
+                                        "cantidad_previos": 2,
+                                    },
+                                    "estado": "pendiente",
+                                    "estado_display": "Pendiente",
+                                    "revisado_en": None,
+                                    "revisado_por": None,
+                                    "creado_en": "2026-10-05T09:15:00-03:00",
+                                }
+                            ],
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="Filtro inválido."),
+            403: OpenApiResponse(
+                description="Falta la cabecera X-Organizacion-Id."
+            ),
+        },
+    ),
+)
+class HallazgoCobroViewSet(PaginacionExplicitaMixin, SoloLecturaTenantViewSet):
+    """Consulta y revisión de anomalías de cobro (VI-19 / RF-07)."""
+
+    queryset = HallazgoCobro.objects.all()
+    serializer_class = HallazgoCobroSerializer
+    _pagination_class = HallazgoPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action != "list":
+            return qs
+
+        estado = self.request.query_params.get("estado")
+        if estado:
+            if estado not in HallazgoCobro.Estado.values:
+                raise ValidationError(
+                    {
+                        "estado": (
+                            f"Estado no válido: '{estado}'. "
+                            f"Opciones: {', '.join(HallazgoCobro.Estado.values)}."
+                        )
+                    }
+                )
+            qs = qs.filter(estado=estado)
+
+        tipo = self.request.query_params.get("tipo")
+        if tipo:
+            if tipo not in HallazgoCobro.Tipo.values:
+                raise ValidationError(
+                    {
+                        "tipo": (
+                            f"Tipo no válido: '{tipo}'. "
+                            f"Opciones: {', '.join(HallazgoCobro.Tipo.values)}."
+                        )
+                    }
+                )
+            qs = qs.filter(tipo=tipo)
+
+        suscripcion_id = self.request.query_params.get("suscripcion")
+        if suscripcion_id:
+            try:
+                uuid.UUID(str(suscripcion_id))
+            except (TypeError, ValueError) as exc:
+                raise ValidationError(
+                    {"suscripcion": "Debe ser un UUID válido."}
+                ) from exc
+            qs = qs.filter(suscripcion_id=suscripcion_id)
+
+        return qs
+
+    @extend_schema(
+        summary="Marcar un hallazgo como revisado",
+        description=(
+            "Cambia ``estado`` de ``pendiente`` a ``revisada`` y registra "
+            "``revisado_en``/``revisado_por``. Es idempotente y **no** "
+            "modifica el estado de la suscripción ni borra el cobro."
+        ),
+        request=None,
+        responses={200: HallazgoCobroSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="revisar")
+    def revisar(self, request, pk=None):
+        """POST /api/hallazgos/<id>/revisar/."""
+        hallazgo = self.get_object()
+        hallazgo = marcar_hallazgo_revisado(
+            hallazgo,
+            usuario_id=_actor_id_opcional(request),
+        )
+        return Response(
+            HallazgoCobroSerializer(hallazgo).data,
+            status=status.HTTP_200_OK,
+        )

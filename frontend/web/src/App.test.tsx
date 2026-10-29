@@ -81,11 +81,13 @@ describe("App: secciones del menú que ya existen", () => {
     expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
   });
 
-  it("con sesión, /recomendaciones muestra Próximamente y no llama al backend mientras VI-17 no exista (AN-20)", async () => {
+  it("con sesión, /recomendaciones abre la página real y pide VI-17, ya no Próximamente (CH-26)", async () => {
+    vi.mocked(getRecomendaciones).mockResolvedValue({ results: [], disponible: true, motivo_sin_sugerencias: null });
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     montar("/recomendaciones");
-    expect(await screen.findByText("En construcción")).toBeInTheDocument();
-    expect(getRecomendaciones).not.toHaveBeenCalled();
+    expect(await screen.findByText("No tienes recomendaciones por ahora")).toBeInTheDocument();
+    expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+    expect(getRecomendaciones).toHaveBeenCalledTimes(1);
   });
 
   it("con sesión, /calendario abre la cuadrícula del mes (CH-17)", async () => {
