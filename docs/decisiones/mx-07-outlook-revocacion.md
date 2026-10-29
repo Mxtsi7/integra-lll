@@ -1,11 +1,33 @@
 # MX-07 — Evidencia de revocación para Outlook
 
-- **Estado:** propuesta documentada; **pendiente de decisión humana**.
+- **Estado:** decisión registrada el 29 de octubre de 2026; **visto bueno de Felipe Orellana PENDIENTE**.
 - **Fecha:** 29 de octubre de 2026.
 - **Alcance:** PR #72, eliminación de organización, servicio Connectors / FE-05.
-- **Deciden:** Felipe Orellana (Connectors / FE-05) y Maximiliano Sáez (producto / PR #72).
-- **Naturaleza:** este documento no aprueba ni implementa una política. Deja las opciones y sus consecuencias para que la decisión se tome por escrito antes de la fase 2.
-- **Estado de esta fase:** solo investigación y documentación. No se modificaron `eliminacion.py`, `revocacion.py`, `proveedores.py` ni migraciones; no se ejecutó ninguna llamada de revocación contra Microsoft.
+- **Decidido por:** [NOMBRE], usuario de esta sesión (completar antes de publicar).
+- **Visto bueno de Felipe Orellana (Connectors / FE-05):** PENDIENTE.
+- **Firma de Maximiliano Sáez (producto / PR #72):** no registrada; este documento no la simula.
+- **Naturaleza:** registra la opción elegida y sus límites. No acredita que Outlook cumpla RF-01.7 ni sustituye la ratificación pendiente.
+- **Estado de la fase 1:** investigación y documentación. No se modificaron `eliminacion.py`, `revocacion.py`, `proveedores.py` ni migraciones; no se ejecutó ninguna llamada de revocación contra Microsoft.
+- **Estado de la fase 2:** implementada la opción 3 en código y pruebas; ver la sección 0 y el informe del PR.
+
+## 0. Decisión registrada
+
+- **Opción elegida:** **3**, acotada a Outlook y a la eliminación de organización.
+- **Qué se acepta:** cerrar la limpieza de una organización con cuentas Outlook **sin revocación ante Microsoft**, porque no existe una operación aplicable para cuentas personales y las opciones para trabajo/escuela tienen efectos y permisos que esta PR no puede asumir.
+- **Qué se destruye:** nuestras credenciales cifradas de Outlook, únicamente como parte final de la limpieza, en la misma transacción que borra las filas de `CuentaConectada`. Nunca en una ruta que termine en 409.
+- **Qué NO se hace:** no se escribe `revocado_en` para Outlook, no se reutiliza ese campo con otro significado, no se llama a Microsoft Graph desde la limpieza, no se retira Connectors de los destinos y no se edita la migración publicada `0003_autorizacion_y_revocacion`.
+- **Riesgo residual:** un refresh token que Microsoft ya emitió podría seguir válido hasta que expire o hasta que el usuario retire el acceso desde su cuenta Microsoft. Nosotros ya no tendremos copia, así que explotarlo exigiría que alguien hubiera obtenido el token antes. No se controla lo que Microsoft haga con tokens ya emitidos.
+- **Requisito:** RF-01.7 **no se modifica**. Outlook queda como **incumplimiento documentado de RF-01.7 con mitigación y riesgo residual**, hasta que el equipo ratifique una enmienda. La propuesta de enmienda no aprobada se incluye en `INFORME-PR72.md`.
+- **Ratificación pendiente:** el visto bueno de Felipe Orellana y la propuesta de enmienda a cargo del dueño de la matriz de requisitos (MX-22) siguen PENDIENTES. Este documento no afirma que estén aprobados.
+
+### Hechos de Microsoft citados en la decisión
+
+1. `revokeSignInSessions` **no está soportado en modo delegado para cuentas personales**. En cuentas de trabajo/escuela exige `User.RevokeSessions.All`, y además invalida **todos** los refresh tokens del usuario en **todas** las aplicaciones y las cookies de sesión del navegador. Se descarta por su efecto global. Fuente: <https://learn.microsoft.com/en-us/graph/api/user-revokesigninsessions?view=graph-rest-1.0>.
+2. Para cuentas personales no hay una API documentada para revocar el consentimiento; el usuario debe retirarlo manualmente en <https://account.live.com/consent/Manage>. **Esta afirmación proviene de una respuesta de Microsoft Q&A, no de documentación oficial**, y se marca como no oficial: <https://learn.microsoft.com/en-us/answers/questions/5563534/how-to-revoke-consent-through-api-after-the-third>.
+3. Los access tokens no se pueden revocar; en Entra duran una hora por defecto. Fuente: <https://learn.microsoft.com/en-us/entra/identity/users/users-revoke-access>.
+4. Para cuentas de trabajo/escuela, quitar el grant de consentimiento exige permisos de administrador y no invalida los access tokens ya emitidos. Esta afirmación proviene de un blog de terceros, **no está verificada** y queda **fuera de alcance**.
+
+> Las secciones 1 a 12 conservan el análisis y las opciones de la fase 1. Donde dicen que no hay decisión, se leen junto con esta sección 0 y con el estado de ratificación pendiente.
 
 ## 1. El problema, en cinco líneas
 
@@ -243,7 +265,9 @@ No significa “Microsoft revocó el token”. Significa: “cerramos el acceso 
 | Escribir `revocado_en` con la fecha de desconexión | Sería una evidencia falsa: `revocado_en` significa confirmación del proveedor. |
 | Retirar Connectors de los destinos | Evita el problema en vez de resolverlo y deja datos de Connectors sin limpiar. |
 
-## 7. Recomendación (propuesta, no aprobada)
+## 7. Recomendación original (propuesta, no aprobada; superada por la decisión 0)
+
+**Nota de implementación:** la fase 2 implementó la opción 3 por decisión del usuario de la sesión, con el visto bueno de Felipe **PENDIENTE**. La condición 7 de esta recomendación —firma de Felipe y Maxi antes de tocar código— **no se cumplió tal como estaba escrita**; queda registrada como ratificación pendiente y no se presenta como aprobada.
 
 **Propuesta:** adoptar la **opción 3**, acotada a Outlook, con un estado explícito distinto de `revocado_en` y una instrucción al usuario para retirar el acceso desde su cuenta Microsoft.
 
@@ -283,9 +307,9 @@ La propuesta incluye estas condiciones mínimas:
 6. Si no se aprueba la opción 3, ¿la PR queda en draft y se documenta que MX-07 no puede cumplir 72 horas para Outlook, o se elige la opción 1/4?
 7. ¿Quién firma la decisión y con qué fecha, para poder citarla en el informe y en el flujo `07-eliminar-cuenta.md`?
 
-## 9. Prueba de aceptación que debería cumplir la opción elegida
+## 9. Prueba de aceptación que debía cumplir la opción elegida
 
-No está implementada ni ejecutada en esta fase. Debe ser reproducible y no cambiar el comportamiento de Gmail.
+La fase 1 no la implementó. La fase 2 implementó las pruebas de `services/connectors/tests/test_eliminacion.py`; las condiciones 1 y 2 de esta lista describían el comportamiento anterior de Outlook y quedaron reemplazadas por la decisión de la sección 0: Outlook ya no devuelve 409 por sí solo. Se conserva la lista como registro de lo que se esperaba antes de decidir.
 
 1. **Fallo inicial:** organización con Outlook; el primer `DELETE` interno devuelve 409, `revocado_en` sigue `NULL`, el ciphertext sigue intacto, la cuenta sigue en estado conectado y la organización no queda marcada como eliminada.
 2. **Reintento sin evidencia:** un segundo `DELETE` vuelve a devolver 409; no se borra nada y no se escribe evidencia falsa.
