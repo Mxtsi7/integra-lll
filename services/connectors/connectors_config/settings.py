@@ -90,6 +90,21 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
 }
 
+# ── Subida de archivos para importar (FE-07) ──────────────────────────
+# Tope de tamaño por archivo. 5 MB alcanza para años de cartola en CSV y
+# para una cartola PDF; más que eso no es una cartola, es otra cosa.
+IMPORTACION_TAMANO_MAXIMO_BYTES = env.int(
+    "IMPORTACION_TAMANO_MAXIMO_BYTES", default=5 * 1024 * 1024
+)
+# Cuántos archivos puede subir una organización por día. Es la cuota de
+# ingesta de la tarjeta: sin ella, un cliente en bucle llenaría la base de
+# archivos pendientes.
+IMPORTACION_CUOTA_DIARIA = env.int("IMPORTACION_CUOTA_DIARIA", default=20)
+# Cuánto se guarda el archivo. Es almacenamiento TEMPORAL: lo necesita el
+# procesamiento (FE-09) y después sobra. `purgar_archivos_importacion` borra
+# los vencidos; la importación y sus candidatos quedan.
+IMPORTACION_DIAS_RETENCION = env.int("IMPORTACION_DIAS_RETENCION", default=7)
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True

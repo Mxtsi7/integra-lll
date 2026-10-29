@@ -463,3 +463,54 @@ class Importacion(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.get_origen_display()} · {self.get_estado_display()}"
+
+
+class ArchivoImportacion(ModeloTenant):
+    """El archivo que se subió para una importación, guardado TEMPORALMENTE (FE-07).
+
+    ── Por qué en la base y no en disco ────────────────────────────────────
+    En Kubernetes el disco del pod es efímero y no se comparte: el worker que
+    procese el archivo (FE-09) puede correr en otro pod. No hay un
+    almacenamiento de objetos en el cluster. Guardar los bytes en la base,
+    con un tope de tamaño y una fecha de vencimiento, es lo más simple que
+    funciona en los dos pods y en los dos entornos.
+
+    ── Es temporal de verdad ───────────────────────────────────────────────
+    `vence_en` lo pone la subida (hoy + `IMPORTACION_DIAS_RETENCION`) y
+    `purgar_archivos_importacion` borra los vencidos. La importación y sus
+    candidatos no se tocan: lo que sobra es el archivo, no el resultado.
+
+    `sha256` queda para poder decir "este archivo ya lo subiste" (FE-09) y
+    para que el procesamiento compruebe que lee lo que se validó.
+    """
+
+    class Formato(models.TextChoices):
+        CSV = "csv", "CSV"
+        PDF = "pdf", "PDF"
+
+    importacion = models.OneToOneField(
+        Importacion,
+        on_delete=models.CASCADE,
+        related_name="archivo",
+        verbose_name="Importación",
+    )
+    formato = models.CharField(max_length=4, choices=Formato.choices)
+    tamano = models.PositiveIntegerField(verbose_name="Tamaño en bytes")
+    sha256 = models.CharField(max_length=64, db_index=True)
+    contenido = models.BinaryField(verbose_name="Bytes del archivo")
+    vence_en = models.DateTimeField(
+        verbose_name="Se borra después de",
+        help_text="Pasada esta fecha, `purgar_archivos_importacion` lo elimina.",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "archivo_importacion"
+        ordering = ["-creado_en"]
+        indexes = ModeloTenant.Meta.indexes + [
+            models.Index(fields=["vence_en"], name="archivo_importacion_vence"),
+        ]
+        verbose_name = "Archivo de importación"
+        verbose_name_plural = "Archivos de importación"
+
+    def __str__(self) -> str:
+        return f"{self.importacion_id}: {self.formato} de {self.tamano} bytes"
