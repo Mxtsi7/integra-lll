@@ -17,3 +17,22 @@ export interface Recomendacion {
 export async function getRecomendaciones(): Promise<{ results: Recomendacion[] } | Recomendacion[]> {
   return await pedir('/recomendaciones/');
 }
+
+export interface ExplicacionRecomendacion {
+  id: string;
+  suscripcion_id: string;
+  explicacion: string;
+  fuente: 'reglas';
+  estado: 'disponible' | 'datos_insuficientes';
+  motivo: string | null;
+  ahorro_estimado: number | null;
+  moneda: string;
+  base_calculo: string | null;
+  evidencia: { id: string; url: string; descripcion: string } | null;
+  uso: 'no_evaluado';
+  advertencia_uso: string;
+}
+
+export async function explicarRecomendacion(id: string): Promise<ExplicacionRecomendacion> {
+  return await pedir(`/recomendaciones/${encodeURIComponent(id)}/explicar/`);
+}
