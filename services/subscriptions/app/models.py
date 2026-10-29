@@ -526,6 +526,160 @@ class Cobro(ReferenciasCatalogo, ModeloTenant):
         return self.monto > self.suscripcion.monto
 
 
+class HallazgoCobro(ModeloTenant):
+    """Anomalía detectada sobre un cobro (VI-19 / RF-07 / CU-30).
+
+    Hay dos tipos:
+
+    * ``alza_tarifa``: el cobro supera en **más de 5 %** el promedio de los
+      cobros anteriores del mismo servicio (mínimo 2 cobros previos y una
+      ventana de 3 meses).
+    * ``doble_cobro``: existe otro cobro del mismo servicio a menos de 5 días.
+
+    La identidad de negocio se guarda en ``clave_deduplicacion``: una clave
+    por cobro para las alzas y una clave por par ordenado de cobros para los
+    dobles cobros. Así, volver a analizar el mismo cobro (por ejemplo, al
+    reprocesar una importación) no crea alertas repetidas.
+
+    ``estado`` es la preferencia de revisión de la alerta, no el estado de la
+    suscripción: marcarla como revisada nunca cambia ``Subscription.estado``
+    (RF-07 / RF-09).
+    """
+
+    class Tipo(models.TextChoices):
+        ALZA_TARIFA = "alza_tarifa", "Alza de tarifa"
+        DOBLE_COBRO = "doble_cobro", "Posible doble cobro"
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        REVISADA = "revisada", "Revisada"
+
+    tipo = models.CharField(
+        max_length=20,
+        choices=Tipo.choices,
+        verbose_name="Tipo de anomalía",
+    )
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="hallazgos_cobro",
+        verbose_name="Suscripción",
+    )
+
+    cobro = models.ForeignKey(
+        Cobro,
+        on_delete=models.CASCADE,
+        related_name="hallazgos",
+        verbose_name="Cobro analizado",
+    )
+
+    cobro_relacionado = models.ForeignKey(
+        Cobro,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="hallazgos_relacionados",
+        verbose_name="Cobro relacionado",
+        help_text="Segundo cargo del par cuando el hallazgo es un posible doble cobro.",
+    )
+
+    monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name="Monto del cobro",
+    )
+
+    monto_referencia = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Monto de referencia",
+        help_text="Promedio de los cobros previos (alza) o monto del otro cargo (doble cobro).",
+    )
+
+    moneda = models.CharField(
+        max_length=3,
+        default="CLP",
+        verbose_name="Moneda",
+    )
+
+    porcentaje_variacion = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Variación porcentual",
+        help_text="Solo aplica al alza de tarifa; 6.00 significa un 6 % sobre el promedio.",
+    )
+
+    fecha_cobro = models.DateField(verbose_name="Fecha del cobro analizado")
+
+    fecha_referencia = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Fecha de referencia",
+        help_text="Fecha del cargo relacionado en un posible doble cobro.",
+    )
+
+    detalle = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Detalle",
+        help_text="Evidencia adicional: cobros previos usados en el promedio, días de diferencia, etc.",
+    )
+
+    clave_deduplicacion = models.CharField(
+        max_length=120,
+        verbose_name="Clave de deduplicación",
+    )
+
+    estado = models.CharField(
+        max_length=10,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+        verbose_name="Estado de revisión",
+    )
+
+    revisado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Revisado en",
+    )
+
+    revisado_por = models.BigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Revisado por",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "hallazgo_cobro"
+        ordering = ["-fecha_cobro", "-creado_en", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "clave_deduplicacion"],
+                name="hallazgo_cobro_unico_por_tenant",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organizacion_id", "estado", "-creado_en"],
+                name="hallazgo_org_estado_creado",
+            ),
+            models.Index(
+                fields=["suscripcion", "-fecha_cobro"],
+                name="hallazgo_suscripcion_fecha",
+            ),
+        ]
+        verbose_name = "Hallazgo de cobro"
+        verbose_name_plural = "Hallazgos de cobro"
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} · {self.suscripcion} · {self.fecha_cobro}"
+
+
 class RegistroUso(ModeloTenant):
     """Registro histórico de uso de una suscripción en una fecha determinada (CU-23 / RF-04 / RF-15)."""
 
