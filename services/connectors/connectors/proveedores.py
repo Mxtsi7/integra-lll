@@ -68,6 +68,12 @@ class ConfiguracionOAuth:
     # Google quiere access_type=offline + prompt=consent para entregar el
     # refresh token; Microsoft lo entrega con el scope offline_access.
     extra_autorizacion: tuple[tuple[str, str], ...] = ()
+    #: ¿El proveedor ofrece una operación de revocación que podamos usar?
+    #: No se deduce de `url_revocacion`: un fallo del proveedor y una
+    #: limitación permanente son cosas distintas. Outlook es el caso conocido
+    #: en que no existe revocación por token; su política se documenta en
+    #: `docs/decisiones/mx-07-outlook-revocacion.md`.
+    revocacion_soportada: bool = True
 
     @property
     def scope_junto(self) -> str:
@@ -92,6 +98,7 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
             # queda sin poder refrescarse.
             ("prompt", "consent"),
         ),
+        revocacion_soportada=True,
     ),
     CuentaConectada.Proveedor.OUTLOOK: ConfiguracionOAuth(
         url_autorizacion="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
@@ -108,6 +115,8 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
         # Microsoft emite por tenant: https://login.microsoftonline.com/{tid}/v2.0
         # El prefijo se comprueba aparte, en `_emisor_aceptado`.
         emisores=("https://login.microsoftonline.com/",),
+        # Limitación permanente del proveedor, no un fallo reintentable.
+        revocacion_soportada=False,
     ),
 }
 
@@ -124,6 +133,26 @@ def configuracion_de(proveedor: str) -> ConfiguracionOAuth:
         raise ProveedorNoSoportado(
             f"{proveedor} no usa OAuth; no se puede iniciar una autorización."
         ) from None
+
+
+def soporta_revocacion(proveedor: str) -> bool:
+    """¿El proveedor ofrece una revocación que podamos intentar?
+
+    Un proveedor desconocido se trata como **soportado** para que la limpieza
+    lo bloquee en vez de aceptarlo por error. El CSV tampoco está en
+    `CONFIGURACIONES`, pero la limpieza lo excluye antes de llegar acá.
+    """
+    config = CONFIGURACIONES.get(proveedor)
+    return True if config is None else config.revocacion_soportada
+
+
+def proveedores_sin_revocacion() -> tuple[str, ...]:
+    """Proveedores cuya limitación es permanente, no un fallo reintentable."""
+    return tuple(
+        proveedor
+        for proveedor, config in CONFIGURACIONES.items()
+        if not config.revocacion_soportada
+    )
 
 
 def credenciales_de(proveedor: str) -> tuple[str, str]:
@@ -224,9 +253,14 @@ def revocar(proveedor: str, *, access_token: str) -> bool:
     Microsoft no tiene endpoint de revocación por token: devuelve False y el
     detalle lo explica. El token igual queda inservible de este lado porque se
     borra, y expira solo.
+
+    Este `False` no distingue “el proveedor no lo soporta” de “el proveedor
+    falló”. Para esa decisión, usar `soporta_revocacion()`; la limpieza de
+    Outlook no debe confundir la limitación permanente con un fallo
+    reintentable.
     """
     config = configuracion_de(proveedor)
-    if not config.url_revocacion:
+    if not config.revocacion_soportada or not config.url_revocacion:
         return False
     try:
         respuesta = requests.post(

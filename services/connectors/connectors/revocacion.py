@@ -16,6 +16,10 @@ revocación por token.
     no confirmada   → los tokens se CONSERVAN cifrados para reintentar, la
                       cuenta igual queda desconectada, y `revocado_en` sigue
                       en NULL
+    no soportada    → el proveedor no ofrece revocación (Outlook). No se llama
+                      al proveedor, no se escribe `revocado_en` y las
+                      credenciales se conservan hasta el borrado final de la
+                      limpieza. No es un fallo reintentable.
 
 `revocado_en` es la evidencia que consume la limpieza coordinada de #72. Que
 no haya tokens guardados **no** demuestra que el acceso se haya revocado del
@@ -74,6 +78,9 @@ class Resultado:
     #: lo revocado fue la concesión anterior y no se tocó la nueva.
     reconectada_mientras_tanto: bool
     detalle: str
+    #: True si el proveedor no ofrece revocación. Es una limitación permanente,
+    #: no un fallo: no se reintenta y no se escribe `revocado_en`.
+    no_soportada: bool = False
 
 
 def _credenciales_para_revocar(cuenta: CuentaConectada) -> tuple[str, str]:
@@ -101,6 +108,33 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
     decide si además se puede dar por revocado.
     """
     version = cuenta.credenciales_version
+    if not proveedores.soporta_revocacion(cuenta.proveedor):
+        # Outlook: no hay mecanismo que confirmar. Se desconecta localmente,
+        # no se inventa `revocado_en` y no se destruyen las credenciales: la
+        # limpieza las borra con la fila, después de validar todo lo demás.
+        detalle = (
+            "Desconectada por el usuario; el proveedor no ofrece revocación "
+            "de acceso. Las credenciales se conservan cifradas hasta la "
+            "limpieza final."
+        )
+        with transaction.atomic():
+            cambiadas = CuentaConectada.objects.filter(
+                pk=cuenta.pk, credenciales_version=version
+            ).update(
+                estado=CuentaConectada.Estado.DESCONECTADA,
+                detalle_del_estado=detalle[:200],
+                actualizado_en=timezone.now(),
+            )
+        cuenta.refresh_from_db()
+        return Resultado(
+            confirmada=False,
+            sin_nada_que_revocar=False,
+            ilegible=False,
+            reconectada_mientras_tanto=not cambiadas,
+            detalle=detalle,
+            no_soportada=True,
+        )
+
     token, situacion = _credenciales_para_revocar(cuenta)
 
     if situacion == ILEGIBLE:
@@ -214,7 +248,8 @@ def reintentar_pendiente(pendiente: CuentaConectada) -> Resultado | None:
       · ya no existe,
       · cambió de versión (alguien reconectó),
       · ya no está desconectada,
-      · o ya tiene evidencia de revocación.
+      · ya tiene evidencia de revocación,
+      · o su proveedor no ofrece revocación (Outlook).
     """
     actual = CuentaConectada.objects.filter(pk=pendiente.pk).first()
     if actual is None:
@@ -224,6 +259,10 @@ def reintentar_pendiente(pendiente: CuentaConectada) -> Resultado | None:
     if actual.estado != CuentaConectada.Estado.DESCONECTADA:
         return None
     if actual.revocado_en is not None:
+        return None
+    if not proveedores.soporta_revocacion(actual.proveedor):
+        # Outlook: no hay nada que reintentar. La limpieza lo trata como
+        # limitación conocida y borra sus credenciales con la fila.
         return None
     # Desde acá, `revocar_y_desconectar` lee el token de `actual` (la misma
     # versión que se seleccionó) y su escritura condicional cubre lo que
@@ -255,6 +294,10 @@ def pendientes_de_revocar(organizacion_id=None):
     con qué reintentar. Incluye las ilegibles a propósito — son exactamente
     las que hay que reintentar cuando vuelva la clave de cifrado.
 
+    Excluye a los proveedores que declararon no ofrecer revocación (Outlook):
+    no es un pendiente reintentable. Sus credenciales se destruyen con la fila
+    en el borrado final de la limpieza, no se reintentan para siempre.
+
     Devuelve un queryset y no una lista: el comando lo recorre y vuelve a leer
     cada cuenta antes de cada intento, porque una lista materializada queda
     vieja apenas alguien reconecta.
@@ -263,6 +306,9 @@ def pendientes_de_revocar(organizacion_id=None):
         estado=CuentaConectada.Estado.DESCONECTADA,
         revocado_en__isnull=True,
     ).exclude(access_token__isnull=True, refresh_token__isnull=True)
+    sin_revocacion = proveedores.proveedores_sin_revocacion()
+    if sin_revocacion:
+        qs = qs.exclude(proveedor__in=sin_revocacion)
     if organizacion_id is not None:
         qs = qs.filter(organizacion_id=organizacion_id)
     return qs
