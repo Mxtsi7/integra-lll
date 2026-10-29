@@ -89,10 +89,17 @@ case "$1" in
       fi
       exit 0 ;;
   exec)
+      case "$2" in
+        deployment/subscriptions|deployment/rabbitmq) ;;
+        *) echo "Error from server (NotFound): recurso $2 inexistente" >&2; exit 1 ;;
+      esac
       case "$todo" in
         *bulk_create*)         echo "sembradas 500"; exit 0 ;;
         *OutboxEvento*)        echo "${OUTBOX_PENDIENTES:-0}"; exit 0 ;;
-        *"--quiet"*)           echo "subscriptions.resumen ${COLA_MENSAJES:-0}"; exit 0 ;;
+        *"--quiet"*)
+          [ "$FALLA_RABBIT" = "0" ] || exit 1
+          [ "$COLA_AUSENTE" = "1" ] || echo "subscriptions.resumen ${COLA_MENSAJES:-0}"
+          exit 0 ;;
         *rabbitmqctl*)         echo "name messages consumers"; exit 0 ;;
         *ResumenOrganizacion*) echo "  org 1000 en 1 activas"; exit 0 ;;
       esac
@@ -122,6 +129,7 @@ reiniciar_estado() {  # $1 = API, $2 = worker, $3 = consumidor-eventos, $4 = mig
   rm -f "$ESTADO/rollouts"
   : > "$REGISTRO"
   export OUTBOX_PENDIENTES=0 COLA_MENSAJES=0 FALLA_CARGA=0 ROLLOUT_FALLA_DESDE=""
+  export FALLA_RABBIT=0 COLA_AUSENTE=0
 }
 
 correr() {
@@ -217,6 +225,48 @@ if dice "NO SE PUDO VERIFICAR"; then v=1; else v=0; fi
 juzgar "avisa que la restauracion no se pudo verificar" "$v"
 if dice "kubectl get deployment subscriptions -o yaml"; then v=1; else v=0; fi
 juzgar "y dice como revisarla a mano" "$v"
+
+echo
+echo "=== 7. la cola tiene mensajes: aborta y restaura ==="
+reiniciar_estado 0 1 ausente
+export COLA_MENSAJES=5
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+if dice "COMPARACION INVALIDA"; then v=1; else v=0; fi
+juzgar "no acredita drenaje con mensajes pendientes" "$v"
+juzgar "la API vuelve al valor original" "$(si "$(api)" = "0")"
+
+echo
+echo "=== 8. la cola no aparece: no equivale a cero ==="
+reiniciar_estado 1 0 ausente
+export COLA_AUSENTE=1
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+if dice "COMPARACION INVALIDA"; then v=1; else v=0; fi
+juzgar "no acredita drenaje sin evidencia de la cola" "$v"
+if dice "CON cola"; then v=0; else v=1; fi
+juzgar "no inicia la segunda corrida" "$v"
+juzgar "la API vuelve al valor original" "$(si "$(api)" = "1")"
+
+echo
+echo "=== 9. rabbitmqctl falla: no equivale a cero ==="
+reiniciar_estado 1 0 ausente
+export FALLA_RABBIT=1
+codigo="$(correr)"
+juzgar "sale distinto de 0" "$(si "$codigo" != "0")"
+if dice "COMPARACION INVALIDA"; then v=1; else v=0; fi
+juzgar "no acredita drenaje tras un error de consulta" "$v"
+juzgar "la API vuelve al valor original" "$(si "$(api)" = "1")"
+
+echo
+echo "=== 10. conteos no numericos: no acreditan drenaje ==="
+for origen in OUTBOX_PENDIENTES COLA_MENSAJES; do
+  reiniciar_estado 1 0 ausente
+  export "$origen=desconocido"
+  codigo="$(correr)"
+  juzgar "$origen invalido impide terminar con exito" "$(si "$codigo" != "0")"
+  juzgar "se restaura la API tras $origen invalido" "$(si "$(api)" = "1")"
+done
 
 echo
 echo "--------------------------------"

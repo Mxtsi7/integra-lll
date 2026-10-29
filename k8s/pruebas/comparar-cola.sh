@@ -41,6 +41,7 @@ RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
 # que el arnés (probar-comparar-cola.sh) no tenga que esperar de verdad.
 DRENAR_INTENTOS="${DRENAR_INTENTOS:-60}"
 DRENAR_PAUSA="${DRENAR_PAUSA:-2}"
+RABBIT="${RABBIT:-deployment/rabbitmq}"
 
 # ── Solo se toca UN contenedor: el de la API, por nombre ─────────────────────
 # Lo único que lee EVENTOS_ASINCRONOS es el POST (events/modo.py). El
@@ -87,7 +88,7 @@ restaurar() {
   [ "$RESTAURADO" = "1" ] && exit "$codigo"
   RESTAURADO=1
   echo
-  echo "── restaurando la bandera en los dos deployments ──"
+  echo "── restaurando la bandera en el contenedor de la API ──"
   local fallas=0
   poner_bandera "$DEPLOYMENT_API" "$CONTENEDOR_API" "$ORIGINAL_API" || fallas=$((fallas + 1))
   if ! kubectl rollout status "deployment/$DEPLOYMENT_API" --timeout=180s >/dev/null; then
@@ -130,10 +131,16 @@ drenar() {
   printf "── esperando a que se drene el outbox y la cola "
   while [ "$i" -lt "$limite" ]; do
     local pendientes cola
-    pendientes="$(kubectl exec deployment/subscriptions --       python manage.py shell -c       "from app.models import OutboxEvento; print(OutboxEvento.objects.filter(publicado_en__isnull=True).count())"       2>/dev/null | tr -d '
-' || echo "?")"
-    cola="$(kubectl exec statefulset/rabbitmq --       rabbitmqctl list_queues name messages --quiet 2>/dev/null       | awk '$1=="subscriptions.resumen"{print $2}' || echo "?")"
-    if [ "$pendientes" = "0" ] && [ "${cola:-0}" = "0" ]; then
+    pendientes="$(kubectl exec "deployment/$DEPLOYMENT_API" -c "$CONTENEDOR_API" -- \
+      python manage.py shell -c \
+      "from app.models import OutboxEvento; print(OutboxEvento.objects.filter(publicado_en__isnull=True).count())" \
+      2>/dev/null | tr -d '\r\n' || echo "?")"
+    cola="$(kubectl exec "$RABBIT" -- \
+      rabbitmqctl list_queues name messages --quiet 2>/dev/null \
+      | awk '$1=="subscriptions.resumen"{print $2}' || echo "?")"
+    # Ausencia de la cola o fallo de consulta no acreditan un cero.
+    if [[ "$pendientes" =~ ^[0-9]+$ && "$cola" =~ ^[0-9]+$ ]] \
+       && [ "$pendientes" = "0" ] && [ "$cola" = "0" ]; then
       echo " listo (outbox 0, cola 0)"
       return 0
     fi
@@ -246,7 +253,7 @@ correr 1 "CON cola: el POST solo publica"    "$ORG_CON"
 
 echo
 echo "═══ la cola después de la corrida asíncrona ═══"
-kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues name messages consumers 2>/dev/null || true
+kubectl exec "$RABBIT" -- rabbitmqctl list_queues name messages consumers 2>/dev/null || true
 echo
 echo "Si 'messages' bajó a 0, el consumidor ya drenó la ráfaga."
 echo "Resúmenes calculados:"
