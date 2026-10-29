@@ -6,6 +6,7 @@ import {
   type Recomendacion,
   type RecomendacionDescartada,
 } from '@ojoalgasto/shared';
+import { useAuth } from '../context/AuthContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
 export type EstadoRecomendaciones =
@@ -57,6 +58,15 @@ function sinClave<T>(registro: Record<string, T>, clave: string): Record<string,
 }
 
 export function useRecomendaciones() {
+  const { capturarSesion } = useAuth();
+  // La sesión con la que se montó la página. Si cambia, <RutaPrivada> la
+  // vuelve a montar desde cero (lista, errores y descartes nuevos); esto
+  // cubre el descarte que se confirma entre el cambio y ese nuevo montaje, o
+  // con la página ya cerrada: no se aplica ni se anuncia (revisión de #128).
+  const [sesion] = useState(capturarSesion);
+  const montado = useRef(false);
+  const sigueVigente = useCallback(() => montado.current && capturarSesion() === sesion, [capturarSesion, sesion]);
+
   const [estado, setEstado] = useState<EstadoRecomendaciones>({ tipo: 'cargando' });
   const [descartes, setDescartes] = useState<Record<string, EstadoDescarte>>({});
   // Solo se muestra la última carga: si se reintenta antes de que llegue la
@@ -97,14 +107,18 @@ export function useRecomendaciones() {
   /**
    * CH-32: la tarjeta se retira solo cuando el servidor confirma. Si falla, se
    * queda con el error y se puede volver a intentar. Devuelve la confirmación,
-   * o null si no se descartó.
+   * o null si no se descartó o si ya no es de esta sesión y esta página.
    */
   const descartar = useCallback(async (id: string): Promise<RecomendacionDescartada | null> => {
-    if (enviando.current.has(id)) return null;
+    // Con la sesión ya cambiada no se manda: la tarjeta es de la cuenta anterior.
+    if (!sigueVigente() || enviando.current.has(id)) return null;
     enviando.current.add(id);
     setDescartes((d) => ({ ...d, [id]: { tipo: 'enviando' } }));
     try {
       const confirmacion = await descartarRecomendacion(id);
+      // Confirmado para la sesión anterior, o con la página ya cerrada: quien
+      // llama no debe anunciarlo ni mover el foco.
+      if (!sigueVigente()) return null;
       descartadas.current.add(id);
       setEstado((e) => (e.tipo === 'listo' ? { ...e, items: e.items.filter((i) => i.id !== id) } : e));
       setDescartes((d) => sinClave(d, id));
@@ -115,12 +129,14 @@ export function useRecomendaciones() {
     } finally {
       enviando.current.delete(id);
     }
-  }, []);
+  }, [sigueVigente]);
 
   useEffect(() => {
+    montado.current = true;
     cargarRecomendaciones();
     return () => {
       // Al desmontar, la carga en vuelo ya no se muestra.
+      montado.current = false;
       cargaActual.current += 1;
     };
   }, [cargarRecomendaciones]);

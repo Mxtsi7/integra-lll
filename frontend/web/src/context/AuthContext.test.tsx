@@ -114,3 +114,81 @@ describe("Marca de sesión", () => {
     expect(result.current.estaAutenticado).toBe(false);
   });
 });
+
+// Revisión de #128: la marca es observable (`sesion`) para que <RutaPrivada>
+// vuelva a montar lo privado, y un refresh del access no la cambia.
+describe("Marca de sesión observable", () => {
+  /** Un JWT con los claims del servicio auth. */
+  function jwtDeSesion(user_id: number, sid: string, jti: string): string {
+    const b64 = (o: unknown) =>
+      btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const exp = Math.floor((Date.now() + 30 * 60_000) / 1000);
+    return `${b64({ alg: "HS256" })}.${b64({ user_id, organizacion_id: `org-${user_id}`, sid, jti, exp })}.firma`;
+  }
+
+  async function otraPestanaGuarda(access: string) {
+    guardarTokens({ access_token: access, refresh_token: `refresh-${access.slice(-8)}` });
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    });
+  }
+
+  beforeEach(() => {
+    guardarTokens({ access_token: jwtDeSesion(7, "sesion-a", "a-1"), refresh_token: "refresh-a" });
+  });
+
+  it("cambia, junto con capturarSesion(), cuando otra pestaña entra con otra cuenta", async () => {
+    const { result } = await montar();
+    const antes = result.current.sesion;
+    expect(result.current.capturarSesion()).toBe(antes);
+
+    getUsuarioActualMock.mockResolvedValue(USUARIO_B);
+    await otraPestanaGuarda(jwtDeSesion(8, "sesion-b", "b-1"));
+
+    expect(result.current.sesion).not.toBe(antes);
+    expect(result.current.capturarSesion()).toBe(result.current.sesion);
+    expect(result.current.usuario?.id).toBe("8");
+  });
+
+  it("no cambia ni vuelve a pedir el usuario cuando otra pestaña solo renueva el access", async () => {
+    const { result } = await montar();
+    const antes = result.current.sesion;
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+
+    await otraPestanaGuarda(jwtDeSesion(7, "sesion-a", "a-2"));
+    expect(result.current.sesion).toBe(antes);
+    expect(result.current.capturarSesion()).toBe(antes);
+    expect(getUsuarioActualMock).toHaveBeenCalledTimes(1);
+
+    // Después del refresh, otra cuenta sí se detecta (el token conocido es el nuevo).
+    getUsuarioActualMock.mockResolvedValue(USUARIO_B);
+    await otraPestanaGuarda(jwtDeSesion(8, "sesion-b", "b-1"));
+    expect(result.current.sesion).not.toBe(antes);
+    expect(result.current.usuario?.id).toBe("8");
+  });
+
+  it("un nuevo login de la misma cuenta en otra pestaña (otro sid) es otra sesión", async () => {
+    const { result } = await montar();
+    const antes = result.current.sesion;
+
+    await otraPestanaGuarda(jwtDeSesion(7, "sesion-a-2", "a-3"));
+    expect(result.current.sesion).not.toBe(antes);
+  });
+
+  it("cambia al cerrar sesión y al entrar", async () => {
+    const { result } = await montar();
+    const conA = result.current.sesion;
+
+    await act(async () => {
+      result.current.cerrarSesionLocal();
+    });
+    const anonima = result.current.sesion;
+    expect(anonima).not.toBe(conA);
+
+    await act(async () => {
+      result.current.iniciarSesion({ access_token: jwtDeSesion(8, "sesion-b", "b-1"), refresh_token: "refresh-b" });
+    });
+    expect(result.current.sesion).not.toBe(anonima);
+    expect(result.current.capturarSesion()).toBe(result.current.sesion);
+  });
+});

@@ -18,6 +18,9 @@ export function RecomendacionesPage() {
   const resultados = useRef<HTMLDivElement>(null);
 
   const noMeInteresa = async (item: Recomendacion) => {
+    // descartar() devuelve null también si, mientras viajaba, cambió la
+    // sesión o se cerró la página: el descarte de otra cuenta no se anuncia
+    // ni mueve el foco (revisión de #128).
     if (!(await descartar(item.id))) return;
     toast.exito('Listo, dejamos de mostrarte esa recomendación.');
     resultados.current?.focus();

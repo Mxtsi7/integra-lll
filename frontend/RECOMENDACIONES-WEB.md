@@ -23,6 +23,9 @@ Rutas relativas a `frontend/`.
 | [web/src/pages/RecomendacionesPage.tsx](web/src/pages/RecomendacionesPage.tsx) | Tarjetas, estado vacío, error con reintento y botón "No me interesa" |
 | [web/src/pages/RecomendacionesPage.module.css](web/src/pages/RecomendacionesPage.module.css) | Colores del tema en vez de blancos fijos |
 | [web/src/App.tsx](web/src/App.tsx) | Solo el comentario de la ruta: ya no muestra "Próximamente" |
+| [web/src/context/AuthContext.tsx](web/src/context/AuthContext.tsx) | La marca de sesión también como estado (`sesion`); un refresh no la cambia |
+| [web/src/components/RutaPrivada.tsx](web/src/components/RutaPrivada.tsx) | `<Outlet key={sesion} />`: lo privado se vuelve a montar al cambiar de sesión |
+| [shared/src/auth.ts](shared/src/auth.ts) | `sesionDelToken(token)`: de qué usuario, organización y `sid` es un token |
 
 ## Qué hace
 
@@ -66,6 +69,25 @@ Rutas relativas a `frontend/`.
 - **Tema claro.** El CSS anterior tenía blancos fijos (`#ffffff`) y en tema claro el título quedaba
   blanco sobre fondo claro. Ahora usa `--tinta`, `--tinta-2`, `.tile`, `Insignia` y `Boton`.
 
+## Cambio de sesión (revisión de #128)
+
+Si otra pestaña entraba como B, esta seguía mostrando las recomendaciones de A en la misma ruta: la
+guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
+
+- **Un límite común.** `AuthContext` expone la marca de sesión como estado (`sesion`) y
+  `<RutaPrivada>` la usa de `key`. Al cambiar de cuenta, todo lo privado se desmonta y se vuelve a
+  montar: la lista, los errores, los descartes y sus refs empiezan de cero y se pide la lista de B.
+  Pasa al instante, aunque `/usuarios/me/` de B siga pendiente. Sirve igual para las demás pantallas
+  privadas, sin un mecanismo por página.
+- **Un refresh no es otra sesión.** Antes cualquier token distinto contaba como otra cuenta. Ahora se
+  comparan el usuario (`user_id` o `sub`), la organización y el `sid`, que el servicio auth conserva al
+  rotar el token. Si coinciden, no se recarga nada; otro login (otro `sid`) sí es otra sesión. Sin esos
+  claims se sigue tratando como otra, como antes.
+- **Respuestas tardías.** `descartar()` anota la sesión con la que se montó la página. Si al confirmar
+  cambió la sesión o se cerró la página, devuelve `null`: no hay aviso, no se mueve el foco y no se toca
+  la lista. Con la sesión ya cambiada tampoco se manda un descarte nuevo. Una carga de A que llega
+  tarde queda en la página desmontada.
+
 ## Cómo se comprobó
 
 - `shared/src/api/recomendaciones.test.ts`: la ruta `.../dismiss/` con `POST` y sin cuerpo, y el id
@@ -82,6 +104,21 @@ Rutas relativas a `frontend/`.
   - descartar con el botón deshabilitado en vuelo, el aviso y el foco;
   - el fallo con su alerta en la tarjeta, y descartar la última.
 - `web/src/App.test.tsx`: `/recomendaciones` ya no muestra "En construcción" y pide VI-17.
+- `web/src/pages/RecomendacionesPage.sesion.test.tsx` (revisión de #128): `AuthProvider`, guarda
+  privada y tokens reales; solo se simula la red. Cubre:
+  - A→B por evento `storage` en la misma ruta, con `/usuarios/me/` de B pendiente;
+  - la lista de A, o su error, que llega después del cambio;
+  - el descarte de A confirmado tarde, en el mismo instante del cambio o con error;
+  - un clic en la tarjeta de A en ese instante;
+  - el descarte después de cerrar sesión o de salir de la página;
+  - el refresh del token, que no recarga nada.
+- `web/src/context/AuthContext.test.tsx` y `shared/src/auth.test.ts`: la marca cambia con otra cuenta,
+  con otro login, al salir y al entrar, pero no con un refresh.
+- **Mutaciones de la revisión:** sin `key` en la guarda, un refresh como cambio de cuenta, la marca no
+  observable, el descarte tardío sin revisar la sesión, sin revisar antes de enviar, y `sigueVigente`
+  sin la sesión o sin el montaje. En las 7 falla alguna prueba, y también en las 5 de `sesionDelToken`.
+- **Sobre `main` actualizado** (con #131, #122 y #117): shared 215, web 352 y móvil 37 pruebas,
+  typecheck y build.
 - **Contrato con las vistas reales** de `services/analytics` (código de main, SQLite), con lo que manda
   la web: 6 pruebas temporales, fuera del repo, más las 31 de VI-17/VI-18 del backend, todas pasan.
   - `ahorro_estimado` llega como número.
@@ -105,7 +142,10 @@ Rutas relativas a `frontend/`.
   - descartar con éxito y con fallo;
   - recargar después de descartar;
   - los colores calculados en tema claro y oscuro;
-  - 375 px sin scroll horizontal.
+  - 375 px sin scroll horizontal;
+  - dos pestañas (revisión de #128). Un refresh de A en la otra pestaña no hizo ninguna petición. Con un
+    descarte de A en vuelo entró B: la página pasó sola a las recomendaciones de B, y la confirmación
+    tardía de A no mostró aviso ni movió el foco.
 
 ## Fuera de esta tarea
 

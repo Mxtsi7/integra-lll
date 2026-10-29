@@ -11,6 +11,7 @@ import {
   logout,
   obtenerAccessToken,
   revocarSesion,
+  sesionDelToken,
   tokenExpirado,
 } from "./auth";
 
@@ -71,6 +72,37 @@ describe("tokenExpirado", () => {
 
   it("un JWT sin exp se da por vigente (decide el backend)", () => {
     expect(tokenExpirado(jwt({ rol: "titular" }), AHORA)).toBe(false);
+  });
+});
+
+// Revisión de #128: un refresh no es un cambio de cuenta.
+describe("sesionDelToken", () => {
+  const SESION_A = { user_id: 7, organizacion_id: "org-a", sid: "sesion-a" };
+
+  it("el refresh de un token es de la misma sesión aunque cambien jti y exp", () => {
+    const original = jwt({ ...SESION_A, jti: "a-1", exp: enSegundos(AHORA + 60_000) });
+    const renovado = jwt({ ...SESION_A, jti: "a-2", exp: enSegundos(AHORA + 30 * 60_000) });
+    expect(sesionDelToken(original)).not.toBeNull();
+    expect(sesionDelToken(renovado)).toBe(sesionDelToken(original));
+  });
+
+  it("otro usuario, otra organización u otro login son otra sesión", () => {
+    const a = sesionDelToken(jwt(SESION_A));
+    expect(sesionDelToken(jwt({ ...SESION_A, user_id: 8 }))).not.toBe(a);
+    expect(sesionDelToken(jwt({ ...SESION_A, organizacion_id: "org-b" }))).not.toBe(a);
+    expect(sesionDelToken(jwt({ ...SESION_A, sid: "sesion-a-2" }))).not.toBe(a);
+  });
+
+  it("acepta el usuario en `sub` cuando no viene `user_id`", () => {
+    expect(sesionDelToken(jwt({ sub: "7" }))).toBe(sesionDelToken(jwt({ sub: "7", jti: "otro" })));
+    expect(sesionDelToken(jwt({ sub: "7" }))).not.toBe(sesionDelToken(jwt({ sub: "8" })));
+  });
+
+  it("sin usuario o sin JWT legible no se sabe de quién es", () => {
+    expect(sesionDelToken(jwt({ exp: enSegundos(AHORA + 60_000) }))).toBeNull();
+    expect(sesionDelToken(jwt({ user_id: { id: 7 } }))).toBeNull();
+    expect(sesionDelToken("a.%%%.c")).toBeNull();
+    expect(sesionDelToken("")).toBeNull();
   });
 });
 

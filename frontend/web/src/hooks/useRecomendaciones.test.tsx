@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pedir } from '../../../shared/src/api/cliente';
+import { AuthProvider } from '../context/AuthContext';
+import { ToastProvider } from '../context/ToastContext';
 import { useRecomendaciones } from './useRecomendaciones';
 
 vi.mock('../../../shared/src/api/cliente', async (importOriginal) => {
@@ -10,11 +13,21 @@ vi.mock('../../../shared/src/api/cliente', async (importOriginal) => {
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
+// El hook anota la sesión con la que se montó (revisión de #128): necesita el AuthProvider real.
+function Proveedores({ children }: { children: ReactNode }) {
+  return (
+    <ToastProvider>
+      <AuthProvider>{children}</AuthProvider>
+    </ToastProvider>
+  );
+}
+const montarHook = () => renderHook(useRecomendaciones, { wrapper: Proveedores });
+
 describe('contrato de recomendaciones de VI-17', () => {
   const item = { id: 'rec-1', suscripcion_id: 'sub-2', titulo: 'Revisar servicio' };
   it.each([{ respuesta: [item] }, { respuesta: { count: 1, results: [item] } }])('conserva los datos recibidos: %j', async ({ respuesta }) => {
     vi.mocked(pedir).mockResolvedValue(respuesta);
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await waitFor(() =>
       expect(result.current.estado).toEqual({ tipo: 'listo', items: [item], disponible: true, motivoSinSugerencias: null }),
     );
@@ -28,7 +41,7 @@ describe('contrato de recomendaciones de VI-17', () => {
       disponible: true,
       motivo_sin_sugerencias: 'Todavía no hay recomendaciones de consolidación generadas.',
     });
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await waitFor(() =>
       expect(result.current.estado).toEqual({
         tipo: 'listo',
@@ -41,19 +54,19 @@ describe('contrato de recomendaciones de VI-17', () => {
 
   it('sin umbral configurado (disponible: false) no se confunde con "no hay sugerencias"', async () => {
     vi.mocked(pedir).mockResolvedValue({ results: [], disponible: false, motivo_sin_sugerencias: 'No hay umbral.' });
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await waitFor(() => expect(result.current.estado).toMatchObject({ tipo: 'listo', disponible: false }));
   });
 
   it('un formato desconocido no se convierte en vacío de negocio', async () => {
     vi.mocked(pedir).mockResolvedValue({ detalle: 'respuesta inesperada' });
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await waitFor(() => expect(result.current.estado.tipo).toBe('error'));
   });
 
   it('una dependencia no disponible se muestra como error', async () => {
     vi.mocked(pedir).mockRejectedValue(new Error('Servicio no disponible'));
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await waitFor(() => expect(result.current.estado).toEqual({ tipo: 'error', mensaje: 'Servicio no disponible' }));
   });
 
@@ -62,7 +75,7 @@ describe('contrato de recomendaciones de VI-17', () => {
     vi.mocked(pedir)
       .mockReturnValueOnce(new Promise((r) => (responderVieja = r)))
       .mockResolvedValueOnce({ results: [] });
-    const { result } = renderHook(useRecomendaciones);
+    const { result } = montarHook();
     await act(async () => result.current.recargar());
     await act(async () => responderVieja({ results: [item] }));
     expect(result.current.estado).toMatchObject({ tipo: 'listo', items: [] });
@@ -75,7 +88,7 @@ describe('descartar (CH-32, VI-18)', () => {
 
   async function montarCon(items: unknown[]) {
     vi.mocked(pedir).mockResolvedValueOnce({ results: items });
-    const hook = renderHook(useRecomendaciones);
+    const hook = montarHook();
     await waitFor(() => expect(hook.result.current.estado.tipo).toBe('listo'));
     return hook;
   }
