@@ -9,7 +9,8 @@ La defensa es estructural, no una expresión regular sobre texto libre:
 * Cada clave permitida tiene un **tipo explícito**. Los importes solo se
   aceptan en campos monetarios y como números (``Decimal``/``int``/``float``);
   las fechas, en campos de fecha y como ``date``/``datetime`` o ISO-8601
-  estricto; los estados y monedas, contra un catálogo cerrado.
+  estricto; los estados, contra un catálogo cerrado; y las monedas, contra el
+  catálogo activo de monedas.
 * Los nombres de servicio son texto controlado por el usuario y pueden
   contener nombres de personas. No se intenta "limpiarlos" con regex: se
   sustituyen por un **alias local** (``servicio_1``, ``servicio_2``…). El
@@ -41,6 +42,10 @@ import math
 import re
 from typing import Any, Mapping, Protocol
 import uuid
+
+from django.apps import apps as django_apps
+from django.core.exceptions import AppRegistryNotReady, ImproperlyConfigured
+from django.db import DatabaseError
 
 
 # ── tipos del esquema de campos ──────────────────────────────────────
@@ -129,7 +134,12 @@ CAMPOS_PROHIBIDOS = frozenset(
 
 # Catálogos cerrados. Se mantienen alineados con app.models y la migración que
 # carga los catálogos; un valor desconocido se descarta, no se envía.
-_VALORES_MONEDA = frozenset({"CLP", "USD"})
+#
+# Las monedas no se fijan acá: el catálogo es extensible (basta con agregar una
+# fila activa en ``Moneda``). El conjunto base es solo el respaldo para
+# contextos sin base de datos; nunca se usa para aceptar un código que el
+# catálogo no tenga cuando la consulta sí está disponible.
+_VALORES_MONEDA_BASE = frozenset({"CLP", "USD"})
 _VALORES_CATEGORIA = frozenset(
     {
         "streaming",
@@ -160,7 +170,6 @@ _VALORES_ESTADO = frozenset(
 _VALORES_TIPO = frozenset({"alza_tarifa", "doble_cobro"})
 
 _VALORES_ENUM: dict[str, frozenset[str]] = {
-    "moneda": _VALORES_MONEDA,
     "categoria": _VALORES_CATEGORIA,
     "frecuencia": _VALORES_FRECUENCIA,
     "estado": _VALORES_ESTADO,
@@ -279,17 +288,46 @@ def sanitizar_texto(texto: str) -> str:
 # ── validadores por tipo ─────────────────────────────────────────────
 
 
+def _cargar_monedas_validas() -> frozenset[str]:
+    """Códigos activos del catálogo, con un respaldo seguro si no hay BD.
+
+    La sanitización también se ejecuta en pruebas puras o en contextos donde
+    la base de datos no está disponible. En esos casos se mantiene el
+    conjunto base CLP/USD: nunca se abre la puerta a cualquier código de tres
+    letras. Cuando la consulta funciona, el catálogo activo es la única
+    fuente de verdad y admite monedas nuevas sin tocar este módulo.
+    """
+    if not django_apps.ready:
+        return _VALORES_MONEDA_BASE
+
+    try:
+        from app.models import Moneda
+
+        return frozenset(
+            Moneda.objects.filter(activo=True).values_list("codigo", flat=True)
+        )
+    except (AppRegistryNotReady, ImproperlyConfigured, DatabaseError, RuntimeError):
+        return _VALORES_MONEDA_BASE
+
+
 @dataclass
 class _ContextoSanitizacion:
     """Estado compartido para asignar el mismo alias al mismo servicio."""
 
     alias_servicios: dict[str, str] = field(default_factory=dict)
+    _monedas_validas: frozenset[str] | None = field(default=None, init=False)
 
     def alias(self, valor: str) -> str:
         clave = valor.strip().casefold()
         if clave not in self.alias_servicios:
             self.alias_servicios[clave] = f"servicio_{len(self.alias_servicios) + 1}"
         return self.alias_servicios[clave]
+
+    def monedas_validas(self) -> frozenset[str]:
+        """Consulta el catálogo una sola vez por contexto de sanitización."""
+        if self._monedas_validas is None:
+            self._monedas_validas = _cargar_monedas_validas()
+        return self._monedas_validas
 
 
 def _numero_seguro(valor: Any) -> Any:
@@ -350,12 +388,19 @@ def _periodo_seguro(valor: Any) -> Any:
     return _DESCARTAR
 
 
-def _enum_seguro(clave: str, valor: Any) -> Any:
+def _enum_seguro(
+    clave: str,
+    valor: Any,
+    contexto: _ContextoSanitizacion,
+) -> Any:
     if not isinstance(valor, str):
         return _DESCARTAR
     normalizado = valor.strip()
     normalizado = normalizado.upper() if clave == "moneda" else normalizado.lower()
-    permitidos = _VALORES_ENUM.get(clave, frozenset())
+    if clave == "moneda":
+        permitidos = contexto.monedas_validas()
+    else:
+        permitidos = _VALORES_ENUM.get(clave, frozenset())
     return normalizado if normalizado in permitidos else _DESCARTAR
 
 
@@ -381,7 +426,7 @@ def _sanitizar_campo(
     if tipo == _TIPO_PERIODO:
         return _periodo_seguro(valor)
     if tipo == _TIPO_ENUM:
-        return _enum_seguro(clave, valor)
+        return _enum_seguro(clave, valor, contexto)
     if tipo == _TIPO_SERVICIO:
         return _servicio_seguro(valor, contexto)
 

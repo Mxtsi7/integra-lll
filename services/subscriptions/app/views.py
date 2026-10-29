@@ -767,15 +767,33 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         suscripcion = self.get_object()
 
         if request.method == "POST":
-            entrada = RegistrarCobroSerializer(data=request.data)
-            entrada.is_valid(raise_exception=True)
-            cobro = Cobro.objects.create(
-                organizacion_id=request.organizacion_id,
-                suscripcion=suscripcion,
-                monto=entrada.validated_data["monto"],
-                moneda=entrada.validated_data.get("moneda") or suscripcion.moneda,
-                fecha=entrada.validated_data["fecha"],
+            entrada = RegistrarCobroSerializer(
+                data=request.data,
+                context={"suscripcion": suscripcion},
             )
+            entrada.is_valid(raise_exception=True)
+            try:
+                # El cobro y la detección que dispara su señal post_save
+                # comparten transacción: si la detección falla, no queda un
+                # cobro persistido con un error visible para el cliente (un
+                # reintento no debe duplicarlo).
+                with transaction.atomic():
+                    cobro = Cobro.objects.create(
+                        organizacion_id=request.organizacion_id,
+                        suscripcion=suscripcion,
+                        monto=entrada.validated_data["monto"],
+                        moneda=(
+                            entrada.validated_data.get("moneda")
+                            or suscripcion.moneda
+                        ),
+                        fecha=entrada.validated_data["fecha"],
+                    )
+            except DjangoValidationError as exc:
+                # El catálogo también valida en el ORM (por ejemplo, si la
+                # moneda se desactiva entre la validación y el guardado).
+                raise ValidationError(
+                    getattr(exc, "message_dict", None) or exc.messages
+                ) from exc
             return Response(
                 CobroSerializer(cobro).data,
                 status=status.HTTP_201_CREATED,

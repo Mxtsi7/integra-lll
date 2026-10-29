@@ -336,6 +336,35 @@ class RegistrarCobroSerializer(serializers.Serializer):
             raise serializers.ValidationError("El monto debe ser mayor a 0.")
         return value
 
+    def validate_moneda(self, value: str) -> str:
+        codigo = value.strip().upper()
+        if not Moneda.objects.filter(codigo=codigo, activo=True).exists():
+            raise serializers.ValidationError(
+                "Debe ser un código del catálogo activo de monedas."
+            )
+        return codigo
+
+    def validate(self, attrs):
+        """Valida también la moneda efectiva cuando se hereda de la suscripción.
+
+        Si el cliente omite ``moneda``, el cobro usará la de la suscripción.
+        Comprobar solo el campo explícito dejaría pasar una moneda heredada
+        que ya no esté activa y el error aparecería después, al guardar.
+        """
+        suscripcion = self.context.get("suscripcion")
+        if suscripcion is not None and "moneda" not in attrs:
+            if not Moneda.objects.filter(
+                codigo=suscripcion.moneda, activo=True
+            ).exists():
+                raise serializers.ValidationError(
+                    {
+                        "moneda": (
+                            "La moneda de la suscripción no está activa en el catálogo."
+                        )
+                    }
+                )
+        return attrs
+
 
 class HallazgoCobroSerializer(serializers.ModelSerializer):
     """Contrato de una alerta de alza de tarifa o posible doble cobro (VI-19)."""

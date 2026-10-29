@@ -606,7 +606,11 @@ class HallazgoCobro(ModeloTenant):
     )
 
     porcentaje_variacion = models.DecimalField(
-        max_digits=8,
+        # El cobro admite hasta 99.999.999,99 y el promedio mínimo es 0,01:
+        # la variación máxima ronda 999.999.999.800,00 %. Con 8 dígitos el
+        # caso extremo rompía al persistir el hallazgo y dejaba el cobro
+        # guardado. 14 dígitos cubren todo el rango numérico del modelo.
+        max_digits=14,
         decimal_places=2,
         null=True,
         blank=True,

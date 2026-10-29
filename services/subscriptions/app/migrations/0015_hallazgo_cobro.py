@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
                 ('monto', models.DecimalField(decimal_places=2, max_digits=10, verbose_name='Monto del cobro')),
                 ('monto_referencia', models.DecimalField(blank=True, decimal_places=2, help_text='Promedio de los cobros previos (alza) o monto del otro cargo (doble cobro).', max_digits=10, null=True, verbose_name='Monto de referencia')),
                 ('moneda', models.CharField(default='CLP', max_length=3, verbose_name='Moneda')),
-                ('porcentaje_variacion', models.DecimalField(blank=True, decimal_places=2, help_text='Solo aplica al alza de tarifa; 6.00 significa un 6 % sobre el promedio.', max_digits=8, null=True, verbose_name='Variación porcentual')),
+                ('porcentaje_variacion', models.DecimalField(blank=True, decimal_places=2, help_text='Solo aplica al alza de tarifa; 6.00 significa un 6 % sobre el promedio.', max_digits=14, null=True, verbose_name='Variación porcentual')),
                 ('fecha_cobro', models.DateField(verbose_name='Fecha del cobro analizado')),
                 ('fecha_referencia', models.DateField(blank=True, help_text='Fecha del cargo relacionado en un posible doble cobro.', null=True, verbose_name='Fecha de referencia')),
                 ('detalle', models.JSONField(blank=True, default=dict, help_text='Evidencia adicional: cobros previos usados en el promedio, días de diferencia, etc.', verbose_name='Detalle')),

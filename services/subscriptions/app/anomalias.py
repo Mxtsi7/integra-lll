@@ -68,6 +68,23 @@ def _promedio(montos: list[Decimal]) -> Decimal:
     )
 
 
+def _decimal_legible(valor: Decimal) -> str:
+    """Representa un ``Decimal`` sin ceros sobrantes y con al menos 2 decimales.
+
+    El umbral exacto puede tener más de dos decimales (por ejemplo 10.49475);
+    se conserva esa precisión en la evidencia, pero un valor exacto como
+    10500.0000 se muestra como 10500.00.
+    """
+    texto = format(valor, "f")
+    if "." not in texto:
+        return f"{texto}.00"
+    entero, decimales = texto.split(".", 1)
+    decimales = decimales.rstrip("0") or "00"
+    if len(decimales) < 2:
+        decimales = decimales.ljust(2, "0")
+    return f"{entero}.{decimales}"
+
+
 def _cobros_previos(cobro: Cobro) -> list[Cobro]:
     """Cobros del mismo servicio y **misma moneda** anteriores al cobro.
 
@@ -107,19 +124,29 @@ def evaluar_alza_tarifa(cobro: Cobro) -> dict[str, Any] | None:
         return None
 
     montos = [previo.monto for previo in previos]
+    cantidad = len(montos)
+    suma = sum(montos, MONTO_CERO)
+    if suma <= MONTO_CERO:
+        return None
+
+    # La comparación es exacta: promedio * (1 + 5 %). No se redondea ni el
+    # promedio ni el umbral antes de decidir, porque eso ocultaba alzas
+    # legítimas (con antecedentes 9,99 y 10,00, un cobro de 10,50 supera el
+    # 5 % real pero el promedio redondeado a 10,00 lo escondía).
+    #   monto > (suma / cantidad) * 1,05
+    # equivale, sin división, a:
+    #   monto * cantidad > suma * 1,05
+    if cobro.monto * cantidad <= suma * (Decimal("1") + UMBRAL_ALZA):
+        return None
+
+    promedio_exacto = suma / cantidad
+    # Estos dos valores sí son representaciones/persistencia: el promedio se
+    # guarda en ``monto_referencia`` (2 decimales) y la variación en el campo
+    # porcentual. El umbral del detalle conserva la precisión del cálculo.
     promedio = _promedio(montos)
-    if promedio <= MONTO_CERO:
-        return None
-
-    umbral = (promedio * (Decimal("1") + UMBRAL_ALZA)).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
-    )
-    # Estricto: igualar el umbral (exactamente +5 %) no es un alza.
-    if cobro.monto <= umbral:
-        return None
-
+    umbral = promedio_exacto * (Decimal("1") + UMBRAL_ALZA)
     variacion = (
-        ((cobro.monto - promedio) / promedio) * Decimal("100")
+        ((cobro.monto - promedio_exacto) / promedio_exacto) * Decimal("100")
     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
@@ -242,7 +269,7 @@ def detectar_anomalias_cobro(cobro: Cobro) -> list[HallazgoCobro]:
                 fecha_referencia=None,
                 detalle={
                     "promedio": str(alza["promedio"]),
-                    "umbral": str(alza["umbral"]),
+                    "umbral": _decimal_legible(alza["umbral"]),
                     "cantidad_previos": alza["cantidad_previos"],
                     "cobros_previos": alza["cobros_previos"],
                 },
