@@ -66,6 +66,7 @@ def test_revocacion_externa_pendiente_conserva_token_cifrado_para_reintento(monk
     cuenta = CuentaConectada.objects.create(
         organizacion_id=org, proveedor="gmail", cuenta_externa="prueba@test.cl", refresh_token="token-prueba",
     )
+    monkeypatch.setattr("connectors.proveedores.revocar", lambda *args, **kwargs: False)
     assert limpiar(org).status_code == 409
     cuenta.refresh_from_db()
     assert cuenta.estado == CuentaConectada.Estado.CONECTADA
@@ -74,10 +75,8 @@ def test_revocacion_externa_pendiente_conserva_token_cifrado_para_reintento(monk
     assert not estado.eliminada
     assert estado.operacion_id is None
     assert limpiar(org).status_code == 409
-    # Simula únicamente el registro posterior a un ACK real del adaptador FE-05.
-    from django.utils import timezone
-    cuenta.revocado_en = timezone.now()
-    cuenta.save(update_fields=["revocado_en"])
+    # Se usa el adaptador real de FE-05; solo el proveedor externo tiene doble.
+    monkeypatch.setattr("connectors.proveedores.revocar", lambda *args, **kwargs: True)
     assert limpiar(org).status_code == 204
     estado.refresh_from_db()
     assert estado.eliminada
@@ -90,3 +89,62 @@ def test_ausencia_de_tokens_no_demuestra_revocacion_externa(monkeypatch):
     cuenta = CuentaConectada.objects.create(organizacion_id=org, proveedor="outlook", cuenta_externa="prueba@test.cl")
     assert limpiar(org).status_code == 409
     assert CuentaConectada.objects.filter(pk=cuenta.pk).exists()
+
+
+def test_gmail_confirmado_se_conserva_aunque_outlook_bloquee(monkeypatch, claves):
+    from unittest.mock import Mock
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    gmail = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="gmail", cuenta_externa="gmail@test.cl", refresh_token="gmail-token",
+    )
+    outlook = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="outlook", cuenta_externa="outlook@test.cl", access_token="outlook-token",
+    )
+    revocar = Mock(side_effect=lambda proveedor, **kwargs: proveedor == "gmail")
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    assert limpiar(org).status_code == 409
+    gmail.refresh_from_db()
+    outlook.refresh_from_db()
+    assert gmail.revocado_en is not None and gmail.refresh_token is None
+    assert outlook.revocado_en is None and outlook.access_token == "outlook-token"
+    assert outlook.estado == CuentaConectada.Estado.CONECTADA
+    assert not EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+    revocar.reset_mock()
+    assert limpiar(org).status_code == 409
+    revocar.assert_called_once_with("outlook", access_token="outlook-token")
+
+
+def test_firma_invalida_no_intenta_revocar(monkeypatch, claves):
+    from unittest.mock import Mock
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="gmail", cuenta_externa="gmail@test.cl", refresh_token="token",
+    )
+    revocar = Mock()
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    assert APIClient().delete(
+        f"/internal/organizaciones/{org}/", {"operacion_id": str(uuid.uuid4())}, format="json",
+    ).status_code == 403
+    revocar.assert_not_called()
+    cuenta.refresh_from_db()
+    assert cuenta.refresh_token == "token"
+
+
+def test_limpieza_con_clave_ilegible_conserva_ciphertext(monkeypatch, claves):
+    from shared.cifrado.cifrador import generar_clave
+    from shared.cifrado import SECRETO_ILEGIBLE
+    from unittest.mock import Mock
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="gmail", cuenta_externa="gmail@test.cl", refresh_token="token",
+    )
+    claves(generar_clave())
+    revocar = Mock()
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    assert limpiar(org).status_code == 409
+    revocar.assert_not_called()
+    cuenta.refresh_from_db()
+    assert cuenta.refresh_token is SECRETO_ILEGIBLE and cuenta.revocado_en is None

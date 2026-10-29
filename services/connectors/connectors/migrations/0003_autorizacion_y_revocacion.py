@@ -3,7 +3,6 @@
 import shared.cifrado.campos
 import uuid
 from django.db import migrations, models
-from connectors.migraciones import AgregarCampoSiAusente
 
 
 class Migration(migrations.Migration):
@@ -18,7 +17,7 @@ class Migration(migrations.Migration):
             name='credenciales_version',
             field=models.PositiveIntegerField(default=0, help_text='Sube cada vez que se guardan tokens nuevos. `revocado_en` acredita la revocación de la versión que había al momento de pedirla, no de cualquiera posterior.', verbose_name='Versión de las credenciales'),
         ),
-        AgregarCampoSiAusente(
+        migrations.AddField(
             model_name='cuentaconectada',
             name='revocado_en',
             field=models.DateTimeField(blank=True, help_text='Se llena SOLO cuando el proveedor confirmó la revocación. Que no haya tokens guardados no demuestra que el acceso se haya revocado del otro lado: el token pudo seguir vivo hasta vencer. La limpieza coordinada de #72 exige este dato.', null=True, verbose_name='Revocación confirmada por el proveedor'),

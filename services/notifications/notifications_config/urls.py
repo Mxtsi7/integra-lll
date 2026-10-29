@@ -3,9 +3,10 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from notifications.views import salud
-from notifications.eliminacion import LimpiezaNotificationsView
+from notifications.eliminacion import LimpiezaNotificationsView, LimpiezaUsuarioNotificationsView
 
 urlpatterns = [
+    path("internal/organizaciones/<uuid:organizacion_id>/usuarios/<int:usuario_id>/", LimpiezaUsuarioNotificationsView.as_view()),
     path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaNotificationsView.as_view()),
     path("health/", salud, name="health"),
     path("admin/", admin.site.urls),

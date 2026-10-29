@@ -87,7 +87,7 @@ def aplicar(sobre: dict) -> bool:
     organizacion_id = _uuid(sobre.get("organizacion_id"), "organizacion_id")
     # Serializa toda la proyección con el borrado, incluidos eventos tardíos.
     with transaction.atomic():
-        if bloquear_organizacion(organizacion_id).eliminada:
+        if bloquear_organizacion(organizacion_id, compartido=True).eliminada:
             return False
         return _aplicar_vigente(sobre, nombre, organizacion_id)
 

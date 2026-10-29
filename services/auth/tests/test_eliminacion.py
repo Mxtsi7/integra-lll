@@ -214,3 +214,61 @@ def test_dos_titulares_concurrentes_crean_una_sola_eliminacion():
     assert sorted(estados) == [202, 204]
     assert EliminacionOrganizacion.objects.filter(organizacion_id=org.pk).count() == 1
     assert not User.objects.filter(organizacion=org).exists()
+
+
+def test_integrante_deja_limpieza_personal_durable_y_worker_reintenta(monkeypatch):
+    from app.models import EliminacionUsuario
+    from shared.eliminacion import cabeceras_eliminacion
+    from django.core.management import call_command
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = Organizacion.objects.create(nombre="Compartida")
+    titular = usuario(org)
+    integrante = usuario(org, "integrante@test.cl", User.Rol.INTEGRANTE)
+    pk = integrante.pk
+    assert eliminar(integrante).status_code == 204
+    operacion = EliminacionUsuario.objects.get(usuario_id=pk, organizacion_id=org.pk)
+    assert operacion.pendientes == ["notifications"]
+    with patch("app.eliminacion.requests.delete", side_effect=requests.Timeout()):
+        call_command("procesar_eliminaciones")
+    operacion.refresh_from_db()
+    assert operacion.pendientes == ["notifications"] and operacion.completado_en is None
+    with patch("app.eliminacion.requests.delete", return_value=SimpleNamespace(status_code=204)) as enviar:
+        call_command("procesar_eliminaciones")
+        llamada = enviar.call_args
+        assert llamada.args[0].endswith(f"/internal/organizaciones/{org.pk}/usuarios/{pk}/")
+        firma = cabeceras_eliminacion(f"notifications:usuario:{pk}", org.pk, operacion.pk)
+        assert llamada.kwargs["headers"]["X-Eliminacion-Firma"] == firma["X-Eliminacion-Firma"]
+    operacion.refresh_from_db()
+    assert operacion.completado_en is not None and operacion.pendientes == []
+    assert Organizacion.objects.filter(pk=org.pk).exists()
+    assert User.objects.filter(pk=titular.pk).exists()
+    with patch("app.eliminacion.requests.delete") as enviar:
+        call_command("procesar_eliminaciones")
+        enviar.assert_not_called()
+
+
+def test_destinos_se_guardan_al_crear_y_no_se_recortan_en_reintento(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_DESTINOS", "subscriptions, notifications")
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = Organizacion.objects.create(nombre="Demo")
+    respuesta = eliminar(usuario(org), confirmacion_organizacion="ELIMINAR")
+    operacion = EliminacionOrganizacion.objects.get(pk=respuesta.data["operacion_id"])
+    assert operacion.pendientes == ["subscriptions", "notifications"]
+    monkeypatch.setenv("ELIMINACION_DESTINOS", "subscriptions")
+    with patch("app.eliminacion.requests.delete", return_value=SimpleNamespace(status_code=503)) as enviar:
+        assert not procesar_eliminacion(operacion.pk)
+    assert enviar.call_count == 2
+    operacion.refresh_from_db()
+    assert operacion.pendientes == ["subscriptions", "notifications"]
+
+
+@pytest.mark.parametrize("valor", ["", "subcriptions", "subscriptions,subscriptions"])
+def test_destinos_invalidos_no_eliminan_usuario(monkeypatch, valor):
+    from django.core.exceptions import ImproperlyConfigured
+    monkeypatch.setenv("ELIMINACION_DESTINOS", valor)
+    org = Organizacion.objects.create(nombre="Conservar")
+    user = usuario(org)
+    with pytest.raises(ImproperlyConfigured):
+        eliminar(user, confirmacion_organizacion="ELIMINAR")
+    assert User.objects.filter(pk=user.pk).exists()
+    assert not EliminacionOrganizacion.objects.exists()

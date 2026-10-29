@@ -7,7 +7,7 @@ from .bloqueo import bloquear_organizacion
 
 
 class EscrituraOrganizacionMiddleware:
-    """Mantiene el mismo bloqueo que limpieza hasta concluir la escritura HTTP."""
+    """Comparte el bloqueo entre escrituras; la limpieza lo toma exclusivo."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -21,7 +21,7 @@ class EscrituraOrganizacionMiddleware:
         except (ValueError, AttributeError):
             return JsonResponse({"code": "organizacion_invalida"}, status=403)
         with transaction.atomic():
-            estado = bloquear_organizacion(org)
+            estado = bloquear_organizacion(org, compartido=True)
             if estado.eliminada:
                 return JsonResponse({"code": "organizacion_eliminada"}, status=410)
             # Una respuesta 400 puede confirmar un cambio deliberado, como

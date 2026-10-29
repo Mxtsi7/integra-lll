@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from app.eliminacion import procesar_eliminacion
-from app.models import ConsentimientoDisociado, EliminacionOrganizacion
+from app.models import ConsentimientoDisociado, EliminacionOrganizacion, EliminacionUsuario
 
 
 class Command(BaseCommand):
@@ -20,6 +20,9 @@ class Command(BaseCommand):
             for pk in EliminacionOrganizacion.objects.filter(completado_en__isnull=True).values_list("pk", flat=True):
                 completa = procesar_eliminacion(pk)
                 self.stdout.write(f"{pk}: {'completada' if completa else 'pendiente'}")
+            for pk in EliminacionUsuario.objects.filter(completado_en__isnull=True).values_list("pk", flat=True):
+                completa = procesar_eliminacion(pk, por_usuario=True)
+                self.stdout.write(f"usuario {pk}: {'completada' if completa else 'pendiente'}")
             if not options["continuo"]:
                 return
             close_old_connections()

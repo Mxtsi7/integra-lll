@@ -1,164 +1,121 @@
-# MX-07 — Eliminar cuenta (RF-01.7)
+# MX-07 — Eliminar cuenta y coordinar limpieza
 
-`DELETE /api/usuarios/me/` recibe identidad del gateway, contrasta usuario activo
-y organización en auth y exige la contraseña actual y confirmación literal:
+[MX-07](https://trello.com/c/50Mkov2i), RF-01.7.
 
-```json
-{"password": "contraseña actual", "confirmacion": "ELIMINAR"}
-```
+`DELETE /api/usuarios/me/` exige contraseña y `confirmacion=ELIMINAR`.
+Cancelar o rechazar la contraseña no elimina datos. La identidad procede del
+contexto del Gateway; nunca se selecciona el usuario desde el cuerpo.
 
-- Integrante o titular con otro titular activo: revoca todas sus sesiones en
-  Redis, elimina únicamente su usuario y responde `204`. Conserva la organización.
-- Usuario legítimo sin organización: acepta la ausencia de `X-Organizacion-Id`,
-  reautentica, revoca sus sesiones y elimina solo su perfil con `204`, sin outbox.
-  Si tiene organización, omitir la cabecera devuelve `403`; enviar una organización
-  ajena devuelve `404`, incluso para un usuario sin organización.
-- Último titular activo: exige también `"confirmacion_organizacion": "ELIMINAR"`.
-  Sin ese campo responde `409`, sin cambios. Con confirmación revoca primero las
-  sesiones de todos sus usuarios, elimina esos usuarios y persiste una operación
-  de limpieza en la misma transacción. Responde `202` con `operacion_id` y
-  `estado=pendiente`; todavía no declara completada la limpieza de la organización.
-- Contraseña incorrecta o contexto de usuario ausente: `403`; contexto de otra organización:
-  `404`; cuerpo inválido: `400`; Redis no disponible: `503` sin borrado SQL.
-  Si Redis falla tras revocar algún usuario, ese usuario debe volver a iniciar sesión.
+- Integrante o titular con otro titular: elimina su cuenta y revoca sus sesiones,
+  con respuesta 204. En la misma transacción deja una `EliminacionUsuario` durable
+  para limpiar sus preferencias en Notifications. El 204 confirma la cuenta local;
+  la limpieza personal entre servicios se reintenta hasta recibir ACK.
+- Usuario sin organización: elimina su cuenta y sesiones, sin trabajo entre servicios.
+- Último titular: exige además `confirmacion_organizacion=ELIMINAR`. Elimina las
+  cuentas y revoca las sesiones de sus miembros, registra `EliminacionOrganizacion`
+  y devuelve 202 con `operacion_id`. Auth conserva la organización hasta los ACK.
 
-Se bloquea la organización durante la decisión de último titular. El registro
-con código también adquiere ese bloqueo y rechaza organizaciones en eliminación.
-La lista de afectados siempre deriva de la organización del usuario autenticado;
-no se acepta un identificador de usuario u organización en el cuerpo.
+El consentimiento se conserva disociado durante seis años calendario, sin usuario,
+organización ni otro identificador. La versión original del consentimiento no se
+registraba y no se inventa retrospectivamente.
 
-RF-01.7 conserva de forma disociada la fecha de consentimiento existente durante
-seis años calendario desde la eliminación. `ConsentimientoDisociado` guarda
-únicamente un UUID aleatorio, `consentimiento_en`, `eliminado_en` y `retener_hasta`;
-no tiene FK ni identificador de usuario/organización, correo, nombre o hash de
-identidad. Solo se copian fechas no nulas de los usuarios afectados en la misma
-transacción del borrado. Si falla la operación, tampoco queda una copia parcial.
-No se expone mediante API, serializer, admin ni exportación. La versión/texto del
-consentimiento no existe en los datos previos y permanece desconocida; no se
-reconstruye ni se inventa. Aplicar `0010_retencion_consentimiento`.
+## Entrega durable e aislamiento
 
-El worker de eliminaciones purga estos registros al alcanzar `retener_hasta`,
-incluidas las pasadas manuales sin operaciones pendientes. Para eliminaciones
-del 29 de febrero, la retención vence el 28 de febrero del sexto año.
+`python manage.py procesar_eliminaciones --continuo` procesa ambos tipos de trabajo
+cada 60 segundos. Solo un 204 quita un destino de pendientes. Errores HTTP, red,
+firmas y bloqueos 409 conservan el trabajo; una reentrega es idempotente.
 
-## Coordinación y reintentos
-
-`auth.eliminacion_organizacion` guarda UUID de operación, UUID de organización,
-servicios pendientes y fechas. No guarda correo, contraseña ni tokens. La
-migración `0007_eliminacion_organizacion` debe aplicarse antes de servir tráfico.
-El UUID de organización queda como marca de la eliminación y permite reintentar
-sin depender de la existencia de sus usuarios.
-
-El worker `auth-eliminaciones` de Compose ejecuta `procesar_eliminaciones
---continuo` cada 60 segundos. Arranque y pasada manual:
-
-```bash
-docker compose up -d --build auth auth-eliminaciones subscriptions connectors analytics notifications
-docker compose exec auth python manage.py procesar_eliminaciones
-```
-
-Los entrypoints de Connectors, Analytics y Notifications esperan PostgreSQL y
-ejecutan `migrate --noinput` antes de servir HTTP. Por eso también aplican
-`borrado.0001_initial`; Connectors une `0002_cuenta_revocada` y
-`0003_autorizacion_y_revocacion` mediante `0004_unir_eliminacion_oauth`.
-Las dos migraciones históricas que agregan `revocado_en` conservan sus nombres
-y ahora comprueban si la columna ya existe antes de crearla. Esto permite
-actualizar desde cualquiera de las dos ramas sin duplicarla ni perder su fecha.
-El worker de eliminaciones espera los healthchecks de auth y de los cuatro
-consumidores. El worker de Connectors espera su servidor ya migrado y omite
-migraciones duplicadas con `APLICAR_MIGRACIONES=0`.
-
-El worker envía órdenes HTTP privadas por servicio, conforme a la regla 2 del
-catálogo de eventos: una orden no se publica como si fuera un hecho consumado.
-Cada servicio borra exclusivamente sus propios modelos mediante:
+La organización se limpia mediante:
 
 ```http
 DELETE /internal/organizaciones/<uuid>/
 X-Eliminacion-Instante: <unix-segundos>
 X-Eliminacion-Firma: <HMAC-SHA256>
-X-Correlation-ID: <operacion_id>
 Content-Type: application/json
 
 {"operacion_id": "<uuid>"}
 ```
 
-La firma cubre `servicio:organizacion_id:operacion_id:instante` y caduca a los
-60 segundos. Requiere `ELIMINACION_INTERNA_SECRET` independiente, compartido por
-auth y consumidores, suministrado por el entorno y sin valor en `.env.example`.
-Estas rutas no pertenecen a `/api/` ni se enrutan desde el gateway. Los servicios
-deben permanecer en la red privada según ADR-004.
+La firma cubre `servicio:organizacion_id:operacion_id:instante`, con vigencia de
+60 segundos. La limpieza personal usa `/internal/organizaciones/<uuid>/usuarios/<id>/`
+en Notifications y firma `notifications:usuario:<id>` como destino, vinculando
+también el usuario. Una firma de organización no autoriza limpiar una persona.
+Las rutas son privadas y el Gateway no las expone. No hay consultas entre esquemas.
 
-`URL_SUBSCRIPTIONS`, `URL_CONNECTORS`, `URL_ANALYTICS` y `URL_NOTIFICATIONS`
-permiten configurar los destinos internos. Cada llamada limita conexión a 2 s y
-lectura a 5 s, sin redirecciones. Solo `204` elimina el destino de pendientes;
-fallo de red, firma, `409` o caída del proceso conserva el trabajo para reintento.
-La entrega puede repetirse: los handlers son idempotentes. Cuando llegan los
-cuatro ACK se elimina la organización en auth y se completa la operación. No hay
-consultas ni claves foráneas entre esquemas (ADR-002).
+`ELIMINACION_INTERNA_SECRET` es independiente de JWT y se comparte entre Auth y los
+consumidores. Las URLs se configuran con `URL_SUBSCRIPTIONS`, `URL_CONNECTORS`,
+`URL_ANALYTICS` y `URL_NOTIFICATIONS`. Las llamadas limitan conexión/lectura a 2/5 s
+y no siguen redirecciones.
 
-## Datos cubiertos y límites de integración
+`ELIMINACION_DESTINOS` enumera servicios separados por comas; por defecto incluye
+los cuatro. Rechaza listas vacías, duplicadas o desconocidas antes de revocar
+sesiones. Los destinos quedan guardados al crear cada operación: cambiar la
+configuración nunca recorta un trabajo que ya está pendiente. Solo se excluye un
+servicio que no almacena datos en ese entorno. Habilitar un nuevo servicio exige
+agregar su destino antes de que reciba datos.
 
-- Subscriptions: elimina outbox, presupuestos, cobros, registros de uso,
-  historial de transiciones y suscripciones del UUID.
-  Conserva el catálogo global de proveedores. Si una FK local inconsistente
-  conecta un hijo de otro tenant, devuelve `409` y conserva los datos para que
-  se corrija la inconsistencia, evitando el borrado ajeno por cascada.
-- Connectors: elimina autorizaciones OAuth pendientes e importaciones, incluidas las que no tienen cuenta
-  asociada. Una importación ajena que referencia una cuenta propia bloquea
-  la limpieza con `409`, evitando modificar su FK por `SET_NULL`.
-  CSV y cuentas OAuth con
-  revocación acreditada se eliminan si no hay revocaciones pendientes en el tenant.
-  Si hay cuentas OAuth de Gmail/Outlook sin `revocado_en`, devuelve
-  `409 revocacion_proveedor_pendiente`: el handler exige la evidencia que registra
-  el adaptador FE-05 y no llama directamente al proveedor. Conserva los tokens cifrados y la operación
-  pendiente para permitir esa revocación y reintentar después. El bloqueo revierte
-  todos los cambios locales del intento, incluida la desconexión y la marca de
-  eliminación; no acredita una limpieza terminada. Borrar el token
-  local no demuestra que el proveedor haya revocado el acceso, tampoco encontrar
-  tokens nulos. Aplicar migración `connectors.0002_cuenta_revocada`. FE-05 deberá
-  registrar `revocado_en` únicamente tras confirmar la revocación con el proveedor;
-  el serializer público no permite editar esa fecha. El siguiente reintento
-  elimina las credenciales locales y confirma la limpieza del esquema.
-- Analytics: elimina cupos y sus documentos/intentos/consumos de IA, suscripciones
-  observadas, cobertura, uso proyectado y mensual, recomendaciones y descartes.
-  Conserva el catálogo global de umbrales de ahorro. Un descarte ajeno enlazado
-  a una recomendación propia bloquea con `409` antes de borrar por cascada.
-- Notifications: elimina alertas y preferencias de notificación del tenant.
+## Datos y revocación OAuth
 
-Cada consumidor instala la app `shared.borrado` y aplica su migración
-`borrado.0001_initial` en su propio esquema. Su fila `EstadoOrganizacion` guarda
-solo UUID de organización, operación y marca de eliminación. El middleware de
-escritura toma un bloqueo sobre esa fila hasta terminar cada POST/PUT/PATCH/DELETE
-con contexto tenant. La limpieza toma el mismo bloqueo, valida y persiste la marca
-en la misma transacción que el borrado confirmado con `204`. Un `409` revierte
-todo el intento y permite corregir el bloqueo y reintentar. Así espera las
-escrituras en vuelo y, tras una limpieza exitosa, rechaza
-las posteriores con `410 organizacion_eliminada`, incluso después de reiniciar
-el servicio. No usa Redis ni consulta auth para guardar esa marca.
+- Subscriptions elimina outbox, presupuestos, cobros, uso, transiciones y
+  suscripciones. Conserva proveedores globales y bloquea FK ajenas inconsistentes.
+- Connectors elimina autorizaciones pendientes, importaciones y cuentas. Antes de
+  limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin evidencia.
+  Un fallo devuelve 409, conserva las credenciales cifradas y revierte los cambios
+  locales de esa cuenta. Una confirmación real guarda `revocado_en` y retira tokens.
+  Ese éxito queda confirmado en una transacción de preparación independiente:
+  sobrevive aunque otra cuenta bloquee la limpieza. No se vuelve a revocar esa
+  concesión en cada reintento. La limpieza final vuelve a verificar la evidencia
+  bajo bloqueo, por si hubo reconexión entre preparación y borrado.
+- Outlook continúa pendiente: el adaptador no ofrece revocación por token y no se
+  sustituye por desconexión, expiración o tokens nulos. El usuario indicó mantenerlo
+  bloqueado hasta acordar con Felipe qué evidencia acepta. No se acredita el plazo
+  de eliminación ni se pasa MX-07 a ready mientras falte esa decisión.
+- Analytics elimina datos de ingesta/uso, cobertura, recomendaciones y descartes,
+  conservando umbrales globales; bloquea cascadas que afectarían otro tenant.
+- Notifications elimina alertas y preferencias al borrar la organización. Al
+  retirar un integrante elimina solo sus preferencias y conserva una marca mínima
+  `(organizacion_id, usuario_id)` para que solicitudes en vuelo no las recreen.
+  Conserva las preferencias de otros usuarios y organizaciones.
 
-Los futuros trabajos internos que escriban datos deben utilizar el mismo
-contrato: `with shared.borrado.bloqueo.escritura_organizacion(organizacion_id):`.
-No se debe escribir directamente al ORM desde consumidores o sincronizadores
-sin adquirir ese bloqueo. Los adaptadores de eventos de uso y recomendaciones
-de Analytics adquieren ese bloqueo: un evento tardío de una organización
-eliminada se descarta sin recrear datos ni republicar recomendaciones.
+`EstadoOrganizacion` vive en cada esquema consumidor. En PostgreSQL las escrituras
+HTTP y trabajos internos toman `FOR SHARE`: varias escrituras del mismo tenant
+pueden avanzar a la vez. La limpieza usa `FOR UPDATE`, espera las escrituras en
+vuelo y marca el tenant eliminado en la misma transacción que borra sus datos.
+Después se rechazan nuevas escrituras. El GET de preferencias también participa
+del bloqueo porque crea valores iniciales. En bases sin bloqueo compartido se
+conserva el camino ORM; la verificación de concurrencia requiere PostgreSQL.
+Los trabajos internos deben usar `escritura_organizacion`; los adaptadores de
+Analytics también comprueban la marca antes de aplicar eventos tardíos.
 
-El despliegue Kubernetes actual no incluye todos los consumidores; para completar
-la limpieza debe desplegarlos junto al worker/supervisor y el secreto compartido.
-Si falta alguno, la operación queda pendiente. FE-05 ya aporta adaptadores en
-`main`; este merge conserva draft y no declara acreditada la revocación externa
-de cuentas reales ni la coordinación automática de esa revocación al eliminar.
+## Migraciones y despliegue
+
+La migración publicada `connectors.0003_autorizacion_y_revocacion` se conserva
+idéntica a main. Se retiran la antigua `0002_cuenta_revocada`, su helper y la unión
+`0004_unir_eliminacion_oauth`. Las bases locales desechables que ejecutaron esas
+migraciones experimentales deben recrearse por su responsable; este cambio no
+intenta reconciliarlas modificando migraciones publicadas. Las actualizaciones
+desde `0002_importaciones` y `0003_autorizacion_y_revocacion` preservan datos.
+Auth agrega `0015_eliminacionusuario` y Notifications `0004_usuarioeliminado`.
+Todos los consumidores aplican también `borrado.0001_initial` en su propio esquema.
+
+Compose ya ejecuta el worker. Kubernetes incorpora `auth-eliminaciones` y genera
+`ELIMINACION_INTERNA_SECRET` si falta en el Secret existente. El worker espera las
+migraciones de Auth sin ejecutarlas en paralelo. La demo solo despliega
+Subscriptions, por eso configura `ELIMINACION_DESTINOS=subscriptions`; esto no
+despliega ni acredita Connectors, Analytics o Notifications en ese cluster.
+El HPA de Gateway queda en máximo 2, igual que Subscriptions: 10 pods en reposo y
+12 al escalar. Presupuesto máximo: 2688 MiB de límite de memoria y 1750 milicores.
+La CI comprueba ese presupuesto. No se ejecutó un despliegue ni revocación real.
 
 ## Validación
 
-Pruebas de negocio y aislamiento con bases PostgreSQL de prueba independientes:
-
-```bash
-docker compose run --rm auth pytest tests/test_eliminacion.py -q
-docker compose run --rm subscriptions pytest tests/test_eliminacion.py -q
-docker compose run --rm connectors pytest tests/test_eliminacion.py -q
-```
-
-Cubren integrante, varios titulares, confirmaciones, contexto ajeno, caída de
-Redis, outbox/reintentos, aislamiento de cobros/uso, conservación de proveedores,
-firmas alteradas/caducadas, CSV y bloqueo recuperable de revocación externa.
+Las suites de Auth, Subscriptions, Connectors, Analytics y Notifications corren
+con PostgreSQL local. Las regresiones cubren rollback, reintentos, firmas,
+limpieza personal y rechazo de recreación, Gmail confirmado junto a Outlook
+pendiente, credenciales ilegibles, migraciones y aislamiento A/B. PostgreSQL
+comprueba escrituras concurrentes y que la limpieza espere una escritura en vuelo.
+El proveedor OAuth y el transporte entre servicios usan dobles explícitos.
+La prueba de Gateway ejecuta `gateway.app.proxy` y Auth en un proceso; no acredita
+servidores desplegados. Las dos pruebas de DELETE de #73 pasan a
+`tests/test_aislamiento_eliminacion_gateway.py`; registro y GET/PATCH se separan
+en una entrega directa a main.

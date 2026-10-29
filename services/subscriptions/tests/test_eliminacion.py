@@ -197,3 +197,30 @@ def test_limpieza_espera_escritura_en_vuelo_y_luego_borra(monkeypatch):
         post_save.disconnect(pausar_escritura, sender=Subscription)
     assert EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
     assert not Subscription.objects.filter(organizacion_id=org).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_escrituras_del_mismo_tenant_avanzan_en_paralelo():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from django.db import close_old_connections, connection
+    from shared.borrado.bloqueo import escritura_organizacion
+    if connection.vendor != "postgresql":
+        pytest.skip("FOR SHARE requiere PostgreSQL")
+    org = uuid.uuid4()
+    EstadoOrganizacion.objects.create(organizacion_id=org)
+    dentro = Barrier(2)
+    def escribir():
+        close_old_connections()
+        try:
+            with escritura_organizacion(org):
+                dentro.wait(timeout=5)
+                return Subscription.objects.create(
+                    organizacion_id=org, nombre="Concurrente", monto=1000,
+                    frecuencia="mensual", fecha_proximo_cobro="2026-11-01",
+                ).pk
+        finally:
+            close_old_connections()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ids = list(pool.map(lambda _: escribir(), range(2)))
+    assert len(set(ids)) == 2

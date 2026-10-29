@@ -22,6 +22,25 @@ def cabeceras_eliminacion(servicio, organizacion_id, operacion_id):
     return {"X-Eliminacion-Instante": instante, "X-Eliminacion-Firma": firma}
 
 
+def validar_solicitud_eliminacion(request, servicio, organizacion_id):
+    try:
+        if not isinstance(request.data, dict):
+            raise ValueError
+        operacion_id = str(uuid.UUID(str(request.data.get("operacion_id"))))
+        instante = request.headers.get("X-Eliminacion-Instante", "")
+        if abs(time.time() - int(instante)) > 60:
+            raise ValueError
+    except (ValueError, TypeError, OverflowError):
+        raise PermissionDenied("Solicitud interna inválida")
+    secreto = os.environ.get("ELIMINACION_INTERNA_SECRET", "")
+    mensaje = f"{servicio}:{organizacion_id}:{operacion_id}:{instante}"
+    esperada = hmac.new(secreto.encode(), mensaje.encode(), hashlib.sha256).hexdigest()
+    firma = request.headers.get("X-Eliminacion-Firma", "")
+    if not secreto or not firma.isascii() or not hmac.compare_digest(esperada, firma):
+        raise PermissionDenied("Solicitud interna inválida")
+    return operacion_id
+
+
 class LimpiezaOrganizacionView(APIView):
     """Cada servicio declara únicamente sus propios modelos, en orden hijo/padre."""
 
@@ -31,21 +50,10 @@ class LimpiezaOrganizacionView(APIView):
     modelos = ()
 
     def delete(self, request, organizacion_id):
-        try:
-            if not isinstance(request.data, dict):
-                raise ValueError
-            operacion_id = str(uuid.UUID(str(request.data.get("operacion_id"))))
-            instante = request.headers.get("X-Eliminacion-Instante", "")
-            if abs(time.time() - int(instante)) > 60:
-                raise ValueError
-        except (ValueError, TypeError, OverflowError):
-            raise PermissionDenied("Solicitud interna inválida")
-        secreto = os.environ.get("ELIMINACION_INTERNA_SECRET", "")
-        mensaje = f"{self.servicio}:{organizacion_id}:{operacion_id}:{instante}"
-        esperada = hmac.new(secreto.encode(), mensaje.encode(), hashlib.sha256).hexdigest()
-        firma = request.headers.get("X-Eliminacion-Firma", "")
-        if not secreto or not firma.isascii() or not hmac.compare_digest(esperada, firma):
-            raise PermissionDenied("Solicitud interna inválida")
+        operacion_id = validar_solicitud_eliminacion(request, self.servicio, organizacion_id)
+        bloqueo = self.preparar_limpieza(organizacion_id)
+        if bloqueo is not None:
+            return bloqueo
         from shared.borrado.bloqueo import bloquear_organizacion
 
         with transaction.atomic():
@@ -62,6 +70,10 @@ class LimpiezaOrganizacionView(APIView):
             for modelo in self.modelos:
                 modelo.objects.filter(organizacion_id=organizacion_id).delete()
         return Response(status=204)
+
+    def preparar_limpieza(self, organizacion_id):
+        """Preparación durable; la evidencia externa sobrevive a otro bloqueo."""
+        pass
 
     def validar_limpieza(self, organizacion_id):
         pass

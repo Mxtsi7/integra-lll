@@ -5,6 +5,7 @@ import uuid
 
 import requests
 from django.core.cache import caches
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -15,9 +16,17 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from shared.eliminacion import cabeceras_eliminacion
-from .models import ConsentimientoDisociado, EliminacionOrganizacion, Organizacion, User
+from .models import ConsentimientoDisociado, EliminacionOrganizacion, EliminacionUsuario, Organizacion, User
 
 SERVICIOS = {"subscriptions": 8002, "connectors": 8003, "analytics": 8004, "notifications": 8005}
+
+
+def destinos_eliminacion():
+    valor = os.environ.get("ELIMINACION_DESTINOS", ",".join(SERVICIOS))
+    destinos = [nombre.strip() for nombre in valor.split(",") if nombre.strip()]
+    if not destinos or len(set(destinos)) != len(destinos) or set(destinos) - SERVICIOS.keys():
+        raise ImproperlyConfigured("ELIMINACION_DESTINOS debe listar destinos conocidos, sin duplicados")
+    return destinos
 
 
 def conservar_consentimientos(usuarios):
@@ -53,6 +62,7 @@ class EliminarCuentaMixin:
     def delete(self, request, *args, **kwargs):
         serializer = EliminarCuentaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        destinos = destinos_eliminacion()
         try:
             usuario_id = int(request.headers.get("X-Usuario-Id", ""))
             if not 0 < usuario_id <= 2**63 - 1:
@@ -83,7 +93,12 @@ class EliminarCuentaMixin:
                     caches["sesiones"].delete(f"usuario:{pk}")
                 if ultimo_titular:
                     operacion = EliminacionOrganizacion.objects.create(
-                        organizacion_id=organizacion_id, pendientes=list(SERVICIOS),
+                        organizacion_id=organizacion_id, pendientes=destinos,
+                    )
+                elif organizacion_id is not None and "notifications" in destinos:
+                    EliminacionUsuario.objects.create(
+                        organizacion_id=organizacion_id, usuario_id=usuario.pk,
+                        pendientes=["notifications"],
                     )
                 conservar_consentimientos(afectados)
                 afectados.delete()
@@ -94,17 +109,23 @@ class EliminarCuentaMixin:
         return Response(status=204)
 
 
-def procesar_eliminacion(operacion_id):
+def procesar_eliminacion(operacion_id, *, por_usuario=False):
     """Al menos una entrega; ACK 204 solamente. Un fallo nunca descarta el trabajo."""
     with transaction.atomic():
-        operacion = EliminacionOrganizacion.objects.select_for_update().get(pk=operacion_id)
+        modelo = EliminacionUsuario if por_usuario else EliminacionOrganizacion
+        operacion = modelo.objects.select_for_update().get(pk=operacion_id)
         for servicio in list(operacion.pendientes):
             base = os.environ.get(f"URL_{servicio.upper()}", f"http://{servicio}:{SERVICIOS[servicio]}")
+            recurso = f"/internal/organizaciones/{operacion.organizacion_id}/"
+            destino_firma = servicio
+            if por_usuario:
+                recurso += f"usuarios/{operacion.usuario_id}/"
+                destino_firma += f":usuario:{operacion.usuario_id}"
             try:
                 respuesta = requests.delete(
-                    f"{base.rstrip('/')}/internal/organizaciones/{operacion.organizacion_id}/",
+                    f"{base.rstrip('/')}{recurso}",
                     json={"operacion_id": str(operacion.pk)},
-                    headers={**cabeceras_eliminacion(servicio, operacion.organizacion_id, operacion.pk),
+                    headers={**cabeceras_eliminacion(destino_firma, operacion.organizacion_id, operacion.pk),
                              "X-Correlation-ID": str(operacion.pk)},
                     timeout=(2, 5), allow_redirects=False,
                 )
@@ -114,7 +135,8 @@ def procesar_eliminacion(operacion_id):
                 operacion.pendientes.remove(servicio)
         if not operacion.pendientes:
             # No hay FK entre servicios; cada ACK corresponde a su esquema.
-            Organizacion.objects.filter(pk=operacion.organizacion_id).delete()
+            if not por_usuario:
+                Organizacion.objects.filter(pk=operacion.organizacion_id).delete()
             operacion.completado_en = timezone.now()
         operacion.save(update_fields=["pendientes", "completado_en"])
     return not operacion.pendientes

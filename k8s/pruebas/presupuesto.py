@@ -47,6 +47,7 @@ for ruta in sorted(glob.glob(sys.argv[1]+"/*.yaml")):
 
 TOPE={"limits.memory":2752*MI,"requests.memory":1152*MI,"limits.cpu":2000,"requests.cpu":1000,"pods":12}
 
+fallo=False
 for escalado in (False,True):
     print(f"\n===== {'PEOR CASO: HPA al maximo' if escalado else 'En reposo (minReplicas)'} =====")
     tot=dict.fromkeys(TOPE,0)
@@ -67,3 +68,5 @@ for escalado in (False,True):
         cabe = u<=h; ok &= cabe
         print(f"  {k:18} {us:>8} / {hs:<8} {'cabe' if cabe else '*** NO CABE ***'}   holgura {h-u if 'cpu' in k or k=='pods' else (h-u)//MI}{'' if k=='pods' else ('m' if 'cpu' in k else 'Mi')}")
     print("  => " + ("TODO ENTRA" if ok else "ALGO NO ENTRA"))
+    fallo |= not ok
+sys.exit(1 if fallo else 0)

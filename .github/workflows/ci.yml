@@ -177,5 +177,10 @@ jobs:
       - name: Arnés de la rotación (dobles con estado, sin cluster)
         run: bash k8s/pruebas/probar-rotacion.sh
 
+      - name: Presupuesto de recursos Kubernetes
+        run: |
+          pip install PyYAML==6.0.3
+          python k8s/pruebas/presupuesto.py k8s
+
       - name: Arnés de la comparación (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-comparar-cola.sh

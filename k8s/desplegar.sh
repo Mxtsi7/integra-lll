@@ -96,6 +96,14 @@ if ! kubectl get secret ojoalgasto -o jsonpath='{.data.CLAVES_CIFRADO}' | grep -
   echo "   CLAVES_CIFRADO agregada al secret"
 fi
 
+# Firma independiente de JWT, compartida por Auth y consumidores de limpieza.
+# Se añade también al Secret existente, sin rotar otras credenciales.
+if ! kubectl get secret ojoalgasto -o jsonpath='{.data.ELIMINACION_INTERNA_SECRET}' | grep -q .; then
+  CLAVE_ELIMINACION="$(openssl rand -hex 32)"
+  kubectl patch secret ojoalgasto --type=merge \
+    -p "{\"stringData\":{\"ELIMINACION_INTERNA_SECRET\":\"$CLAVE_ELIMINACION\"}}" >/dev/null
+fi
+
 echo "── aplicando manifiestos ──"
 for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml k8s/02-redis-rabbitmq.yaml \
          k8s/10-auth.yaml k8s/11-subscriptions.yaml k8s/12-gateway.yaml \
@@ -110,7 +118,7 @@ done
 
 echo "── esperando a que todo quede arriba ──"
 kubectl rollout status statefulset/postgres --timeout=300s
-for d in redis rabbitmq auth subscriptions subscriptions-worker subscriptions-beat gateway web; do
+for d in redis rabbitmq auth auth-eliminaciones subscriptions subscriptions-worker subscriptions-beat gateway web; do
   # Un deployment en 0 réplicas está así a propósito (RabbitMQ hasta el
   # Sprint 2). `rollout status` se quedaría esperando 300s y saldría con
   # error, tumbando el script entero por algo que no es una falla.
