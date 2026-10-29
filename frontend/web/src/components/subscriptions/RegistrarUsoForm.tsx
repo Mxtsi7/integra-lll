@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Clock } from "lucide-react";
 import {
   ErrorDeApi,
@@ -20,6 +20,11 @@ interface RegistrarUsoFormProps {
    */
   /** `fecha` es undefined si el usuario dejó "Día" vacío: el backend usa hoy. */
   onRegistrar: (minutos: number, fecha?: string) => Promise<void>;
+  /**
+   * true mientras hay otra operación sobre la suscripción (cancelarla): no se
+   * envía nada hasta que termine (revisión de #112).
+   */
+  bloqueado?: boolean;
 }
 
 const ID_CAMPO: Record<CampoUso, string> = { minutos: "uso-minutos", fecha: "uso-fecha" };
@@ -44,7 +49,7 @@ function textoConfirmacion(minutos: number, fecha: string | undefined, hoy: stri
  * reglas que RegistrarUsoSerializer (enteros de 1 a 44.640, fecha no futura)
  * y el backend sigue siendo la validación definitiva.
  */
-export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
+export function RegistrarUsoForm({ onRegistrar, bloqueado = false }: RegistrarUsoFormProps) {
   const hoy = hoyLocalIso();
   const [minutos, setMinutos] = useState("");
   // Se propone hoy; el contrato admite otra fecha pasada (o ninguna).
@@ -53,11 +58,13 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
   const [confirmacion, setConfirmacion] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
+  // Ref y no solo estado: dos envíos en el mismo instante verían el estado viejo.
+  const enviandoRef = useRef(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // Un doble clic no registra dos veces el mismo uso.
-    if (guardando) return;
+    if (enviandoRef.current || bloqueado) return;
 
     const locales = validarUso({ minutos, fecha }, hoy);
     setErrores(locales);
@@ -70,6 +77,7 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
     }
 
     const cantidad = Number(minutos.trim());
+    enviandoRef.current = true;
     setGuardando(true);
     try {
       // "Día" vacío no viaja como fecha: "" (el serializer lo rechaza); se
@@ -90,6 +98,7 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
         setErrorGeneral("No pudimos registrar el uso. Intenta de nuevo.");
       }
     } finally {
+      enviandoRef.current = false;
       setGuardando(false);
     }
   };
@@ -135,7 +144,7 @@ export function RegistrarUsoForm({ onRegistrar }: RegistrarUsoFormProps) {
         <p className={styles.confirmacion} role="status">
           {confirmacion}
         </p>
-        <Boton type="submit" cargando={guardando}>
+        <Boton type="submit" cargando={guardando} disabled={bloqueado}>
           {guardando ? "Registrando…" : "Registrar uso"}
         </Boton>
       </div>
