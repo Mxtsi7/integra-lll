@@ -39,7 +39,7 @@ Todas las cifras de esta tabla son ejecuciones locales contra PostgreSQL 16 y Ra
 |---|---:|---:|---:|---:|---|
 | Auth | 29 | 29 | 0 | 0 | 20 de `test_eliminacion.py`, 3 de aislamiento Gateway, 6 de retención de consentimiento |
 | Subscriptions | 28 | 28 | 0 | 0 | 19 de `test_eliminacion.py`, 7 de `test_eventos_eliminacion.py`, 2 de carrera PostgreSQL |
-| Connectors | 16 de eliminación/migración | 16 | 0 | 0 | 7 pruebas netas nuevas respecto de la línea base de 9 (9 agregadas; 2 reemplazadas porque su comportamiento cambió); suite completa del servicio: 190 aprobadas |
+| Connectors | 17 de eliminación/migración | 17 | 0 | 0 | 8 pruebas netas nuevas respecto de la línea base de 9 (10 agregadas; 2 reemplazadas porque su comportamiento cambió); suite completa del servicio: 191 aprobadas |
 | Analytics | 4 | 4 | 0 | 0 | Sin omisiones |
 | Notifications | 3 | 3 | 0 | 0 | Sin omisiones |
 
@@ -51,7 +51,7 @@ Todas las cifras de esta tabla son ejecuciones locales contra PostgreSQL 16 y Ra
 2. **Orden de destrucción:** se hizo que `preparar_limpieza` borrara los tokens de Outlook antes de la validación final; `test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina` falló porque el token de Outlook ya no existía.
 3. **Rollback:** se quitó `transaction.set_rollback(True)` del fallo de Gmail; `test_revocacion_externa_pendiente_conserva_token_cifrado_para_reintento` falló porque la cuenta quedó `desconectada` en vez de `conectada`.
 
-Tras revertir las tres mutaciones, la suite completa de Connectors volvió a pasar: 190 pruebas. Las 16 de eliminación/migración también pasaron.
+Tras revertir las tres mutaciones, la suite completa de Connectors volvió a pasar: 191 pruebas. Las 17 de eliminación/migración también pasaron.
 
 ## 5. Comandos exactos que ejecuté
 

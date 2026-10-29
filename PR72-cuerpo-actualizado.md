@@ -46,8 +46,8 @@ Ejecutadas contra PostgreSQL 16 y RabbitMQ 3.13, con Python 3.13. **No se ejecut
 |---|---:|---:|---:|
 | Auth (eliminación + Gateway + retención) | 29 | 0 | 0 |
 | Subscriptions (eliminación + eventos + carrera PostgreSQL) | 28 | 0 | 0 |
-| Connectors (eliminación/migración) | 16 | 0 | 0 |
-| Connectors (suite completa) | 190 | 0 | 0 |
+| Connectors (eliminación/migración) | 17 | 0 | 0 |
+| Connectors (suite completa) | 191 | 0 | 0 |
 | Analytics | 4 | 0 | 0 |
 | Notifications | 3 | 0 | 0 |
 
