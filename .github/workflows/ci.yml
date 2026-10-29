@@ -31,6 +31,24 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # Un RabbitMQ de verdad. Hace falta para la prueba de recorrido completo
+      # de subscriptions: un desajuste entre la routing key que se publica y
+      # el enlace de la cola es INVISIBLE con dobles —el publicador "publica"
+      # y la prueba pasa— y solo aparece contra un broker, donde
+      # `mandatory=True` lanza UnroutableError. Ya pasó una vez.
+      #
+      # Va en todos los trabajos porque `services:` no se puede condicionar
+      # por matriz; los que no lo usan solo pagan el arranque. La variable que
+      # activa esas pruebas (RABBITMQ_PRUEBA_URL) sí es solo de subscriptions.
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
+
     env:
       # Lo mismo que .env.example, con la base apuntando al servicio de arriba.
       DEBUG: "True"
@@ -43,6 +61,9 @@ jobs:
       JWT_ALGORITMO: HS256
       # PYTHONPATH apunta a la raíz para que resuelva shared/, como en Docker.
       PYTHONPATH: ${{ github.workspace }}
+      # Solo subscriptions tiene pruebas contra el broker; en los demás queda
+      # vacía y esas pruebas se saltan solas.
+      RABBITMQ_PRUEBA_URL: ${{ matrix.servicio == 'subscriptions' && 'amqp://guest:guest@localhost:5672/' || '' }}
 
     defaults:
       run:
@@ -121,3 +142,40 @@ jobs:
       - name: Build
         run: npm run build
 
+  # ── Guiones de operación ─────────────────────────────────────────────
+  # Dos scripts que tocan el cluster de verdad y no se pueden "probar en
+  # producción a ver qué pasa". Cada uno tiene un arnés con dobles CON
+  # ESTADO que no toca ningún cluster ni ninguna base, y corre en segundos.
+  #
+  # · rotar-clave-postgres.sh: la base y el Secret son dos estados
+  #   independientes (lo que permite representar una desincronización);
+  #   dieciocho caminos: feliz, fallo de cada paso, la reanudación después
+  #   de cada uno, y la muerte del proceso o un error de escritura al anotar
+  #   una fase (el archivo vigente sobrevive).
+  # · comparar-cola.sh: cambia EVENTOS_ASINCRONOS en dos deployments y tiene
+  #   que dejarlos exactamente como estaban, pase lo que pase: salida normal,
+  #   drenaje que no termina, carga interrumpida y rollout de la restauración
+  #   fallido.
+  operacion:
+    name: operación · guiones de k8s
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sintaxis de los guiones
+        run: |
+          bash -n k8s/rotar-clave-postgres.sh
+          bash -n k8s/pruebas/probar-rotacion.sh
+          bash -n k8s/desplegar.sh
+          bash -n k8s/pruebas/comparar-cola.sh
+          bash -n k8s/pruebas/probar-comparar-cola.sh
+
+      - name: Arnés de la rotación (dobles con estado, sin cluster)
+        run: bash k8s/pruebas/probar-rotacion.sh
+
+      - name: Arnés de la comparación (kubectl doble, sin cluster)
+        run: bash k8s/pruebas/probar-comparar-cola.sh
