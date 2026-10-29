@@ -14,6 +14,8 @@ import {
   inicializarStorageSeguro,
   limpiarSesionSegura,
   obtenerTokensSeguros,
+  esTokenValido,
+  decodificarPayloadJwt,
   __reiniciarEstadoParaPruebas,
 } from './storageSeguro';
 
@@ -412,6 +414,239 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
       } finally {
         configurarBackendStorage(backendMock);
       }
+    });
+  });
+
+  describe('4. Regresiones de concurrencia, rollback y políticas durables (Segunda Revisión)', () => {
+    it('rollback de guardado A obsoleto no invalida ni borra guardado B posterior [P1 Hallazgo 2]', async () => {
+      let resolverEscrituraA: () => void = () => {};
+      let rechazarEscrituraA: (err: any) => void = () => {};
+      const promesaBloqueoA = new Promise<void>((resolve, reject) => {
+        resolverEscrituraA = resolve;
+        rechazarEscrituraA = reject;
+      });
+
+      const tokensA = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 1800),
+        refresh_token: 'refresh-sesion-A',
+      };
+      const tokensB = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 3600),
+        refresh_token: 'refresh-sesion-B',
+      };
+
+      // Backend que bloquea la escritura de access_token de A
+      const backendIntercalado: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          if (v === tokensA.access_token) {
+            await promesaBloqueoA;
+          }
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendIntercalado);
+
+      try {
+        // 1. Empezar guardado A (quedará bloqueado en hardware)
+        const promesaA = guardarTokensSeguros(tokensA);
+
+        // Esperar brevemente para asegurar que A inició su encolado
+        await new Promise((r) => setTimeout(r, 10));
+
+        // 2. Empezar guardado B (inicia con nueva generación y actualiza RAM de inmediato)
+        const promesaB = guardarTokensSeguros(tokensB);
+
+        // 3. Rechazar la escritura de A
+        rechazarEscrituraA(new Error('Fallo simulado en disco al escribir token A'));
+
+        // A debe rechazar con su error
+        await expect(promesaA).rejects.toThrow('Fallo al persistir tokens en almacenamiento seguro');
+
+        // B debe completarse con éxito
+        await promesaB;
+
+        // 4. Verificación de invariantes: B debe permanecer intacta en RAM y hardware
+        expect(obtenerAccessToken()).toBe(tokensB.access_token);
+        expect(obtenerRefreshToken()).toBe(tokensB.refresh_token);
+        expect(haySesionValida()).toBe(true);
+
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(tokensB.access_token);
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(tokensB.refresh_token);
+
+        // 5. Reinicio simulado: B sobrevive y se rehidrata perfectamente
+        __reiniciarEstadoParaPruebas();
+        configurarBackendStorage(backendIntercalado);
+        const resHidratacion = await hidratarSesionSegura();
+        expect(resHidratacion.hayTokens).toBe(true);
+        expect(obtenerAccessToken()).toBe(tokensB.access_token);
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('fallo durante el rollback de borrado se captura y maneja sin promesas no atendidas [P1 Hallazgo 2]', async () => {
+      const backendFalloRollback: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k) => {
+          if (k === CLAVES_SEGURAS.REFRESH_TOKEN) {
+            throw new Error('Hardware error on set');
+          }
+        }),
+        deleteItemAsync: vi.fn(async () => {
+          throw new Error('Hardware error on delete during rollback');
+        }),
+      };
+      configurarBackendStorage(backendFalloRollback);
+
+      try {
+        const tokens = {
+          access_token: jwtValido(),
+          refresh_token: 'refresh-fallo-rollback',
+        };
+
+        // Debe lanzar el error de guardado y manejar internamente el fallo del rollback sin crash
+        await expect(guardarTokensSeguros(tokens)).rejects.toThrow(
+          'Fallo al persistir tokens en almacenamiento seguro'
+        );
+
+        expect(obtenerAccessToken()).toBeNull();
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('hidratación preserva limpieza_pendiente si el borrado de credenciales falla [P1 Hallazgo 3]', async () => {
+      // 1. Sembrar dos tokens válidos y marca durable limpieza_pendiente = 1
+      const tokens = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-sesion-cerrada',
+      };
+      almacenamientoSimulado.set(CLAVES_SEGURAS.ACCESS_TOKEN, tokens.access_token);
+      almacenamientoSimulado.set(CLAVES_SEGURAS.REFRESH_TOKEN, tokens.refresh_token);
+      almacenamientoSimulado.set(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, '1');
+
+      // Backend que falla al borrar credenciales pero permitiría borrar la marca
+      let intentoBorradoMarca = false;
+      const backendFalloBorradoTokens: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          if (k === CLAVES_SEGURAS.ACCESS_TOKEN || k === CLAVES_SEGURAS.REFRESH_TOKEN) {
+            throw new Error('Hardware delete tokens error');
+          }
+          if (k === CLAVES_SEGURAS.LIMPIEZA_PENDIENTE) {
+            intentoBorradoMarca = true;
+            almacenamientoSimulado.delete(k);
+          }
+        }),
+      };
+      configurarBackendStorage(backendFalloBorradoTokens);
+
+      try {
+        // 2. Hidratar: no debe recuperar la sesión
+        const res1 = await hidratarSesionSegura();
+        expect(res1.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+
+        // La marca LIMPIEZA_PENDIENTE NO debe haberse borrado porque el borrado de tokens falló
+        expect(intentoBorradoMarca).toBe(false);
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBe('1');
+
+        // 3. Reiniciar RAM y volver a hidratar sin nuevo login
+        __reiniciarEstadoParaPruebas();
+        configurarBackendStorage(backendFalloBorradoTokens);
+
+        const res2 = await hidratarSesionSegura();
+        expect(res2.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+        // La marca sigue intacta protegiendo la sesión
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBe('1');
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('fallo al leer marca LIMPIEZA_PENDIENTE produce resultado seguro sin recuperar tokens [P1 Hallazgo 3]', async () => {
+      almacenamientoSimulado.set(CLAVES_SEGURAS.ACCESS_TOKEN, jwtValido());
+      almacenamientoSimulado.set(CLAVES_SEGURAS.REFRESH_TOKEN, 'refresh-test');
+
+      const backendFalloLecturaMarca: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => {
+          if (k === CLAVES_SEGURAS.LIMPIEZA_PENDIENTE) {
+            throw new Error('Hardware read error');
+          }
+          return almacenamientoSimulado.get(k) ?? null;
+        }),
+        setItemAsync: vi.fn(async (k, v) => {
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendFalloLecturaMarca);
+
+      try {
+        const res = await hidratarSesionSegura();
+        expect(res.hidratado).toBe(false);
+        expect(res.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('esTokenValido acepta tokens recién emitidos con reloj adelantado o atrasado [P2 Hallazgo 4]', () => {
+      const ahoraServidor = Math.floor(Date.now() / 1000);
+
+      // Token recién emitido por el servidor (duración 30 min)
+      const tokenRecienEmitido = [
+        btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=+$/, ''),
+        btoa(
+          JSON.stringify({
+            iat: ahoraServidor,
+            exp: ahoraServidor + 30 * 60,
+            user_id: 'usr-1',
+          })
+        ).replace(/=+$/, ''),
+        'sig',
+      ].join('.');
+
+      // Reloj del teléfono normal
+      expect(esTokenValido(tokenRecienEmitido, ahoraServidor * 1000)).toBe(true);
+
+      // Reloj del teléfono adelantado 40 minutos
+      const relojAdelantado = (ahoraServidor + 40 * 60) * 1000;
+      expect(esTokenValido(tokenRecienEmitido, relojAdelantado)).toBe(true);
+
+      // Reloj del teléfono atrasado 40 minutos
+      const relojAtrasado = (ahoraServidor - 40 * 60) * 1000;
+      expect(esTokenValido(tokenRecienEmitido, relojAtrasado)).toBe(true);
+
+      // Token realmente expirado (exp menor o igual a iat o vencido)
+      const tokenExpirado = [
+        btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=+$/, ''),
+        btoa(
+          JSON.stringify({
+            iat: ahoraServidor,
+            exp: ahoraServidor - 60,
+            user_id: 'usr-1',
+          })
+        ).replace(/=+$/, ''),
+        'sig',
+      ].join('.');
+      expect(esTokenValido(tokenExpirado, ahoraServidor * 1000)).toBe(false);
+
+      // Token malformado
+      expect(esTokenValido('token.malformado')).toBe(false);
+      expect(esTokenValido('')).toBe(false);
     });
   });
 });

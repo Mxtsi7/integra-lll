@@ -1,8 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   haySesionValida,
-  tokenExpirado,
-  revocarSesion,
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
@@ -12,7 +10,10 @@ import {
   hidratarSesionSegura,
   guardarTokensSeguros,
   limpiarSesionSegura,
+  obtenerTokensSeguros,
+  esTokenValido,
 } from '../src/services/storageSeguro';
+import { revocarTokensRemotos } from '../src/services/clienteHttp';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
@@ -151,12 +152,19 @@ export function AuthProvider({
 
   const iniciarSesion = useCallback(
     async (tokens: Tokens, u?: Usuario) => {
-      // 1. Validación previa de vigencia/formato del token recibido
-      if (!tokens.access_token || tokenExpirado(tokens.access_token)) {
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+      // 0. Capturar la identidad de esta operación antes de cualquier paso asíncrono
+      const idSesion = ++sesionVigente.current;
+      ultimaPeticion.current++;
+      const esVigente = () => idSesion === sesionVigente.current;
+
+      // 1. Validación previa de vigencia/formato del token recibido con su desfase propio
+      if (!tokens.access_token || !esTokenValido(tokens.access_token)) {
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
         throw new Error('Token inválido o expirado');
       }
 
@@ -164,12 +172,19 @@ export function AuthProvider({
       try {
         await guardarTokensSeguros(tokens);
       } catch (err) {
-        // Rollback completo del contexto en caso de rechazo del almacenamiento
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+        // Rollback del contexto SOLO si esta operación sigue siendo la vigente
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
         throw err;
+      }
+
+      // Si durante la persistencia se inició otra sesión o logout, abortar
+      if (!esVigente()) {
+        return;
       }
 
       // 3. Validación de vigencia del token guardado
@@ -177,15 +192,20 @@ export function AuthProvider({
         try {
           await limpiarSesionSegura();
         } catch {}
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
         throw new Error('Token inválido o expirado');
       }
 
+      if (!esVigente()) {
+        return;
+      }
+
       // 4. Transicionar a autenticado SOLO tras persistencia y validación exitosas
-      const idSesion = ++sesionVigente.current;
       setEstado('autenticado');
 
       if (u) {
@@ -201,24 +221,25 @@ export function AuthProvider({
   );
 
   const cerrarSesion = useCallback(async () => {
-    // 1. Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
+    // 1. Invalida inmediatamente cualquier petición asíncrona de perfil o sesión en vuelo
     sesionVigente.current++;
     ultimaPeticion.current++;
 
-    // 2. Cierre inmediato en memoria para navegación pública instantánea
+    // 2. Capturar credenciales activas antes de limpiar memoria
+    const credenciales = obtenerTokensSeguros();
+
+    // 3. Cierre inmediato en memoria para navegación pública instantánea
     setUsuario(null);
     setEstado('anonimo');
     setEstadoPerfil('inactivo');
     setErrorPerfil(null);
 
-    // 3. Revocación remota (con o sin respuesta del backend)
-    try {
-      await revocarSesion();
-    } catch {
-      // Ignorar error si el backend no responde
+    // 4. Revocación remota aislada en segundo plano con las credenciales capturadas de esta sesión
+    if (credenciales.refresh_token) {
+      void revocarTokensRemotos(credenciales);
     }
 
-    // 4. Limpieza persistente en hardware seguro (propaga error si la eliminación física falla)
+    // 5. Limpieza persistente en hardware seguro: se ejecuta inmediatamente (no después de la red)
     await limpiarSesionSegura();
   }, []);
 

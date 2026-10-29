@@ -20,7 +20,10 @@ import {
   inicializarStorageSeguro,
   adaptadorStorageSincrono,
   CLAVES_SEGURAS,
+  hidratarSesionSegura,
+  __reiniciarEstadoParaPruebas,
 } from '../src/services/storageSeguro';
+import { configurarClienteHttp } from '../src/services/clienteHttp';
 import { AuthProvider, useAuth, type Tokens } from './AuthContext';
 function jwtValido(expSegundos: number = Math.floor(Date.now() / 1000) + 3600): string {
   const base64url = (texto: string) =>
@@ -689,6 +692,218 @@ describe('AuthContext móvil', () => {
         expect(obtenerAccessToken()).toBeNull();
       } finally {
         deleteItemSpy.mockRestore();
+      }
+    });
+
+    it('logout A demorado no borra la sesión B posterior ni tras resolución 200 ni con fallo [P1 Hallazgo 1]', async () => {
+      // 1. Iniciar sesión A
+      const tokensA: Tokens = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 1800),
+        refresh_token: 'refresh-sesion-A',
+      };
+      const usuarioA: Usuario = { ...USUARIO_PRUEBA, id: 'usr-A', nombre: 'Usuario A' };
+
+      const tokensB: Tokens = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 3600),
+        refresh_token: 'refresh-sesion-B',
+      };
+      const usuarioB: Usuario = { ...USUARIO_PRUEBA, id: 'usr-B', nombre: 'Usuario B' };
+
+      let resolverLogoutA: (res: any) => void = () => {};
+      const promesaLogoutA = new Promise((resolve) => {
+        resolverLogoutA = resolve;
+      });
+
+      // Mockear fetch para pausar la respuesta a /auth/logout/
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.includes('/auth/logout/')) {
+          await promesaLogoutA;
+          return { ok: true, status: 200, json: async () => ({}) };
+        }
+        if (url.includes('/usuarios/me/')) {
+          return { ok: true, status: 200, json: async () => usuarioB };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+      });
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="autenticado" initialUsuario={usuarioA}>
+          {children}
+        </AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      // Guardar tokens de A en storage para simular estado activo
+      await guardarTokensSeguros(tokensA);
+      expect(result.current.haySesion).toBe(true);
+
+      // 2. Ejecutar cerrarSesion() de A (UI debe quedar en anónimo inmediatamente)
+      let promesaCierre: Promise<void> | undefined;
+      await act(async () => {
+        promesaCierre = result.current.cerrarSesion();
+      });
+
+      expect(result.current.estado).toBe('anonimo');
+      expect(result.current.usuario).toBeNull();
+      expect(result.current.haySesion).toBe(false);
+
+      // 3. Durante la espera de red del logout A, completar iniciarSesion(B)
+      await act(async () => {
+        await result.current.iniciarSesion(tokensB, usuarioB);
+      });
+
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.usuario).toEqual(usuarioB);
+      expect(obtenerAccessToken()).toBe(tokensB.access_token);
+
+      // 4. Resolver el logout de A (200 OK del Gateway)
+      resolverLogoutA(true);
+      await act(async () => {
+        await promesaCierre;
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      // 5. Invariante: B debe seguir intacta en estado, RAM y SecureStore
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.usuario).toEqual(usuarioB);
+      expect(obtenerAccessToken()).toBe(tokensB.access_token);
+      expect(await SecureStore.getItemAsync('access_token')).toBe(tokensB.access_token);
+
+      // Reinicio simulado: B sigue persistida
+      __reiniciarEstadoParaPruebas();
+      inicializarStorageSeguro();
+      const resHidratacion = await hidratarSesionSegura();
+      expect(resHidratacion.hayTokens).toBe(true);
+      expect(obtenerAccessToken()).toBe(tokensB.access_token);
+    });
+
+    it('intercalado: fallo de persistencia de login A no cancela ni invalida login B posterior [P1 Hallazgo 2]', async () => {
+      const tokensA: Tokens = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 1800),
+        refresh_token: 'refresh-login-A',
+      };
+      const tokensB: Tokens = {
+        access_token: jwtValido(Math.floor(Date.now() / 1000) + 3600),
+        refresh_token: 'refresh-login-B',
+      };
+      const usuarioB: Usuario = { ...USUARIO_PRUEBA, id: 'usr-B', nombre: 'Usuario B' };
+
+      let rechazarEscrituraA: (err: any) => void = () => {};
+      const promesaBloqueoA = new Promise<void>((_, reject) => {
+        rechazarEscrituraA = reject;
+      });
+
+      const setItemSpy = vi.spyOn(SecureStore, 'setItemAsync').mockImplementation(async (key, val) => {
+        if (val === tokensA.access_token) {
+          await promesaBloqueoA;
+        }
+      });
+
+      try {
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <AuthProvider>{children}</AuthProvider>
+        );
+
+        const { result } = renderHook(() => useAuth(), { wrapper });
+
+        // 1. Iniciar login A y B concurrentemente dentro de act() para evitar act() solapados
+        let errorA: any;
+        let bCompleto = false;
+        await act(async () => {
+          const pA = result.current.iniciarSesion(tokensA).catch((e) => {
+            errorA = e;
+          });
+
+          await new Promise((r) => setTimeout(r, 10));
+
+          const pB = result.current.iniciarSesion(tokensB, usuarioB).then(() => {
+            bCompleto = true;
+          });
+
+          // Desbloquear / rechazar A para permitir que la cola avance
+          rechazarEscrituraA(new Error('Fallo de hardware en token A'));
+
+          await pA;
+          await pB;
+        });
+
+        expect(errorA).toBeDefined();
+        expect(bCompleto).toBe(true);
+
+        // 5. El fallo de A no debe resetear el contexto a anónimo
+        expect(result.current.estado).toBe('autenticado');
+        expect(result.current.usuario).toEqual(usuarioB);
+        expect(haySesionValida()).toBe(true);
+      } finally {
+        setItemSpy.mockRestore();
+      }
+    });
+
+    it('iniciarSesion acepta token recién emitido con el reloj del teléfono adelantado 40 minutos [P2 Hallazgo 4]', async () => {
+      const ahoraServidor = Math.floor(Date.now() / 1000);
+      const desfaseMs = 40 * 60 * 1000;
+
+      const realNow = Date.now.bind(Date);
+      const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + desfaseMs);
+
+      try {
+        const base64url = (t: string) =>
+          btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        const tokenConRelojDesfasado: Tokens = {
+          access_token: [
+            base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+            base64url(
+              JSON.stringify({
+                iat: ahoraServidor,
+                exp: ahoraServidor + 30 * 60,
+                user_id: 'usr-1',
+                rol: 'titular',
+              })
+            ),
+            'firma',
+          ].join('.'),
+          refresh_token: 'refresh-desfase',
+        };
+
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+        );
+
+        const { result } = renderHook(() => useAuth(), { wrapper });
+
+        // Token recién emitido debe aceptarse a pesar de los 40 min de adelanto en el reloj
+        await act(async () => {
+          await result.current.iniciarSesion(tokenConRelojDesfasado, USUARIO_PRUEBA);
+        });
+
+        expect(result.current.haySesion).toBe(true);
+        expect(result.current.estado).toBe('autenticado');
+
+        // Token realmente expirado (exp <= iat)
+        const tokenExpirado: Tokens = {
+          access_token: [
+            base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+            base64url(
+              JSON.stringify({
+                iat: ahoraServidor,
+                exp: ahoraServidor - 60,
+                user_id: 'usr-1',
+                rol: 'titular',
+              })
+            ),
+            'firma',
+          ].join('.'),
+          refresh_token: 'refresh-expirado',
+        };
+
+        await expect(
+          act(async () => {
+            await result.current.iniciarSesion(tokenExpirado);
+          })
+        ).rejects.toThrow('Token inválido o expirado');
+      } finally {
+        dateSpy.mockRestore();
       }
     });
   });

@@ -5,6 +5,7 @@ import {
   logout,
   obtenerAccessToken,
   obtenerRefreshToken,
+  tokenExpirado,
 } from '@ojoalgasto/shared';
 
 export interface IBackendStorageSeguro {
@@ -223,21 +224,35 @@ export async function hidratarSesionSegura(): Promise<{
   await esperarMutacionesPendientes();
 
   try {
-    // 2. Comprobar si existe una limpieza pendiente no confirmada previamente
-    const limpiezaPendiente = await backendActual
-      .getItemAsync(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)
-      .catch(() => null);
+    // 2. Comprobar si existe una limpieza pendiente no confirmada previamente.
+    // No convertimos fallos en ausencia con .catch(() => null); si la lectura
+    // arroja error, se captura en el catch exterior y retorna de forma segura
+    // { hidratado: false, hayTokens: false } sin rescatar credenciales.
+    const limpiezaPendiente = await backendActual.getItemAsync(
+      CLAVES_SEGURAS.LIMPIEZA_PENDIENTE
+    );
 
     if (limpiezaPendiente === '1') {
-      // Hubo un cierre de sesión previo con fallo persistente: no recuperar esa sesión
+      // Hubo un cierre de sesión previo con fallo persistente: no recuperar esa sesión.
+      // Borrar primero credenciales; solo si se eliminan efectivamente se borra la marca.
+      let credencialesEliminadas = false;
       try {
         await Promise.all([
           backendActual.deleteItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN),
           backendActual.deleteItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN),
-          backendActual.deleteItemAsync(CLAVES_SEGURAS.DESFASE_RELOJ),
-          backendActual.deleteItemAsync(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE),
+          backendActual.deleteItemAsync(CLAVES_SEGURAS.DESFASE_RELOJ).catch(() => {}),
         ]);
-      } catch {}
+        credencialesEliminadas = true;
+      } catch {
+        credencialesEliminadas = false;
+      }
+
+      if (credencialesEliminadas) {
+        try {
+          await backendActual.deleteItemAsync(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE);
+        } catch {}
+      }
+
       cacheMemoria = {};
       storageHidratado = true;
       return { hidratado: true, hayTokens: false };
@@ -306,14 +321,27 @@ export async function guardarTokensSeguros(tokens: {
     const promesas = promesasPorGeneracion.get(gen) ?? [];
     await Promise.all(promesas);
   } catch (err) {
-    cacheMemoria = {};
-    logout();
+    // Si otra operación posterior ya inició (gen < generacionActual),
+    // este guardado obsoleto NO debe limpiar la RAM ni invalidar la nueva sesión.
+    if (gen === generacionActual) {
+      cacheMemoria = {};
+      logout();
 
-    // b. Reversión en hardware seguro
-    const genRollback = ++generacionActual;
-    encolarDelete(CLAVES_SEGURAS.ACCESS_TOKEN, genRollback);
-    encolarDelete(CLAVES_SEGURAS.REFRESH_TOKEN, genRollback);
-    encolarDelete(CLAVES_SEGURAS.DESFASE_RELOJ, genRollback);
+      // Reversión en hardware seguro
+      const genRollback = ++generacionActual;
+      promesasPorGeneracion.set(genRollback, []);
+      const p1 = encolarDelete(CLAVES_SEGURAS.ACCESS_TOKEN, genRollback);
+      const p2 = encolarDelete(CLAVES_SEGURAS.REFRESH_TOKEN, genRollback);
+      const p3 = encolarDelete(CLAVES_SEGURAS.DESFASE_RELOJ, genRollback);
+
+      try {
+        await Promise.all([p1, p2, p3]);
+      } catch (rollbackErr) {
+        console.warn('[StorageSeguro] Error durante rollback en SecureStore:', rollbackErr);
+      } finally {
+        promesasPorGeneracion.delete(genRollback);
+      }
+    }
 
     throw new Error(
       `Fallo al persistir tokens en almacenamiento seguro: ${
@@ -383,6 +411,53 @@ export function obtenerTokensSeguros(): {
     access_token: obtenerAccessToken(),
     refresh_token: obtenerRefreshToken(),
   };
+}
+
+/**
+ * Decodifica de forma segura el payload de un JWT sin validar su firma.
+ */
+export function decodificarPayloadJwt(token: string): Record<string, unknown> | null {
+  if (typeof token !== 'string') return null;
+  const partes = token.split('.');
+  if (partes.length !== 3) return null;
+  try {
+    const base64 = partes[1].replace(/-/g, '+').replace(/_/g, '/');
+    const conPadding = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const jsonStr =
+      typeof atob === 'function'
+        ? atob(conPadding)
+        : typeof Buffer !== 'undefined'
+        ? Buffer.from(conPadding, 'base64').toString('utf8')
+        : null;
+    if (!jsonStr) return null;
+    const datos: unknown = JSON.parse(jsonStr);
+    return typeof datos === 'object' && datos !== null
+      ? (datos as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Valida si un access token tiene estructura JWT legible y no está vencido,
+ * calculando el desfase respecto al claim `iat` del propio token.
+ * Evita rechazar tokens válidos recién emitidos cuando el reloj del dispositivo
+ * esté adelantado respecto al reloj del servidor.
+ */
+export function esTokenValido(accessToken: string, ahoraMs: number = Date.now()): boolean {
+  if (!accessToken || typeof accessToken !== 'string') {
+    return false;
+  }
+  const payload = decodificarPayloadJwt(accessToken);
+  if (!payload) {
+    return false;
+  }
+  if (typeof payload.exp !== 'number') {
+    return true;
+  }
+  const desfasePropio = typeof payload.iat === 'number' ? payload.iat * 1000 - ahoraMs : 0;
+  return !tokenExpirado(accessToken, ahoraMs + desfasePropio);
 }
 
 /**

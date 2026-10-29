@@ -2,9 +2,11 @@ import { Platform } from 'react-native';
 import {
   configurarApi,
   configureAuthApi,
+  obtenerAuthApiUrl,
   AuthError,
   ErrorDeApi,
 } from '@ojoalgasto/shared';
+import { esTokenValido } from './storageSeguro';
 
 export interface ValidacionUrlApi {
   valida: boolean;
@@ -153,7 +155,21 @@ export function configurarClienteHttp(urlPersonalizada?: string): {
  * Retorna la URL base activa configurada en el cliente.
  */
 export function obtenerUrlBaseConfigurada(): string {
-  return urlBaseActual || obtenerApiUrlConfigurada();
+  if (urlBaseActual) {
+    return urlBaseActual;
+  }
+  const authUrl = obtenerAuthApiUrl();
+  if (authUrl && authUrl !== 'http://localhost:8000/api') {
+    return normalizarUrlApi(authUrl);
+  }
+  return obtenerApiUrlConfigurada();
+}
+
+/**
+ * Reinicia la URL configurada (para uso exclusivo en pruebas).
+ */
+export function __reiniciarClienteHttpParaPruebas(): void {
+  urlBaseActual = '';
 }
 
 /**
@@ -253,4 +269,50 @@ export function procesarErrorHttp(
     esDominio: false,
     mensaje: error instanceof Error ? error.message : fallback,
   };
+}
+
+/**
+ * Envía la revocación del refresh token al Gateway de forma aislada e idempotente,
+ * utilizando las credenciales explícitas de la sesión que se está cerrando.
+ * No depende de la lectura en storage ni bloquea el flujo si la red falla.
+ */
+export async function revocarTokensRemotos(credenciales?: {
+  access_token?: string | null;
+  refresh_token?: string | null;
+} | null): Promise<boolean> {
+  const refreshToken = credenciales?.refresh_token;
+  if (!refreshToken) {
+    return false;
+  }
+
+  const urlBase = obtenerUrlBaseConfigurada();
+  const urlLogout = `${urlBase}/auth/logout/`;
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 5000) : null;
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (credenciales?.access_token && esTokenValido(credenciales.access_token)) {
+      headers['Authorization'] = `Bearer ${credenciales.access_token}`;
+    }
+
+    const respuesta = await fetch(urlLogout, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      signal: controller?.signal,
+    });
+
+    return respuesta.ok;
+  } catch (_error) {
+    // La revocación remota es aislada y tolerante a fallos de red/servidor
+    return false;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
