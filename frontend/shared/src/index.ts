@@ -28,6 +28,7 @@ export * from './auth';
 export * from './api/catalogos';
 
 export * from './api/conectores';
+export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/planes';

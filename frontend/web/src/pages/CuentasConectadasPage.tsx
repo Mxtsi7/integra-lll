@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { ListaCuentas, type EstadoListaCuentas } from '../components/Cuentas/ListaCuentas';
 import styles from '../components/Cuentas/Cuentas.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
+import { BotonEnlace } from '../components/ui/Boton';
 import { Seccion } from '../components/ui/Seccion';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
@@ -91,7 +92,17 @@ export function CuentasConectadasPage({ cargarCuentas, accionConectar }: Cuentas
           )}
         </Seccion>
 
-        <Seccion titulo="Tus cuentas" icono={<Link2 size={19} aria-hidden="true" />} tinte="azul">
+        <Seccion
+          titulo="Tus cuentas"
+          icono={<Link2 size={19} aria-hidden="true" />}
+          tinte="azul"
+          // CH-27: lo que trajo cada cuenta o archivo, y cómo va.
+          accion={
+            <BotonEnlace to="/importaciones" variante="sutil" tamano="s">
+              Ver importaciones
+            </BotonEnlace>
+          }
+        >
           <ListaCuentas estado={estado} onReintentar={() => setIntento((n) => n + 1)} />
         </Seccion>
       </div>
