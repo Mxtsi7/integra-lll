@@ -155,7 +155,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // cerrado sesión): el mismo número sirve para cortar los reintentos.
     const vigente = () => id === ultimaPeticion.current && estadoRef.current.tipo !== "anonimo";
 
-    for (let intento = 0; ; intento++) {
+    // Cuántas esperas de reintento van. Volver a preguntar tras un refresh
+    // (más abajo) no gasta ninguna: no es una falla del servidor.
+    let intento = 0;
+    for (;;) {
+      // El access con que sale esta consulta: pedir() lo lee al enviarla.
+      const tokenDeLaConsulta = obtenerAccessToken();
       try {
         const usuario = await getUsuarioActual();
         if (vigente()) cambiarEstado({ tipo: "autenticado", usuario });
@@ -163,8 +168,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err: unknown) {
         if (!vigente()) return;
         if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
-          // 401: el gateway rechazó el token. 404: el usuario del token ya no
-          // existe. En ambos casos la sesión no sirve.
+          const tokenActual = obtenerAccessToken();
+          if (tokenActual !== tokenDeLaConsulta) {
+            // Revisión de #128: el rechazo es del token con que salió la
+            // consulta y, mientras viajaba, se guardó otro. No puede borrar
+            // el nuevo. Si es un refresh de la misma sesión, se vuelve a
+            // preguntar con el vigente: cada repetición necesita otra
+            // renovación, así que no queda dando vueltas. Si es otra sesión,
+            // su carga la lanza quien la detecta (evento `storage` o
+            // iniciarSesion) y esta termina sin tocar nada.
+            if (esLaMismaSesion(tokenActual, tokenDeLaConsulta)) continue;
+            return;
+          }
+          // 401: el gateway rechazó el token vigente. 404: el usuario del
+          // token ya no existe. En ambos casos la sesión no sirve.
           logout();
           cambiarEstado({ tipo: "anonimo" });
           return;
@@ -178,7 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // …y se reintenta solo, sin pedir un nuevo login (revisión CH-02).
         // Un 403 u otro 4xx no se arregla reintentando: ahí se para.
         if (!esErrorTemporal(err) || intento >= ESPERAS_REINTENTO_MS.length) return;
-        await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento]));
+        await new Promise((resolver) => setTimeout(resolver, ESPERAS_REINTENTO_MS[intento++]));
         if (!vigente()) return;
       }
     }

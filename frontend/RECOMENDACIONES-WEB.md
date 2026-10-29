@@ -83,6 +83,11 @@ guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
   comparan el usuario (`user_id` o `sub`), la organización y el `sid`, que el servicio auth conserva al
   rotar el token. Si coinciden, no se recarga nada; otro login (otro `sid`) sí es otra sesión. Sin esos
   claims se sigue tratando como otra, como antes.
+- **Un 401 tardío no borra el par renovado** (segunda revisión). Cada consulta a `/usuarios/me/` anota
+  el access con que salió. Un 401 o 404 solo cierra la sesión si es de ese token y sigue siendo el
+  vigente. Si mientras viajaba llegó un refresh de la misma sesión, se vuelve a preguntar con el token
+  nuevo, sin cambiar la marca; cada repetición necesita otra renovación. Si el token nuevo es de otra
+  sesión, la carga de esa sesión la lanza quien la detecta y esta termina sin tocar nada.
 - **Respuestas tardías.** `descartar()` anota la sesión con la que se montó la página. Si al confirmar
   cambió la sesión o se cerró la página, devuelve `null`: no hay aviso, no se mueve el foco y no se toca
   la lista. Con la sesión ya cambiada tampoco se manda un descarte nuevo. Una carga de A que llega
@@ -114,10 +119,28 @@ guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
   - el refresh del token, que no recarga nada.
 - `web/src/context/AuthContext.test.tsx` y `shared/src/auth.test.ts`: la marca cambia con otra cuenta,
   con otro login, al salir y al entrar, pero no con un refresh.
+- `web/src/context/AuthContext.test.tsx`, "Refresh con `/usuarios/me/` en vuelo": cliente compartido
+  real, solo se simula `fetch`. Cubre:
+  - el 401 tardío de A1 con A2 ya guardado, revisando los dos tokens y el perfil final;
+  - varias renovaciones seguidas;
+  - la respuesta buena de A1;
+  - el 404 del token renovado y la renovación hecha en la misma pestaña;
+  - el 401 del token vigente, que cierra la sesión;
+  - el 401 de A cuando ya se guardó otra cuenta.
+
+  Con el `AuthContext` del commit anterior fallan 3 de estos casos.
 - **Mutaciones de la revisión:** sin `key` en la guarda, un refresh como cambio de cuenta, la marca no
   observable, el descarte tardío sin revisar la sesión, sin revisar antes de enviar, y `sigueVigente`
   sin la sesión o sin el montaje. En las 7 falla alguna prueba, y también en las 5 de `sesionDelToken`.
-- **Sobre `main` actualizado** (con #131, #122 y #117): shared 215, web 352 y móvil 37 pruebas,
+  Del 401 tardío:
+  - no comparar el token de la consulta;
+  - que otra sesión también vuelva a preguntar, o caiga al logout;
+  - que el refresh no vuelva a preguntar;
+  - tomar el token de `tokenConocido`, o una sola vez por carga;
+  - que el refresh cambie la marca.
+
+  En las 7 falla alguna prueba.
+- **Sobre `main` actualizado** (con #131, #122 y #117): shared 215, web 359 y móvil 37 pruebas,
   typecheck y build.
 - **Contrato con las vistas reales** de `services/analytics` (código de main, SQLite), con lo que manda
   la web: 6 pruebas temporales, fuera del repo, más las 31 de VI-17/VI-18 del backend, todas pasan.
@@ -145,7 +168,10 @@ guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
   - 375 px sin scroll horizontal;
   - dos pestañas (revisión de #128). Un refresh de A en la otra pestaña no hizo ninguna petición. Con un
     descarte de A en vuelo entró B: la página pasó sola a las recomendaciones de B, y la confirmación
-    tardía de A no mostró aviso ni movió el foco.
+    tardía de A no mostró aviso ni movió el foco;
+  - el 401 tardío. `/usuarios/me/` con A1 tardó y respondió 401 después de que la otra pestaña guardara
+    A2. Se volvió a preguntar con A2 y la página quedó con el perfil y el par A2. Con el `AuthContext`
+    anterior, el mismo intercalado borró los dos tokens y mandó a `/login`.
 
 ## Fuera de esta tarea
 
