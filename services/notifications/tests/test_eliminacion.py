@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from shared.borrado.models import EstadoOrganizacion
 from shared.eliminacion import cabeceras_eliminacion
-from notifications.models import Alerta
+from notifications.models import Alerta, PreferenciaNotificacion
 
 
 @pytest.mark.django_db
@@ -26,6 +26,7 @@ def test_limpieza_borra_alertas_sin_tocar_otra_organizacion(monkeypatch):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     for tenant in (org, otra):
+        PreferenciaNotificacion.objects.create(organizacion_id=tenant, usuario_id="42")
         Alerta.objects.create(
             organizacion_id=tenant, tipo=Alerta.Tipo.PROXIMO_COBRO,
             titulo="Cobro", mensaje="Aviso", evento_id=uuid.uuid4(),
@@ -39,3 +40,5 @@ def test_limpieza_borra_alertas_sin_tocar_otra_organizacion(monkeypatch):
         assert respuesta.status_code == 204
     assert not Alerta.objects.filter(organizacion_id=org).exists()
     assert Alerta.objects.filter(organizacion_id=otra).count() == 1
+    assert not PreferenciaNotificacion.objects.filter(organizacion_id=org).exists()
+    assert PreferenciaNotificacion.objects.filter(organizacion_id=otra).count() == 1

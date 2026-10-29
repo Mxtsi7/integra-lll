@@ -1,14 +1,26 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from decimal import Decimal
+from threading import Barrier
 from unittest.mock import patch
+from uuid import uuid4
 
-from django.test import SimpleTestCase
+from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.utils import timezone
 
 from analytics.jobs import (
     generar_recomendaciones_consolidacion,
     procesar_evento_solapamiento,
 )
 from analytics.event_consumer import procesar_mensaje
+from analytics.models import (
+    ESTADO_RECOMENDACION_DESCARTADA,
+    ESTADO_RECOMENDACION_VIGENTE,
+    RecomendacionConsolidacion,
+    UmbralAhorro,
+)
 
 
 HOY = date(2026, 10, 17)
@@ -16,6 +28,7 @@ CORTE = date(2026, 9, 2)
 ORG = "11111111-1111-4111-8111-111111111111"
 OTRA_ORG = "22222222-2222-4222-8222-222222222222"
 EVENTO_ID = "33333333-3333-4333-8333-333333333333"
+EVENTO_2_ID = "77777777-7777-4777-8777-777777777777"
 CORRELACION_ID = "44444444-4444-4444-8444-444444444444"
 SUBSCRIPCION_1_ID = "55555555-5555-4555-8555-555555555555"
 SUBSCRIPCION_2_ID = "66666666-6666-4666-8666-666666666666"
@@ -59,10 +72,19 @@ def solapamiento(*ids, categoria="streaming", url="https://catalogo.example/over
     }
 
 
-def evento_solapamiento(*, version=2, organizacion_id=ORG):
+def evento_solapamiento(
+    *,
+    version=2,
+    organizacion_id=ORG,
+    evento_id=EVENTO_ID,
+    ocurrido_en="2026-10-17T12:00:00Z",
+    monto_candidata="9990.00",
+    evidencia_id="catalogo:overlap:1",
+):
     primera = suscripcion(
         SUBSCRIPCION_1_ID,
         "Servicio A",
+        monto=monto_candidata,
         ultimo_uso="2026-08-01",
     )
     segunda = suscripcion(
@@ -75,14 +97,14 @@ def evento_solapamiento(*, version=2, organizacion_id=ORG):
     return {
         "evento": "solapamiento.detectado",
         "version": version,
-        "id": EVENTO_ID,
-        "ocurrido_en": "2026-10-17T12:00:00Z",
+        "id": evento_id,
+        "ocurrido_en": ocurrido_en,
         "correlation_id": CORRELACION_ID,
         "organizacion_id": organizacion_id,
         "datos": {
             "suscripcion_ids": [SUBSCRIPCION_1_ID, SUBSCRIPCION_2_ID],
             "categoria": "streaming",
-            "evidencia_id": "catalogo:overlap:1",
+            "evidencia_id": evidencia_id,
             "evidencia_url": "https://catalogo.example/overlap/1",
             "evidencia_descripcion": "La fuente documenta funciones compartidas.",
             "suscripciones": [primera, segunda],
@@ -331,6 +353,10 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         self.assertEqual(generado["organizacion_id"], ORG)
         self.assertEqual(generado["datos"]["evento_origen_id"], EVENTO_ID)
         self.assertEqual(
+            generado["datos"]["ocurrido_en_origen"],
+            "2026-10-17T12:00:00Z",
+        )
+        self.assertEqual(
             generado["datos"]["suscripcion_candidata"]["id"],
             SUBSCRIPCION_1_ID,
         )
@@ -372,7 +398,19 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         with self.assertRaisesMessage(ValueError, "correlation_id"):
             procesar_evento_solapamiento(evento)
 
-    def test_rabbit_message_publishes_results_before_acknowledging_input(self):
+
+class RabbitMessageConsumerTests(TestCase):
+    def test_late_event_does_not_recreate_or_publish_after_deletion(self):
+        from shared.borrado.models import EstadoOrganizacion
+
+        EstadoOrganizacion.objects.create(organizacion_id=ORG, eliminada=True)
+        canal = CanalFalso()
+        procesar_mensaje(canal, 99, json.dumps(evento_solapamiento()).encode("utf-8"))
+        self.assertFalse(RecomendacionConsolidacion.objects.exists())
+        self.assertEqual(canal.publicados, [])
+        self.assertEqual(canal.confirmados, [99])
+
+    def test_rabbit_message_persists_and_publishes_before_acknowledging_input(self):
         canal = CanalFalso()
         procesar_mensaje(
             canal,
@@ -396,6 +434,25 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
             publicado["id"],
         )
 
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        persistida = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(str(persistida.id), publicado["id"])
+        self.assertEqual(str(persistida.organizacion_id), ORG)
+        self.assertEqual(str(persistida.suscripcion_id), SUBSCRIPCION_1_ID)
+        self.assertEqual(persistida.suscripcion_nombre, "Servicio A")
+        self.assertEqual(persistida.estado, ESTADO_RECOMENDACION_VIGENTE)
+        self.assertEqual(str(persistida.ahorro_estimado), "9990.00")
+        self.assertEqual(persistida.moneda, "CLP")
+        self.assertEqual(persistida.evidencia_id, "catalogo:overlap:1")
+        self.assertEqual(
+            persistida.evidencia_url,
+            "https://catalogo.example/overlap/1",
+        )
+        self.assertEqual(
+            persistida.suscripciones_relacionadas,
+            [{"id": SUBSCRIPCION_2_ID, "nombre": "Servicio B"}],
+        )
+
     def test_invalid_rabbit_message_is_dead_lettered(self):
         canal = CanalFalso()
         procesar_mensaje(canal, 18, b"not-json")
@@ -403,6 +460,27 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         self.assertEqual(canal.confirmados, [])
         self.assertEqual(canal.rechazados, [(18, False)])
         self.assertEqual(canal.publicados, [])
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 0)
+
+    def test_replay_is_idempotent_and_does_not_revive_a_discarded_recommendation(self):
+        body = json.dumps(evento_solapamiento()).encode("utf-8")
+        procesar_mensaje(CanalFalso(), 30, body)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        recomendacion = RecomendacionConsolidacion.objects.get()
+        identificador_original = recomendacion.id
+        recomendacion.estado = ESTADO_RECOMENDACION_DESCARTADA
+        recomendacion.save(update_fields=["estado", "actualizado_en"])
+
+        replay = CanalFalso()
+        procesar_mensaje(replay, 31, body)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        recomendacion.refresh_from_db()
+        self.assertEqual(recomendacion.id, identificador_original)
+        self.assertEqual(recomendacion.estado, ESTADO_RECOMENDACION_DESCARTADA)
+        self.assertEqual(replay.confirmados, [31])
+        self.assertEqual(len(replay.publicados), 1)
 
     def test_replayed_event_uses_snapshot_date_not_delivery_date(self):
         evento = evento_solapamiento()
@@ -435,3 +513,239 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
         self.assertEqual(replay_tardio.publicados, [])
         self.assertEqual(primera_entrega.rechazados, [])
         self.assertEqual(replay_tardio.rechazados, [])
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 0)
+
+    def test_new_snapshot_of_same_finding_updates_the_single_current_recommendation(self):
+        procesar_mensaje(
+            CanalFalso(),
+            40,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+        original = RecomendacionConsolidacion.objects.get()
+
+        procesar_mensaje(
+            CanalFalso(),
+            41,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    ocurrido_en="2026-10-18T12:00:00Z",
+                    monto_candidata="12000.00",
+                )
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(actual.id, original.id)
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+        self.assertEqual(str(actual.evento_origen_id), EVENTO_2_ID)
+        self.assertEqual(actual.estado, ESTADO_RECOMENDACION_VIGENTE)
+        self.assertEqual(actual.ocurrido_en_origen.date(), date(2026, 10, 18))
+
+    def test_new_snapshot_of_same_finding_is_listed_only_once(self):
+        UmbralAhorro.objects.create(moneda="CLP", monto=Decimal("1000.00"))
+        procesar_mensaje(
+            CanalFalso(),
+            42,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+        procesar_mensaje(
+            CanalFalso(),
+            43,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    ocurrido_en="2026-10-18T12:00:00Z",
+                )
+            ).encode("utf-8"),
+        )
+
+        respuesta = self.client.get(
+            "/api/recomendaciones/",
+            HTTP_X_ORGANIZACION_ID=ORG,
+        )
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["total"], 1)
+        self.assertEqual(len(respuesta.json()["results"]), 1)
+
+    def test_new_snapshot_does_not_revive_a_discarded_recommendation(self):
+        procesar_mensaje(
+            CanalFalso(),
+            44,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+        recomendacion = RecomendacionConsolidacion.objects.get()
+        recomendacion.estado = ESTADO_RECOMENDACION_DESCARTADA
+        recomendacion.save(update_fields=["estado", "actualizado_en"])
+
+        procesar_mensaje(
+            CanalFalso(),
+            45,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    ocurrido_en="2026-10-18T12:00:00Z",
+                    monto_candidata="12000.00",
+                )
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(actual.id, recomendacion.id)
+        self.assertEqual(actual.estado, ESTADO_RECOMENDACION_DESCARTADA)
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+
+    def test_out_of_order_snapshot_does_not_replace_newer_data(self):
+        procesar_mensaje(
+            CanalFalso(),
+            46,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    ocurrido_en="2026-10-18T12:00:00Z",
+                    monto_candidata="12000.00",
+                )
+            ).encode("utf-8"),
+        )
+        procesar_mensaje(
+            CanalFalso(),
+            47,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+        self.assertEqual(str(actual.evento_origen_id), EVENTO_2_ID)
+        self.assertEqual(actual.ocurrido_en_origen.date(), date(2026, 10, 18))
+
+    def test_same_finding_in_two_tenants_stays_isolated(self):
+        procesar_mensaje(
+            CanalFalso(),
+            48,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+        procesar_mensaje(
+            CanalFalso(),
+            49,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    organizacion_id=OTRA_ORG,
+                )
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 2)
+        self.assertEqual(
+            RecomendacionConsolidacion.objects.filter(
+                organizacion_id=ORG
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            RecomendacionConsolidacion.objects.filter(
+                organizacion_id=OTRA_ORG
+            ).count(),
+            1,
+        )
+
+    def test_different_evidence_is_a_different_finding(self):
+        procesar_mensaje(
+            CanalFalso(),
+            50,
+            json.dumps(evento_solapamiento()).encode("utf-8"),
+        )
+        procesar_mensaje(
+            CanalFalso(),
+            51,
+            json.dumps(
+                evento_solapamiento(
+                    evento_id=EVENTO_2_ID,
+                    ocurrido_en="2026-10-18T12:00:00Z",
+                    evidencia_id="catalogo:overlap:2",
+                )
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 2)
+        self.assertEqual(
+            RecomendacionConsolidacion.objects.filter(
+                estado=ESTADO_RECOMENDACION_VIGENTE
+            ).count(),
+            2,
+        )
+        self.assertEqual(
+            set(
+                RecomendacionConsolidacion.objects.values_list(
+                    "evidencia_id", flat=True
+                )
+            ),
+            {"catalogo:overlap:1", "catalogo:overlap:2"},
+        )
+
+    def test_business_identity_rejects_two_rows_for_the_same_finding(self):
+        datos = {
+            "organizacion_id": ORG,
+            "evento_origen_id": uuid4(),
+            "correlation_id": uuid4(),
+            "ocurrido_en": timezone.now(),
+            "ocurrido_en_origen": timezone.now(),
+            "categoria": "streaming",
+            "suscripcion_id": SUBSCRIPCION_1_ID,
+            "suscripcion_nombre": "Servicio A",
+            "suscripciones_relacionadas": [],
+            "motivo": "Posible consolidación a revisar en streaming.",
+            "ahorro_estimado": Decimal("9990.00"),
+            "moneda": "CLP",
+            "base_calculo": "monto recurrente 9990.00 CLP mensual",
+            "evidencia_id": "catalogo:overlap:1",
+            "evidencia_url": "https://catalogo.example/overlap/1",
+            "evidencia_descripcion": "La fuente documenta funciones compartidas.",
+        }
+        RecomendacionConsolidacion.objects.create(id=uuid4(), **datos)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            RecomendacionConsolidacion.objects.create(id=uuid4(), **datos)
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+
+
+class ConcurrentRecommendationConsolidationTests(TransactionTestCase):
+    def test_two_concurrent_events_for_the_same_finding_leave_one_current_row(self):
+        if not connection.features.has_select_for_update:
+            self.skipTest("La concurrencia real entre hilos requiere PostgreSQL.")
+
+        barrera = Barrier(2)
+        eventos = [
+            evento_solapamiento(monto_candidata="9990.00"),
+            evento_solapamiento(
+                evento_id=EVENTO_2_ID,
+                ocurrido_en="2026-10-18T12:00:00Z",
+                monto_candidata="12000.00",
+            ),
+        ]
+
+        def entregar(indice):
+            close_old_connections()
+            try:
+                barrera.wait(timeout=5)
+                procesar_mensaje(
+                    CanalFalso(),
+                    60 + indice,
+                    json.dumps(eventos[indice]).encode("utf-8"),
+                )
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(entregar, range(2)))
+
+        self.assertEqual(RecomendacionConsolidacion.objects.count(), 1)
+        actual = RecomendacionConsolidacion.objects.get()
+        self.assertEqual(actual.estado, ESTADO_RECOMENDACION_VIGENTE)
+        self.assertEqual(str(actual.ahorro_estimado), "12000.00")
+        self.assertEqual(str(actual.evento_origen_id), EVENTO_2_ID)

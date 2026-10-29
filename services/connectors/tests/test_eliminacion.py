@@ -3,7 +3,7 @@ import uuid
 import pytest
 from rest_framework.test import APIClient
 
-from connectors.models import CuentaConectada
+from connectors.models import AutorizacionPendiente, CuentaConectada, Importacion
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -19,15 +19,44 @@ def limpiar(org):
     )
 
 
-def test_csv_se_elimina_sin_tocar_otro_tenant(monkeypatch):
+def test_csv_se_elimina_sin_tocar_otro_tenant(monkeypatch, claves):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, otra = uuid.uuid4(), uuid.uuid4()
     propia = CuentaConectada.objects.create(organizacion_id=org, proveedor="csv", cuenta_externa="cartola")
     ajena = CuentaConectada.objects.create(organizacion_id=otra, proveedor="csv", cuenta_externa="cartola")
+    for tenant, cuenta in ((org, propia), (otra, ajena)):
+        AutorizacionPendiente.abrir(
+            organizacion_id=tenant, usuario_id="42", proveedor="gmail",
+            redirect_uri="https://example.com/callback",
+        )
+        Importacion.objects.create(
+            organizacion_id=tenant, usuario_id="42", origen="correo", cuenta=cuenta,
+        )
+        Importacion.objects.create(organizacion_id=tenant, usuario_id="42", origen="csv")
     assert limpiar(org).status_code == 204
     assert limpiar(org).status_code == 204
     assert not CuentaConectada.objects.filter(pk=propia.pk).exists()
     assert CuentaConectada.objects.filter(pk=ajena.pk).exists()
+    assert not Importacion.objects.filter(organizacion_id=org).exists()
+    assert Importacion.objects.filter(organizacion_id=otra).count() == 2
+    assert not AutorizacionPendiente.objects.filter(organizacion_id=org).exists()
+    assert AutorizacionPendiente.objects.filter(organizacion_id=otra).count() == 1
+
+
+def test_fk_de_importacion_ajena_bloquea_sin_modificar_datos(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra = uuid.uuid4(), uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="csv", cuenta_externa="cartola",
+    )
+    importacion = Importacion.objects.create(
+        organizacion_id=otra, usuario_id="42", origen="correo", cuenta=cuenta,
+    )
+    assert limpiar(org).status_code == 409
+    importacion.refresh_from_db()
+    assert importacion.cuenta_id == cuenta.pk
+    assert CuentaConectada.objects.filter(pk=cuenta.pk).exists()
+    assert not EstadoOrganizacion.objects.filter(organizacion_id=org, eliminada=True).exists()
 
 
 def test_revocacion_externa_pendiente_conserva_token_cifrado_para_reintento(monkeypatch, claves):

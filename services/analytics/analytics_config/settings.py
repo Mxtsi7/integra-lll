@@ -90,6 +90,24 @@ SPECTACULAR_SETTINGS = {
 
 RABBITMQ_URL = env("RABBITMQ_URL", default="")
 
+# ── Bajo uso (FE-29) ──────────────────────────────────────
+# Los tres parámetros de la fórmula. Son configurables porque el umbral
+# bueno depende del tipo de servicio y nadie lo sabe todavía: 60 minutos al
+# mes es razonable para un streaming y no quiere decir nada para una
+# herramienta que se abre dos veces y resuelve el trámite.
+#
+# Cada puntaje guarda en su evidencia el umbral con que se calculó, así que
+# cambiar esto no vuelve incomparables los puntajes viejos.
+UMBRAL_BAJO_USO_MINUTOS = env.int("UMBRAL_BAJO_USO_MINUTOS", default=60)
+
+# Cuánto hay que haber observado una suscripción antes de opinar sobre su
+# uso. Por debajo de esto la clasificación es `sin_datos`: es la diferencia
+# entre "no la usa" y "todavía no sabemos", y es un criterio de FE-29.
+UMBRAL_DIAS_OBSERVACION = env.int("UMBRAL_DIAS_OBSERVACION", default=30)
+
+# Cuántos meses mira la ventana.
+MESES_VENTANA_USO = env.int("MESES_VENTANA_USO", default=3)
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True

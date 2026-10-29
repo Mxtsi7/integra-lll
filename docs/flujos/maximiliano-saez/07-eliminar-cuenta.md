@@ -59,7 +59,11 @@ docker compose exec auth python manage.py procesar_eliminaciones
 
 Los entrypoints de Connectors, Analytics y Notifications esperan PostgreSQL y
 ejecutan `migrate --noinput` antes de servir HTTP. Por eso también aplican
-`borrado.0001_initial`; Connectors aplica además `0002_cuenta_revocada`.
+`borrado.0001_initial`; Connectors une `0002_cuenta_revocada` y
+`0003_autorizacion_y_revocacion` mediante `0004_unir_eliminacion_oauth`.
+Las dos migraciones históricas que agregan `revocado_en` conservan sus nombres
+y ahora comprueban si la columna ya existe antes de crearla. Esto permite
+actualizar desde cualquiera de las dos ramas sin duplicarla ni perder su fecha.
 El worker de eliminaciones espera los healthchecks de auth y de los cuatro
 consumidores. El worker de Connectors espera su servidor ya migrado y omite
 migraciones duplicadas con `APLICAR_MIGRACIONES=0`.
@@ -94,15 +98,19 @@ consultas ni claves foráneas entre esquemas (ADR-002).
 
 ## Datos cubiertos y límites de integración
 
-- Subscriptions: elimina cobros, registros de uso, historial de transiciones y suscripciones del UUID.
+- Subscriptions: elimina outbox, presupuestos, cobros, registros de uso,
+  historial de transiciones y suscripciones del UUID.
   Conserva el catálogo global de proveedores. Si una FK local inconsistente
   conecta un hijo de otro tenant, devuelve `409` y conserva los datos para que
   se corrija la inconsistencia, evitando el borrado ajeno por cascada.
-- Connectors: CSV y cuentas OAuth con
+- Connectors: elimina autorizaciones OAuth pendientes e importaciones, incluidas las que no tienen cuenta
+  asociada. Una importación ajena que referencia una cuenta propia bloquea
+  la limpieza con `409`, evitando modificar su FK por `SET_NULL`.
+  CSV y cuentas OAuth con
   revocación acreditada se eliminan si no hay revocaciones pendientes en el tenant.
   Si hay cuentas OAuth de Gmail/Outlook sin `revocado_en`, devuelve
-  `409 revocacion_proveedor_pendiente`: FE-05 todavía no provee adaptadores para
-  revocar la autorización externa. Conserva los tokens cifrados y la operación
+  `409 revocacion_proveedor_pendiente`: el handler exige la evidencia que registra
+  el adaptador FE-05 y no llama directamente al proveedor. Conserva los tokens cifrados y la operación
   pendiente para permitir esa revocación y reintentar después. El bloqueo revierte
   todos los cambios locales del intento, incluida la desconexión y la marca de
   eliminación; no acredita una limpieza terminada. Borrar el token
@@ -111,9 +119,11 @@ consultas ni claves foráneas entre esquemas (ADR-002).
   registrar `revocado_en` únicamente tras confirmar la revocación con el proveedor;
   el serializer público no permite editar esa fecha. El siguiente reintento
   elimina las credenciales locales y confirma la limpieza del esquema.
-- Analytics y Notifications: sus modelos de dominio están vacíos en esta versión;
-  sus ACK corresponden a esa ausencia real de datos. Nuevos modelos tenant deben
-  incorporarse al handler dueño antes de almacenar datos de producción.
+- Analytics: elimina cupos y sus documentos/intentos/consumos de IA, suscripciones
+  observadas, cobertura, uso proyectado y mensual, recomendaciones y descartes.
+  Conserva el catálogo global de umbrales de ahorro. Un descarte ajeno enlazado
+  a una recomendación propia bloquea con `409` antes de borrar por cascada.
+- Notifications: elimina alertas y preferencias de notificación del tenant.
 
 Cada consumidor instala la app `shared.borrado` y aplica su migración
 `borrado.0001_initial` en su propio esquema. Su fila `EstadoOrganizacion` guarda
@@ -129,13 +139,15 @@ el servicio. No usa Redis ni consulta auth para guardar esa marca.
 Los futuros trabajos internos que escriban datos deben utilizar el mismo
 contrato: `with shared.borrado.bloqueo.escritura_organizacion(organizacion_id):`.
 No se debe escribir directamente al ORM desde consumidores o sincronizadores
-sin adquirir ese bloqueo. Los servicios vacíos de esta versión aún no ejecutan
-trabajos de dominio.
+sin adquirir ese bloqueo. Los adaptadores de eventos de uso y recomendaciones
+de Analytics adquieren ese bloqueo: un evento tardío de una organización
+eliminada se descarta sin recrear datos ni republicar recomendaciones.
 
 El despliegue Kubernetes actual no incluye todos los consumidores; para completar
 la limpieza debe desplegarlos junto al worker/supervisor y el secreto compartido.
-Si falta alguno, la operación queda pendiente. Este PR no resuelve FE-05 ni
-declara cumplida la revocación externa de cuentas OAuth.
+Si falta alguno, la operación queda pendiente. FE-05 ya aporta adaptadores en
+`main`; este merge conserva draft y no declara acreditada la revocación externa
+de cuentas reales ni la coordinación automática de esa revocación al eliminar.
 
 ## Validación
 

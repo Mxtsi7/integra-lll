@@ -15,4 +15,3 @@ urlpatterns = [
     # queda en /api/conectores/. El gateway reenvía esa ruta tal cual.
     path("api/", include("connectors.urls")),
 ]
-

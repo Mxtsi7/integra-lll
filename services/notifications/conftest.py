@@ -68,4 +68,3 @@ def django_db_setup(django_db_blocker):
     yield
     with django_db_blocker.unblock():
         teardown_databases(db_cfg, verbosity=0)
-

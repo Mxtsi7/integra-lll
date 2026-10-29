@@ -81,6 +81,17 @@ DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ── Canales de notificación realmente entregables (FE-21 / RF-09) ────
+# Una persona puede PEDIR que le avisen por push; que el push llegue es otra
+# cosa, y hoy no hay quién lo entregue (eso es FE-22 y más).
+#
+# La preferencia se guarda igual —es lo que la persona quiere— y la API
+# informa esta lista aparte, para que el frontend no prometa un canal que no
+# va a cumplir. Guardar la intención y poder cumplirla son cosas distintas.
+#
+# Cuando el push exista, se agrega acá y nadie tiene que volver a elegirlo.
+CANALES_HABILITADOS = env.list("CANALES_HABILITADOS", default=["email", "in_app"])
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
@@ -99,4 +110,3 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
