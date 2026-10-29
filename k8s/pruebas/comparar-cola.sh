@@ -42,32 +42,40 @@ RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
 DRENAR_INTENTOS="${DRENAR_INTENTOS:-60}"
 DRENAR_PAUSA="${DRENAR_PAUSA:-2}"
 
-# ── La bandera original de CADA deployment, incluida su ausencia ─────────────
-# La comparación cambia EVENTOS_ASINCRONOS en la API y en el worker (ahí vive
-# el consumidor). La primera versión guardaba y restauraba solo la de la API:
-# el worker quedaba con la bandera de la última corrida. Y tampoco distinguía
-# "no estaba" de "estaba vacía". Lo encontró la revisión de la PR.
+# ── Solo se toca UN contenedor: el de la API, por nombre ─────────────────────
+# Lo único que lee EVENTOS_ASINCRONOS es el POST (events/modo.py). El
+# consumidor decide por la evidencia del evento, no por la bandera, así que el
+# pod del worker NO se toca: ni el contenedor `worker` ni `consumidor-eventos`.
 #
-# Se guarda "presente=<valor>" o "ausente", por deployment, y se restaura
-# exactamente eso: el valor, o la ausencia (`VAR-`).
-leer_bandera() {  # $1 = deployment
+# Y en la API se cambia el contenedor `subscriptions` con `--containers`
+# explícito. Sin eso, `kubectl set env` usa el comodín `*` y escribe la
+# variable en TODOS los contenedores del pod (incluido el initContainer
+# `migrar`), mientras que leer `containers[0]` guardaba uno solo: al restaurar
+# se copiaba el valor de un contenedor sobre los demás. Lo reprodujo la
+# revisión de la PR con el worker y el consumidor.
+#
+# Se guarda "presente=<valor>" o "ausente" (no es lo mismo que vacía) y se
+# restaura exactamente eso: el valor, o la ausencia (`VAR-`).
+DEPLOYMENT_API=subscriptions
+CONTENEDOR_API=subscriptions
+
+leer_bandera() {  # $1 = deployment, $2 = contenedor
   local valor
-  valor="$(kubectl get "deployment/$1" -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="EVENTOS_ASINCRONOS")]}{"presente="}{.value}{end}' 2>/dev/null || true)"
+  valor="$(kubectl get "deployment/$1" -o jsonpath="{range .spec.template.spec.containers[?(@.name==\"$2\")].env[?(@.name==\"EVENTOS_ASINCRONOS\")]}{\"presente=\"}{.value}{end}" 2>/dev/null || true)"
   if [ -n "$valor" ]; then printf '%s' "$valor"; else printf 'ausente'; fi
 }
 
-poner_bandera() {  # $1 = deployment, $2 = "presente=<valor>" o "ausente"
-  if [ "$2" = "ausente" ]; then
-    kubectl set env "deployment/$1" EVENTOS_ASINCRONOS- >/dev/null
+poner_bandera() {  # $1 = deployment, $2 = contenedor, $3 = "presente=<valor>" o "ausente"
+  if [ "$3" = "ausente" ]; then
+    kubectl set env "deployment/$1" --containers="$2" EVENTOS_ASINCRONOS- >/dev/null
   else
-    kubectl set env "deployment/$1" "EVENTOS_ASINCRONOS=${2#presente=}" >/dev/null
+    kubectl set env "deployment/$1" --containers="$2" "EVENTOS_ASINCRONOS=${3#presente=}" >/dev/null
   fi
 }
 
-ORIGINAL_API="$(leer_bandera subscriptions)"
-ORIGINAL_WORKER="$(leer_bandera subscriptions-worker)"
+ORIGINAL_API="$(leer_bandera "$DEPLOYMENT_API" "$CONTENEDOR_API")"
 
-# ── Restaurar los dos, y COMPROBAR el rollout de la restauración ─────────────
+# ── Restaurar lo que se tocó, y COMPROBAR el rollout de la restauración ──────
 # Corre en el trap EXIT, o sea también si la comparación se interrumpe a la
 # mitad. Ningún comando de acá puede fallar "suelto": con `set -e`, un fallo
 # dentro del trap corta la restauración a medias y además decide el código
@@ -80,22 +88,19 @@ restaurar() {
   RESTAURADO=1
   echo
   echo "── restaurando la bandera en los dos deployments ──"
-  local fallas=0 d
-  poner_bandera subscriptions "$ORIGINAL_API" || fallas=$((fallas + 1))
-  poner_bandera subscriptions-worker "$ORIGINAL_WORKER" || fallas=$((fallas + 1))
-  for d in subscriptions subscriptions-worker; do
-    if ! kubectl rollout status "deployment/$d" --timeout=180s >/dev/null; then
-      echo "   AVISO: el rollout de $d tras restaurar no terminó"
-      fallas=$((fallas + 1))
-    fi
-  done
+  local fallas=0
+  poner_bandera "$DEPLOYMENT_API" "$CONTENEDOR_API" "$ORIGINAL_API" || fallas=$((fallas + 1))
+  if ! kubectl rollout status "deployment/$DEPLOYMENT_API" --timeout=180s >/dev/null; then
+    echo "   AVISO: el rollout de $DEPLOYMENT_API tras restaurar no terminó"
+    fallas=$((fallas + 1))
+  fi
   kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
   if [ "$fallas" -gt 0 ]; then
     echo "   LA RESTAURACIÓN NO SE PUDO VERIFICAR ($fallas problema(s)). Revísala a mano:"
-    echo "   kubectl get deployment subscriptions subscriptions-worker -o yaml | grep -B1 -A1 EVENTOS_ASINCRONOS"
+    echo "   kubectl get deployment $DEPLOYMENT_API -o yaml | grep -B1 -A1 EVENTOS_ASINCRONOS"
     exit 1
   fi
-  echo "   subscriptions: $ORIGINAL_API · subscriptions-worker: $ORIGINAL_WORKER (rollout comprobado)"
+  echo "   $DEPLOYMENT_API/$CONTENEDOR_API: $ORIGINAL_API (rollout comprobado); el pod del worker no se tocó"
   exit "$codigo"
 }
 trap restaurar EXIT
@@ -157,12 +162,11 @@ correr() {
 
   echo
   echo "═══ $etiqueta (EVENTOS_ASINCRONOS=$modo) ═══"
-  kubectl set env deployment/subscriptions "EVENTOS_ASINCRONOS=$modo" >/dev/null
-  # El consumidor vive en el pod del worker y tambien mira la bandera: hay que
-  # cambiarsela a los dos o el modo 0 seguiria recalculando por partida doble.
-  kubectl set env deployment/subscriptions-worker "EVENTOS_ASINCRONOS=$modo" >/dev/null
-  kubectl rollout status deployment/subscriptions --timeout=180s
-  kubectl rollout status deployment/subscriptions-worker --timeout=180s
+  # Solo el contenedor de la API. El consumidor (pod del worker) no mira la
+  # bandera: con evidencia por evento, en modo 0 encuentra la de la API y
+  # omite, y en modo 1 no la encuentra y recalcula. No hay que tocarlo.
+  poner_bandera "$DEPLOYMENT_API" "$CONTENEDOR_API" "presente=$modo"
+  kubectl rollout status "deployment/$DEPLOYMENT_API" --timeout=180s
 
   # Desde aca se cuentan los recalculos de ESTA corrida. Con --since-time, asi
   # que tiene que ser UTC en el formato que acepta kubectl.
