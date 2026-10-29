@@ -81,13 +81,13 @@ con estado HTTP 409.
 
 `services/auth/app/management/commands/procesar_eliminaciones.py:14-29` ejecuta el reintento cada 60 segundos con `--continuo`. Un 409 permanente se convierte en un bucle de reintentos y en una organización que nunca se elimina.
 
-### 2.5. Lo que ya está probado
+### 2.5. Lo que estaba probado antes de la decisión 0
 
-Las pruebas actuales confirman el bloqueo seguro, no que la eliminación complete:
+Las pruebas de la fase 1 confirmaban el bloqueo seguro, no que la eliminación complete:
 
 - `services/connectors/tests/test_eliminacion.py:62-83`: Gmail falla, se conserva el token y se reintenta; cuando el proveedor confirma, la limpieza termina en 204.
-- `test_eliminacion.py:86-91`: una cuenta Outlook sin tokens sigue bloqueando, porque la ausencia de tokens no se toma como evidencia.
-- `test_eliminacion.py:94-115`: Gmail confirmado no se vuelve a revocar; Outlook pendiente mantiene el bloqueo y su token.
+- `test_eliminacion.py:86-91`: antes de la decisión 0, una cuenta Outlook sin tokens seguía bloqueando porque la ausencia de tokens no se tomaba como evidencia. Con la decisión 0, Outlook se cierra sin revocación y sin escribir `revocado_en`.
+- `test_eliminacion.py:94-115`: antes de la decisión 0, Gmail confirmado no se volvía a revocar y Outlook pendiente mantenía el bloqueo. Con la decisión 0, Gmail confirmado no se vuelve a revocar y Outlook termina en el mismo 204.
 - `test_eliminacion.py:135-150`: un ciphertext ilegible se conserva y no se llama al proveedor.
 
 ### 2.6. El plazo que se incumple
@@ -99,11 +99,11 @@ Las pruebas actuales confirman el bloqueo seguro, no que la eliminación complet
 No se encontró una decisión versionada sobre Outlook:
 
 - `docs/arquitectura/ADR-001` a `ADR-007` no tratan la revocación de Outlook.
-- `docs/flujos/maximiliano-saez/07-eliminar-cuenta.md:63-74` solo registra el estado actual: Outlook sigue pendiente y no se sustituye por desconexión, expiración o tokens nulos.
-- Los comentarios de `revocacion.py`, `proveedores.py` y las pruebas describen el comportamiento técnico, pero no autorizan una política de evidencia alternativa.
+- `docs/flujos/maximiliano-saez/07-eliminar-cuenta.md:63-74` registraba el estado anterior: Outlook seguía pendiente y no se sustituía por desconexión, expiración o tokens nulos. El flujo actual documenta la decisión de la sección 0.
+- Los comentarios de `revocacion.py`, `proveedores.py` y las pruebas describen el comportamiento técnico, pero no autorizaban una política de evidencia alternativa.
 - `CONTEXTO-PR72.md` y `PLAN-PR72.md` son insumos de trabajo de esta PR; no son una decisión aprobada ni están versionados.
 
-Por eso las opciones siguientes quedan abiertas.
+Por eso, en la fase 1, las opciones siguientes quedaron abiertas. La decisión de la sección 0 es la que rige el código actual.
 
 ## 4. Verificación contra documentación oficial de Microsoft
 
@@ -315,14 +315,15 @@ La fase 1 no la implementó. La fase 2 implementó las pruebas de `services/conn
 2. **Reintento sin evidencia:** un segundo `DELETE` vuelve a devolver 409; no se borra nada y no se escribe evidencia falsa.
 3. **Evidencia aceptada:**
    - opción 1: Graph responde 2xx y se escribe `revocado_en`;
-   - opción 3: se registra el estado de limitación con timestamp y versión de política, sin escribir `revocado_en`.
+   - opción 3 original: se registraba el estado de limitación con timestamp y versión de política, sin escribir `revocado_en`;
+   - opción 3 implementada en la fase 2: no se agrega un estado nuevo ni una migración; Outlook se acepta como limitación conocida, no escribe `revocado_en` y sus credenciales se borran con la fila al final.
 4. **Cierre:** el siguiente `DELETE` devuelve 204, la cuenta y sus datos se borran, y la organización queda eliminada.
 5. **Repetibilidad:** un `DELETE` posterior vuelve a devolver 204 sin volver a llamar al proveedor ni duplicar evidencia.
-6. **Gmail conviviendo con Outlook:** Gmail confirmado no se vuelve a revocar; el resultado final depende de que Outlook tenga evidencia aceptada. Se verifica el número de llamadas al proveedor.
+6. **Gmail conviviendo con Outlook:** Gmail confirmado no se vuelve a revocar; Outlook se acepta como limitación conocida y la limpieza termina en 204. Se verifica el número de llamadas al proveedor y que Outlook no tenga `revocado_en`.
 7. **Aislamiento:** una organización B no se ve afectada por la limpieza de A.
 8. **Credenciales ilegibles:** se conserva el ciphertext y no se llama al proveedor, igual que hoy.
 
-## 10. Impacto técnico si se aprueba (solo orientativo)
+## 10. Impacto técnico considerado (la fase 2 implementó la opción 3 sin migración)
 
 - Si se agrega un campo, crear una **migración nueva**; no editar `connectors.0003_autorizacion_y_revocacion`, que ya está publicada en `main`.
 - El validador de `LimpiezaConnectorsView` debe distinguir aceptado, pendiente y bloqueo permanente, y no convertir una limitación conocida en un 409 infinito sin visibilidad.
