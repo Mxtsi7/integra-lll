@@ -22,6 +22,11 @@ otro conjunto aislado. No se reciben UUID de organizaciones reales.
 
 La carga usa `Subscription.registrar_uso()` y una transacción con bloqueo por
 suscripción. No sobrescribe usos modificados ni crea registros de cero minutos.
+Al repetir, compara todos los registros de cada suscripción existente con las
+fechas y minutos esperados, incluidos duplicados, registros extra o ausentes y
+el conjunto vacío de `sin_uso`. Cualquier diferencia produce `CommandError` y
+revierte toda la ejecución: conserva las ediciones previas y no rellena usos
+eliminados ni borra registros adicionales para forzar el escenario.
 `ultima_actividad` refleja la ingestión actual, según el dominio VI-10; `fecha`
 conserva el día histórico de uso. `reciente` significa uso reciente al corte,
 no una fecha de alta simulada. La organización es un UUID de demostración: el

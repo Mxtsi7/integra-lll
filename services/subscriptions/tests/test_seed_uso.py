@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from io import StringIO
 from unittest.mock import patch
 
@@ -83,3 +84,29 @@ def test_no_sobrescribe_uso_demo_editado():
     assert RegistroUso.objects.count() == cantidad
     registro.refresh_from_db()
     assert registro.minutos == 999
+
+
+@pytest.mark.parametrize("cambio", ["sin_uso_con_registro", "fecha_movida", "registro_eliminado", "duplicado"])
+def test_detecta_cualquier_diferencia_y_revierte_la_carga_completa(cambio):
+    datos = cargar()
+    org_a, org_b = datos["organizaciones"]
+    escenario = "sin_uso" if cambio == "sin_uso_con_registro" else "reciente"
+    sub = Subscription.objects.get(pk=org_b["escenarios"][escenario]["suscripcion_id"])
+    if cambio == "sin_uso_con_registro":
+        sub.registrar_uso(45, fecha=date(2026, 1, 29), actor_rol="sistema")
+    elif cambio == "fecha_movida":
+        sub.usos.update(fecha=date(2026, 1, 28))
+    elif cambio == "registro_eliminado":
+        sub.usos.all().delete()
+    else:
+        sub.registrar_uso(45, fecha=date(2026, 1, 29), actor_rol="sistema")
+
+    # La repetición comienza creando este escenario: el conflicto posterior
+    # debe revertir también esas escrituras, preservando la edición previa.
+    Subscription.objects.filter(pk=org_a["escenarios"]["alto"]["suscripcion_id"]).delete()
+    suscripciones_antes = list(Subscription.objects.order_by("pk").values())
+    usos_antes = list(RegistroUso.objects.order_by("pk").values())
+    with pytest.raises(CommandError, match="uso demo fue modificado"):
+        cargar()
+    assert list(Subscription.objects.order_by("pk").values()) == suscripciones_antes
+    assert list(RegistroUso.objects.order_by("pk").values()) == usos_antes

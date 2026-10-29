@@ -67,13 +67,13 @@ class Command(BaseCommand):
                     registros = [(mes, 5) for mes in meses_anteriores(corte)]
                 elif escenario == "reciente":
                     registros = [(corte, 45)]
-                for fecha, minutos in registros:
-                    existentes = suscripcion.usos.filter(fecha=fecha)
-                    if existentes.exists():
-                        if existentes.count() != 1 or existentes.get().minutos != minutos:
-                            raise CommandError("El uso demo fue modificado; se revierte la carga para no sobrescribirlo.")
-                        continue
-                    suscripcion.registrar_uso(minutos, fecha=fecha, actor_rol="sistema")
+                if not creada:
+                    existentes = list(suscripcion.usos.order_by("fecha", "minutos").values_list("fecha", "minutos"))
+                    if existentes != sorted(registros):
+                        raise CommandError("El uso demo fue modificado; se revierte la carga para no sobrescribirlo.")
+                else:
+                    for fecha, minutos in registros:
+                        suscripcion.registrar_uso(minutos, fecha=fecha, actor_rol="sistema")
                 escenarios[escenario] = {"suscripcion_id": str(sid), "registros_esperados": len(registros)}
             resultado["organizaciones"].append({"organizacion_id": str(org), "escenarios": escenarios})
         self.stdout.write(json.dumps(resultado, ensure_ascii=False, sort_keys=True))
