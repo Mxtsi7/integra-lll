@@ -613,7 +613,9 @@ class TestDesconectar:
         respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
 
         assert respuesta.status_code == status.HTTP_200_OK
-        assert llamadas[0]["access_token"] == "ya29.token-vivo"
+        # Con los dos tokens se revoca el de REFRESCO: el de acceso vence en
+        # una hora y Google lo rechaza (ver test_revocacion_refresco.py).
+        assert llamadas[0]["access_token"] == "1//refresh-vivo"
 
         cuenta.refresh_from_db()
         assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
@@ -787,7 +789,8 @@ class TestReintento:
         llamadas = revocacion_falsa(monkeypatch, confirma=True)
         call_command("reintentar_revocaciones", aplicar=True, stdout=StringIO())
 
-        assert llamadas and llamadas[0]["access_token"] == "ya29.token-vivo"
+        # El de refresco, por lo mismo que al desconectar.
+        assert llamadas and llamadas[0]["access_token"] == "1//refresh-vivo"
         cuenta.refresh_from_db()
         assert cuenta.revocado_en is not None
         assert cuenta.access_token is None
