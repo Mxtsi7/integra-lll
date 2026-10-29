@@ -48,6 +48,9 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
             bloquear_organizacion(organizacion_id)
             if self._tenant_inconsistente(organizacion_id):
                 return Response({"code": "datos_tenant_inconsistentes"}, status=409)
+            self._versiones_preparadas = dict(CuentaConectada.objects.filter(
+                organizacion_id=organizacion_id,
+            ).values_list("pk", "credenciales_version"))
             cuentas = CuentaConectada.objects.filter(
                 organizacion_id=organizacion_id, revocado_en__isnull=True,
             ).exclude(proveedor=CuentaConectada.Proveedor.CSV)
@@ -73,6 +76,13 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
     def validar_limpieza(self, organizacion_id):
         if self._tenant_inconsistente(organizacion_id):
             return Response({"code": "datos_tenant_inconsistentes"}, status=409)
+        # El bloqueo de organización ya está tomado por la limpieza final.
+        # Una reconexión o cuenta nueva exige preparar de nuevo, incluso Outlook.
+        versiones_actuales = dict(CuentaConectada.objects.filter(
+            organizacion_id=organizacion_id,
+        ).values_list("pk", "credenciales_version"))
+        if versiones_actuales != self._versiones_preparadas:
+            return Response({"code": "credenciales_cambiadas"}, status=409)
         pendientes = list(
             CuentaConectada.objects.filter(
                 organizacion_id=organizacion_id, revocado_en__isnull=True,

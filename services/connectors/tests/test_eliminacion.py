@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from connectors.models import AutorizacionPendiente, CuentaConectada, Importacion
+from connectors.eliminacion import LimpiezaConnectorsView
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -260,8 +261,9 @@ def test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina(monkeypatch, cl
     )
     revocar = Mock(side_effect=[False, True])
     monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    operacion = uuid.uuid4()
 
-    assert limpiar(org).status_code == 409
+    assert limpiar(org, operacion).status_code == 409
 
     gmail.refresh_from_db()
     outlook.refresh_from_db()
@@ -277,12 +279,52 @@ def test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina(monkeypatch, cl
     assert revocar.call_args.args == ("gmail",)
     assert revocar.call_args.kwargs["access_token"] == "gmail-access"
 
-    assert limpiar(org).status_code == 204
+    assert limpiar(org, operacion).status_code == 204
 
     assert revocar.call_count == 2
     assert all(call.args == ("gmail",) for call in revocar.call_args_list)
     assert not CuentaConectada.objects.filter(pk=gmail.pk).exists()
     assert not CuentaConectada.objects.filter(pk=outlook.pk).exists()
+
+
+@pytest.mark.parametrize("cambio", ["reconexion", "cuenta_nueva"])
+def test_cambio_outlook_entre_preparacion_y_borrado_conserva_credenciales_nuevas(monkeypatch, claves, cambio):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    operacion = uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="outlook", cuenta_externa="outlook@test.cl",
+        access_token="anterior", refresh_token="refresh-anterior",
+    )
+    preparar = LimpiezaConnectorsView.preparar_limpieza
+
+    def preparar_y_cambiar(self, organizacion_id):
+        respuesta = preparar(self, organizacion_id)
+        if cambio == "reconexion":
+            CuentaConectada.objects.filter(pk=cuenta.pk).update(
+                access_token="nuevo", refresh_token="refresh-nuevo",
+                credenciales_version=cuenta.credenciales_version + 1,
+            )
+        else:
+            CuentaConectada.objects.create(
+                organizacion_id=org, proveedor="outlook", cuenta_externa="nueva@test.cl",
+                access_token="nuevo", refresh_token="refresh-nuevo",
+            )
+        return respuesta
+
+    monkeypatch.setattr(LimpiezaConnectorsView, "preparar_limpieza", preparar_y_cambiar)
+    respuesta = limpiar(org, operacion)
+    assert respuesta.status_code == 409
+    assert respuesta.json()["code"] == "credenciales_cambiadas"
+    assert not EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+    nueva = CuentaConectada.objects.get(pk=cuenta.pk) if cambio == "reconexion" else CuentaConectada.objects.get(cuenta_externa="nueva@test.cl")
+    assert nueva.access_token == "nuevo"
+    assert nueva.refresh_token == "refresh-nuevo"
+    assert nueva.revocado_en is None
+    # La misma operación puede reintentarse sin destruir la concesión nueva
+    # durante el 409; el siguiente intento la prepara y completa la limpieza.
+    monkeypatch.setattr(LimpiezaConnectorsView, "preparar_limpieza", preparar)
+    assert limpiar(org, operacion).status_code == 204
 
 
 def test_gmail_ya_confirmado_no_se_vuelve_a_revocar_y_outlook_termina(monkeypatch, claves):

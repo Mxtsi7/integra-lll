@@ -71,7 +71,9 @@ agregar su destino antes de que reciba datos.
   preparación independiente: sobrevive aunque otra cuenta bloquee la limpieza. No
   se vuelve a revocar esa concesión en cada reintento. La limpieza final vuelve a
   verificar la evidencia bajo bloqueo, por si hubo reconexión entre preparación y
-  borrado.
+  borrado. Compara además los identificadores y `credenciales_version` de todas
+  las cuentas preparadas: una reconexión o cuenta nueva, también Outlook,
+  devuelve `409 credenciales_cambiadas` sin destruir sus nuevas credenciales.
 - Outlook se cierra **sin revocación ante Microsoft**. La limpieza no llama a
   Graph, no escribe `revocado_en` y no usa ese campo con otro significado. Las
   credenciales cifradas se destruyen únicamente en el borrado final, dentro de
@@ -80,8 +82,8 @@ agregar su destino antes de que reciba datos.
   razón es que `revokeSignInSessions` no está soportado para cuentas personales
   y, para trabajo/escuela, exige consentimiento administrativo y afecta a todas
   las aplicaciones del usuario. Esto es una **mitigación con riesgo residual** y
-  Outlook queda como **incumplimiento documentado de RF-01.7** hasta que el
-  equipo ratifique una enmienda; la decisión completa está en
+  cuenta con el [visto bueno técnico de Felipe / FE-05](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
+  La enmienda de RF-01.7 está registrada para ratificación del equipo; la decisión completa está en
   `docs/decisiones/mx-07-outlook-revocacion.md`.
 - Riesgo residual de Outlook: un refresh token ya emitido por Microsoft podría
   seguir válido hasta que expire o hasta que el usuario retire el acceso. Ya no
@@ -94,8 +96,10 @@ agregar su destino antes de que reciba datos.
   - cuenta de trabajo/escuela: el administrador del tenant o el portal de
     aplicaciones de Microsoft. Esta vía **no está verificada** y queda fuera del
     alcance de esta PR.
-  La pantalla de borrado de cuenta (AN-18) todavía no muestra este aviso; se
-  recomienda hacerlo en el informe, sin implementarlo en esta PR.
+  El diálogo web (AN-18) muestra el aviso antes de confirmar, sin habilitar su
+  bandera de disponibilidad. El flujo móvil AN-19 debe mostrarlo al implementarse.
+  La política también permite resolver operaciones durables Outlook ya pendientes;
+  el worker vuelve a intentar sus mismos destinos y solo retira Connectors tras 204.
 - `pendientes_de_revocar` y `reintentar_revocaciones` excluyen a Outlook: su
   limitación es permanente, no un fallo reintentable. La limpieza registra en
   logs estructurados cuántas cuentas se cerraron sin revocación del proveedor,

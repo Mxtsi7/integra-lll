@@ -1,14 +1,14 @@
 # MX-07 — Evidencia de revocación para Outlook
 
-- **Estado:** decisión registrada el 29 de octubre de 2026; **visto bueno de Felipe Orellana PENDIENTE**.
+- **Estado:** opción 3 implementada y con visto bueno técnico de Felipe Orellana el 29 de octubre de 2026; enmienda de RF-01.7 registrada para ratificación de producto/equipo.
 - **Fecha:** 29 de octubre de 2026.
 - **Alcance:** PR #72, eliminación de organización, servicio Connectors / FE-05.
-- **Decidido por:** [NOMBRE], usuario de esta sesión (completar antes de publicar).
-- **Visto bueno de Felipe Orellana (Connectors / FE-05):** PENDIENTE.
+- **Propuesta de producto:** Maximiliano Sáez, autor de MX-07 / PR #72; la aceptación formal de producto se registra por separado, sin simular una firma.
+- **Visto bueno de Felipe Orellana (Connectors / FE-05):** [opción 3 aprobada, alcance y condiciones](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
 - **Firma de Maximiliano Sáez (producto / PR #72):** no registrada; este documento no la simula.
 - **Naturaleza:** registra la opción elegida y sus límites. No acredita que Outlook cumpla RF-01.7 ni sustituye la ratificación pendiente.
 - **Estado de la fase 1:** investigación y documentación. No se modificaron `eliminacion.py`, `revocacion.py`, `proveedores.py` ni migraciones; no se ejecutó ninguna llamada de revocación contra Microsoft.
-- **Estado de la fase 2:** implementada la opción 3 en código y pruebas; ver la sección 0 y el informe del PR.
+- **Estado de la fase 2:** implementada la opción 3 en código y pruebas; ver la sección 0 y [el flujo vigente](../flujos/maximiliano-saez/07-eliminar-cuenta.md).
 
 ## 0. Decisión registrada
 
@@ -17,8 +17,13 @@
 - **Qué se destruye:** nuestras credenciales cifradas de Outlook, únicamente como parte final de la limpieza, en la misma transacción que borra las filas de `CuentaConectada`. Nunca en una ruta que termine en 409.
 - **Qué NO se hace:** no se escribe `revocado_en` para Outlook, no se reutiliza ese campo con otro significado, no se llama a Microsoft Graph desde la limpieza, no se retira Connectors de los destinos y no se edita la migración publicada `0003_autorizacion_y_revocacion`.
 - **Riesgo residual:** un refresh token que Microsoft ya emitió podría seguir válido hasta que expire o hasta que el usuario retire el acceso desde su cuenta Microsoft. Nosotros ya no tendremos copia, así que explotarlo exigiría que alguien hubiera obtenido el token antes. No se controla lo que Microsoft haga con tokens ya emitidos.
-- **Requisito:** RF-01.7 **no se modifica**. Outlook queda como **incumplimiento documentado de RF-01.7 con mitigación y riesgo residual**, hasta que el equipo ratifique una enmienda. La propuesta de enmienda no aprobada se incluye en `INFORME-PR72.md`.
-- **Ratificación pendiente:** el visto bueno de Felipe Orellana y la propuesta de enmienda a cargo del dueño de la matriz de requisitos (MX-22) siguen PENDIENTES. Este documento no afirma que estén aprobados.
+- **Requisito:** la [enmienda de RF-01.7](../investigacion/requisitos-vigentes.md#rf-017--eliminar-cuenta-y-datos-personales) registra la excepción propuesta por Felipe. Su visto bueno técnico no se presenta como ratificación del equipo ni como acreditación de un despliegue o del plazo de 72 horas.
+- **Ratificación pendiente:** aceptación de producto/equipo de la enmienda, trazada en [MX-22](../investigacion/MX-22-matriz-requisitos.md). El visto bueno de Connectors / FE-05 ya está registrado y no se vuelve a pedir.
+- **Alcance acordado:** todo Outlook, personal y de trabajo/escuela, sin agregar `tid`, campos de evidencia ni migraciones. Gmail conserva la confirmación del proveedor. Los conteos de cierre sin revocación en logs no contienen correos ni tokens; no se exige un campo nuevo en una fila que será eliminada.
+- **Operaciones ya pendientes:** la política también se aplica a las operaciones durables existentes. El siguiente intento del worker conserva su identificador y destinos; Connectors responde 204 al completar la limpieza y Auth retira ese destino. No se descartan destinos ni se fabrican confirmaciones retrospectivas.
+- **Reconexión:** la preparación captura identificadores y `credenciales_version`; la limpieza final vuelve a compararlos bajo bloqueo. Si cambia una versión o aparece una cuenta nueva, responde `409 credenciales_cambiadas`, conserva las nuevas credenciales y prepara otra vez en el siguiente intento.
+- **Aviso al titular:** el diálogo web informa antes de confirmar que Microsoft no revoca automáticamente el acceso y enlaza la retirada del consentimiento en cuentas personales. La pantalla móvil sigue siendo AN-19, sin flujo de confirmación implementado; debe incluir el aviso al implementarlo. No se habilita el borrado web cambiando su bandera en esta PR.
+- **Fuera de esta PR:** Felipe conserva la tarea de alinear la desconexión Outlook ordinaria de FE-05; esta decisión regula la eliminación de organización.
 
 ### Hechos de Microsoft citados en la decisión
 
@@ -267,7 +272,7 @@ No significa “Microsoft revocó el token”. Significa: “cerramos el acceso 
 
 ## 7. Recomendación original (propuesta, no aprobada; superada por la decisión 0)
 
-**Nota de implementación:** la fase 2 implementó la opción 3 por decisión del usuario de la sesión, con el visto bueno de Felipe **PENDIENTE**. La condición 7 de esta recomendación —firma de Felipe y Maxi antes de tocar código— **no se cumplió tal como estaba escrita**; queda registrada como ratificación pendiente y no se presenta como aprobada.
+**Nota histórica:** la fase 2 se implementó antes del visto bueno de Felipe. La condición 7 original —firma de Felipe y Maxi antes de tocar código— no se cumplió en ese orden. El visto bueno técnico posterior está enlazado en la sección 0; la aceptación de producto/equipo sigue diferenciada de esa aprobación.
 
 **Propuesta:** adoptar la **opción 3**, acotada a Outlook, con un estado explícito distinto de `revocado_en` y una instrucción al usuario para retirar el acceso desde su cuenta Microsoft.
 
@@ -286,6 +291,8 @@ La propuesta incluye estas condiciones mínimas:
 **Advertencia:** esta recomendación **no** debe interpretarse como aprobada. Si Maxi o Felipe consideran inaceptable el riesgo de que el refresh token siga vivo hasta 90 días, la opción 3 no sirve y habría que elegir entre limitar el producto a cuentas de trabajo/escuela con consentimiento administrativo (opción 1), aceptar la intervención manual (opción 4) o mantener la PR bloqueada.
 
 ## 8. Preguntas concretas para la decisión
+
+Estas preguntas conservan el análisis original. Las respuestas vigentes de Felipe están en [su comentario de aprobación](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231) y se incorporan en la sección 0: no se exige un campo nuevo, se cubre todo Outlook, se aplica a operaciones pendientes y se revalida la versión de credenciales bajo bloqueo. No son preguntas técnicas todavía sin responder.
 
 ### Para Felipe Orellana (Connectors / FE-05)
 
