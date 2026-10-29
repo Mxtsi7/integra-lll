@@ -1,3 +1,6 @@
+import logging
+import uuid
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -5,11 +8,12 @@ import requests
 
 import pytest
 from django.core.cache import caches
+from django.utils import timezone
 from redis.exceptions import ConnectionError
 from rest_framework.test import APIClient
 
 from app.eliminacion import SERVICIOS, procesar_eliminacion
-from app.models import EliminacionOrganizacion, Organizacion, User
+from app.models import EliminacionOrganizacion, EliminacionUsuario, Organizacion, User
 from app.serializers import RegisterSerializer
 
 pytestmark = pytest.mark.django_db
@@ -264,11 +268,82 @@ def test_destinos_se_guardan_al_crear_y_no_se_recortan_en_reintento(monkeypatch)
 
 @pytest.mark.parametrize("valor", ["", "subcriptions", "subscriptions,subscriptions"])
 def test_destinos_invalidos_no_eliminan_usuario(monkeypatch, valor):
-    from django.core.exceptions import ImproperlyConfigured
     monkeypatch.setenv("ELIMINACION_DESTINOS", valor)
     org = Organizacion.objects.create(nombre="Conservar")
     user = usuario(org)
-    with pytest.raises(ImproperlyConfigured):
-        eliminar(user, confirmacion_organizacion="ELIMINAR")
+    respuesta = eliminar(user, confirmacion_organizacion="ELIMINAR")
+    assert respuesta.status_code == 503
+    assert respuesta.data["code"] == "eliminacion_no_configurada"
     assert User.objects.filter(pk=user.pk).exists()
     assert not EliminacionOrganizacion.objects.exists()
+
+
+@pytest.mark.parametrize("rol,cuerpo", [
+    (User.Rol.TITULAR, {"confirmacion_organizacion": "ELIMINAR"}),  # último titular: sería 202
+    (User.Rol.INTEGRANTE, {}),  # limpieza personal: sería 204
+])
+def test_sin_secreto_interno_no_elimina_ni_revoca_sesiones(monkeypatch, rol, cuerpo):
+    """Con el .env.example tal como viene, ninguna limpieza se podría firmar."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "")
+    org = Organizacion.objects.create(nombre="Conservar")
+    titular = usuario(org)
+    integrante = usuario(org, "integrante@test.cl", User.Rol.INTEGRANTE)
+    cuenta = titular if rol == User.Rol.TITULAR else integrante
+    caches["sesiones"].set(f"usuario:{cuenta.pk}", "sesion")
+    respuesta = eliminar(cuenta, **cuerpo)
+    assert respuesta.status_code == 503
+    assert respuesta.data["code"] == "eliminacion_no_configurada"
+    assert User.objects.filter(pk__in=[titular.pk, integrante.pk]).count() == 2
+    assert caches["sesiones"].get(f"usuario:{cuenta.pk}") == "sesion"
+    assert not EliminacionOrganizacion.objects.exists()
+    assert not EliminacionUsuario.objects.exists()
+
+
+def test_worker_sin_secreto_conserva_pendiente_y_registra_la_causa(monkeypatch, caplog):
+    org = Organizacion.objects.create(nombre="Pendiente")
+    operacion = EliminacionOrganizacion.objects.create(organizacion_id=org.pk, pendientes=list(SERVICIOS))
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "")
+    caplog.set_level(logging.WARNING, logger="app.eliminacion")
+    with patch("app.eliminacion.requests.delete") as enviar:
+        assert not procesar_eliminacion(operacion.pk)
+        enviar.assert_not_called()
+    operacion.refresh_from_db()
+    assert operacion.pendientes == list(SERVICIOS)
+    assert operacion.completado_en is None
+    assert Organizacion.objects.filter(pk=org.pk).exists()
+    assert "ELIMINACION_INTERNA_SECRET no configurado" in caplog.text
+    assert str(operacion.pk) in caplog.text
+
+
+def test_worker_registra_por_que_un_destino_sigue_pendiente(caplog):
+    org = Organizacion.objects.create(nombre="Pendiente")
+    operacion = EliminacionOrganizacion.objects.create(
+        organizacion_id=org.pk, pendientes=["subscriptions", "connectors"],
+    )
+    caplog.set_level(logging.WARNING, logger="app.eliminacion")
+    with patch("app.eliminacion.requests.delete", side_effect=[
+        requests.ConnectTimeout(), SimpleNamespace(status_code=409),
+    ]):
+        assert not procesar_eliminacion(operacion.pk)
+    assert "subscriptions: sin respuesta (ConnectTimeout)" in caplog.text
+    assert "connectors: respondió 409" in caplog.text
+
+
+@pytest.mark.parametrize("por_usuario", [False, True])
+def test_reprocesar_operacion_completada_no_reescribe_completado_en(por_usuario):
+    """`completado_en` es la fecha que se mide contra las 72 h."""
+    terminada = timezone.now() - timedelta(days=1)
+    org = uuid.uuid4()
+    if por_usuario:
+        operacion = EliminacionUsuario.objects.create(
+            organizacion_id=org, usuario_id=42, pendientes=[], completado_en=terminada,
+        )
+    else:
+        operacion = EliminacionOrganizacion.objects.create(
+            organizacion_id=org, pendientes=[], completado_en=terminada,
+        )
+    with patch("app.eliminacion.requests.delete") as enviar:
+        assert procesar_eliminacion(operacion.pk, por_usuario=por_usuario)
+        enviar.assert_not_called()
+    operacion.refresh_from_db()
+    assert operacion.completado_en == terminada

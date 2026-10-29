@@ -1,7 +1,9 @@
 """RF-01.7: reautenticación, revocación y coordinación durable entre servicios."""
 
+import logging
 import os
 import uuid
+from datetime import timedelta
 
 import requests
 from django.core.cache import caches
@@ -18,6 +20,8 @@ from rest_framework.response import Response
 from shared.eliminacion import cabeceras_eliminacion
 from .models import ConsentimientoDisociado, EliminacionOrganizacion, EliminacionUsuario, Organizacion, User
 
+logger = logging.getLogger(__name__)
+
 SERVICIOS = {"subscriptions": 8002, "connectors": 8003, "analytics": 8004, "notifications": 8005}
 
 
@@ -29,12 +33,28 @@ def destinos_eliminacion():
     return destinos
 
 
+def configuracion_eliminacion():
+    """Destinos y secreto, comprobados antes de borrar a nadie.
+
+    Sin secreto el worker no puede firmar ninguna limpieza: los usuarios se
+    borrarían sin vuelta atrás y la operación quedaría pendiente para siempre.
+    """
+    destinos = destinos_eliminacion()
+    if not os.environ.get("ELIMINACION_INTERNA_SECRET", ""):
+        raise ImproperlyConfigured("ELIMINACION_INTERNA_SECRET no configurado")
+    return destinos
+
+
 def conservar_consentimientos(usuarios):
-    eliminado_en = timezone.now()
+    # Solo el día: el instante exacto se cruzaba con `creado_en` de la operación
+    # de borrado, que conserva la persona y la organización.
+    eliminado_en = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        retener_hasta = eliminado_en.replace(year=eliminado_en.year + 6)
+        aniversario = eliminado_en.replace(year=eliminado_en.year + 6)
     except ValueError:  # 29 de febrero: el sexto año puede no ser bisiesto.
-        retener_hasta = eliminado_en.replace(year=eliminado_en.year + 6, day=28)
+        aniversario = eliminado_en.replace(year=eliminado_en.year + 6, day=28)
+    # Hasta el fin del día del aniversario: truncar no acorta los seis años.
+    retener_hasta = aniversario + timedelta(days=1)
     ConsentimientoDisociado.objects.bulk_create([
         ConsentimientoDisociado(
             consentimiento_en=fecha, eliminado_en=eliminado_en, retener_hasta=retener_hasta,
@@ -57,12 +77,17 @@ class EliminarCuentaMixin:
                    400: OpenApiResponse(description="Confirmación o contraseña ausente."),
                    403: OpenApiResponse(description="Identidad o contraseña inválida."),
                    409: OpenApiResponse(description="Último titular: falta confirmacion_organizacion=ELIMINAR."),
-                   503: OpenApiResponse(description="No se pudieron revocar las sesiones; sin eliminación.")},
+                   503: OpenApiResponse(description="No se pudieron revocar las sesiones o la limpieza entre servicios no está configurada; sin eliminación.")},
     )
     def delete(self, request, *args, **kwargs):
         serializer = EliminarCuentaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        destinos = destinos_eliminacion()
+        try:
+            destinos = configuracion_eliminacion()
+        except ImproperlyConfigured as exc:
+            # Mejor no borrar que dejar una limpieza que nunca podrá terminar.
+            logger.error("Eliminación de cuentas no disponible: %s", exc)
+            return Response({"code": "eliminacion_no_configurada"}, status=503)
         try:
             usuario_id = int(request.headers.get("X-Usuario-Id", ""))
             if not 0 < usuario_id <= 2**63 - 1:
@@ -114,6 +139,9 @@ def procesar_eliminacion(operacion_id, *, por_usuario=False):
     with transaction.atomic():
         modelo = EliminacionUsuario if por_usuario else EliminacionOrganizacion
         operacion = modelo.objects.select_for_update().get(pk=operacion_id)
+        if operacion.completado_en is not None:
+            # Reprocesarla no reescribe la fecha que se mide contra las 72 h.
+            return True
         for servicio in list(operacion.pendientes):
             base = os.environ.get(f"URL_{servicio.upper()}", f"http://{servicio}:{SERVICIOS[servicio]}")
             recurso = f"/internal/organizaciones/{operacion.organizacion_id}/"
@@ -122,17 +150,30 @@ def procesar_eliminacion(operacion_id, *, por_usuario=False):
                 recurso += f"usuarios/{operacion.usuario_id}/"
                 destino_firma += f":usuario:{operacion.usuario_id}"
             try:
+                firma = cabeceras_eliminacion(destino_firma, operacion.organizacion_id, operacion.pk)
+            except ValueError as exc:
+                # Sin secreto no se puede firmar para ningún destino: queda
+                # pendiente, pero diciendo por qué.
+                logger.error("Limpieza %s pendiente: no se pudo firmar (%s)", operacion.pk, exc)
+                break
+            try:
                 respuesta = requests.delete(
                     f"{base.rstrip('/')}{recurso}",
                     json={"operacion_id": str(operacion.pk)},
-                    headers={**cabeceras_eliminacion(destino_firma, operacion.organizacion_id, operacion.pk),
-                             "X-Correlation-ID": str(operacion.pk)},
+                    headers={**firma, "X-Correlation-ID": str(operacion.pk)},
                     timeout=(2, 5), allow_redirects=False,
                 )
-            except (requests.RequestException, ValueError):
+            except (requests.RequestException, ValueError) as exc:
+                logger.warning(
+                    "Limpieza %s pendiente en %s: sin respuesta (%s)", operacion.pk, servicio, type(exc).__name__,
+                )
                 continue
             if respuesta.status_code == 204:
                 operacion.pendientes.remove(servicio)
+            else:
+                logger.warning(
+                    "Limpieza %s pendiente en %s: respondió %s", operacion.pk, servicio, respuesta.status_code,
+                )
         if not operacion.pendientes:
             # No hay FK entre servicios; cada ACK corresponde a su esquema.
             if not por_usuario:

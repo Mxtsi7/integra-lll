@@ -175,6 +175,8 @@ services:
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # Mismo código e imagen que analytics; migra solo el servidor. Si los dos
+  # migraran el mismo esquema a la vez, uno muere con UniqueViolation.
   analytics-worker:
     build: ./services/analytics
     command: ["python", "manage.py", "consumir_solapamientos"]
@@ -184,7 +186,9 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: analytics
+      APLICAR_MIGRACIONES: "0"
     depends_on:
+      analytics: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 

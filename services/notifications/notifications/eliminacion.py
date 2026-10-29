@@ -21,7 +21,12 @@ class LimpiezaUsuarioNotificationsView(APIView):
     def delete(self, request, organizacion_id, usuario_id):
         validar_solicitud_eliminacion(request, f"notifications:usuario:{usuario_id}", organizacion_id)
         with transaction.atomic():
-            bloquear_organizacion(organizacion_id)
+            estado = bloquear_organizacion(organizacion_id)
+            if estado.eliminada:
+                # La limpieza de la organización ya borró todo, también lo de
+                # esta persona. Recrear la marca dejaría una fila que nadie
+                # vuelve a borrar en un tenant eliminado.
+                return Response(status=204)
             UsuarioEliminado.objects.get_or_create(
                 organizacion_id=organizacion_id, usuario_id=str(usuario_id),
             )

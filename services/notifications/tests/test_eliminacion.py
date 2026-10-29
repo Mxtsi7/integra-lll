@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 
 from shared.borrado.models import EstadoOrganizacion
 from shared.eliminacion import cabeceras_eliminacion
-from notifications.models import Alerta, PreferenciaNotificacion
+from notifications.models import Alerta, PreferenciaNotificacion, UsuarioEliminado
 
 
 @pytest.mark.django_db
@@ -71,3 +71,29 @@ def test_limpieza_personal_firmada_aislada_e_idempotente(monkeypatch):
         "/api/preferencias-alertas/", HTTP_X_ORGANIZACION_ID=str(org), HTTP_X_USUARIO_ID="42",
     ).status_code == 403
     assert not PreferenciaNotificacion.objects.filter(organizacion_id=org, usuario_id="42").exists()
+
+
+@pytest.mark.django_db
+def test_limpieza_personal_que_llega_despues_de_la_organizacion_no_recrea_datos(monkeypatch):
+    """El worker procesa primero las organizaciones: el ACK personal llega tarde."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra = uuid.uuid4(), uuid.uuid4()
+    operacion_org, operacion_personal = uuid.uuid4(), uuid.uuid4()
+    for tenant in (org, otra):
+        PreferenciaNotificacion.objects.create(organizacion_id=tenant, usuario_id="42")
+
+    def borrar(ruta, destino, operacion):
+        firma = cabeceras_eliminacion(destino, org, operacion)
+        return APIClient().delete(
+            ruta, {"operacion_id": str(operacion)}, format="json",
+            **{f"HTTP_{key.upper().replace('-', '_')}": value for key, value in firma.items()},
+        )
+
+    assert borrar(f"/internal/organizaciones/{org}/", "notifications", operacion_org).status_code == 204
+    personal = f"/internal/organizaciones/{org}/usuarios/42/"
+    for _ in range(2):
+        assert borrar(personal, "notifications:usuario:42", operacion_personal).status_code == 204
+    assert not UsuarioEliminado.objects.filter(organizacion_id=org).exists()
+    assert not PreferenciaNotificacion.objects.filter(organizacion_id=org).exists()
+    assert EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+    assert PreferenciaNotificacion.objects.filter(organizacion_id=otra, usuario_id="42").exists()

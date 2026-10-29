@@ -392,6 +392,53 @@ def test_gmail_confirmado_en_la_misma_limpieza_y_outlook_termina(monkeypatch, cl
     assert not CuentaConectada.objects.filter(pk=outlook.pk).exists()
 
 
+def test_revocacion_confirmada_sobrevive_a_un_fallo_con_otra_cuenta(monkeypatch, claves):
+    """Google ya revocó la primera: un fallo con la segunda no la devuelve a `conectada`."""
+    from django.db import OperationalError
+
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuentas = {
+        f"ya29.{letra}": CuentaConectada.objects.create(
+            organizacion_id=org, proveedor="gmail",
+            cuenta_externa=f"{letra.lower()}@gmail.com", access_token=f"ya29.{letra}",
+        )
+        for letra in "AB"
+    }
+    enviados = []
+
+    def revocar(proveedor, *, access_token):
+        enviados.append(access_token)
+        if len(enviados) == 2:
+            raise OperationalError("se cayó la conexión de la petición")
+        return True
+
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    with pytest.raises(OperationalError):
+        limpiar(org)
+
+    confirmada, interrumpida = (cuentas[token] for token in enviados)
+    confirmada.refresh_from_db()
+    assert confirmada.revocado_en is not None
+    assert confirmada.access_token is None
+    assert confirmada.estado == CuentaConectada.Estado.DESCONECTADA
+    interrumpida.refresh_from_db()
+    assert interrumpida.revocado_en is None
+    assert interrumpida.access_token == enviados[1]
+    assert interrumpida.estado == CuentaConectada.Estado.CONECTADA
+
+    # El reintento solo le manda al proveedor la que faltaba.
+    pendiente = enviados[1]
+    enviados.clear()
+    monkeypatch.setattr(
+        "connectors.proveedores.revocar",
+        lambda proveedor, *, access_token: enviados.append(access_token) or True,
+    )
+    assert limpiar(org).status_code == 204
+    assert enviados == [pendiente]
+    assert not CuentaConectada.objects.filter(organizacion_id=org).exists()
+
+
 def test_reentrega_de_la_misma_operacion_no_duplica_efectos(monkeypatch, claves):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org = uuid.uuid4()

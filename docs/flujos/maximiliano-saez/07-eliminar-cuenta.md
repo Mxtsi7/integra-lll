@@ -16,8 +16,11 @@ contexto del Gateway; nunca se selecciona el usuario desde el cuerpo.
   y devuelve 202 con `operacion_id`. Auth conserva la organización hasta los ACK.
 
 El consentimiento se conserva disociado durante seis años calendario, sin usuario,
-organización ni otro identificador. La versión original del consentimiento no se
-registraba y no se inventa retrospectivamente.
+organización ni otro identificador. La fecha de borrado se guarda solo con el día:
+el instante exacto se podía cruzar con la operación de borrado, que sí conserva la
+persona y la organización. Se retiene hasta el fin del día del aniversario. La
+versión original del consentimiento no se registraba y no se inventa
+retrospectivamente.
 
 ## Entrega durable e aislamiento
 
@@ -45,13 +48,16 @@ OpenAPI público (`@extend_schema(exclude=True)`); no aparecen en el contrato qu
 consume el frontend. No hay consultas entre esquemas.
 
 `ELIMINACION_INTERNA_SECRET` es independiente de JWT y se comparte entre Auth y los
-consumidores. Las URLs se configuran con `URL_SUBSCRIPTIONS`, `URL_CONNECTORS`,
-`URL_ANALYTICS` y `URL_NOTIFICATIONS`. Las llamadas limitan conexión/lectura a 2/5 s
-y no siguen redirecciones.
+consumidores. Sin él ninguna limpieza se puede firmar, así que Auth responde 503
+`eliminacion_no_configurada` antes de revocar sesiones o borrar a nadie. El worker
+registra por qué queda pendiente cada destino: sin firma, sin respuesta o una
+respuesta distinta de 204. Las URLs se configuran con `URL_SUBSCRIPTIONS`,
+`URL_CONNECTORS`, `URL_ANALYTICS` y `URL_NOTIFICATIONS`. Las llamadas limitan
+conexión/lectura a 2/5 s y no siguen redirecciones.
 
 `ELIMINACION_DESTINOS` enumera servicios separados por comas; por defecto incluye
-los cuatro. Rechaza listas vacías, duplicadas o desconocidas antes de revocar
-sesiones. Los destinos quedan guardados al crear cada operación: cambiar la
+los cuatro. Rechaza listas vacías, duplicadas o desconocidas con el mismo 503,
+antes de revocar sesiones. Los destinos quedan guardados al crear cada operación: cambiar la
 configuración nunca recorta un trabajo que ya está pendiente. Solo se excluye un
 servicio que no almacena datos en ese entorno. Habilitar un nuevo servicio exige
 agregar su destino antes de que reciba datos.
@@ -67,9 +73,10 @@ agregar su destino antes de que reciba datos.
   evidencia **cuyo proveedor ofrece revocación**; Outlook se omite y se trata en
   el punto siguiente. Un fallo devuelve 409, conserva las credenciales cifradas y
   revierte los cambios locales de esa cuenta. Una confirmación real guarda
-  `revocado_en` y retira tokens. Ese éxito queda confirmado en una transacción de
-  preparación independiente: sobrevive aunque otra cuenta bloquee la limpieza. No
-  se vuelve a revocar esa concesión en cada reintento. La limpieza final vuelve a
+  `revocado_en` y retira tokens. Cada éxito queda confirmado en su propia
+  transacción, cuenta por cuenta y releída bajo el bloqueo: sobrevive aunque otra
+  cuenta bloquee la limpieza o falle a mitad de camino (una conexión que se cae,
+  un pod que se reinicia). No se vuelve a revocar esa concesión en cada reintento. La limpieza final vuelve a
   verificar la evidencia bajo bloqueo, por si hubo reconexión entre preparación y
   borrado. Compara además los identificadores y `credenciales_version` de todas
   las cuentas preparadas: una reconexión o cuenta nueva, también Outlook,
@@ -109,7 +116,9 @@ agregar su destino antes de que reciba datos.
 - Notifications elimina alertas y preferencias al borrar la organización. Al
   retirar un integrante elimina solo sus preferencias y conserva una marca mínima
   `(organizacion_id, usuario_id)` para que solicitudes en vuelo no las recreen.
-  Conserva las preferencias de otros usuarios y organizaciones.
+  Si esa limpieza personal llega después de la de la organización, responde 204
+  sin escribir: la marca no se recrea en un tenant eliminado. Conserva las
+  preferencias de otros usuarios y organizaciones.
 
 `EstadoOrganizacion` vive en cada esquema consumidor. En PostgreSQL las escrituras
 HTTP y trabajos internos toman `FOR SHARE`: varias escrituras del mismo tenant
@@ -152,7 +161,9 @@ Las suites de Auth, Subscriptions, Connectors, Analytics y Notifications corren
 con PostgreSQL local. Las regresiones cubren rollback, reintentos, firmas,
 limpieza personal y rechazo de recreación, Gmail confirmado junto a Outlook sin
 revocación, credenciales ilegibles, migraciones y aislamiento A/B. PostgreSQL
-comprueba escrituras concurrentes y que la limpieza espere una escritura en vuelo.
+comprueba escrituras concurrentes por HTTP, que la limpieza espere una escritura
+en vuelo en ambos modos de eventos y que una revocación ya confirmada sobreviva a
+que otra conexión termine la de la limpieza.
 El proveedor OAuth y el transporte entre servicios usan dobles explícitos.
 La prueba de Gateway ejecuta `gateway.app.proxy` y Auth en un proceso; no acredita
 servidores desplegados. Las dos pruebas de DELETE de #73 pasan a

@@ -6,7 +6,7 @@ from django.core.management import call_command
 from django.utils import timezone
 from redis.exceptions import ConnectionError
 
-from app.models import ConsentimientoDisociado, Organizacion, User
+from app.models import ConsentimientoDisociado, EliminacionUsuario, Organizacion, User
 from tests.test_eliminacion import eliminar, usuario
 
 pytestmark = pytest.mark.django_db
@@ -56,8 +56,26 @@ def test_retencion_seis_anos_calendario_desde_el_borrado_del_29_febrero():
     with patch("app.eliminacion.timezone.now", return_value=eliminado):
         assert eliminar(user).status_code == 204
     evidencia = ConsentimientoDisociado.objects.get()
-    assert evidencia.eliminado_en == eliminado
-    assert evidencia.retener_hasta == datetime(2030, 2, 28, 12, 30, tzinfo=zona.utc)
+    assert evidencia.eliminado_en == datetime(2024, 2, 29, tzinfo=zona.utc)
+    # Hasta el fin del 28 de febrero de 2030: nunca menos de seis años.
+    assert evidencia.retener_hasta == datetime(2030, 3, 1, tzinfo=zona.utc)
+
+
+def test_evidencia_guarda_solo_el_dia_y_no_se_cruza_con_la_operacion():
+    """Con el instante exacto se volvía a vincular con la persona y la organización."""
+    org = Organizacion.objects.create(nombre="Compartida")
+    usuario(org)
+    integrante = usuario(org, "integrante@test.cl", User.Rol.INTEGRANTE)
+    consentir(integrante, datetime(2026, 1, 5, 9, 15, tzinfo=zona.utc))
+    instante = datetime(2026, 10, 29, 18, 42, 7, 123456, tzinfo=zona.utc)
+    with patch("app.eliminacion.timezone.now", return_value=instante):
+        assert eliminar(integrante).status_code == 204
+    operacion = EliminacionUsuario.objects.get(usuario_id=integrante.pk)
+    assert operacion.creado_en == instante
+    evidencia = ConsentimientoDisociado.objects.get()
+    assert evidencia.eliminado_en == datetime(2026, 10, 29, tzinfo=zona.utc)
+    assert evidencia.retener_hasta == datetime(2032, 10, 30, tzinfo=zona.utc)
+    assert not ConsentimientoDisociado.objects.filter(eliminado_en=operacion.creado_en).exists()
 
 
 def test_fallo_redis_conserva_usuario_sin_archivo_parcial():

@@ -230,9 +230,9 @@ accion_demo() {
 accion_liberar() {
   local qps="${1:-100}" apagar="rabbitmq subscriptions-worker" libera=350
   titulo "4 · LIBERAR CPU ANTES DE LA PRUEBA"
-  nota "El namespace tiene techo de 2000m. Los 9 pods usan 1600m; el generador"
-  nota "pide hasta 400m. Si otro namespace del curso copa la bolsa compartida,"
-  nota "o si el gateway quedó con 2 réplicas, no alcanza."
+  nota "El namespace tiene techo de 2000m. Los 10 pods usan 1350m; el generador"
+  nota "pide hasta 400m y el HPA hasta 400m más. Si otro namespace del curso copa"
+  nota "la bolsa compartida, o si el autoescalado ya creció, no alcanza."
   nota "Se apagan cosas que hoy no hacen nada: RabbitMQ (150m, nunca transportó un"
   nota "mensaje) y el worker de Celery (200m, solo un latido). La app sigue igual."
   if [ "$qps" -gt 120 ]; then

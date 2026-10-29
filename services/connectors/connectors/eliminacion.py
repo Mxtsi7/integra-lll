@@ -13,6 +13,22 @@ from .revocacion import revocar_y_desconectar
 logger = logging.getLogger(__name__)
 
 
+def _revocable(proveedor):
+    if not proveedores.soporta_revocacion(proveedor):
+        # Outlook: no hay revocación que intentar. No se toca nada acá; sus
+        # credenciales se destruyen con la fila en el borrado final, después
+        # de validar toda la organización.
+        return False
+    try:
+        proveedores.configuracion_de(proveedor)
+    except proveedores.ProveedorNoSoportado:
+        # Proveedor desconocido: no hay forma segura de revocar. El validador
+        # lo bloqueará y no se destruyen credenciales en una ruta que termina
+        # en 409.
+        return False
+    return True
+
+
 class LimpiezaConnectorsView(LimpiezaOrganizacionView):
     servicio = "connectors"
     modelos = (AutorizacionPendiente, Importacion, CuentaConectada)
@@ -42,8 +58,6 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
         return respuesta
 
     def preparar_limpieza(self, organizacion_id):
-        # La confirmación externa no puede deshacerse. Conservar cada éxito
-        # aunque otra cuenta bloquee la limpieza o se pierda la respuesta HTTP.
         with transaction.atomic():
             bloquear_organizacion(organizacion_id)
             if self._tenant_inconsistente(organizacion_id):
@@ -51,27 +65,38 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
             self._versiones_preparadas = dict(CuentaConectada.objects.filter(
                 organizacion_id=organizacion_id,
             ).values_list("pk", "credenciales_version"))
-            cuentas = CuentaConectada.objects.filter(
-                organizacion_id=organizacion_id, revocado_en__isnull=True,
-            ).exclude(proveedor=CuentaConectada.Proveedor.CSV)
-            for cuenta in cuentas:
-                if not proveedores.soporta_revocacion(cuenta.proveedor):
-                    # Outlook: no hay revocación que intentar. No se toca nada
-                    # acá; sus credenciales se destruyen con la fila en el
-                    # borrado final, después de validar toda la organización.
+            por_revocar = [
+                pk for pk, proveedor in CuentaConectada.objects.filter(
+                    organizacion_id=organizacion_id, revocado_en__isnull=True,
+                ).exclude(
+                    proveedor=CuentaConectada.Proveedor.CSV,
+                ).order_by("pk").values_list("pk", "proveedor")
+                if _revocable(proveedor)
+            ]
+        # La confirmación externa no puede deshacerse. Cada revocación se
+        # confirma en su propia transacción: si después falla otra cuenta (una
+        # excepción, una conexión que se cae, un pod que se reinicia), las ya
+        # confirmadas conservan `revocado_en` y el reintento no le manda al
+        # proveedor un token que ya revocó.
+        for pk in por_revocar:
+            with transaction.atomic():
+                bloquear_organizacion(organizacion_id)
+                # Se relee bajo el bloqueo y solo en la versión preparada. Una
+                # cuenta confirmada, borrada o reconectada desde entonces no se
+                # toca: una reconexión la rechaza `validar_limpieza` con
+                # `credenciales_cambiadas` y obliga a preparar de nuevo.
+                cuenta = CuentaConectada.objects.filter(
+                    pk=pk,
+                    organizacion_id=organizacion_id,
+                    revocado_en__isnull=True,
+                    credenciales_version=self._versiones_preparadas[pk],
+                ).first()
+                if cuenta is None:
                     continue
-                try:
-                    proveedores.configuracion_de(cuenta.proveedor)
-                except proveedores.ProveedorNoSoportado:
-                    # Proveedor desconocido: no hay forma segura de revocar.
-                    # El validador lo bloqueará y no se destruyen credenciales
-                    # en una ruta que termina en 409.
-                    continue
-                with transaction.atomic():
-                    resultado = revocar_y_desconectar(cuenta)
-                    if not resultado.confirmada or resultado.reconectada_mientras_tanto:
-                        # Un fallo conserva estado y credenciales para reintentar.
-                        transaction.set_rollback(True)
+                resultado = revocar_y_desconectar(cuenta)
+                if not resultado.confirmada or resultado.reconectada_mientras_tanto:
+                    # Un fallo conserva estado y credenciales para reintentar.
+                    transaction.set_rollback(True)
 
     def validar_limpieza(self, organizacion_id):
         if self._tenant_inconsistente(organizacion_id):

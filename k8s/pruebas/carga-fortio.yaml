@@ -17,8 +17,8 @@
 #   http://auth:8001/health/           Django + una consulta a Postgres
 #   http://subscriptions:8002/health/  ídem, otro servicio
 #
-# ⚠️ El namespace tiene un techo de 2 CPU. Los pods del sistema usan 1250m en
-# reposo, y el HPA puede pedir hasta 600m más al escalar. Por eso el límite de
+# ⚠️ El namespace tiene un techo de 2 CPU. Los pods del sistema usan 1350m en
+# reposo, y el HPA puede pedir hasta 400m más al escalar. Por eso el límite de
 # acá es 200m: deja margen. Subirlo puede dejar el Job en Pending, o peor,
 # dejar al autoescalado sin cuota justo cuando tiene que reaccionar.
 # Recalcular con: python k8s/pruebas/presupuesto.py k8s
