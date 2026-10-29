@@ -54,6 +54,13 @@ Rutas relativas a `frontend/`.
   Así cada respuesta es la única en vuelo y se muestra tal cual, sin recargas. Al terminar, bien o mal,
   los controles vuelven. La página también lo verifica (por si se salta la interfaz), y el formulario
   evita el doble envío en el mismo instante con una ref.
+- **La reserva es por suscripción** (tercera revisión de #112). Había una sola: si quedaba pendiente el
+  uso de A, operar en B y volver a A la borraba, se podía cancelar A y la respuesta vieja del uso la
+  devolvía a Activa. Ahora cada suscripción guarda la suya y solo se libera la que terminó. Al volver a A
+  con algo pendiente, cancelar y el formulario siguen bloqueados; si lo pendiente es la cancelación, el
+  diálogo sigue en curso y muestra cómo terminó. La respuesta que llega se muestra (es lo último que pasó
+  con A en el servidor) y la carga de la vuelta que siga en vuelo se descarta, porque puede traer lo de
+  antes.
 
 ## Cómo se comprobó
 
@@ -69,7 +76,11 @@ Rutas relativas a `frontend/`.
     enviándolo detrás del diálogo;
   - los controles vuelven cuando la cancelación sale bien o falla, y cuando registrar uso falla;
   - dos envíos del uso en el mismo instante mandan uno solo;
-  - una operación sola no vuelve a pedir el detalle.
+  - una operación sola no vuelve a pedir el detalle;
+  - A con uso pendiente → uso en B → A: no se cancela hasta que termina el uso de A, y queda Cancelada;
+  - si termina primero lo de A estando en B, no libera la reserva de B;
+  - al volver a una que se está cancelando, el diálogo sigue en curso y muestra el error si falla;
+  - la carga de la vuelta que llega después de la respuesta (de cancelar o de uso) no la revierte.
 - **Mutaciones:** se rompió a propósito cada guarda (descartar la respuesta tardía, no cerrar mientras
   envía, cerrar al cambiar de suscripción, mensaje del 403, pedir confirmación, cerrar tras confirmar,
   aclarar que no elimina) y en las 7 falla alguna prueba. Para la serialización de #112, otras 9:
@@ -80,6 +91,12 @@ Rutas relativas a `frontend/`.
   - la operación nunca se libera;
   - se puede cerrar el diálogo mientras se cancela;
   - uso o cancelar no reservan la suscripción.
+
+  Para la reserva por suscripción, otras 8, todas detectadas: una sola reserva (empezar en B borra la
+  de A), terminar libera todas, la carga de la vuelta no se descarta, mostrar una respuesta no se cuenta,
+  al volver no sigue la confirmación en curso, el formulario solo se bloquea por la cancelación, se puede
+  cerrar el diálogo mientras se cancela y el uso no reserva. Con el código anterior fallan 4 de las 5
+  pruebas nuevas; la quinta (terminar A no libera B) ya se cumplía.
 - **Navegador** contra una API falsa: diálogo, confirmar, estado cancelado y aviso, sin errores en consola.
 - CI local desde `frontend/`, con `main` ya incorporado a la rama: typecheck, pruebas y build.
 

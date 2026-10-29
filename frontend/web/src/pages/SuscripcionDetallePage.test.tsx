@@ -58,6 +58,7 @@ async function montar(ruta = "/suscripciones/a") {
       <ToastProvider>
         <AuthProvider>
           <Link to="/suscripciones/b">Ir a Netflix</Link>
+          <Link to="/suscripciones/a">Ir a Spotify</Link>
           <Routes>
             <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
           </Routes>
@@ -550,5 +551,114 @@ describe("Registrar uso y cancelar no se cruzan (revisión de #112)", () => {
 
     expect(screen.getByText("Cancelada")).toBeInTheDocument();
     expect(getSuscripcionMock).toHaveBeenCalledTimes(1); // solo la carga inicial
+  });
+
+  // Ir a otra suscripción y volver, sin desmontar la página (misma ruta, otro id).
+  const irA = (nombre: "Spotify" | "Netflix") =>
+    act(async () => fireEvent.click(screen.getByRole("link", { name: `Ir a ${nombre}` })));
+
+  it("operar en otra suscripción y volver no libera la reserva: no se cancela hasta que termina el uso", async () => {
+    const usoA = diferida<Suscripcion>();
+    registrarUsoMock.mockImplementation((idSuscripcion) =>
+      idSuscripcion === "a" ? usoA.promesa : Promise.resolve({ ...NETFLIX, horas_uso_mes: 2 }),
+    );
+    cancelarSuscripcionMock.mockResolvedValue({ ...CANCELADA, horas_uso_mes: 0.75 });
+    await montar();
+    await enviarUso();
+    await irA("Netflix");
+    await enviarUso("120");
+    expect(registrarUsoMock).toHaveBeenCalledTimes(2);
+    await irA("Spotify");
+
+    // El uso de Spotify sigue pendiente: ni cancelar ni otro uso encima.
+    expect(botonCancelar()).toBeDisabled();
+    fireEvent.click(botonCancelar());
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(botonRegistrar()).toBeDisabled();
+
+    await act(async () => usoA.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+    expect(horasDelMes()).toHaveTextContent("0,75 h");
+    fireEvent.click(botonCancelar());
+    await confirmar();
+
+    expect(cancelarSuscripcionMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByText("Activa")).not.toBeInTheDocument();
+  });
+
+  it("si termina primero la operación de la anterior, no libera la de la suscripción que se mira", async () => {
+    const usoA = diferida<Suscripcion>();
+    const usoB = diferida<Suscripcion>();
+    registrarUsoMock.mockImplementation((idSuscripcion) => (idSuscripcion === "a" ? usoA.promesa : usoB.promesa));
+    await montar();
+    await enviarUso();
+    await irA("Netflix");
+    await enviarUso("120");
+
+    await act(async () => usoA.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 })); // llega estando en Netflix
+    expect(screen.getByRole("heading", { name: "Netflix", level: 1 })).toBeInTheDocument();
+    expect(screen.queryByText("0,75 h")).not.toBeInTheDocument();
+    expect(botonCancelar()).toBeDisabled(); // el uso de Netflix sigue pendiente
+
+    await act(async () => usoB.resolver({ ...NETFLIX, horas_uso_mes: 2 }));
+    expect(botonCancelar()).toBeEnabled();
+  });
+
+  it("al volver a una que se está cancelando, la confirmación sigue en curso y muestra cómo terminó", async () => {
+    const cancelacion = diferida<Suscripcion>();
+    cancelarSuscripcionMock.mockReturnValue(cancelacion.promesa);
+    await montar();
+    fireEvent.click(botonCancelar());
+    await confirmar();
+    await irA("Netflix");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    await irA("Spotify");
+
+    expect(within(dialogo()).getByRole("button", { name: "Volver" })).toBeDisabled();
+    expect(botonRegistrar()).toBeDisabled();
+    await confirmar(); // no se envía otra
+    expect(cancelarSuscripcionMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => cancelacion.rechazar(new TypeError("Failed to fetch")));
+    expect(within(dialogo()).getByRole("alert")).toHaveTextContent("No pudimos conectar con el servidor.");
+    expect(screen.getByText("Activa")).toBeInTheDocument();
+  });
+
+  it("una carga del detalle que llega después de la respuesta de una operación no la revierte", async () => {
+    const cancelacion = diferida<Suscripcion>();
+    cancelarSuscripcionMock.mockReturnValue(cancelacion.promesa);
+    await montar();
+    fireEvent.click(botonCancelar());
+    await confirmar();
+    await irA("Netflix");
+    const cargaDeLaVuelta = diferida<Suscripcion>();
+    getSuscripcionMock.mockReturnValueOnce(cargaDeLaVuelta.promesa);
+    await irA("Spotify");
+
+    await act(async () => cancelacion.resolver(CANCELADA));
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.getByText("Cancelaste Spotify. Ya no contamos sus próximos cobros.")).toBeInTheDocument();
+
+    // La carga se sirvió antes de cancelar y llega tarde: ya no es lo último.
+    await act(async () => cargaDeLaVuelta.resolver(SPOTIFY));
+    expect(screen.getByText("Cancelada")).toBeInTheDocument();
+    expect(screen.queryByText("Activa")).not.toBeInTheDocument();
+    expect(proximoCobro()).toHaveTextContent("Sin cobros pendientes");
+  });
+
+  it("lo mismo con el uso: al volver se ven las horas que devolvió, aunque la carga llegue después", async () => {
+    const usoA = diferida<Suscripcion>();
+    registrarUsoMock.mockReturnValue(usoA.promesa);
+    await montar();
+    await enviarUso();
+    await irA("Netflix");
+    const cargaDeLaVuelta = diferida<Suscripcion>();
+    getSuscripcionMock.mockReturnValueOnce(cargaDeLaVuelta.promesa);
+    await irA("Spotify");
+
+    await act(async () => usoA.resolver({ ...SPOTIFY, horas_uso_mes: 0.75 }));
+    await act(async () => cargaDeLaVuelta.resolver(SPOTIFY)); // sin el uso nuevo
+    expect(horasDelMes()).toHaveTextContent("0,75 h");
+    expect(botonCancelar()).toBeEnabled();
   });
 });
