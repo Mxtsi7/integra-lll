@@ -188,6 +188,21 @@ export async function eliminarSuscripcion(id: string): Promise<void> {
   await pedir<void>(`/suscripciones/${id}/`, { method: 'DELETE' });
 }
 
+/**
+ * POST /suscripciones/<id>/cancelar/ -> 200 OK / 400 / 403 / 404 (VI-03, CH-10).
+ *
+ * Pasa la suscripción a `cancelado` SIN borrarla: conserva sus cobros y su
+ * historial de uso, y deja de proyectar cobros futuros. Es idempotente:
+ * cancelar una ya cancelada responde 200 sin repetir nada. No reemplaza a
+ * eliminarSuscripcion() (DELETE), que la saca de la lista.
+ */
+export async function cancelarSuscripcion(id: string): Promise<Suscripcion> {
+  const cancelada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/cancelar/`, {
+    method: 'POST',
+  });
+  return desdeLaApi(cancelada);
+}
+
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
