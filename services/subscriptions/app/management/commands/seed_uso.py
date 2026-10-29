@@ -1,11 +1,12 @@
 """MX-27: escenarios ficticios aislados, reproducibles e idempotentes."""
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from app.models import Subscription
 
@@ -34,6 +35,8 @@ class Command(BaseCommand):
                 raise ValueError
         except (ValueError, TypeError) as exc:
             raise CommandError("--fecha-ref debe ser YYYY-MM-DD, entre los años 2000 y 9998.") from exc
+        if corte > timezone.localdate():
+            raise CommandError("--fecha-ref no puede ser una fecha futura.")
 
         resultado = {"version": 1, "fecha_ref": corte.isoformat(), "organizaciones": []}
         for tenant in ("a", "b"):
@@ -74,6 +77,13 @@ class Command(BaseCommand):
                 else:
                     for fecha, minutos in registros:
                         suscripcion.registrar_uso(minutos, fecha=fecha, actor_rol="sistema")
+                # Solo el dataset demo fija actividad histórica; VI-10 sigue
+                # registrando la hora de ingestión para el resto del dominio.
+                ultima_fecha = max((fecha for fecha, _ in registros), default=None)
+                ultima_actividad = timezone.make_aware(datetime.combine(ultima_fecha, time.min)) if ultima_fecha else None
+                if suscripcion.ultima_actividad != ultima_actividad:
+                    suscripcion.ultima_actividad = ultima_actividad
+                    suscripcion.save(update_fields=["ultima_actividad"])
                 escenarios[escenario] = {"suscripcion_id": str(sid), "registros_esperados": len(registros)}
             resultado["organizaciones"].append({"organizacion_id": str(org), "escenarios": escenarios})
         self.stdout.write(json.dumps(resultado, ensure_ascii=False, sort_keys=True))

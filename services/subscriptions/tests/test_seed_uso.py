@@ -1,11 +1,12 @@
 import json
-from datetime import date
+from datetime import date, datetime
 from io import StringIO
 from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command, CommandError
 from django.db.models import Sum
+from django.utils import timezone
 
 from app.models import RegistroUso, Subscription
 from app.serializers import SubscriptionSerializer
@@ -110,3 +111,56 @@ def test_detecta_cualquier_diferencia_y_revierte_la_carga_completa(cambio):
         cargar()
     assert list(Subscription.objects.order_by("pk").values()) == suscripciones_antes
     assert list(RegistroUso.objects.order_by("pk").values()) == usos_antes
+
+
+def test_ultima_actividad_refleja_el_ultimo_uso_de_cada_escenario_y_no_la_ingestion():
+    ahora = timezone.make_aware(datetime(2026, 10, 29, 12))
+    with patch("django.utils.timezone.now", return_value=ahora):
+        datos = cargar()
+    esperadas = {"alto": date(2026, 1, 10), "bajo": date(2026, 1, 1),
+                 "sin_uso": None, "reciente": date(2026, 1, 29)}
+    for org in datos["organizaciones"]:
+        for nombre, escenario in org["escenarios"].items():
+            sub = Subscription.objects.get(pk=escenario["suscripcion_id"])
+            if esperadas[nombre] is None:
+                assert sub.ultima_actividad is None
+            else:
+                assert timezone.is_aware(sub.ultima_actividad)
+                assert timezone.localtime(sub.ultima_actividad).date() == esperadas[nombre]
+    actividades = dict(Subscription.objects.values_list("id", "ultima_actividad"))
+    with patch("django.utils.timezone.now", return_value=timezone.make_aware(datetime(2026, 10, 30, 12))):
+        assert cargar() == datos
+    assert dict(Subscription.objects.values_list("id", "ultima_actividad")) == actividades
+
+
+def test_corrige_ultima_actividad_de_una_carga_anterior_sin_reescribir_sus_usos():
+    datos = cargar()
+    sid = datos["organizaciones"][0]["escenarios"]["reciente"]["suscripcion_id"]
+    Subscription.objects.filter(pk=sid).update(ultima_actividad=timezone.now())
+    usos = list(RegistroUso.objects.order_by("pk").values())
+    cargar()
+    sub = Subscription.objects.get(pk=sid)
+    assert timezone.localtime(sub.ultima_actividad).date() == date(2026, 1, 29)
+    assert list(RegistroUso.objects.order_by("pk").values()) == usos
+
+
+def test_rechaza_corte_futuro_antes_de_escribir_y_admite_hoy():
+    ahora = timezone.make_aware(datetime(2026, 10, 29, 23, 30))
+    with patch("django.utils.timezone.now", return_value=ahora):
+        with pytest.raises(CommandError, match="futura"):
+            cargar("2026-10-30")
+        assert not Subscription.objects.exists()
+        assert not RegistroUso.objects.exists()
+        datos = cargar("2026-10-29")
+    assert datos["fecha_ref"] == "2026-10-29"
+
+
+def test_horas_mostradas_usan_el_mes_actual_y_no_el_mes_de_corte():
+    with patch("django.utils.timezone.now", return_value=timezone.make_aware(datetime(2026, 10, 29, 12))):
+        historico = cargar()
+        actual = cargar("2026-10-29")
+        for datos, esperadas in [(historico, {"alto": "0.00", "bajo": "0.00", "sin_uso": "0.00", "reciente": "0.00"}),
+                                 (actual, {"alto": "20.00", "bajo": "0.08", "sin_uso": "0.00", "reciente": "0.75"})]:
+            for nombre, escenario in datos["organizaciones"][0]["escenarios"].items():
+                sub = Subscription.objects.get(pk=escenario["suscripcion_id"])
+                assert SubscriptionSerializer(sub).data["horas_uso_mes"] == esperadas[nombre]
