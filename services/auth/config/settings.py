@@ -78,6 +78,10 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
+    "COMPONENT_SPLIT_REQUEST": True,
+    "COMPONENT_SPLIT_PATCH": False,
+    "POSTPROCESSING_HOOKS": ["drf_spectacular.hooks.postprocess_schema_enums", "app.openapi.completar_contrato_gateway"],
+    "DESCRIPTION": "Contratos Auth publicados a través del Gateway. Ejemplos ficticios. MX-14 depende de MX-07 para eliminación coordinada.",
     "ENUM_NAME_OVERRIDES": {"CodigoPlanEnum": ["free", "premium"], "CodigoPlanCatalogoEnum": [("free", "Gratuito"), ("premium", "Premium")]},
     "TITLE": f"Ojo al Gasto · {NOMBRE_SERVICIO}",
     "VERSION": "0.1.0",

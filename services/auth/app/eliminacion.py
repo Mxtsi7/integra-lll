@@ -48,12 +48,15 @@ class EliminarCuentaSerializer(serializers.Serializer):
     confirmacion_organizacion = serializers.ChoiceField(choices=["ELIMINAR"], required=False)
 
 
+from .contratos_auth import EliminacionAceptadaSerializer
+
+
 class EliminarCuentaMixin:
     @extend_schema(
         tags=["Usuarios"], summary="Eliminar cuenta propia (RF-01.7)",
         request=EliminarCuentaSerializer,
         responses={204: OpenApiResponse(description="Cuenta eliminada; organización conservada o usuario sin organización."),
-                   202: OpenApiResponse(description="Cuenta eliminada; limpieza de organización pendiente."),
+                   202: OpenApiResponse(response=EliminacionAceptadaSerializer, description="Cuenta eliminada; limpieza de organización pendiente."),
                    400: OpenApiResponse(description="Confirmación o contraseña ausente."),
                    403: OpenApiResponse(description="Identidad o contraseña inválida."),
                    409: OpenApiResponse(description="Último titular: falta confirmacion_organizacion=ELIMINAR."),

@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
+from .contratos_auth import LoginRespuestaSerializer, MensajeAuthSerializer
 from .models import Organizacion, User
 from .eliminacion import EliminarCuentaMixin
 from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
@@ -111,7 +112,7 @@ class LoginView(APIView):
         request=LoginSerializer,
         responses={
             200: OpenApiResponse(
-                description="Login correcto.",
+                response=LoginRespuestaSerializer, description="Login correcto.",
                 examples=[
                     OpenApiExample(
                         "Respuesta exitosa",
@@ -137,6 +138,7 @@ class LoginView(APIView):
                 ],
             ),
             400: OpenApiResponse(description="Body inválido (email mal formado, campos faltantes)."),
+            503: OpenApiResponse(description="No se pudo iniciar sesión; no se emitieron credenciales."),
         },
         examples=[
             OpenApiExample(
@@ -213,7 +215,7 @@ class SolicitudRecuperacionView(APIView):
         request=SolicitudRecuperacionSerializer,
         responses={
             200: OpenApiResponse(
-                description="Solicitud recibida (respuesta neutra).",
+                response=MensajeAuthSerializer, description="Solicitud recibida (respuesta neutra).",
                 examples=[
                     OpenApiExample(
                         "Respuesta neutra",
@@ -257,7 +259,7 @@ class ConfirmacionRecuperacionView(APIView):
         ),
         request=ConfirmacionRecuperacionSerializer,
         responses={
-            200: OpenApiResponse(description="Contraseña restablecida. Inicia sesión nuevamente."),
+            200: OpenApiResponse(response=MensajeAuthSerializer, description="Contraseña restablecida. Inicia sesión nuevamente."),
             400: OpenApiResponse(
                 response=PolymorphicProxySerializer(
                     component_name="ErrorConfirmacionRecuperacion",
