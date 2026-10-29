@@ -28,6 +28,10 @@ from connectors.models import ArchivoImportacion, Importacion
 
 pytestmark = pytest.mark.django_db
 
+#: El salto de linea como constante: escribirlo en linea obliga a
+#: escaparlo y ya se rompio al editar este archivo.
+SALTO = b"\n"
+
 ORG_A = uuid.UUID("11111111-1111-1111-1111-111111111111")
 ORG_B = uuid.UUID("22222222-2222-2222-2222-222222222222")
 USUARIO_A = "42"
@@ -332,3 +336,148 @@ class TestValidar:
         assert archivos.nombre_seguro(nombre) == esperado
         contenido = PDF if esperado.endswith(".pdf") else CSV
         assert validar(nombre, contenido, tamano_maximo=10_000).nombre == esperado
+
+
+# ══════════════════════════════════════════════════════════════════════
+# El conteo de filas y los saltos de línea raros
+# (hallazgo de la revisión de #120)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestConteoDeFilas:
+    """`splitlines()` corta en más cosas que el salto de línea.
+
+    También en U+0085 (NEL), U+2028 y U+2029. En un CSV de Excel en cp1252
+    decodificado como Latin-1 el byte 0x85 son los puntos suspensivos "…", así
+    que cada celda que los tuviera sumaba una fila falsa a `filas_totales` y la
+    barra de progreso de CH-27 quedaba mintiendo.
+    """
+
+    MAXIMO = 1024 * 1024
+
+    def test_un_csv_cp1252_con_puntos_suspensivos_no_suma_filas_falsas(self):
+        contenido = (
+            b"nombre;monto\r\n"
+            b"Netflix\x85;9990\r\n"
+            b"Spotify;5990\r\n"
+            b"Disney\x85 plus;7990\r\n"
+        )
+        validado = validar("cartola.csv", contenido, tamano_maximo=self.MAXIMO)
+        assert validado.filas == 3, "conto filas de mas por el 0x85"
+
+    def test_cuenta_igual_con_CRLF_que_con_LF(self):
+        datos = b"nombre;monto\n" + b"Netflix;9990\n" * 4
+        con_crlf = datos.replace(b"\n", b"\r\n")
+        assert (
+            validar("a.csv", datos, tamano_maximo=self.MAXIMO).filas
+            == validar("b.csv", con_crlf, tamano_maximo=self.MAXIMO).filas
+            == 4
+        )
+
+    def test_cuenta_igual_con_CR_solo(self):
+        """Mac clásico. Raro, pero si llega no puede contar una sola fila."""
+        datos = b"nombre;monto\rNetflix;9990\rSpotify;5990\r"
+        assert validar("a.csv", datos, tamano_maximo=self.MAXIMO).filas == 2
+
+    def test_una_linea_en_blanco_no_cuenta(self):
+        datos = b"nombre;monto\n\nNetflix;9990\n\n\nSpotify;5990\n"
+        assert validar("a.csv", datos, tamano_maximo=self.MAXIMO).filas == 2
+
+    def test_un_separador_de_linea_unicode_no_parte_la_fila(self):
+        """U+2028 y U+2029 también los corta `splitlines()`."""
+        contenido = "nombre;monto\nNetflix\u2028x;9990\nSpotify;5990\n".encode()
+        assert validar("a.csv", contenido, tamano_maximo=self.MAXIMO).filas == 2
+
+
+# ══════════════════════════════════════════════════════════════════════
+# La retención: purgar deja la importación FALLIDA, no huérfana
+# (hallazgo de la revisión de #120)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestPurgaDejaLaImportacionFallida:
+    """Borrar el archivo y dejar la importación en `pendiente` la vuelve
+    imposible de procesar: FE-09 la tomaría, buscaría el archivo y no habría
+    nada.
+    """
+
+    def _con_archivo_vencido(self, estado=Importacion.Estado.PENDIENTE):
+        importacion = Importacion.objects.create(
+            organizacion_id=ORG_A, usuario_id="42",
+            origen=Importacion.Origen.CSV, nombre_archivo="cartola.csv",
+            estado=estado,
+        )
+        datos = b"nombre;monto" + SALTO + b"Netflix;9990" + SALTO
+        ArchivoImportacion.objects.create(
+            importacion=importacion,
+            organizacion_id=ORG_A,
+            formato="csv",
+            tamano=len(datos),
+            sha256=hashlib.sha256(datos).hexdigest(),
+            contenido=datos,
+            vence_en=timezone.now() - timedelta(hours=1),
+        )
+        return importacion
+
+    def test_una_pendiente_sin_archivo_queda_fallida(self):
+        importacion = self._con_archivo_vencido()
+        call_command("purgar_archivos_importacion", aplicar=True, stdout=StringIO())
+
+        importacion.refresh_from_db()
+        assert importacion.estado == Importacion.Estado.FALLIDA
+        assert not ArchivoImportacion.objects.filter(
+            importacion=importacion
+        ).exists()
+
+    def test_el_error_dice_que_el_archivo_vencio(self):
+        """Sin motivo, quien la vea fallida no sabe por qué."""
+        importacion = self._con_archivo_vencido()
+        call_command("purgar_archivos_importacion", aplicar=True, stdout=StringIO())
+
+        importacion.refresh_from_db()
+        assert importacion.errores_totales == 1
+        assert importacion.errores[0]["codigo"] == "archivo_vencido"
+
+    def test_una_que_ya_estaba_completada_no_se_toca(self):
+        """Su archivo ya no hace falta: el análisis terminó."""
+        importacion = self._con_archivo_vencido(estado=Importacion.Estado.PENDIENTE)
+        importacion.avanzar_a(Importacion.Estado.PROCESANDO)
+        importacion.avanzar_a(Importacion.Estado.COMPLETADA)
+
+        call_command("purgar_archivos_importacion", aplicar=True, stdout=StringIO())
+        importacion.refresh_from_db()
+        assert importacion.estado == Importacion.Estado.COMPLETADA
+        assert importacion.errores_totales == 0
+
+    def test_en_modo_ensayo_no_cambia_nada(self):
+        importacion = self._con_archivo_vencido()
+        call_command("purgar_archivos_importacion", stdout=StringIO())
+
+        importacion.refresh_from_db()
+        assert importacion.estado == Importacion.Estado.PENDIENTE
+        assert ArchivoImportacion.objects.filter(importacion=importacion).exists()
+
+    def test_un_archivo_que_NO_vencio_no_se_toca(self):
+        importacion = Importacion.objects.create(
+            organizacion_id=ORG_A, usuario_id="42",
+            origen=Importacion.Origen.CSV, nombre_archivo="cartola.csv",
+        )
+        datos = b"a;b" + SALTO + b"1;2" + SALTO
+        ArchivoImportacion.objects.create(
+            importacion=importacion, organizacion_id=ORG_A,
+            formato="csv", tamano=len(datos),
+            sha256=hashlib.sha256(datos).hexdigest(), contenido=datos,
+            vence_en=timezone.now() + timedelta(days=1),
+        )
+        call_command("purgar_archivos_importacion", aplicar=True, stdout=StringIO())
+
+        importacion.refresh_from_db()
+        assert importacion.estado == Importacion.Estado.PENDIENTE
+        assert ArchivoImportacion.objects.filter(importacion=importacion).exists()
+
+    def test_la_salida_dice_cuantas_quedaron_fallidas(self):
+        self._con_archivo_vencido()
+        self._con_archivo_vencido()
+        salida = StringIO()
+        call_command("purgar_archivos_importacion", aplicar=True, stdout=salida)
+        assert "2 importacion(es)" in salida.getvalue()

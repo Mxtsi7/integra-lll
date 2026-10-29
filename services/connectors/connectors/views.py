@@ -543,8 +543,18 @@ class SubirArchivoView(APIView):
             )
 
         tamano_maximo = int(settings.IMPORTACION_TAMANO_MAXIMO_BYTES)
-        # Se lee a lo más un byte por sobre el máximo: un archivo enorme no
-        # llega a cargarse entero en memoria antes de rechazarse.
+        # Se lee a lo más un byte por sobre el máximo: alcanza para saber que
+        # se pasó sin traer el resto a memoria.
+        #
+        # OJO con lo que esto NO hace: `MultiPartParser` ya recibió y guardó
+        # el archivo COMPLETO antes de llegar acá —en memoria o en un temporal
+        # del disco según su tamaño—, así que esta lectura acotada no evita
+        # que un archivo enorme se cargue. Un comentario anterior decía que sí
+        # y era falso; lo corrigió la revisión de #120.
+        #
+        # Quien sí corta antes de leer nada es el gateway, mirando
+        # Content-Length (ver `gateway/app/proxy.py`). Esta comprobación queda
+        # porque el servicio también se puede llamar directo.
         contenido = subido.read(tamano_maximo + 1)
         try:
             validado = archivos.validar(subido.name, contenido, tamano_maximo=tamano_maximo)

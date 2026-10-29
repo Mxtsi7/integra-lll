@@ -1,0 +1,64 @@
+# ── Purga de los archivos de importación (FE-07 / RF-05) ─────────────────────
+# Las cartolas son datos financieros sensibles y `vence_en` no servía de nada:
+# el comando existía pero no lo ejecutaba nadie, así que los archivos quedaban
+# en `archivo_importacion` indefinidamente. Lo encontró la revisión de #120.
+#
+# ── Por qué un CronJob y no el beat de Celery ────────────────────────────────
+# El beat que existe vive en el pod de `subscriptions` y corre tareas de ESE
+# servicio. La purga es de `connectors`, que tiene otro esquema de base
+# (ADR-002): meterla ahí la obligaría a cruzar esquemas, que es justo lo que
+# el ADR prohíbe.
+#
+# ── ⚠️ Compite con la holgura del autoescalado ───────────────────────────────
+# La ResourceQuota permite 12 pods y, con los dos HPA al máximo, se usan los
+# 12. Este pod necesita un 13.º, así que si el CronJob dispara justo en un
+# pico NO va a poder crearse.
+#
+# Por eso corre a las 04:15 de Chile, que es la hora más tranquila, y lleva
+# `startingDeadlineSeconds` alto para reintentar si no alcanzó a arrancar.
+# Que pueda fallar queda dicho acá y no escondido: si pasa a ser un problema,
+# la salida es subir la cuota del namespace, no bajar el autoescalado.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purgar-importaciones
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # 07:15 UTC = 04:15 en Chile (UTC-3). El cluster corre en UTC.
+  schedule: "15 7 * * *"
+  # Si una corrida se pasó de la hora, igual se intenta dentro de 2 h. Sin
+  # esto, un pico a las 04:15 saltaría la purga de ese día entero.
+  startingDeadlineSeconds: 7200
+  # Nunca dos a la vez: borran las mismas filas.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Tres intentos y se rinde: si la base no está, insistir no ayuda y el
+      # job del día siguiente lo vuelve a tomar.
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: ghcr
+          containers:
+            - name: purga
+              image: IMAGEN_CONNECTORS
+              imagePullPolicy: Always   # la etiqueta se reutiliza
+              command:
+                - python
+                - manage.py
+                - purgar_archivos_importacion
+                - --aplicar
+              envFrom:
+                - configMapRef: { name: ojoalgasto }
+                - secretRef: { name: ojoalgasto }
+              env:
+                - { name: ESQUEMA_BD, value: connectors }
+              # Chico a propósito: lee unas filas y borra. Pedir de más le
+              # quitaría espacio al autoescalado, que es con quien compite.
+              resources:
+                requests: { cpu: 25m,  memory: 64Mi }
+                limits:   { cpu: 100m, memory: 160Mi }

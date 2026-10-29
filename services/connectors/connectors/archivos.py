@@ -34,6 +34,12 @@ from dataclasses import dataclass
 FORMATOS_ADMITIDOS = ("csv", "pdf")
 SEPARADORES = (",", ";", "\t", "|")
 
+#: Los saltos de linea, como constantes: escribirlos en linea obliga a
+#: escaparlos y ya se rompio una vez al editar este archivo.
+LF = chr(10)
+CR = chr(13)
+CRLF = CR + LF
+
 FORMATO_NO_ADMITIDO = "formato_no_admitido"
 ARCHIVO_VACIO = "archivo_vacio"
 ARCHIVO_EXCEDIDO = "archivo_excedido"
@@ -92,7 +98,18 @@ def _validar_csv(contenido: bytes) -> tuple[int, str]:
     if b"\x00" in contenido:
         raise ArchivoRechazado(CONTENIDO_INCOMPATIBLE, "El archivo no es texto: trae bytes nulos.")
     texto = _decodificar(contenido)
-    lineas = [l for l in texto.splitlines() if l.strip()]
+    # ── `split` y no `splitlines` ───────────────────────────────────────
+    # `splitlines()` corta en MÁS cosas que el salto de línea: también en
+    # U+0085 (NEL), U+2028 y U+2029. En un CSV de Excel en cp1252
+    # decodificado como Latin-1, el byte 0x85 son los puntos suspensivos
+    # "…", así que cada celda que los tuviera sumaba una fila falsa a
+    # `filas_totales` y la barra de progreso de CH-27 quedaba mintiendo.
+    # Lo encontró la revisión de #120.
+    #
+    # Se normaliza CRLF y CR a LF primero, para que un archivo de Windows
+    # o de Mac clásico cuente igual.
+    normalizado = texto.replace(CRLF, LF).replace(CR, LF)
+    lineas = [l for l in normalizado.split(LF) if l.strip()]
     if len(lineas) < 2:
         raise ArchivoRechazado(
             CONTENIDO_INCOMPATIBLE,

@@ -18,16 +18,21 @@ IMAGEN_AUTH="$REGISTRO/ojoalgasto-auth:$ETIQUETA"
 IMAGEN_SUBSCRIPTIONS="$REGISTRO/ojoalgasto-subscriptions:$ETIQUETA"
 IMAGEN_GATEWAY="$REGISTRO/ojoalgasto-gateway:$ETIQUETA"
 IMAGEN_WEB="$REGISTRO/ojoalgasto-web:$ETIQUETA"
+# connectors todavia no tiene Deployment, pero el CronJob de la purga usa su
+# imagen (ver k8s/40-purga-importaciones.yaml). Sin esto, el manifiesto se
+# aplicaria con el literal IMAGEN_CONNECTORS y el pod no arrancaria nunca.
+IMAGEN_CONNECTORS="$REGISTRO/ojoalgasto-connectors:$ETIQUETA"
 
 if [ "${SOLO_APLICAR:-0}" != "1" ]; then
   echo "── construyendo imágenes ($ETIQUETA) ──"
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/auth          -t "$IMAGEN_AUTH" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/subscriptions -t "$IMAGEN_SUBSCRIPTIONS" .
+  docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/connectors    -t "$IMAGEN_CONNECTORS" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=gateway                -t "$IMAGEN_GATEWAY" .
   docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
 
   echo "── publicando ──"
-  for i in "$IMAGEN_AUTH" "$IMAGEN_SUBSCRIPTIONS" "$IMAGEN_GATEWAY" "$IMAGEN_WEB"; do
+  for i in "$IMAGEN_AUTH" "$IMAGEN_SUBSCRIPTIONS" "$IMAGEN_GATEWAY" "$IMAGEN_WEB" "$IMAGEN_CONNECTORS"; do
     docker push -q "$i"
   done
 fi
@@ -104,6 +109,7 @@ for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml k8s/02-redis-rabbitmq.ya
       -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
       -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \
       -e "s|IMAGEN_WEB|$IMAGEN_WEB|g" \
+      -e "s|IMAGEN_CONNECTORS|$IMAGEN_CONNECTORS|g" \
       -e "s|ojoalgasto-forellana.dev.censei.cl|$HOST_PUBLICO|g" \
       "$f" | kubectl apply -f -
 done

@@ -115,6 +115,17 @@ RUTAS_PUBLICAS = (
     "/api/auth/email-verification/confirm/",
 )
 
+# ── El tope de la subida de archivos (FE-07) ────────────────────────
+# El gateway tiene que conocerlo para poder rechazar con el mismo 413 que el
+# servicio, ANTES de leer el cuerpo. Es la MISMA variable de entorno que usa
+# connectors, así que los dos leen el mismo número y no se desincronizan.
+#
+# No se toca DATA_UPLOAD_MAX_MEMORY_SIZE: el límite global de 2,5 MB sigue
+# valiendo para todas las demás rutas.
+IMPORTACION_TAMANO_MAXIMO_BYTES = env.int(
+    "IMPORTACION_TAMANO_MAXIMO_BYTES", default=5 * 1024 * 1024
+)
+
 # Cuánto se espera a un servicio antes de responder 504.
 TIEMPO_ESPERA_SEGUNDOS = 10
 
