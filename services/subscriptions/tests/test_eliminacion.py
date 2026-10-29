@@ -5,7 +5,10 @@ from unittest.mock import patch
 import pytest
 from rest_framework.test import APIClient
 
-from app.models import Cobro, Proveedor, RegistroUso, Subscription, TransicionEstado
+from app.models import (
+    Cobro, Proveedor, RegistroUso, ResumenOrganizacion, Subscription,
+    TrabajoDerivado, TransicionEstado,
+)
 from app.models import OutboxEvento, Presupuesto
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
@@ -84,6 +87,26 @@ def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
     for _ in range(2):
         assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
     for modelo in (Presupuesto, OutboxEvento):
+        assert not modelo.objects.filter(organizacion_id=org).exists()
+        assert modelo.objects.filter(organizacion_id=otra).count() == 1
+
+
+def test_limpieza_borra_resumen_y_trabajo_derivado_solo_del_tenant_con_doble_entrega(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    evento_org, evento_otra = uuid.uuid4(), uuid.uuid4()
+    for tenant, evento in ((org, evento_org), (otra, evento_otra)):
+        ResumenOrganizacion.objects.create(
+            organizacion_id=tenant, moneda="CLP", total_mensual=1000, cantidad_activas=1,
+        )
+        TrabajoDerivado.objects.create(
+            organizacion_id=tenant, evento_id=evento, hecho_por="consumidor",
+        )
+
+    for _ in range(2):
+        assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+
+    for modelo in (ResumenOrganizacion, TrabajoDerivado):
         assert not modelo.objects.filter(organizacion_id=org).exists()
         assert modelo.objects.filter(organizacion_id=otra).count() == 1
 

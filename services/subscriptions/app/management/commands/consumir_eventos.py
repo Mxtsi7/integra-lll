@@ -73,7 +73,9 @@ from events.topologia import (
     EXCHANGE,
     declarar,
 )
-from events.trabajo import HECHO_POR_CONSUMIDOR, recalcular_resumen_por_evento
+from events.trabajo import (
+    HECHO_POR_CONSUMIDOR, OrganizacionEliminada, recalcular_resumen_por_evento,
+)
 
 
 registro = logging.getLogger(__name__)
@@ -152,7 +154,7 @@ class Desenlace:
     #: True → ack. False → a la cola de fallos, con el motivo.
     confirmar: bool
     motivo: str = ""
-    #: True si ESTE proceso recalculó; False si el trabajo ya estaba acreditado.
+    #: True si ESTE proceso recalculó; False si estaba acreditado u obsoleto.
     recalculado: bool = False
 
 
@@ -176,6 +178,13 @@ def procesar(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
             hecho = recalcular_resumen_por_evento(
                 evento_id, organizacion_id, hecho_por=HECHO_POR_CONSUMIDOR
             )
+        except OrganizacionEliminada:
+            # El tombstone durable vuelve obsoleta la entrega. No es trabajo hecho.
+            registro.info(
+                "resumen.omitido organizacion_eliminada org=%s evento=%s",
+                organizacion_id, evento_id,
+            )
+            return Desenlace(confirmar=True, motivo="organizacion_eliminada")
         except ERRORES_PASAJEROS as error:
             ultimo = error
             if intento < INTENTOS:
