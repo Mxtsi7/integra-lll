@@ -78,6 +78,8 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
+    # Evita inferencias distintas del prefijo entre versiones/entornos.
+    "SCHEMA_PATH_PREFIX": r"/api",
     "COMPONENT_SPLIT_REQUEST": True,
     "COMPONENT_SPLIT_PATCH": False,
     "POSTPROCESSING_HOOKS": ["drf_spectacular.hooks.postprocess_schema_enums", "app.openapi.completar_contrato_gateway"],

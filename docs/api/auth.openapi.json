@@ -8,7 +8,7 @@
     "paths": {
         "/api/auth/change-password/": {
             "post": {
-                "operationId": "api_auth_change_password_create",
+                "operationId": "auth_change_password_create",
                 "tags": [
                     "Auth"
                 ],
@@ -214,7 +214,7 @@
         },
         "/api/auth/email-verification/confirm/": {
             "post": {
-                "operationId": "api_auth_email_verification_confirm_create",
+                "operationId": "auth_email_verification_confirm_create",
                 "description": "Ruta pública. Token de un solo uso, válido 60 minutos. Activa exclusivamente el correo y usuario asociados al token y avisa al correo anterior si hubo cambio.",
                 "summary": "Confirmar verificación de correo",
                 "tags": [
@@ -354,7 +354,7 @@
         },
         "/api/auth/email-verification/request/": {
             "post": {
-                "operationId": "api_auth_email_verification_request_create",
+                "operationId": "auth_email_verification_request_create",
                 "description": "Requiere JWT validado por gateway. Email opcional; cambiarlo requiere password actual. Conserva el correo activo hasta confirmar. Máximo 5 envíos/hora y uno cada 60 segundos.",
                 "summary": "Solicitar o reenviar verificación de correo",
                 "tags": [
@@ -593,7 +593,7 @@
         },
         "/api/auth/google/": {
             "post": {
-                "operationId": "api_auth_google_create",
+                "operationId": "auth_google_create",
                 "description": "Valida ID token OIDC con nonce de un uso. Primera vinculación exige password local. No registra cuentas.",
                 "tags": [
                     "Auth"
@@ -764,7 +764,7 @@
         },
         "/api/auth/google/nonce/": {
             "get": {
-                "operationId": "api_auth_google_nonce_retrieve",
+                "operationId": "auth_google_nonce_retrieve",
                 "tags": [
                     "Auth"
                 ],
@@ -818,7 +818,7 @@
         },
         "/api/auth/login/": {
             "post": {
-                "operationId": "api_auth_login_create",
+                "operationId": "auth_login_create",
                 "description": "Autentica con email y password. Devuelve access_token, refresh_token y datos básicos del usuario. El JWT incluye claims organizacion_id y rol (ADR-004). Ruta pública.",
                 "summary": "Iniciar sesión",
                 "tags": [
@@ -981,7 +981,7 @@
         },
         "/api/auth/logout/": {
             "post": {
-                "operationId": "api_auth_logout_create",
+                "operationId": "auth_logout_create",
                 "description": "Revoca exclusivamente la sesión del refresh_token del body. No requiere access token: funciona también con el access vencido. Firma, expiración, usuario, sid y JTI se validan en Auth. Repetir el logout con el mismo refresh devuelve 204.",
                 "tags": [
                     "Auth"
@@ -1113,7 +1113,7 @@
         },
         "/api/auth/password-reset/": {
             "post": {
-                "operationId": "api_auth_password_reset_create",
+                "operationId": "auth_password_reset_create",
                 "description": "Envía un enlace de un solo uso, válido por 60 minutos. La respuesta es idéntica exista o no el correo (anti-enumeración). Ruta pública.",
                 "summary": "Solicitar recuperación de contraseña",
                 "tags": [
@@ -1204,7 +1204,7 @@
         },
         "/api/auth/password-reset/confirm/": {
             "post": {
-                "operationId": "api_auth_password_reset_confirm_create",
+                "operationId": "auth_password_reset_confirm_create",
                 "description": "Recibe el token compuesto del enlace y password. Aplica RF-01.1, consume el enlace de forma atómica y revoca las sesiones anteriores. No inicia sesión automáticamente.",
                 "summary": "Confirmar recuperación de contraseña",
                 "tags": [
@@ -1328,7 +1328,7 @@
         },
         "/api/auth/refresh/": {
             "post": {
-                "operationId": "api_auth_refresh_create",
+                "operationId": "auth_refresh_create",
                 "tags": [
                     "Auth"
                 ],
@@ -1466,7 +1466,7 @@
         },
         "/api/auth/register/": {
             "post": {
-                "operationId": "api_auth_register_create",
+                "operationId": "auth_register_create",
                 "description": "Crea un usuario y su organización (titular) o lo une a una organización existente con `codigo_organizacion` (integrante). Ruta pública.",
                 "summary": "Registrar usuario",
                 "tags": [
@@ -1563,7 +1563,7 @@
         },
         "/api/catalogos/paises/": {
             "get": {
-                "operationId": "api_catalogos_paises_list",
+                "operationId": "catalogos_paises_list",
                 "parameters": [
                     {
                         "in": "query",
@@ -1575,7 +1575,7 @@
                     }
                 ],
                 "tags": [
-                    "api"
+                    "catalogos"
                 ],
                 "security": [
                     {
@@ -1665,7 +1665,7 @@
         },
         "/api/contrataciones/": {
             "post": {
-                "operationId": "api_contrataciones_create",
+                "operationId": "contrataciones_create",
                 "tags": [
                     "Contratación"
                 ],
@@ -1881,7 +1881,7 @@
         },
         "/api/contrataciones/{id}/": {
             "get": {
-                "operationId": "api_contrataciones_retrieve",
+                "operationId": "contrataciones_retrieve",
                 "parameters": [
                     {
                         "in": "path",
@@ -2045,7 +2045,7 @@
         },
         "/api/contrataciones/{id}/cancelar/": {
             "post": {
-                "operationId": "api_contrataciones_cancelar_create",
+                "operationId": "contrataciones_cancelar_create",
                 "parameters": [
                     {
                         "in": "path",
@@ -2241,7 +2241,7 @@
         },
         "/api/organizacion/": {
             "get": {
-                "operationId": "api_organizacion_retrieve",
+                "operationId": "organizacion_retrieve",
                 "description": "Devuelve la organización del contexto (X-Organizacion-Id), sus miembros activos y el rol del usuario que consulta (mi_rol). Requiere las cabeceras que inyecta el gateway tras validar el JWT (ADR-004).",
                 "summary": "Detalle de la organización actual",
                 "parameters": [],
@@ -2421,7 +2421,7 @@
         },
         "/api/pagos/webhook/": {
             "post": {
-                "operationId": "api_pagos_webhook_create",
+                "operationId": "pagos_webhook_create",
                 "parameters": [
                     {
                         "in": "header",
@@ -2641,7 +2641,7 @@
         },
         "/api/planes/": {
             "get": {
-                "operationId": "api_planes_list",
+                "operationId": "planes_list",
                 "tags": [
                     "Planes"
                 ],
@@ -2798,7 +2798,7 @@
         },
         "/api/schema/": {
             "get": {
-                "operationId": "api_schema_retrieve",
+                "operationId": "schema_retrieve",
                 "description": "OpenApi3 schema for this API. Format can be selected via content negotiation.\n\n- YAML: application/vnd.oai.openapi\n- JSON: application/vnd.oai.openapi+json",
                 "parameters": [
                     {
@@ -2922,7 +2922,7 @@
                     }
                 ],
                 "tags": [
-                    "api"
+                    "schema"
                 ],
                 "security": [
                     {
@@ -2968,7 +2968,7 @@
         },
         "/api/usuarios/{id}/": {
             "get": {
-                "operationId": "api_usuarios_retrieve",
+                "operationId": "usuarios_retrieve",
                 "description": "Devuelve el usuario con el id de la URL, solo si coincide con X-Usuario-Id (contexto del gateway). Sin password.",
                 "summary": "Detalle de usuario por id",
                 "parameters": [
@@ -3133,7 +3133,7 @@
         },
         "/api/usuarios/me/": {
             "get": {
-                "operationId": "api_usuarios_me_retrieve",
+                "operationId": "usuarios_me_retrieve",
                 "description": "Devuelve el usuario activo identificado por X-Usuario-Id y valida X-Organizacion-Id contra su pertenencia vigente. El gateway inyecta ambas cabeceras tras validar el JWT. Una organización desactualizada devuelve 403; el cliente debe descartar la sesión y volver a iniciar sesión.",
                 "summary": "Usuario actual (me)",
                 "tags": [
@@ -3287,7 +3287,7 @@
                 "parameters": []
             },
             "patch": {
-                "operationId": "api_usuarios_me_partial_update",
+                "operationId": "usuarios_me_partial_update",
                 "description": "GET /api/usuarios/me/ — el usuario del token. Es la que llama la web.",
                 "tags": [
                     "Usuarios"
@@ -3492,7 +3492,7 @@
                 "parameters": []
             },
             "delete": {
-                "operationId": "api_usuarios_me_destroy",
+                "operationId": "usuarios_me_destroy",
                 "description": "GET /api/usuarios/me/ — el usuario del token. Es la que llama la web.",
                 "summary": "Eliminar cuenta propia (RF-01.7)",
                 "tags": [
@@ -3683,7 +3683,7 @@
         },
         "/api/usuarios/me/permisos/": {
             "get": {
-                "operationId": "api_usuarios_me_permisos_retrieve",
+                "operationId": "usuarios_me_permisos_retrieve",
                 "tags": [
                     "Planes"
                 ],
