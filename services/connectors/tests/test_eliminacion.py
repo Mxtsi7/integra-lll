@@ -439,6 +439,48 @@ def test_revocacion_confirmada_sobrevive_a_un_fallo_con_otra_cuenta(monkeypatch,
     assert not CuentaConectada.objects.filter(organizacion_id=org).exists()
 
 
+def test_reconexion_despues_de_preparar_no_se_revoca_y_obliga_a_preparar_de_nuevo(monkeypatch, claves):
+    """La versión preparada manda: una concesión nueva no se le manda al proveedor."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuentas = {
+        f"ya29.{letra}": CuentaConectada.objects.create(
+            organizacion_id=org, proveedor="gmail",
+            cuenta_externa=f"{letra.lower()}@gmail.com", access_token=f"ya29.{letra}",
+        )
+        for letra in "AB"
+    }
+    enviados = []
+
+    def revocar(proveedor, *, access_token):
+        enviados.append(access_token)
+        if len(enviados) == 1:
+            # Mientras se revoca la primera, la otra se reconecta: es otra concesión.
+            otra = next(c for token, c in cuentas.items() if token != access_token)
+            CuentaConectada.objects.filter(pk=otra.pk).update(
+                access_token="ya29.NUEVO", credenciales_version=otra.credenciales_version + 1,
+            )
+        return True
+
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    respuesta = limpiar(org)
+    assert respuesta.status_code == 409
+    assert respuesta.json()["code"] == "credenciales_cambiadas"
+    assert len(enviados) == 1, f"le mandó al proveedor: {enviados}"
+    primera = cuentas[enviados[0]]
+    reconectada = next(c for token, c in cuentas.items() if token != enviados[0])
+    primera.refresh_from_db()
+    assert primera.revocado_en is not None and primera.access_token is None
+    reconectada.refresh_from_db()
+    assert reconectada.access_token == "ya29.NUEVO"
+    assert reconectada.revocado_en is None
+    assert reconectada.estado == CuentaConectada.Estado.CONECTADA
+
+    # Otra preparación ya ve la concesión nueva y la revoca.
+    assert limpiar(org).status_code == 204
+    assert enviados[1:] == ["ya29.NUEVO"]
+
+
 def test_reentrega_de_la_misma_operacion_no_duplica_efectos(monkeypatch, claves):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org = uuid.uuid4()
