@@ -360,18 +360,16 @@ class UserDetailView(generics.RetrieveAPIView):
         ),
         responses={
             200: UserSerializer,
-            403: OpenApiResponse(description="Falta la cabecera X-Usuario-Id."),
-            404: OpenApiResponse(description="El usuario no existe, o el id pedido no es el del token."),
+            403: OpenApiResponse(description="Falta contexto válido de usuario u organización, o la pertenencia cambió."),
+            404: OpenApiResponse(description="El usuario no existe, está inactivo, o el id pedido no es el del token."),
         },
     )
     def get(self, request, *args, **kwargs):
         return super().get(request, *args, **kwargs)
 
     def get_queryset(self):
-        usuario_id = self.request.headers.get("X-Usuario-Id")
-        if not usuario_id:
-            raise PermissionDenied("Falta el contexto de usuario")
-        return User.objects.filter(pk=usuario_id)
+        usuario = usuario_del_contexto(self.request)
+        return User.objects.filter(pk=usuario.pk)
 
 
 
