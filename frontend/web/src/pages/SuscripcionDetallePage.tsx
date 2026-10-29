@@ -20,6 +20,7 @@ import { Insignia } from '../components/ui/Insignia';
 import { Modal } from '../components/ui/Modal';
 import CancelarSuscripcionDialog from '../components/subscriptions/CancelarSus';
 import { useToast } from '../context/ToastContext';
+import { useAuth, type MarcaSesion } from '../context/AuthContext';
 import {
   usePresentacionCategoria,
   cuandoEnDias,
@@ -55,6 +56,26 @@ function mensajeErrorCancelacion(err: unknown): string {
 }
 
 export function SuscripcionDetallePage() {
+  const { capturarSesion } = useAuth();
+  const sesion = capturarSesion();
+  // Cada sesión tiene sus propios datos, formularios y reservas, incluso si
+  // otra pestaña cambia de cuenta sin cambiar la URL de este detalle.
+  return <DetalleDeSesion key={sesion} sesion={sesion} />;
+}
+
+function DetalleDeSesion({ sesion }: { sesion: MarcaSesion }) {
+  const { capturarSesion } = useAuth();
+  const montada = useRef(true);
+  useEffect(() => {
+    montada.current = true;
+    return () => { montada.current = false; };
+  }, []);
+  // La marca cambia antes de que termine /usuarios/me/ de la cuenta nueva.
+  // Comparar solo usuario o id de suscripción no protege esa espera.
+  const sigueVigente = useCallback(
+    () => montada.current && capturarSesion() === sesion,
+    [capturarSesion, sesion],
+  );
   const categoriaVisual = usePresentacionCategoria();
   const { id } = useParams<{ id: string }>();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
@@ -91,19 +112,21 @@ export function SuscripcionDetallePage() {
 
   /** Reserva la suscripción para una operación; null si ya hay otra en vuelo sobre ella. */
   const empezarOperacion = useCallback((tipo: Operacion['tipo'], idDetalle: string): Operacion | null => {
+    if (!sigueVigente()) return null;
     if (operacionesRef.current.has(idDetalle)) return null;
     const nueva: Operacion = { tipo, id: idDetalle };
     operacionesRef.current.set(idDetalle, nueva);
     setOperaciones(new Map(operacionesRef.current));
     return nueva;
-  }, []);
+  }, [sigueVigente]);
 
   /** Libera solo la reserva que terminó, nunca otra más nueva. */
   const terminarOperacion = useCallback((terminada: Operacion) => {
+    if (!sigueVigente()) return;
     if (operacionesRef.current.get(terminada.id) !== terminada) return;
     operacionesRef.current.delete(terminada.id);
     setOperaciones(new Map(operacionesRef.current));
-  }, []);
+  }, [sigueVigente]);
 
   // Cuántas respuestas de operaciones se mostraron. Con la reserva, la
   // respuesta de una operación es lo último que pasó en el servidor con esa
@@ -111,9 +134,10 @@ export function SuscripcionDetallePage() {
   // estaba en vuelo cuando llegó puede traer lo de antes y se descarta.
   const respuestasMostradas = useRef(0);
   const mostrarRespuesta = useCallback((suscripcion: Suscripcion) => {
+    if (!sigueVigente()) return;
     respuestasMostradas.current += 1;
     setEstado({ tipo: 'listo', suscripcion });
-  }, []);
+  }, [sigueVigente]);
 
   useEffect(() => {
     idActual.current = id;
@@ -124,7 +148,7 @@ export function SuscripcionDetallePage() {
     if (!id) return;
     let cancelado = false;
     const mostradasAlEmpezar = respuestasMostradas.current;
-    const vigente = () => !cancelado && respuestasMostradas.current === mostradasAlEmpezar;
+    const vigente = () => !cancelado && sigueVigente() && respuestasMostradas.current === mostradasAlEmpezar;
     setEstado({ tipo: 'cargando' });
 
     // Antes se pedía la lista completa y se buscaba el id (había un TODO
@@ -142,7 +166,7 @@ export function SuscripcionDetallePage() {
     return () => {
       cancelado = true;
     };
-  }, [id]);
+  }, [id, sigueVigente]);
 
   // Historial de uso (CH-15): GET /suscripciones/<id>/uso/.
   useEffect(() => {
@@ -152,18 +176,18 @@ export function SuscripcionDetallePage() {
 
     getUsos(id)
       .then((usos) => {
-        if (cancelado) return;
+        if (cancelado || !sigueVigente()) return;
         historialDe.current = id;
         setHistorial({ tipo: 'listo', usos });
       })
       .catch(() => {
-        if (!cancelado) setHistorial({ tipo: 'error' });
+        if (!cancelado && sigueVigente()) setHistorial({ tipo: 'error' });
       });
 
     return () => {
       cancelado = true;
     };
-  }, [id, recargaHistorial]);
+  }, [id, recargaHistorial, sigueVigente]);
 
   const recargarHistorial = useCallback(() => setRecargaHistorial((n) => n + 1), []);
 
@@ -178,7 +202,7 @@ export function SuscripcionDetallePage() {
         // Sin fecha se omite la propiedad: { minutos } es válido para la API y
         // usa hoy; { minutos, fecha: "" } no lo es.
         const actualizada = await registrarUso(id, fecha ? { minutos, fecha } : { minutos });
-        if (idActual.current !== id) return; // se navegó a otra suscripción
+        if (!sigueVigente() || idActual.current !== id) return;
         // La respuesta trae la suscripción actualizada: horas de uso del mes y
         // costo por hora se recalculan con ella, sin otra petición.
         mostrarRespuesta(actualizada);
@@ -189,40 +213,42 @@ export function SuscripcionDetallePage() {
         terminarOperacion(reservada);
       }
     },
-    [id, empezarOperacion, terminarOperacion, mostrarRespuesta, recargarHistorial],
+    [id, empezarOperacion, terminarOperacion, mostrarRespuesta, recargarHistorial, sigueVigente],
   );
 
   const abrirCancelacion = useCallback(() => {
+    if (!sigueVigente()) return;
     // Mientras se registra uso el botón está deshabilitado; esto es por si igual llega.
     if (idActual.current && operacionesRef.current.has(idActual.current)) return;
     setErrorCancelacion(null);
     setConfirmandoCancelacion(true);
-  }, []);
+  }, [sigueVigente]);
 
   // "Volver", la X y Escape: no se llama a la API ni cambia nada.
   const cerrarCancelacion = useCallback(() => {
+    if (!sigueVigente()) return;
     const actual = idActual.current ? operacionesRef.current.get(idActual.current) : undefined;
     if (actual?.tipo === 'cancelacion') return;
     setErrorCancelacion(null);
     setConfirmandoCancelacion(false);
-  }, []);
+  }, [sigueVigente]);
 
   // Usa la transición del backend (POST .../cancelar/, VI-03), no DELETE: la
   // suscripción se queda con su historial y deja de proyectar cobros.
   const confirmarCancelacion = async () => {
-    if (!id || estado.tipo !== 'listo') return;
+    if (!sigueVigente() || !id || estado.tipo !== 'listo') return;
     const reservada = empezarOperacion('cancelacion', id);
     if (!reservada) return; // doble clic, o ya hay otra operación en vuelo
     const nombre = estado.suscripcion.nombre;
     setErrorCancelacion(null);
     try {
       const cancelada = await cancelarSuscripcion(id);
-      if (idActual.current !== id) return; // se navegó a otra suscripción
+      if (!sigueVigente() || idActual.current !== id) return;
       mostrarRespuesta(cancelada);
       setConfirmandoCancelacion(false);
       toast.exito(`Cancelaste ${nombre}. Ya no contamos sus próximos cobros.`);
     } catch (err: unknown) {
-      if (idActual.current === id) setErrorCancelacion(mensajeErrorCancelacion(err));
+      if (sigueVigente() && idActual.current === id) setErrorCancelacion(mensajeErrorCancelacion(err));
     } finally {
       terminarOperacion(reservada);
     }
@@ -266,6 +292,7 @@ export function SuscripcionDetallePage() {
               key={id}
               onRegistrar={registrar}
               bloqueado={confirmandoCancelacion || enCurso !== null}
+              sigueVigente={sigueVigente}
             />
 
             <h3 className={styles.subtitulo}>Historial</h3>

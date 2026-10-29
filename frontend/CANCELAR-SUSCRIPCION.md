@@ -64,6 +64,18 @@ Rutas relativas a `frontend/`.
 
 ## Cómo se comprobó
 
+La página también aísla cada sesión. Al cerrar sesión o cambiar de cuenta en otra pestaña,
+las respuestas pendientes de detalle, historial, uso y cancelación ya no actualizan datos ni
+avisos de la cuenta nueva. Los formularios y las reservas se reinician para esa sesión.
+La comprobación usa la marca de `AuthContext`, que cambia antes de terminar `/usuarios/me/`;
+no depende de que el perfil nuevo ya haya llegado. El formulario de uso descarta además sus
+confirmaciones y errores locales cuando termina una petición de la sesión anterior.
+
+- `web/src/pages/SuscripcionDetallePage.sesion.test.tsx`: nueve regresiones con tokens,
+  `AuthProvider`, rutas privadas y componentes reales; solo se simula la red. Cubren logout,
+  cambio entre cuentas de organizaciones distintas, éxito/error tardíos de cancelación,
+  respuestas antiguas de uso/detalle/historial y `/me` de la cuenta nueva todavía pendiente.
+
 - `shared/src/api/suscripciones.test.ts`: la URL es `.../cancelar/` con `POST` y sin cuerpo; un rechazo
   llega como `ErrorDeApi` con su estado.
 - `web/src/pages/SuscripcionDetallePage.test.tsx` (página real, solo se simula la red): confirmar,

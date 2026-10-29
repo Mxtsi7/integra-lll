@@ -25,6 +25,8 @@ interface RegistrarUsoFormProps {
    * envía nada hasta que termine (revisión de #112).
    */
   bloqueado?: boolean;
+  /** Descarta también los avisos locales si cambió la sesión durante el envío. */
+  sigueVigente?: () => boolean;
 }
 
 const ID_CAMPO: Record<CampoUso, string> = { minutos: "uso-minutos", fecha: "uso-fecha" };
@@ -49,7 +51,7 @@ function textoConfirmacion(minutos: number, fecha: string | undefined, hoy: stri
  * reglas que RegistrarUsoSerializer (enteros de 1 a 44.640, fecha no futura)
  * y el backend sigue siendo la validación definitiva.
  */
-export function RegistrarUsoForm({ onRegistrar, bloqueado = false }: RegistrarUsoFormProps) {
+export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente = () => true }: RegistrarUsoFormProps) {
   const hoy = hoyLocalIso();
   const [minutos, setMinutos] = useState("");
   // Se propone hoy; el contrato admite otra fecha pasada (o ninguna).
@@ -64,7 +66,7 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false }: RegistrarUs
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // Un doble clic no registra dos veces el mismo uso.
-    if (enviandoRef.current || bloqueado) return;
+    if (enviandoRef.current || bloqueado || !sigueVigente()) return;
 
     const locales = validarUso({ minutos, fecha }, hoy);
     setErrores(locales);
@@ -83,9 +85,11 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false }: RegistrarUs
       // "Día" vacío no viaja como fecha: "" (el serializer lo rechaza); se
       // omite y el backend usa hoy (revisión PR #80).
       await onRegistrar(cantidad, fecha || undefined);
+      if (!sigueVigente()) return;
       setMinutos("");
       setConfirmacion(textoConfirmacion(cantidad, fecha || undefined, hoy));
     } catch (err: unknown) {
+      if (!sigueVigente()) return;
       if (err instanceof ErrorDeApi && err.campos) {
         const { porCampo, general } = erroresDesdeServidor(err.campos, CAMPO_DESDE_API);
         setErrores(porCampo);
@@ -99,7 +103,7 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false }: RegistrarUs
       }
     } finally {
       enviandoRef.current = false;
-      setGuardando(false);
+      if (sigueVigente()) setGuardando(false);
     }
   };
 
