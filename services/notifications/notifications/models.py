@@ -440,3 +440,190 @@ class SuscripcionVigilada(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.nombre or self.suscripcion_id} ({self.estado}, cobra {self.proximo_cobro})"
+
+
+class EventoRecibido(ModeloTenant):
+    """El inbox del consumidor de RabbitMQ (FE-24 / MX-21).
+
+    RabbitMQ entrega **al menos una vez**: un ack perdido, un reinicio en
+    medio del trabajo o un replay traen el mismo mensaje otra vez, con el
+    mismo `id`. MX-21 pide unicidad `(consumidor, organizacion_id, id)` y que
+    el efecto se guarde en la MISMA transacción que esta fila.
+
+    ── Por qué el INSERT y no un SELECT previo ─────────────────────────────
+    La tentación es `if EventoRecibido.objects.filter(...).exists(): return`.
+    Eso no deduplica nada: con dos consumidores (o uno reconectado mientras el
+    otro trabaja) los dos hacen el SELECT, los dos lo ven vacío, y los dos
+    hacen el efecto. La única garantía real es la restricción única: se
+    INSERTA y, si choca, el mensaje ya se procesó. El guardia vive en la base,
+    no en memoria.
+
+    ── Por qué `consumidor` ────────────────────────────────────────────────
+    Un mismo evento puede llegar a dos colas con efectos distintos. Sin esa
+    columna, el inbox de una cola haría que la otra diera su mensaje por
+    procesado y no hiciera nada nunca.
+
+    No se expira: MX-21 dice explícitamente que no se acorte la ventana de
+    replay sin acordarla. Cuando haga falta purgar, es una tarea aparte con
+    una ventana decidida, no un borrado silencioso acá.
+    """
+
+    #: Qué cola lo procesó. Los valores los fija `events.topologia`.
+    consumidor = models.CharField(
+        max_length=40,
+        verbose_name="Consumidor",
+        help_text="El nombre de la cola que procesó el mensaje.",
+    )
+    evento_id = models.UUIDField(
+        verbose_name="Id del evento",
+        help_text=(
+            "El `id` del sobre, que el catálogo designa para descartar "
+            "duplicados. Nace una vez por hecho: reintentos y reentregas "
+            "conservan el mismo."
+        ),
+    )
+    evento = models.CharField(
+        max_length=60,
+        verbose_name="Nombre del evento",
+        help_text="Para poder mirar el inbox sin volver a leer el cuerpo.",
+    )
+    ocurrido_en = models.DateTimeField(
+        verbose_name="Ocurrido en",
+        help_text=(
+            "Cuándo pasó el hecho, según el productor. Distinto de "
+            "`creado_en`, que es cuándo lo procesamos: la diferencia entre "
+            "los dos es el retraso real de la cola."
+        ),
+    )
+    hubo_efecto = models.BooleanField(
+        default=True,
+        verbose_name="Hubo efecto",
+        help_text=(
+            "False cuando el sobre era válido pero no cambió nada (un evento "
+            "más viejo que la proyección). Se registra igual para no volver a "
+            "procesarlo, y la bandera distingue 'no hizo falta' de 'se hizo'."
+        ),
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "evento_recibido"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["consumidor", "organizacion_id", "evento_id"],
+                name="evento_recibido_unico_por_consumidor",
+            ),
+        ]
+        verbose_name = "Evento recibido"
+        verbose_name_plural = "Eventos recibidos"
+
+    def __str__(self) -> str:
+        return f"{self.consumidor} <- {self.evento} ({self.evento_id})"
+
+
+class AlertaPorEntregar(ModeloTenant):
+    """El outbox de `alerta.activada` (FE-24 / MX-21).
+
+    Una alerta creada no se publica en el acto: se deja acá, en la MISMA
+    transacción que la alerta, y un proceso aparte (`publicar_alertas`) la
+    manda al broker después del commit. Es el patrón outbox, por la misma
+    razón que en Subscriptions: si se publicara dentro de la transacción y el
+    commit fallara, el evento ya estaría afuera anunciando algo que no pasó;
+    y si se publicara después sin dejar rastro, un corte entre el commit y el
+    publish perdería el evento sin que nada avise.
+
+    ── El `id` de la fila ES el `id` del evento ────────────────────────────
+    `ModeloTenant` ya trae un UUID de clave primaria, así que no hace falta
+    una segunda columna. Eso da gratis lo que pide el contrato: el `id` nace
+    una vez y los reintentos conservan el mismo, porque reintentar es volver a
+    publicar ESTA fila.
+
+    ── Una fila por persona, no por alerta ─────────────────────────────────
+    `alerta.activada` exige `usuario_id`, pero las alertas son de la
+    organización (así está modelado FE-16). El evento es de ENTREGA: una fila
+    por cada persona de la organización que quiere ese tipo de aviso por algún
+    canal. Dos personas con el aviso encendido son dos entregas del mismo
+    hecho, con ids distintos y el mismo `correlation_id`.
+    """
+
+    #: Lo que el contrato llama `evento` y `version`. Son constantes de
+    #: clase y no columnas: esta tabla publica un solo tipo de evento, y
+    #: `routing_key` las lee igual que las lee de una fila de Subscriptions.
+    evento = "alerta.activada"
+    version = 2
+
+    alerta = models.ForeignKey(
+        "Alerta",
+        on_delete=models.CASCADE,
+        related_name="entregas",
+        verbose_name="Alerta",
+    )
+    usuario_id = models.BigIntegerField(
+        validators=[MinValueValidator(1)],
+        verbose_name="Usuario",
+        help_text=(
+            "Entero positivo, coherente con `auth.User.id` (BigAutoField), "
+            "como exige MX-21 v2. OJO: `PreferenciaNotificacion.usuario_id` "
+            "es texto (el valor crudo de la cabecera), asi que aca se "
+            "convierte y una preferencia con un id no numerico NO produce "
+            "entrega: publicar un `usuario_id` invalido rompe el contrato."
+        ),
+    )
+    correlation_id = models.UUIDField(
+        verbose_name="Correlación",
+        help_text=(
+            "Compartido por todas las entregas de la misma alerta. Un job sin "
+            "petición HTTP genera la suya al empezar y la conserva durante "
+            "sus reintentos."
+        ),
+    )
+    programada_para = models.DateTimeField(
+        verbose_name="Programada para",
+        help_text=(
+            "El instante de la alerta. El contrato exige "
+            "`programada_para <= ocurrido_en`: se anuncia una alerta que YA "
+            "venció, no una futura."
+        ),
+    )
+
+    publicado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Publicado en",
+        help_text="NULL mientras sigue pendiente de publicar.",
+    )
+    intentos = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="Intentos de publicación",
+    )
+    ultimo_error = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Último error de publicación",
+        help_text="Sin cuerpos ni secretos: el motivo y nada más.",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "alerta_por_entregar"
+        constraints = [
+            # Una entrega por alerta y persona. Si el generador corre dos
+            # veces, la alerta ya existe y no se vuelve a encolar; si algo
+            # intentara encolar igual, choca acá en vez de duplicar el aviso.
+            models.UniqueConstraint(
+                fields=["alerta", "usuario_id"],
+                name="entrega_unica_por_alerta_y_usuario",
+            ),
+        ]
+        indexes = ModeloTenant.Meta.indexes + [
+            # El despachador busca las pendientes, que son pocas entre muchas.
+            models.Index(
+                fields=["publicado_en"],
+                condition=models.Q(publicado_en__isnull=True),
+                name="entrega_pendiente",
+            ),
+        ]
+        verbose_name = "Alerta por entregar"
+        verbose_name_plural = "Alertas por entregar"
+
+    def __str__(self) -> str:
+        estado = "publicada" if self.publicado_en else "pendiente"
+        return f"entrega de {self.alerta_id} a {self.usuario_id} ({estado})"

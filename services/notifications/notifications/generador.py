@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from . import entregas
 from .models import Alerta, PreferenciaNotificacion, SuscripcionVigilada
 
 #: Espacio de los ids determinísticos. Cambiarlo haría que todas las
@@ -118,11 +119,24 @@ def alguien_quiere_fin_de_prueba(organizacion_id) -> bool:
     )
 
 
-def _crear_una_vez(**campos) -> tuple[Alerta | None, bool]:
-    """Crea la alerta si su ventana no tiene una. (alerta, era_nueva)."""
+def _crear_una_vez(*, programada_para, **campos) -> tuple[Alerta | None, bool]:
+    """Crea la alerta y encola sus entregas. (alerta, era_nueva).
+
+    Las dos cosas en un solo `atomic`: la alerta y las filas de
+    `AlertaPorEntregar` que el despachador de FE-24 va a publicar. Si se
+    escribieran por separado, un corte entre las dos dejaría una alerta que
+    nadie entrega (y que nunca se vuelve a intentar, porque la segunda corrida
+    la encuentra ya creada y no toca el outbox).
+
+    `programada_para` es cuándo VENCIO la alerta —el comienzo de su ventana—,
+    no cuándo se creó la fila. MX-21 exige `programada_para <= ocurrido_en`, y
+    `ocurrido_en` lo pone el publicador al mandarla.
+    """
     try:
         with transaction.atomic():
-            return Alerta.objects.create(**campos), True
+            alerta = Alerta.objects.create(**campos)
+            entregas.encolar(alerta, programada_para=programada_para)
+            return alerta, True
     except IntegrityError:
         # La restricción única (organización, evento_id): esta ventana ya
         # avisó. Es el camino normal de la segunda corrida del día.
@@ -132,6 +146,48 @@ def _crear_una_vez(**campos) -> tuple[Alerta | None, bool]:
 def _texto_monto(suscripcion: SuscripcionVigilada) -> str:
     monto = f"{suscripcion.monto:,.0f}".replace(",", ".")
     return f"{monto} {suscripcion.moneda}"
+
+
+# ── Los textos de las alertas, en un solo lugar ─────────────────────────────
+# Los usa el generador al crearlas y FE-23 (`anulacion.py`) al corregirlas
+# cuando cambia el monto y la fecha no. Si cada uno tuviera su copia de la
+# frase, un cambio de redaccion dejaria alertas viejas y nuevas diciendo cosas
+# distintas sobre el mismo cobro.
+
+
+def mensaje_proximo_cobro(suscripcion: SuscripcionVigilada) -> str:
+    return (
+        f"El cobro de {_texto_monto(suscripcion)} de "
+        f"{suscripcion.nombre or 'la suscripción'} está programado para el "
+        f"{suscripcion.proximo_cobro:%d-%m-%Y}."
+    )
+
+
+def mensaje_fin_prueba(suscripcion: SuscripcionVigilada) -> str:
+    return (
+        f"El período de prueba de {suscripcion.nombre or 'la suscripción'} "
+        f"termina el {suscripcion.fin_prueba:%d-%m-%Y}. Si no la cancelas "
+        f"antes, se cobra {_texto_monto(suscripcion)}."
+    )
+
+
+#: Quien escribe el mensaje de cada tipo. Los tipos que no genera este modulo
+#: (alza de tarifa, doble cobro, presupuesto excedido) no estan: sus alertas
+#: las escribe otro y FE-23 no les toca el texto.
+MENSAJE_POR_TIPO = {
+    Alerta.Tipo.PROXIMO_COBRO: mensaje_proximo_cobro,
+    Alerta.Tipo.FIN_PRUEBA: mensaje_fin_prueba,
+}
+
+
+def mensaje_de(tipo: str, suscripcion: SuscripcionVigilada) -> str | None:
+    """El mensaje que le corresponde hoy a una alerta de ese tipo.
+
+    None cuando este modulo no escribe ese tipo. El llamador no debe inventar
+    un texto en ese caso: significa que la alerta la escribio otro.
+    """
+    escribir = MENSAJE_POR_TIPO.get(tipo)
+    return escribir(suscripcion) if escribir else None
 
 
 def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
@@ -165,15 +221,15 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
         candidatas = [d for d in anticipaciones[org] if faltan <= d]
         for dias in sorted(candidatas)[:1]:
             alerta, nueva = _crear_una_vez(
+                # El comienzo de la ventana: las 00:00 del dia en que
+                # empezaban los `dias` de anticipacion. Es <= ahora porque la
+                # alerta solo se crea cuando ese dia ya llego.
+                programada_para=_medianoche(suscripcion.proximo_cobro - dt.timedelta(days=dias)),
                 organizacion_id=org,
                 tipo=Alerta.Tipo.PROXIMO_COBRO,
                 titulo=f"{suscripcion.nombre or 'Una suscripción'} se cobra "
                        + ("hoy" if faltan == 0 else f"en {faltan} día{'s' if faltan != 1 else ''}"),
-                mensaje=(
-                    f"El cobro de {_texto_monto(suscripcion)} de "
-                    f"{suscripcion.nombre or 'la suscripción'} está programado para el "
-                    f"{suscripcion.proximo_cobro:%d-%m-%Y}."
-                ),
+                mensaje=mensaje_proximo_cobro(suscripcion),
                 suscripcion_id=suscripcion.suscripcion_id,
                 evento_id=id_de_ventana(
                     org, suscripcion.suscripcion_id, Alerta.Tipo.PROXIMO_COBRO,
@@ -181,6 +237,7 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
                 ),
                 datos={
                     "origen": "generador",
+                    "nombre": suscripcion.nombre,
                     "fecha_cobro": suscripcion.proximo_cobro.isoformat(),
                     "dias_faltantes": faltan,
                     "anticipacion_dias": dias,
@@ -195,12 +252,16 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
     return resultado
 
 
+def _medianoche(fecha: dt.date) -> dt.datetime:
+    """Las 00:00 de ese dia en la zona horaria local (Chile)."""
+    return timezone.make_aware(
+        dt.datetime.combine(fecha, dt.time.min), timezone.get_current_timezone()
+    )
+
+
 def _fin_de_prueba_en(suscripcion: SuscripcionVigilada) -> dt.datetime:
     """El instante en que deja de ser gratis: las 00:00 del día `fin_prueba`."""
-    return timezone.make_aware(
-        dt.datetime.combine(suscripcion.fin_prueba, dt.time.min),
-        timezone.get_current_timezone(),
-    )
+    return _medianoche(suscripcion.fin_prueba)
 
 
 def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
@@ -227,14 +288,13 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
         candidatas = [v for v in VENTANAS_FIN_PRUEBA if horas <= v]
         for ventana in sorted(candidatas)[:1]:
             alerta, nueva = _crear_una_vez(
+                # El comienzo de la ventana: `ventana` horas antes del fin de
+                # la prueba. Es <= ahora porque `horas <= ventana`.
+                programada_para=_fin_de_prueba_en(suscripcion) - dt.timedelta(hours=ventana),
                 organizacion_id=org,
                 tipo=Alerta.Tipo.FIN_PRUEBA,
                 titulo=f"La prueba de {suscripcion.nombre or 'una suscripción'} termina en menos de {ventana} h",
-                mensaje=(
-                    f"El período de prueba de {suscripcion.nombre or 'la suscripción'} "
-                    f"termina el {suscripcion.fin_prueba:%d-%m-%Y}. Si no la cancelas "
-                    f"antes, se cobra {_texto_monto(suscripcion)}."
-                ),
+                mensaje=mensaje_fin_prueba(suscripcion),
                 suscripcion_id=suscripcion.suscripcion_id,
                 evento_id=id_de_ventana(
                     org, suscripcion.suscripcion_id, Alerta.Tipo.FIN_PRUEBA,
@@ -242,6 +302,7 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
                 ),
                 datos={
                     "origen": "generador",
+                    "nombre": suscripcion.nombre,
                     "fin_prueba": suscripcion.fin_prueba.isoformat(),
                     "ventana_horas": ventana,
                     "horas_restantes": round(horas, 1),
