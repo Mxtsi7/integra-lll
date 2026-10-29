@@ -526,6 +526,164 @@ class Cobro(ReferenciasCatalogo, ModeloTenant):
         return self.monto > self.suscripcion.monto
 
 
+class HallazgoCobro(ModeloTenant):
+    """Anomalía detectada sobre un cobro (VI-19 / RF-07 / CU-30).
+
+    Hay dos tipos:
+
+    * ``alza_tarifa``: el cobro supera en **más de 5 %** el promedio de los
+      cobros anteriores del mismo servicio (mínimo 2 cobros previos y una
+      ventana de 3 meses).
+    * ``doble_cobro``: existe otro cobro del mismo servicio a menos de 5 días.
+
+    La identidad de negocio se guarda en ``clave_deduplicacion``: una clave
+    por cobro para las alzas y una clave por par ordenado de cobros para los
+    dobles cobros. Así, volver a analizar el mismo cobro (por ejemplo, al
+    reprocesar una importación) no crea alertas repetidas.
+
+    ``estado`` es la preferencia de revisión de la alerta, no el estado de la
+    suscripción: marcarla como revisada nunca cambia ``Subscription.estado``
+    (RF-07 / RF-09).
+    """
+
+    class Tipo(models.TextChoices):
+        ALZA_TARIFA = "alza_tarifa", "Alza de tarifa"
+        DOBLE_COBRO = "doble_cobro", "Posible doble cobro"
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        REVISADA = "revisada", "Revisada"
+
+    tipo = models.CharField(
+        max_length=20,
+        choices=Tipo.choices,
+        verbose_name="Tipo de anomalía",
+    )
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.CASCADE,
+        related_name="hallazgos_cobro",
+        verbose_name="Suscripción",
+    )
+
+    cobro = models.ForeignKey(
+        Cobro,
+        on_delete=models.CASCADE,
+        related_name="hallazgos",
+        verbose_name="Cobro analizado",
+    )
+
+    cobro_relacionado = models.ForeignKey(
+        Cobro,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="hallazgos_relacionados",
+        verbose_name="Cobro relacionado",
+        help_text="Segundo cargo del par cuando el hallazgo es un posible doble cobro.",
+    )
+
+    monto = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name="Monto del cobro",
+    )
+
+    monto_referencia = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Monto de referencia",
+        help_text="Promedio de los cobros previos (alza) o monto del otro cargo (doble cobro).",
+    )
+
+    moneda = models.CharField(
+        max_length=3,
+        default="CLP",
+        verbose_name="Moneda",
+    )
+
+    porcentaje_variacion = models.DecimalField(
+        # El cobro admite hasta 99.999.999,99 y el promedio mínimo es 0,01:
+        # la variación máxima ronda 999.999.999.800,00 %. Con 8 dígitos el
+        # caso extremo rompía al persistir el hallazgo y dejaba el cobro
+        # guardado. 14 dígitos cubren todo el rango numérico del modelo.
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="Variación porcentual",
+        help_text="Solo aplica al alza de tarifa; 6.00 significa un 6 % sobre el promedio.",
+    )
+
+    fecha_cobro = models.DateField(verbose_name="Fecha del cobro analizado")
+
+    fecha_referencia = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Fecha de referencia",
+        help_text="Fecha del cargo relacionado en un posible doble cobro.",
+    )
+
+    detalle = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Detalle",
+        help_text="Evidencia adicional: cobros previos usados en el promedio, días de diferencia, etc.",
+    )
+
+    clave_deduplicacion = models.CharField(
+        max_length=120,
+        verbose_name="Clave de deduplicación",
+    )
+
+    estado = models.CharField(
+        max_length=10,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+        verbose_name="Estado de revisión",
+    )
+
+    revisado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Revisado en",
+    )
+
+    revisado_por = models.BigIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Revisado por",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "hallazgo_cobro"
+        ordering = ["-fecha_cobro", "-creado_en", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "clave_deduplicacion"],
+                name="hallazgo_cobro_unico_por_tenant",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["organizacion_id", "estado", "-creado_en"],
+                name="hallazgo_org_estado_creado",
+            ),
+            models.Index(
+                fields=["suscripcion", "-fecha_cobro"],
+                name="hallazgo_suscripcion_fecha",
+            ),
+        ]
+        verbose_name = "Hallazgo de cobro"
+        verbose_name_plural = "Hallazgos de cobro"
+
+    def __str__(self) -> str:
+        return f"{self.get_tipo_display()} · {self.suscripcion} · {self.fecha_cobro}"
+
+
 class RegistroUso(ModeloTenant):
     """Registro histórico de uso de una suscripción en una fecha determinada (CU-23 / RF-04 / RF-15)."""
 
@@ -661,3 +819,136 @@ class Presupuesto(ModeloTenant):
 
     def __str__(self) -> str:
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
+
+
+class ResumenOrganizacion(ModeloTenant):
+    """Agregado del gasto mensual de una organización, una fila por moneda.
+
+    Esto es *trabajo derivado*: nace de que algo pasó (se creó una
+    suscripción), no de que alguien lo haya pedido. Según el ADR-003 ese tipo
+    de trabajo va por evento, no dentro de la petición HTTP.
+
+    Existe justamente para poder medir esa diferencia: con
+    `EVENTOS_ASINCRONOS=0` se recalcula dentro del POST y el usuario espera;
+    con `=1` el POST solo deja el evento en el outbox y lo recalcula el
+    consumidor. Ver `events/modo.py` y `k8s/pruebas/comparar-cola.sh`.
+    """
+
+    moneda = models.CharField(
+        max_length=3,
+        # Literales igual que en Presupuesto: Subscription.Moneda ya no existe
+        # como enum, la moneda se valida contra el catálogo compartido.
+        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
+        verbose_name="Moneda",
+        help_text=(
+            "Hay una fila por moneda, no una sola con el total. Sumar CLP y "
+            "USD da un número que no es plata de ninguna divisa: 10.000 CLP "
+            "más 10 USD no son 10.010 de nada. Convertir exigiría una fuente "
+            "de tipos de cambio que el sistema no tiene, así que se informa "
+            "cada divisa por separado y quien muestre el panel decide cómo "
+            "presentarlas."
+        ),
+    )
+
+    total_mensual = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0"),
+        verbose_name="Gasto mensual en esta moneda",
+        help_text="Las anuales se dividen por 12 para dejarlas comparables.",
+    )
+
+    cantidad_activas = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Suscripciones activas",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "resumen_organizacion"
+        ordering = ["organizacion_id", "moneda"]
+        constraints = [
+            # Una fila por organización y moneda: el resumen se reemplaza, no
+            # se apila.
+            models.UniqueConstraint(
+                fields=["organizacion_id", "moneda"],
+                name="resumen_unico_por_organizacion_y_moneda",
+            ),
+        ]
+        verbose_name = "Resumen de organización"
+        verbose_name_plural = "Resúmenes de organización"
+
+    def __str__(self) -> str:
+        return (
+            f"{self.organizacion_id}: {self.total_mensual} {self.moneda} "
+            f"en {self.cantidad_activas} activas"
+        )
+
+
+class TrabajoDerivado(ModeloTenant):
+    """Evidencia durable de que el trabajo derivado de UN evento ya se hizo.
+
+    ── Por qué existe ───────────────────────────────────────────────────────
+    En modo síncrono el POST recalcula el resumen y el evento igual va al
+    outbox (es parte del contrato). El consumidor lo recibe después y tiene
+    que decidir si el trabajo está hecho o pendiente. La primera versión lo
+    decidía mirando SU PROPIA bandera `EVENTOS_ASINCRONOS`: si estaba en 0,
+    confirmaba sin recalcular. Pero la bandera del proceso que consume no
+    dice nada de lo que hizo el proceso que produjo: un evento producido en
+    asíncrono (sin resumen) y consumido con la bandera en 0 recibía ACK y el
+    resumen no existía nunca. Lo reprodujo la revisión de la PR. Pasa al
+    cambiar de modo con mensajes pendientes, o cuando API y worker tienen
+    configuraciones distintas durante un despliegue.
+
+    La decisión tiene que salir de evidencia **durable y vinculada al
+    evento**, no de una bandera. Esto es esa evidencia: una fila por
+    (evento, trabajo), escrita en la MISMA transacción que el trabajo. Quien
+    la encuentra puede omitir; quien no, tiene que hacer el trabajo, sea
+    cual sea su bandera.
+
+    De paso resuelve la idempotencia del consumidor ante una reentrega: si
+    la fila existe, el evento ya se procesó.
+    """
+
+    class Trabajo(models.TextChoices):
+        RESUMEN = "resumen_organizacion", "Recalcular el resumen de la organización"
+
+    evento_id = models.UUIDField(
+        verbose_name="Evento del outbox",
+        help_text=(
+            "El `id` del sobre (regla 1 del catálogo). UUID suelto y no FK: "
+            "el evento puede venir de otro productor, y la evidencia tiene "
+            "que poder existir aunque el outbox se purgue."
+        ),
+    )
+
+    trabajo = models.CharField(
+        max_length=40,
+        choices=Trabajo.choices,
+        default=Trabajo.RESUMEN,
+        verbose_name="Qué trabajo",
+    )
+
+    hecho_en = models.DateTimeField(default=timezone.now, verbose_name="Hecho el")
+
+    hecho_por = models.CharField(
+        max_length=20,
+        verbose_name="Quién lo hizo",
+        help_text="`api` (dentro del POST, modo síncrono) o `consumidor`.",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "trabajo_derivado"
+        ordering = ["-hecho_en"]
+        constraints = [
+            # Un trabajo se acredita una vez por evento. Si dos consumidores
+            # reciben la misma entrega, el segundo choca acá y se da cuenta.
+            models.UniqueConstraint(
+                fields=["evento_id", "trabajo"],
+                name="trabajo_derivado_unico_por_evento",
+            ),
+        ]
+        verbose_name = "Trabajo derivado hecho"
+        verbose_name_plural = "Trabajos derivados hechos"
+
+    def __str__(self) -> str:
+        return f"{self.trabajo} de {self.evento_id} por {self.hecho_por}"

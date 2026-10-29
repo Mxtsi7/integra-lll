@@ -25,6 +25,11 @@ Lo que hay que mirar acá son tres cosas:
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import secrets
+from datetime import timedelta
+
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -106,6 +111,50 @@ class CuentaConectada(ModeloTenant):
         verbose_name="Detalle del estado",
     )
 
+    # ⚠️ MISMO NOMBRE Y MISMO SIGNIFICADO que el campo que agrega #72
+    # (migración `0002_cuenta_revocada`). Está así a propósito: dos campos
+    # distintos para la misma idea serían un lío silencioso para siempre,
+    # mientras que dos `AddField` con el mismo nombre son UN conflicto
+    # visible que se resuelve borrando una línea al integrar. Si #72 entra
+    # primero, se borra esta declaración y su AddField de acá.
+    # ── La evidencia de revocación es de UNA concesión, no de la cuenta ──
+    # Sin esto había dos agujeros, los dos encontrados en revisión:
+    #
+    # · Revocación confirmada → reconexión con credenciales nuevas → la
+    #   nueva revocación falla. La cuenta conservaba la fecha ANTERIOR y
+    #   `pendientes_de_revocar()` la excluía, así que las credenciales
+    #   nuevas quedaban vivas con una revocación "acreditada" que no era
+    #   de ellas. #72 habría tomado esa fecha como prueba.
+    #
+    # · Desconexión y reconexión a la vez: `revocar_y_desconectar` habla
+    #   con el proveedor ANTES de guardar, y mientras espera un callback
+    #   puede dejar tokens nuevos. Al volver, borraba los nuevos y
+    #   acreditaba haberlos revocado, cuando revocó los viejos.
+    #
+    # El contador sube con cada juego de credenciales nuevo, y la
+    # revocación solo se guarda si la versión no cambió mientras tanto.
+    credenciales_version = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Versión de las credenciales",
+        help_text=(
+            "Sube cada vez que se guardan tokens nuevos. `revocado_en` "
+            "acredita la revocación de la versión que había al momento de "
+            "pedirla, no de cualquiera posterior."
+        ),
+    )
+
+    revocado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Revocación confirmada por el proveedor",
+        help_text=(
+            "Se llena SOLO cuando el proveedor confirmó la revocación. "
+            "Que no haya tokens guardados no demuestra que el acceso se "
+            "haya revocado del otro lado: el token pudo seguir vivo hasta "
+            "vencer. La limpieza coordinada de #72 exige este dato."
+        ),
+    )
+
     # ── comportamiento ───────────────────────────────────────────────
 
     # Los estados que por sí solos exigen volver a autorizar. Están acá y no
@@ -171,6 +220,190 @@ class CuentaConectada(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.get_proveedor_display()}: {self.cuenta_externa} ({self.get_estado_display()})"
+
+
+class AutorizacionPendiente(ModeloTenant):
+    """Un flujo de OAuth empezado y todavía sin cerrar (FE-03 / FE-04).
+
+    Nace cuando el usuario pide conectar una cuenta y muere cuando vuelve del
+    proveedor (o cuando expira). Guarda las dos cosas que prueban que el
+    callback que llega es el mismo flujo que se inició:
+
+    · **`estado_oauth`** (el `state` de OAuth) — 43 caracteres de
+      `secrets.token_urlsafe`. Viaja al proveedor y vuelve en la URL. Es lo
+      que impide que alguien mande a un usuario un callback armado a mano.
+
+    · **`verificador_pkce`** (RFC 7636) — se queda ACÁ. Al proveedor solo va
+      su hash (`code_challenge`). Quien canjea el código tiene que mostrar el
+      verificador, así que un código robado de la URL no sirve sin él.
+
+    ── Por qué el state se guarda en la base y no firmado en una cookie ─────
+    Porque el callback tiene que ser de **un solo uso**, y eso es un hecho
+    compartido, no algo que se pueda deducir de un token firmado. Con una
+    fila se marca `usada_en` en un UPDATE condicional y dos callbacks
+    simultáneos con el mismo código no pueden ganar los dos.
+
+    ── Por qué trae la organización ────────────────────────────────────────
+    El callback llega como una redirección del navegador desde Google: ahí no
+    hay cabecera `X-Organizacion-Id` que valga. La organización se deduce de
+    ESTA fila, que se creó cuando sí había contexto. Es lo que cumple el
+    criterio "éxito deja cuenta conectada del tenant correcto".
+    """
+
+    # 43 caracteres es lo que da token_urlsafe(32); 64 deja margen.
+    estado_oauth = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="Parámetro state del flujo",
+        help_text=(
+            "Único a nivel global, no por organización: en el callback se "
+            "busca por este valor ANTES de saber de qué organización es."
+        ),
+    )
+
+    proveedor = models.CharField(
+        max_length=20,
+        choices=CuentaConectada.Proveedor.choices,
+        verbose_name="Proveedor",
+    )
+
+    # Quién inició el flujo. FE-03 pide el state "vinculado a sesión", y sin
+    # esto no lo estaba: bastaba con ser del mismo tenant para cerrar un
+    # flujo ajeno. El state aleatorio y PKCE prueban que el flujo es
+    # legítimo, no que vuelva la MISMA persona que lo abrió.
+    #
+    # Se guarda el valor crudo de la cabecera `X-Usuario-Id` que inyecta el
+    # gateway, como texto: el id vive en el esquema de `auth` y acá no se
+    # interpreta, solo se compara.
+    usuario_id = models.CharField(
+        max_length=64,
+        verbose_name="Usuario que inició el flujo",
+    )
+
+    # Dos sesiones del MISMO usuario también son flujos distintos: con solo
+    # `usuario_id`, el callback abierto en una pestaña cerraba el flujo
+    # iniciado en otra. El gateway inyecta `X-Sesion-Id` desde el claim
+    # `sid` del JWT (gateway/app/proxy.py), así que el dato ya llega.
+    #
+    # Admite vacío para los flujos abiertos antes de este campo: un token
+    # viejo puede no traer `sid`. Cuando está vacío no se compara, y queda
+    # dicho en el callback por qué.
+    sesion_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="Sesión que inició el flujo",
+    )
+
+    # Secreto: va cifrado igual que los tokens (FE-06).
+    verificador_pkce = CampoCifrado(
+        verbose_name="Verificador PKCE",
+    )
+
+    # La URI que se le mandó al proveedor. Se guarda porque en el canje hay
+    # que mandar exactamente la misma: si no calza, el proveedor rechaza.
+    redirect_uri = models.URLField(
+        max_length=300,
+        verbose_name="Callback registrado en el proveedor",
+    )
+
+    # A dónde mandar el navegador DESPUÉS de cerrar el flujo. Validado contra
+    # la lista blanca al crearse (ver vistas): acá ya llega limpio.
+    retorno = models.URLField(
+        max_length=300,
+        blank=True,
+        default="",
+        verbose_name="Retorno del frontend",
+    )
+
+    expira_en = models.DateTimeField(
+        verbose_name="Vence el",
+    )
+
+    # Null mientras no se use. No es un booleano a propósito: saber CUÁNDO se
+    # usó sirve para investigar un intento de reuso.
+    usada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Usada el",
+    )
+
+    # ── comportamiento ───────────────────────────────────────────────
+
+    #: Cuánto dura un flujo. Diez minutos alcanzan de sobra para elegir
+    #: cuenta y aceptar, y dejan una ventana corta si el state se filtra.
+    MINUTOS_DE_VIDA = 10
+
+    @classmethod
+    def abrir(cls, *, organizacion_id, usuario_id, proveedor: str,
+              redirect_uri: str, retorno: str = "",
+              sesion_id: str = "") -> tuple["AutorizacionPendiente", str]:
+        """Crea el flujo y devuelve (fila, desafio_pkce).
+
+        El verificador queda guardado cifrado; el desafío es lo único que sale
+        de acá y es lo que se le manda al proveedor.
+        """
+        verificador = secrets.token_urlsafe(32)
+        desafio = (
+            base64.urlsafe_b64encode(hashlib.sha256(verificador.encode()).digest())
+            .decode()
+            .rstrip("=")  # el RFC pide base64url SIN relleno
+        )
+        fila = cls.objects.create(
+            organizacion_id=organizacion_id,
+            usuario_id=str(usuario_id),
+            sesion_id=str(sesion_id or ""),
+            proveedor=proveedor,
+            estado_oauth=secrets.token_urlsafe(32),
+            verificador_pkce=verificador,
+            redirect_uri=redirect_uri,
+            retorno=retorno,
+            expira_en=timezone.now() + timedelta(minutes=cls.MINUTOS_DE_VIDA),
+        )
+        return fila, desafio
+
+    @property
+    def vigente(self) -> bool:
+        """Sirve para canjear: ni usada ni vencida."""
+        return self.usada_en is None and self.expira_en > timezone.now()
+
+    def marcar_usada(self, *, cuando=None) -> bool:
+        """Quema el flujo. True si ESTA llamada fue la que lo quemó.
+
+        El UPDATE condicional es lo que hace el "un solo uso" de verdad:
+        comprobar en Python y guardar después deja una ventana en la que dos
+        callbacks con el mismo código pasan los dos. Acá gana uno solo, y el
+        otro recibe False porque la base ya no tenía la fila sin usar.
+        """
+        ahora = cuando or timezone.now()
+        cambiadas = type(self).objects.filter(
+            pk=self.pk, usada_en__isnull=True
+        ).update(usada_en=ahora, actualizado_en=ahora)
+        if cambiadas:
+            self.usada_en = ahora
+        else:
+            self.refresh_from_db()
+        return bool(cambiadas)
+
+    # ── meta ─────────────────────────────────────────────────────────
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "autorizacion_pendiente"
+        ordering = ["-creado_en"]
+        indexes = [
+            # Para la limpieza de las vencidas sin tocar el resto.
+            models.Index(
+                fields=["expira_en"],
+                name="autorizacion_expira",
+            ),
+        ]
+        verbose_name = "Autorización pendiente"
+        verbose_name_plural = "Autorizaciones pendientes"
+
+    def __str__(self) -> str:
+        estado = "usada" if self.usada_en else ("vigente" if self.vigente else "vencida")
+        return f"{self.get_proveedor_display()} ({estado})"
 
 
 class Importacion(ModeloTenant):

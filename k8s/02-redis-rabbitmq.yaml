@@ -39,8 +39,11 @@ spec:
 # RabbitMQ: el bus de eventos entre servicios del ADR-003.
 #
 # Mide 136Mi en reposo (medido 2026-10-19), de ahí el límite de 256Mi.
-# Todavía ningún servicio publica eventos, pero va en el despliegue porque es
-# parte de la arquitectura declarada y así está listo cuando se use.
+# Ya se usa: `subscriptions` despacha acá los eventos de su outbox
+# (MX-21/VI-26), y el consumidor del mismo servicio los toma de la cola
+# `subscriptions.resumen` para recalcular el resumen de la organización.
+# Con EVENTOS_ASINCRONOS=0 ese mismo trabajo se hace dentro del POST: esa
+# es la comparación con y sin cola (k8s/pruebas/comparar-cola.sh).
 apiVersion: v1
 kind: Service
 metadata:
