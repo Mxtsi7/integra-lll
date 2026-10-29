@@ -32,7 +32,7 @@ function PantallaVerificando() {
 
 /** Rutas que exigen sesión: Home, Panel, Perfil, Configuración, detalle. */
 export function RutaPrivada() {
-  const { estado, verificarSesion } = useAuth();
+  const { estado, sesion, verificarSesion } = useAuth();
   const location = useLocation();
 
   // El token puede vencer con la pestaña abierta; se revisa en cada
@@ -53,7 +53,12 @@ export function RutaPrivada() {
     );
   }
 
-  return <Outlet />;
+  // Si otra pestaña entra con otra cuenta, la ruta sigue igual pero cambia
+  // la marca de sesión: con ella de `key`, todo lo privado se desmonta y se
+  // vuelve a montar desde cero. Ninguna pantalla sigue mostrando (ni puede
+  // usar) datos o acciones de la cuenta anterior (revisión de #128). Un
+  // refresh del token no cambia la marca, así que no vacía nada.
+  return <Outlet key={sesion} />;
 }
 
 /** Login y registro: con sesión activa no tiene sentido verlos. */

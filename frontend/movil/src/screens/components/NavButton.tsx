@@ -6,19 +6,23 @@ export function NavButton({
   title,
   onPress,
   variant = 'primary',
+  disabled = false,
 }: {
   testID?: string;
   title: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary' | 'danger';
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       testID={testID}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.button,
         styles[variant],
         pressed && styles.pressed,
+        disabled && styles.disabled,
       ]}
       onPress={onPress}
     >
@@ -50,6 +54,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
+  },
+  disabled: {
+    opacity: 0.45,
   },
   text: {
     color: '#ffffff',

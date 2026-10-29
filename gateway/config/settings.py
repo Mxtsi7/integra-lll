@@ -88,6 +88,12 @@ RUTAS = {
     "/api/usuarios/": "auth",
     "/api/organizacion/": "auth",
     "/api/suscripciones/": "subscriptions",
+    # VI-19: hallazgos de anomalías (listado, detalle y revisión).
+    "/api/hallazgos/": "subscriptions",
+    # VI-25: alias anunciado de la exportación CSV de cobros. La ruta
+    # canónica es /api/suscripciones/exportar-csv/ y llega por el prefijo
+    # "/api/suscripciones/"; el alias necesita su propia entrada.
+    "/api/export/cobros/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
     # FE-08: progreso de las importaciones (lo consulta CH-27).

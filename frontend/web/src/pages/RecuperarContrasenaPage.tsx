@@ -38,9 +38,19 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // CH-25: el error del correo va en su campo (aria-invalid + descripción) y
+  // el foco vuelve a él; antes era un aviso suelto y el foco se perdía.
+  const [errorCorreo, setErrorCorreo] = useState<string | null>(null);
 
   // Sin handler real (CH-06) la funcionalidad no está disponible: no se simula éxito.
   const isAvailable = Boolean(onSolicitarRecuperacion);
+
+  const mostrarErrorCorreo = (mensaje: string) => {
+    setError(null);
+    setErrorCorreo(mensaje);
+    // Después del render: el campo pudo estar deshabilitado mientras se enviaba.
+    setTimeout(() => document.getElementById('email')?.focus());
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,13 +58,14 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
     if (!onSolicitarRecuperacion || isLoading) return;
 
     // Misma validación de correo que el registro (shared/validaciones.ts).
-    const errorCorreo = validarCorreo(email);
-    if (errorCorreo) {
-      setError(errorCorreo);
+    const invalido = validarCorreo(email);
+    if (invalido) {
+      mostrarErrorCorreo(invalido);
       return;
     }
 
     setError(null);
+    setErrorCorreo(null);
     setIsLoading(true);
 
     try {
@@ -62,7 +73,10 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
       setIsSubmitted(true);
     } catch (err: unknown) {
       // El formulario vuelve a quedar habilitado (finally) para reintentar.
-      setError(mensajeDeError(err));
+      // Un 400 del campo email es un error del campo, no un aviso general.
+      const delCampo = err instanceof AuthError ? err.campos?.email?.[0] : undefined;
+      if (delCampo) mostrarErrorCorreo(delCampo);
+      else setError(mensajeDeError(err));
     } finally {
       setIsLoading(false);
     }
@@ -118,7 +132,11 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
           placeholder="tu@correo.cl"
           icono={<Mail size={16} />}
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setErrorCorreo(null);
+          }}
+          error={errorCorreo ?? undefined}
           disabled={isLoading}
           required
         />
