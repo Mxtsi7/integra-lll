@@ -70,13 +70,13 @@ export function EditarNombre({ nombreActual, onGuardar }: EditarNombreProps) {
     }
   }
 
-  if (modo === 'viendo') {
+ if (modo === 'viendo') {
     return (
       <View style={styles.fila}>
-        <Text style={styles.etiqueta}>Nombre</Text>
         <View style={styles.encabezado}>
-          <Text testID="nombre-actual" style={styles.valor}>
-            {nombreActual}
+          <Text style={styles.valor}>
+            <Text style={styles.etiqueta}>Nombre: </Text>
+            <Text testID="nombre-actual">{nombreActual}</Text>
           </Text>
           <Pressable testID="editar-nombre" accessibilityRole="button" onPress={empezar}>
             <Text style={styles.enlace}>Editar</Text>
@@ -85,7 +85,6 @@ export function EditarNombre({ nombreActual, onGuardar }: EditarNombreProps) {
       </View>
     );
   }
-
   const guardando = modo === 'guardando';
   return (
     <View style={styles.fila}>

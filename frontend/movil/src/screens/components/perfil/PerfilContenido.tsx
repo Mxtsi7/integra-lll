@@ -12,9 +12,9 @@ export interface PerfilContenidoProps {
 function Fila({ etiqueta, valor, testID }: { etiqueta: string; valor: string; testID: string }) {
   return (
     <View style={styles.fila}>
-      <Text style={styles.etiqueta}>{etiqueta}</Text>
-      <Text testID={testID} style={styles.valor}>
-        {valor}
+      <Text style={styles.valor}>
+        <Text style={styles.etiqueta}>{etiqueta}: </Text>
+        <Text testID={testID}>{valor}</Text>
       </Text>
     </View>
   );
