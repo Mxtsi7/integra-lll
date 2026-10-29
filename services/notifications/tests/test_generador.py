@@ -162,10 +162,13 @@ class TestProximoCobro:
         # Hoy: entra en la ventana de 7, no en la de 3.
         r1 = generar_proximos_cobros(ahora=HOY)
         assert [a.datos["anticipacion_dias"] for a in r1.creadas] == [7]
-        # Tres días después: entra la de 3; la de 7 ya existe.
+        # Tres días después: entra la de 3. La de 7 YA NO SE REVISITA: solo se
+        # mira la ventana más cercana que contiene el cobro, así que `repetidas`
+        # ahora es 0 y no 1. Antes se recorrían todas y la de 7 volvía a
+        # chocar con su alerta ya creada.
         r2 = generar_proximos_cobros(ahora=instante(2026, 11, 24))
         assert [a.datos["anticipacion_dias"] for a in r2.creadas] == [3]
-        assert r2.repetidas == 1
+        assert r2.repetidas == 0
         assert len(alertas()) == 2
         assert all(a.suscripcion_id == susc.suscripcion_id for a in alertas())
 
@@ -236,19 +239,27 @@ class TestFinDePrueba:
         assert "termina en menos de 48 h" in alerta.titulo
         assert "23-11-2026" in alerta.mensaje and "9.990 CLP" in alerta.mensaje
 
-    def test_a_menos_de_24h_avisa_la_de_24_y_la_de_48_si_faltaba(self):
+    def test_a_menos_de_24h_avisa_SOLO_la_de_24(self):
+        """Antes creaba la de 24 Y la de 48 en la misma corrida.
+
+        Con 14 h restantes se cumplen las dos ventanas, y salían dos avisos
+        casi idénticos. La de 48 ya pasó: avisarla ahora no agrega nada. Lo
+        encontró la revisión de la PR.
+        """
         vigilada(estado="prueba", fin_prueba=self.FIN)
-        # Domingo 22 a las 10:00 → faltan 14 h: entran las dos ventanas.
+        # Domingo 22 a las 10:00 → faltan 14 h.
         resultado = generar_fin_de_prueba(ahora=instante(2026, 11, 22))
-        assert sorted(a.datos["ventana_horas"] for a in resultado.creadas) == [24, 48]
+        assert [a.datos["ventana_horas"] for a in resultado.creadas] == [24]
 
     def test_cada_ventana_produce_a_lo_sumo_una_alerta(self):
         vigilada(estado="prueba", fin_prueba=self.FIN)
         generar_fin_de_prueba(ahora=HOY)                        # 48 h
         generar_fin_de_prueba(ahora=instante(2026, 11, 21, 18)) # 48 h de nuevo
         generar_fin_de_prueba(ahora=instante(2026, 11, 22))     # 24 h
-        r = generar_fin_de_prueba(ahora=instante(2026, 11, 22, 20))  # las dos de nuevo
-        assert r.creadas == [] and r.repetidas == 2
+        # Y de nuevo dentro de las 24 h: solo se mira ESA ventana, así que
+        # repite 1 y no 2. La de 48 ya no se revisita.
+        r = generar_fin_de_prueba(ahora=instante(2026, 11, 22, 20))
+        assert r.creadas == [] and r.repetidas == 1
         assert len(alertas(tipo=Alerta.Tipo.FIN_PRUEBA)) == len(VENTANAS_FIN_PRUEBA) == 2
 
     def test_a_mas_de_48h_no_avisa(self):
@@ -325,3 +336,69 @@ class TestGenerar:
 
         with pytest.raises(CommandError, match="instante ISO"):
             call_command("generar_alertas", ahora="ayer")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Entrar tarde a las ventanas: UNA alerta, no varias
+# (hallazgo de la revisión de #119)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestEntrarTardeALasVentanas:
+    """Con varias anticipaciones y un cobro cercano salía una alerta por cada
+    ventana ya cumplida, todas con el MISMO título.
+
+    Pasa cuando la suscripción se creó recién, o cuando el job no corrió un
+    día. El título usa `faltan`, no `dias`, así que las dos decían "se cobra
+    en 2 días" y solo se distinguían por `anticipacion_dias`.
+    """
+
+    def test_con_3_y_7_y_un_cobro_a_2_dias_sale_UNA_sola(self):
+        """La reproducción de la revisión."""
+        preferencia(usuario="1", dias_anticipacion=3)
+        preferencia(usuario="2", dias_anticipacion=7)
+        vigilada(cobro=dt.date(2026, 11, 23))  # a 2 días de HOY (21-11)
+
+        resultado = generar_proximos_cobros(ahora=HOY)
+        assert len(resultado.creadas) == 1, [
+            a.datos["anticipacion_dias"] for a in resultado.creadas
+        ]
+        # La MÁS CERCANA que ya contiene el cobro.
+        assert resultado.creadas[0].datos["anticipacion_dias"] == 3
+
+    def test_el_dia_a_dia_sigue_avisando_cada_ventana(self):
+        """El control: la corrección no puede quitar los avisos de siempre.
+
+        Con el job corriendo todos los días, cada ventana avisa el suyo.
+        """
+        preferencia(usuario="1", dias_anticipacion=3)
+        preferencia(usuario="2", dias_anticipacion=7)
+        vigilada(cobro=dt.date(2026, 11, 28))  # a 7 días
+
+        r7 = generar_proximos_cobros(ahora=HOY)
+        assert [a.datos["anticipacion_dias"] for a in r7.creadas] == [7]
+
+        r3 = generar_proximos_cobros(ahora=instante(2026, 11, 25))  # a 3 días
+        assert [a.datos["anticipacion_dias"] for a in r3.creadas] == [3]
+
+        assert len(alertas(tipo=Alerta.Tipo.PROXIMO_COBRO)) == 2
+
+    def test_un_cobro_HOY_con_varias_ventanas_sale_una_sola(self):
+        preferencia(usuario="1", dias_anticipacion=1)
+        preferencia(usuario="2", dias_anticipacion=7)
+        vigilada(cobro=dt.date(2026, 11, 21))  # hoy
+
+        resultado = generar_proximos_cobros(ahora=HOY)
+        assert len(resultado.creadas) == 1
+        assert resultado.creadas[0].datos["anticipacion_dias"] == 1
+
+    def test_una_prueba_que_termina_en_10h_avisa_una_sola_vez(self):
+        """Con menos de 24 h se cumplen la de 48 y la de 24."""
+        vigilada(estado="prueba", fin_prueba=dt.date(2026, 11, 22))
+        # 21-11 a las 14:00 → faltan ~10 h hasta el fin del 22.
+        resultado = generar_fin_de_prueba(ahora=instante(2026, 11, 22, 14))
+        assert len(resultado.creadas) <= 1, [
+            a.datos["ventana_horas"] for a in resultado.creadas
+        ]
+        if resultado.creadas:
+            assert resultado.creadas[0].datos["ventana_horas"] == 24

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 import uuid
 from decimal import Decimal, InvalidOperation
 
@@ -80,6 +81,46 @@ def _monto(valor) -> Decimal:
         raise SobreInvalido(f"`datos.monto` no es un decimal: {valor!r}") from None
 
 
+#: Los ciclos que el contrato admite. Validar contra la lista y no recortar a
+#: 10 caracteres: `"mensualmente"` recortado daba `"mensualmen"`, que no es un
+#: ciclo y se guardaba igual.
+CICLOS = frozenset({"mensual", "anual"})
+
+_MONEDA = re.compile(r"^[A-Z]{3}$")
+
+
+def _obligatorio(valor, campo: str):
+    """Exige que el campo venga. None y cadena vacía son lo mismo acá."""
+    if valor is None or (isinstance(valor, str) and not valor.strip()):
+        raise SobreInvalido(f"falta `{campo}`, que MX-21 v2 declara obligatorio")
+    return valor
+
+
+def _texto_obligatorio(valor, campo: str, largo: int) -> str:
+    return str(_obligatorio(valor, campo))[:largo]
+
+
+def _moneda(valor) -> str:
+    """Tres letras mayúsculas, como pide el contrato.
+
+    Antes se recortaba a 3 caracteres, así que `"pesos"` quedaba en `"pes"` y
+    se guardaba como si fuera una moneda.
+    """
+    crudo = str(_obligatorio(valor, "datos.moneda"))
+    if not _MONEDA.match(crudo):
+        raise SobreInvalido(f"`datos.moneda` no es un codigo de 3 letras: {crudo!r}")
+    return crudo
+
+
+def _ciclo(valor) -> str:
+    crudo = str(_obligatorio(valor, "datos.ciclo"))
+    if crudo not in CICLOS:
+        raise SobreInvalido(
+            f"`datos.ciclo` debe ser uno de {sorted(CICLOS)}, no {crudo!r}"
+        )
+    return crudo
+
+
 def aplicar(sobre: dict) -> bool:
     """Aplica un evento a la proyección. True si cambió algo.
 
@@ -101,13 +142,28 @@ def aplicar(sobre: dict) -> bool:
     if not isinstance(datos, dict):
         raise SobreInvalido("`datos` no es un objeto.")
 
+    # ── Lo que el contrato exige NO se inventa ──────────────────────────────
+    # La versión anterior asumía monto="0.00", moneda="CLP" y ciclo="mensual",
+    # y trataba `proximo_cobro` como opcional, aunque MX-21 v2 los declara
+    # OBLIGATORIOS. Un sobre incompleto producía una alerta de "0 CLP" en vez
+    # de rechazarse, y el usuario recibía un aviso de un cobro que nadie sabe
+    # cuánto es. Lo encontró la revisión de la PR.
+    #
+    # Ahora faltan → `SobreInvalido`, que el consumidor aparta a la cola de
+    # fallos: un productor mal implementado se ve, no se maquilla.
     valores = {
-        "nombre": str(datos.get("nombre") or "")[:120],
-        "monto": _monto(datos.get("monto", "0.00")),
-        "moneda": str(datos.get("moneda") or "CLP")[:3],
-        "ciclo": str(datos.get("ciclo") or "mensual")[:10],
-        "proximo_cobro": _fecha(datos.get("proximo_cobro"), "datos.proximo_cobro", opcional=True),
-        "estado": str(datos.get("estado") or "")[:20],
+        "nombre": _texto_obligatorio(datos.get("nombre"), "datos.nombre", 120),
+        "monto": _monto(_obligatorio(datos.get("monto"), "datos.monto")),
+        "moneda": _moneda(datos.get("moneda")),
+        "ciclo": _ciclo(datos.get("ciclo")),
+        # `_obligatorio` primero para que el motivo diga "falta el campo" y no
+        # "no es una fecha ISO: None", que manda a buscar el error al lugar
+        # equivocado.
+        "proximo_cobro": _fecha(
+            _obligatorio(datos.get("proximo_cobro"), "datos.proximo_cobro"),
+            "datos.proximo_cobro",
+        ),
+        "estado": _texto_obligatorio(datos.get("estado"), "datos.estado", 20),
         # Extensión del contrato: si el sobre la trae, se guarda; si no, NULL.
         "fin_prueba": _fecha(datos.get("fin_prueba"), "datos.fin_prueba", opcional=True),
         "observada_en": ocurrido_en,

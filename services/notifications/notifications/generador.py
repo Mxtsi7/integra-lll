@@ -151,9 +151,19 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
         if org not in anticipaciones:
             anticipaciones[org] = anticipaciones_de_cobro(org)
         faltan = (suscripcion.proximo_cobro - hoy).days
-        for dias in sorted(anticipaciones[org]):
-            if faltan > dias:
-                continue  # todavía no entra en esta ventana
+        # ── Una sola alerta por corrida ─────────────────────────────────────
+        # Antes se recorrían TODAS las ventanas y se creaba una alerta por
+        # cada una que ya contuviera el cobro. Con preferencias de 3 y 7 días
+        # y un cobro a 2 —una suscripción recién creada, o un día en que el
+        # job no corrió— salían DOS alertas casi idénticas, las dos con el
+        # mismo título ("se cobra en 2 días"), porque el título usa `faltan` y
+        # no `dias`. Lo encontró la revisión de la PR.
+        #
+        # Ahora solo la ventana MÁS CERCANA que ya contiene el cobro: las
+        # mayores ya pasaron y avisar por ellas hoy no agrega nada. Si el job
+        # corre todos los días, cada ventana avisa el suyo igual que antes.
+        candidatas = [d for d in anticipaciones[org] if faltan <= d]
+        for dias in sorted(candidatas)[:1]:
             alerta, nueva = _crear_una_vez(
                 organizacion_id=org,
                 tipo=Alerta.Tipo.PROXIMO_COBRO,
@@ -212,9 +222,10 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
         if restante <= dt.timedelta(0):
             continue  # ya terminó: eso lo cuenta subscriptions, no un aviso
         horas = restante.total_seconds() / 3600
-        for ventana in VENTANAS_FIN_PRUEBA:
-            if horas > ventana:
-                continue  # todavía no entra en esta ventana
+        # Mismo criterio: con menos de 24 h restantes se cumplían la ventana
+        # de 48 y la de 24, y se creaban las dos juntas.
+        candidatas = [v for v in VENTANAS_FIN_PRUEBA if horas <= v]
+        for ventana in sorted(candidatas)[:1]:
             alerta, nueva = _crear_una_vez(
                 organizacion_id=org,
                 tipo=Alerta.Tipo.FIN_PRUEBA,
