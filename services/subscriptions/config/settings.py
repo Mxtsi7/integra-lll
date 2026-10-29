@@ -96,6 +96,23 @@ RABBITMQ_URL = env(
     "RABBITMQ_URL",
     default="amqp://guest:guest@rabbitmq:5672/",
 )
+
+# ── trabajo derivado de los eventos (ADR-003) ─────────────────
+# Recalcular el resumen de la organización es trabajo derivado: sale de
+# que se creó una suscripción, no de que alguien lo haya pedido. La
+# bandera elige quién lo hace y, sobre todo, quién espera:
+#
+#   EVENTOS_ASINCRONOS=0  se recalcula DENTRO del POST. El usuario espera.
+#   EVENTOS_ASINCRONOS=1  el POST solo deja el evento en el outbox y
+#                         responde; lo recalcula el consumidor.
+#
+# Existe para poder MEDIR la diferencia con la misma carga y el mismo
+# trabajo (ver k8s/pruebas/comparar-cola.sh). No es un interruptor de
+# "modo debug": los dos caminos son código de producción.
+#
+# Ojo: en los dos modos el evento se registra igual en el outbox, porque
+# otros consumidores dependen de él. La bandera NO apaga el outbox.
+EVENTOS_ASINCRONOS = env.bool("EVENTOS_ASINCRONOS", default=False)
 CELERY_BEAT_SCHEDULE = {
     "despachar-eventos-pendientes": {
         "task": "app.tasks.despachar_eventos_pendientes",
