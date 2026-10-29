@@ -606,6 +606,10 @@ def cuenta(claves):
 
 
 class TestDesconectar:
+    def test_outlook_declara_la_limitacion_en_su_adaptador(self):
+        assert proveedores.soporta_revocacion("outlook") is False
+        assert proveedores.soporta_revocacion("gmail") is True
+
     def test_cuando_el_proveedor_confirma_se_borran_las_credenciales(
         self, cliente, cuenta, monkeypatch
     ):
@@ -720,6 +724,30 @@ class TestDesconectar:
         # Sin token no hubo nada que revocar, así que NO se acredita revocación.
         assert sin_token.revocado_en is None
 
+    def test_outlook_no_ofrece_revocacion_y_conserva_sus_credenciales(
+        self, cliente, claves, monkeypatch
+    ):
+        """Outlook no es un fallo reintentable: no hay llamada que hacer."""
+        cuenta = CuentaConectada.objects.create(
+            organizacion_id=ORG_A,
+            proveedor="outlook",
+            cuenta_externa="persona@outlook.com",
+            access_token="token-outlook",
+            refresh_token="refresh-outlook",
+        )
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+
+        respuesta = cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        assert llamadas == []
+        cuenta.refresh_from_db()
+        assert cuenta.estado == CuentaConectada.Estado.DESCONECTADA
+        assert cuenta.revocado_en is None
+        assert cuenta.access_token == "token-outlook"
+        assert cuenta.refresh_token == "refresh-outlook"
+        assert "no ofrece revocación" in cuenta.detalle_del_estado
+
     def test_desconectar_dos_veces_no_falla(self, cliente, cuenta, monkeypatch):
         revocacion_falsa(monkeypatch)
         cliente.delete(f"{LISTA}{cuenta.id}/", headers=cabecera(ORG_A))
@@ -812,6 +840,19 @@ class TestReintento:
         from connectors.revocacion import pendientes_de_revocar
 
         assert cuenta.estado == CuentaConectada.Estado.CONECTADA
+        assert list(pendientes_de_revocar()) == []
+
+    def test_outlook_no_queda_en_la_lista_de_pendientes(self, claves):
+        """Su limitación es permanente; reintentarla sería un bucle inútil."""
+        from connectors.revocacion import pendientes_de_revocar
+
+        CuentaConectada.objects.create(
+            organizacion_id=ORG_A,
+            proveedor="outlook",
+            cuenta_externa="pendiente@outlook.com",
+            access_token="token-outlook",
+            estado=CuentaConectada.Estado.DESCONECTADA,
+        )
         assert list(pendientes_de_revocar()) == []
 
 
@@ -910,7 +951,7 @@ class TestReconexionInvalidaLaEvidencia:
             estado=CuentaConectada.Estado.DESCONECTADA,
         )
         segunda = CuentaConectada.objects.create(
-            organizacion_id=ORG_A, proveedor="outlook", cuenta_externa="b@outlook.com",
+            organizacion_id=ORG_A, proveedor="gmail", cuenta_externa="b@gmail.com",
             access_token="ya29.token-b",
             estado=CuentaConectada.Estado.DESCONECTADA,
         )
@@ -1170,7 +1211,7 @@ class TestElReintentoNoRevocaLasCredencialesNuevas:
         primera. La primera se revoca, la segunda se salta."""
         primera = desconectada_pendiente(token="ya29.token-a")
         segunda = CuentaConectada.objects.create(
-            organizacion_id=ORG_A, proveedor="outlook", cuenta_externa="b@outlook.com",
+            organizacion_id=ORG_A, proveedor="gmail", cuenta_externa="z@gmail.com",
             access_token="ya29.token-b", estado=CuentaConectada.Estado.DESCONECTADA,
         )
         tocados = []
@@ -1244,6 +1285,25 @@ class TestReintentarPendiente:
         resultado = reintentar_pendiente(CuentaConectada.objects.get(pk=cuenta.pk))
         assert resultado is not None and resultado.confirmada is True
         assert [l["access_token"] for l in llamadas] == ["ya29.token-viejo"]
+
+    def test_proveedor_sin_revocacion_se_omite_sin_tocar_nada(self, claves, monkeypatch):
+        from connectors.revocacion import reintentar_pendiente
+
+        cuenta = CuentaConectada.objects.create(
+            organizacion_id=ORG_A,
+            proveedor="outlook",
+            cuenta_externa="p@outlook.com",
+            access_token="token-outlook",
+            estado=CuentaConectada.Estado.DESCONECTADA,
+        )
+        llamadas = revocacion_falsa(monkeypatch, confirma=True)
+
+        assert reintentar_pendiente(CuentaConectada.objects.get(pk=cuenta.pk)) is None
+
+        assert llamadas == []
+        cuenta.refresh_from_db()
+        assert cuenta.revocado_en is None
+        assert cuenta.access_token == "token-outlook"
 
     def test_la_guarda_va_antes_de_cualquier_llamada_externa(self):
         """Si alguien mueve la comprobación después del proveedor, esto falla."""

@@ -40,7 +40,9 @@ La firma cubre `servicio:organizacion_id:operacion_id:instante`, con vigencia de
 60 segundos. La limpieza personal usa `/internal/organizaciones/<uuid>/usuarios/<id>/`
 en Notifications y firma `notifications:usuario:<id>` como destino, vinculando
 también el usuario. Una firma de organización no autoriza limpiar una persona.
-Las rutas son privadas y el Gateway no las expone. No hay consultas entre esquemas.
+Las rutas son privadas, el Gateway no las expone y están excluidas del esquema
+OpenAPI público (`@extend_schema(exclude=True)`); no aparecen en el contrato que
+consume el frontend. No hay consultas entre esquemas.
 
 `ELIMINACION_INTERNA_SECRET` es independiente de JWT y se comparte entre Auth y los
 consumidores. Las URLs se configuran con `URL_SUBSCRIPTIONS`, `URL_CONNECTORS`,
@@ -61,17 +63,43 @@ agregar su destino antes de que reciba datos.
   Conserva proveedores globales y bloquea FK ajenas inconsistentes, incluidas las
   relaciones de los hallazgos con su suscripción, cobro y cobro relacionado.
 - Connectors elimina autorizaciones pendientes, importaciones y cuentas. Antes de
-  limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin evidencia.
-  Un fallo devuelve 409, conserva las credenciales cifradas y revierte los cambios
-  locales de esa cuenta. Una confirmación real guarda `revocado_en` y retira tokens.
-  Ese éxito queda confirmado en una transacción de preparación independiente:
-  sobrevive aunque otra cuenta bloquee la limpieza. No se vuelve a revocar esa
-  concesión en cada reintento. La limpieza final vuelve a verificar la evidencia
-  bajo bloqueo, por si hubo reconexión entre preparación y borrado.
-- Outlook continúa pendiente: el adaptador no ofrece revocación por token y no se
-  sustituye por desconexión, expiración o tokens nulos. El usuario indicó mantenerlo
-  bloqueado hasta acordar con Felipe qué evidencia acepta. No se acredita el plazo
-  de eliminación ni se pasa MX-07 a ready mientras falte esa decisión.
+  limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin
+  evidencia **cuyo proveedor ofrece revocación**; Outlook se omite y se trata en
+  el punto siguiente. Un fallo devuelve 409, conserva las credenciales cifradas y
+  revierte los cambios locales de esa cuenta. Una confirmación real guarda
+  `revocado_en` y retira tokens. Ese éxito queda confirmado en una transacción de
+  preparación independiente: sobrevive aunque otra cuenta bloquee la limpieza. No
+  se vuelve a revocar esa concesión en cada reintento. La limpieza final vuelve a
+  verificar la evidencia bajo bloqueo, por si hubo reconexión entre preparación y
+  borrado.
+- Outlook se cierra **sin revocación ante Microsoft**. La limpieza no llama a
+  Graph, no escribe `revocado_en` y no usa ese campo con otro significado. Las
+  credenciales cifradas se destruyen únicamente en el borrado final, dentro de
+  la transacción que elimina las filas de `CuentaConectada`, después de que
+  pasaron todas las demás validaciones; un 409 deja el ciphertext intacto. La
+  razón es que `revokeSignInSessions` no está soportado para cuentas personales
+  y, para trabajo/escuela, exige consentimiento administrativo y afecta a todas
+  las aplicaciones del usuario. Esto es una **mitigación con riesgo residual** y
+  Outlook queda como **incumplimiento documentado de RF-01.7** hasta que el
+  equipo ratifique una enmienda; la decisión completa está en
+  `docs/decisiones/mx-07-outlook-revocacion.md`.
+- Riesgo residual de Outlook: un refresh token ya emitido por Microsoft podría
+  seguir válido hasta que expire o hasta que el usuario retire el acceso. Ya no
+  conservamos copia; explotarlo exigiría que alguien lo hubiera obtenido antes.
+  El sistema no controla los tokens que el proveedor ya emitió.
+- Paso manual para el usuario:
+  - cuenta personal: retirar el acceso de la aplicación en
+    <https://account.live.com/consent/Manage>. La fuente es una respuesta de
+    Microsoft Q&A, **no documentación oficial**;
+  - cuenta de trabajo/escuela: el administrador del tenant o el portal de
+    aplicaciones de Microsoft. Esta vía **no está verificada** y queda fuera del
+    alcance de esta PR.
+  La pantalla de borrado de cuenta (AN-18) todavía no muestra este aviso; se
+  recomienda hacerlo en el informe, sin implementarlo en esta PR.
+- `pendientes_de_revocar` y `reintentar_revocaciones` excluyen a Outlook: su
+  limitación es permanente, no un fallo reintentable. La limpieza registra en
+  logs estructurados cuántas cuentas se cerraron sin revocación del proveedor,
+  sin correos ni tokens. No se añadió cuerpo al 204 para no romper al consumidor.
 - Analytics elimina datos de ingesta/uso, cobertura, recomendaciones y descartes,
   conservando umbrales globales; bloquea cascadas que afectarían otro tenant.
 - Notifications elimina alertas y preferencias al borrar la organización. Al
@@ -118,8 +146,8 @@ La CI comprueba ese presupuesto. No se ejecutó un despliegue ni revocación rea
 
 Las suites de Auth, Subscriptions, Connectors, Analytics y Notifications corren
 con PostgreSQL local. Las regresiones cubren rollback, reintentos, firmas,
-limpieza personal y rechazo de recreación, Gmail confirmado junto a Outlook
-pendiente, credenciales ilegibles, migraciones y aislamiento A/B. PostgreSQL
+limpieza personal y rechazo de recreación, Gmail confirmado junto a Outlook sin
+revocación, credenciales ilegibles, migraciones y aislamiento A/B. PostgreSQL
 comprueba escrituras concurrentes y que la limpieza espere una escritura en vuelo.
 El proveedor OAuth y el transporte entre servicios usan dobles explícitos.
 La prueba de Gateway ejecuta `gateway.app.proxy` y Auth en un proceso; no acredita

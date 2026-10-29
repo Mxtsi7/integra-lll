@@ -7,6 +7,7 @@ import time
 import uuid
 
 from django.db import transaction
+from drf_spectacular.utils import extend_schema
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -49,6 +50,7 @@ class LimpiezaOrganizacionView(APIView):
     servicio = None
     modelos = ()
 
+    @extend_schema(exclude=True)
     def delete(self, request, organizacion_id):
         operacion_id = validar_solicitud_eliminacion(request, self.servicio, organizacion_id)
         bloqueo = self.preparar_limpieza(organizacion_id)
