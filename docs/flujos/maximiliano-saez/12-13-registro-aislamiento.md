@@ -49,7 +49,7 @@ python manage.py spectacular --validate --file "$env:TEMP/auth-schema-pruebas.ya
 
 Dependencias de comportamiento: [perfil/clave](05-06-perfil-clave.md),
 [sesiones](29-10-sesiones.md), [verificación de correo](28-verificacion-correo.md),
-[eliminación](07-eliminar-cuenta.md) y
+[cobertura de DELETE de #72](https://github.com/Mxtsi7/integra-lll/pull/72) y
 [Google Login](../../../services/auth/GOOGLE-LOGIN.md).
 
 Esta entrega se basa directamente en main y no depende de MX-07. Las dos pruebas de DELETE /api/usuarios/me/ viven en #72, en tests/test_aislamiento_eliminacion_gateway.py. MX-12 y la matriz independiente se revisan aquí; el cierre completo de MX-13 requiere integrar también #72.
