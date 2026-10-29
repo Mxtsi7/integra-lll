@@ -141,7 +141,6 @@ c) El sistema no controla los tokens que el proveedor ya emitió. Ese riesgo res
 Motivo: Microsoft Graph revokeSignInSessions no está soportado en modo delegado para cuentas personales de Microsoft y, en cuentas de trabajo o escuela, exige consentimiento administrativo e invalida los refresh tokens del usuario en todas sus aplicaciones. No hay API para revocar el consentimiento de una cuenta personal.
 
 Mientras esta propuesta no se ratifique, Outlook se trata como incumplimiento documentado de RF-01.7 con mitigación (destrucción local de credenciales) y riesgo residual.
----
 
 ## Diferencias entre la propuesta y el texto real de RF-01.7
 
