@@ -139,7 +139,7 @@
 }
 
 .detalleAlerta {
-  color: var(--acento);
+  color: var(--acento-texto);
   font-weight: 700;
 }
 

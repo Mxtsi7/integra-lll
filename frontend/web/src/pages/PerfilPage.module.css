@@ -39,7 +39,7 @@
 .planNombre {
   font-size: 14px;
   font-weight: 800;
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .planDetalle {
