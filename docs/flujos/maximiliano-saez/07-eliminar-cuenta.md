@@ -56,9 +56,10 @@ agregar su destino antes de que reciba datos.
 
 ## Datos y revocación OAuth
 
-- Subscriptions elimina outbox, presupuestos, cobros, uso, transiciones,
-  suscripciones, resúmenes por moneda y evidencia de trabajo derivado.
-  Conserva proveedores globales y bloquea FK ajenas inconsistentes.
+- Subscriptions elimina outbox, presupuestos, hallazgos de cobro, cobros, uso,
+  transiciones, suscripciones, resúmenes por moneda y evidencia de trabajo derivado.
+  Conserva proveedores globales y bloquea FK ajenas inconsistentes, incluidas las
+  relaciones de los hallazgos con su suscripción, cobro y cobro relacionado.
 - Connectors elimina autorizaciones pendientes, importaciones y cuentas. Antes de
   limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin evidencia.
   Un fallo devuelve 409, conserva las credenciales cifradas y revierte los cambios
