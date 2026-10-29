@@ -1,6 +1,6 @@
 # [MX-07] Eliminar cuenta y coordinar limpieza entre servicios
 
-> Cuerpo propuesto para el PR #72. **No se publicó desde esta sesión** y el PR sigue en draft. No se movió a ready, no se fusionó y no se hizo force-push.
+> Cuerpo propuesto para el PR #72. **No se publicó desde esta sesión** y no se cambió su estado (draft/ready). No se movió a ready, no se fusionó y no se hizo force-push.
 
 ## Resumen
 
