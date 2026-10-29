@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('connectors', '0002_importaciones'),
+        ('connectors', '0003_autorizacion_y_revocacion'),
     ]
 
     operations = [

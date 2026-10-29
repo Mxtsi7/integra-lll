@@ -1,7 +1,13 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .views import CuentaConectadaViewSet, ImportacionViewSet, SubirArchivoView
+from .views import (
+    CallbackAutorizacionView,
+    CuentaConectadaViewSet,
+    ImportacionViewSet,
+    IniciarAutorizacionView,
+    SubirArchivoView,
+)
 
 router = DefaultRouter()
 # "conectores", en español: el gateway enruta /api/conectores/ y reenvía la
@@ -12,7 +18,26 @@ router.register(r"conectores", CuentaConectadaViewSet, basename="cuenta-conectad
 # intacta y un nombre en inglés moriría en un 404 invisible desde afuera.
 router.register(r"importaciones", ImportacionViewSet, basename="importacion")
 
+# ── El orden importa ─────────────────────────────────────────────────
+# El router arma la ruta de detalle como `conectores/<pk>/`, y el lookup por
+# omisión de DRF es `[^/.]+`: acepta cualquier cosa que no tenga barra ni
+# punto. O sea que `conectores/autorizaciones/` CALZA con el detalle, y si el
+# include del router fuera primero, la petición se iría a `retrieve` con
+# pk="autorizaciones" y moriría en un 404 raro en vez de llegar acá.
+#
+# Por eso las rutas de OAuth van ANTES del include. Django resuelve con la
+# primera que calza, así que las específicas tienen que ir arriba.
 urlpatterns = [
+    path(
+        "conectores/autorizaciones/",
+        IniciarAutorizacionView.as_view(),
+        name="iniciar-autorizacion",
+    ),
+    path(
+        "conectores/autorizaciones/callback/",
+        CallbackAutorizacionView.as_view(),
+        name="callback-autorizacion",
+    ),
     # Va ANTES del include del router: `importaciones/<pk>/` aceptaria
     # "archivos" como pk y moriria en un 404 raro (ver el comentario de
     # arriba sobre el lookup de DRF).
