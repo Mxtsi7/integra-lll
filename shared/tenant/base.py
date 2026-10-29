@@ -76,6 +76,10 @@ class ContextoTenantMiddleware:
     def __call__(self, request):
         request.organizacion_id = request.headers.get("X-Organizacion-Id")
         request.usuario_id = request.headers.get("X-Usuario-Id")
+        # El gateway la saca del claim `sid` del JWT (gateway/app/proxy.py).
+        # Va acá y no leída a mano en cada vista porque este middleware es
+        # justamente el que normaliza las cabeceras del contrato ADR-004.
+        request.sesion_id = request.headers.get("X-Sesion-Id")
         request.rol = request.headers.get("X-Rol")
         request.correlation_id = request.headers.get("X-Correlation-ID")
         return self.get_response(request)
