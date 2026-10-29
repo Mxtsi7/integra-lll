@@ -84,8 +84,9 @@ export function App() {
                   en silencio. */}
               <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
               <Route path={RUTA_AGENDA} element={<AgendaPage />} />
-              {/* AN-20: mientras VI-17 no exista (RECOMENDACIONES_DISPONIBLES = false),
-                  se muestra Próximamente y no se llama al backend. */}
+              {/* AN-20: con RECOMENDACIONES_DISPONIBLES = false se muestra
+                  Próximamente y no se llama al backend. VI-17 ya está en main
+                  (CH-26), así que hoy es true. */}
               <Route
                 path="/recomendaciones"
                 element={
