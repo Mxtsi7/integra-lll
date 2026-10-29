@@ -20,40 +20,6 @@
   color: var(--coral);
 }
 
-/* ---- Interruptor ---- */
-
-.interruptor {
-  position: relative;
-  flex-shrink: 0;
-  width: 44px;
-  height: 25px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: var(--vidrio-borde-fuerte);
-  transition: background-color var(--rapido);
-}
-
-.interruptorActivo {
-  background: var(--acento);
-  box-shadow: 0 0 16px -4px var(--acento);
-}
-
-.interruptorBola {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 19px;
-  height: 19px;
-  border-radius: 50%;
-  background: #ffffff;
-  transition: transform var(--rapido);
-}
-
-.interruptorActivo .interruptorBola {
-  transform: translateX(19px);
-}
-
 /* ---- Selector de tema ---- */
 
 .selectorTema {
