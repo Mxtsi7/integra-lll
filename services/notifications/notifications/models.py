@@ -1,5 +1,6 @@
 """Modelos del servicio de notificaciones — FE-16."""
 
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import Value
 from django.db.models.functions import Coalesce
@@ -198,3 +199,159 @@ class Alerta(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.get_tipo_display()}: {self.titulo} ({self.get_lectura_display()})"
+
+
+class PreferenciaNotificacion(ModeloTenant):
+    """Qué avisos quiere recibir una persona, y por dónde (FE-21 / RF-09).
+
+    ── Por qué una fila por persona y no por organización ───────────────────
+    Dos personas de la misma organización pueden querer cosas distintas: al
+    contador le sirven los avisos de presupuesto y al que usa las cuentas le
+    sirven los de fin de prueba. La llave es (organización, usuario), así que
+    el aislamiento por tenant de `ModeloTenant` sigue aplicando y además nadie
+    ve ni cambia las preferencias de otro.
+
+    ── Por qué columnas y no un JSON ───────────────────────────────────────
+    Los cinco tipos son un conjunto CERRADO que sale de los requisitos
+    (`Alerta.Tipo`), y los canales también. Con columnas:
+
+    · el esquema dice qué existe, y agregar un tipo es una migración que se
+      ve en la revisión, no un string nuevo que aparece en producción;
+    · el ORM valida el tipo del valor, en vez de aceptar
+      `{"proximo_cobro": "quizás"}`;
+    · un PATCH con una clave inventada se rechaza solo.
+
+    Un JSON habría sido más corto y habría aceptado cualquier cosa.
+
+    ── Los canales se piden aunque todavía no se entreguen ─────────────────
+    `por_push` existe y se puede encender, pero hoy no hay quién entregue un
+    push: eso es FE-22 y más. La preferencia se guarda igual —es lo que la
+    persona quiere— y la API informa aparte qué canales están REALMENTE
+    habilitados (`canales_disponibles`), para que el frontend no prometa algo
+    que no va a llegar. Guardar la intención y poder cumplirla son dos cosas
+    distintas y conviene no mezclarlas.
+    """
+
+    usuario_id = models.CharField(
+        max_length=64,
+        verbose_name="Usuario",
+        help_text=(
+            "El valor crudo de la cabecera `X-Usuario-Id` que inyecta el "
+            "gateway. Acá no se interpreta, solo se compara: el id vive en el "
+            "esquema de `auth` (ADR-002)."
+        ),
+    )
+
+    # ── por dónde ────────────────────────────────────────────────────
+
+    por_email = models.BooleanField(
+        default=True,
+        verbose_name="Avisar por correo",
+    )
+
+    por_push = models.BooleanField(
+        default=False,
+        verbose_name="Avisar por push",
+        help_text=(
+            "Apagado por omisión a propósito: todavía no hay quién entregue "
+            "un push. Encenderlo guarda la intención; que llegue depende de "
+            "que el canal exista (ver `CANALES_HABILITADOS`)."
+        ),
+    )
+
+    en_la_app = models.BooleanField(
+        default=True,
+        verbose_name="Mostrar dentro de la aplicación",
+        help_text="El listado de alertas (FE-19). Siempre entregable.",
+    )
+
+    # ── qué avisos ───────────────────────────────────────────────────
+    # Uno por cada `Alerta.Tipo`. Si se agrega un tipo allá y no acá, la
+    # prueba `test_hay_una_preferencia_por_cada_tipo_de_alerta` falla.
+
+    avisar_proximo_cobro = models.BooleanField(
+        default=True, verbose_name="Próximo cobro"
+    )
+    avisar_fin_prueba = models.BooleanField(
+        default=True, verbose_name="Fin de prueba gratuita"
+    )
+    avisar_alza_tarifa = models.BooleanField(
+        default=True, verbose_name="Alza de tarifa"
+    )
+    avisar_doble_cobro = models.BooleanField(
+        default=True, verbose_name="Posible doble cobro"
+    )
+    avisar_presupuesto_excedido = models.BooleanField(
+        default=True, verbose_name="Presupuesto excedido"
+    )
+
+    # ── cuándo ───────────────────────────────────────────────────────
+
+    dias_anticipacion = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(30)],
+        verbose_name="Días de anticipación del aviso de cobro",
+        help_text=(
+            "Con cuántos días de anticipación avisar un cobro próximo. El "
+            "mínimo es 1 (avisar el mismo día no da margen para cancelar) y "
+            "el máximo 30 (más que eso es un mes completo y deja de ser un "
+            "aviso). 3 por omisión."
+        ),
+    )
+
+    #: Qué columna gobierna cada tipo de alerta. Está acá y no repartido por
+    #: el código para que `debe_avisar` y el serializer digan lo mismo.
+    CAMPO_POR_TIPO = {
+        Alerta.Tipo.PROXIMO_COBRO: "avisar_proximo_cobro",
+        Alerta.Tipo.FIN_PRUEBA: "avisar_fin_prueba",
+        Alerta.Tipo.ALZA_TARIFA: "avisar_alza_tarifa",
+        Alerta.Tipo.DOBLE_COBRO: "avisar_doble_cobro",
+        Alerta.Tipo.PRESUPUESTO_EXCEDIDO: "avisar_presupuesto_excedido",
+    }
+
+    #: Igual para los canales.
+    CAMPO_POR_CANAL = {
+        "email": "por_email",
+        "push": "por_push",
+        "in_app": "en_la_app",
+    }
+
+    def quiere(self, tipo: str) -> bool:
+        """¿Quiere recibir avisos de este tipo?"""
+        campo = self.CAMPO_POR_TIPO.get(tipo)
+        if campo is None:
+            # Un tipo que no está en el mapa no se avisa: es más seguro no
+            # mandar nada que mandar por un canal que nadie eligió.
+            return False
+        return getattr(self, campo)
+
+    def canales_elegidos(self) -> list[str]:
+        """Los canales encendidos, en orden estable."""
+        return [
+            canal
+            for canal, campo in self.CAMPO_POR_CANAL.items()
+            if getattr(self, campo)
+        ]
+
+    def debe_avisar(self, tipo: str, canal: str) -> bool:
+        """La pregunta que hará FE-17/FE-18 antes de crear una alerta."""
+        campo = self.CAMPO_POR_CANAL.get(canal)
+        if campo is None:
+            return False
+        return self.quiere(tipo) and getattr(self, campo)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "preferencia_notificacion"
+        constraints = [
+            # Una sola fila por persona: las preferencias se reemplazan, no se
+            # apilan.
+            models.UniqueConstraint(
+                fields=["organizacion_id", "usuario_id"],
+                name="preferencia_unica_por_tenant_y_usuario",
+            ),
+        ]
+        verbose_name = "Preferencia de notificación"
+        verbose_name_plural = "Preferencias de notificación"
+
+    def __str__(self) -> str:
+        return f"{self.usuario_id}: {', '.join(self.canales_elegidos()) or 'sin canales'}"

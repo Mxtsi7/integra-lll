@@ -81,6 +81,37 @@ DATABASES["default"]["TEST"] = {"NAME": f"test_{SERVICE_NAME}"}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ── OAuth de los conectores (FE-03 / FE-04 / FE-05) ─────────────────
+#
+# El callback que se le registra al proveedor. Tiene que ser EXACTAMENTE el
+# mismo que se manda en el canje, o el proveedor rechaza. Apunta al frontend,
+# que recibe el `code` y el `state` en la URL y nos los reenvía por POST a
+# /api/conectores/autorizaciones/callback/.
+OAUTH_REDIRECT_URI = env("OAUTH_REDIRECT_URI", default="")
+
+# Lista blanca de orígenes a los que se puede mandar el navegador al cerrar
+# el flujo. Se compara el ORIGEN completo (esquema + host + puerto), no un
+# prefijo: con `startswith`, "https://ojoalgasto.cl.malo.com" pasaría por
+# empezar igual que el nuestro.
+#
+# Vacía por omisión a propósito: sin configurar, NO se acepta ningún retorno.
+# El flujo igual funciona (el frontend sabe a dónde volver); lo que no se
+# acepta es que lo diga la petición.
+OAUTH_RETORNOS_PERMITIDOS = env.list("OAUTH_RETORNOS_PERMITIDOS", default=[])
+
+# Credenciales por proveedor. Los secretos vienen del Secret del cluster,
+# nunca del ConfigMap ni del repo.
+OAUTH_CREDENCIALES = {
+    "gmail": {
+        "client_id": env("OAUTH_GMAIL_CLIENT_ID", default=""),
+        "client_secret": env("OAUTH_GMAIL_CLIENT_SECRET", default=""),
+    },
+    "outlook": {
+        "client_id": env("OAUTH_OUTLOOK_CLIENT_ID", default=""),
+        "client_secret": env("OAUTH_OUTLOOK_CLIENT_SECRET", default=""),
+    },
+}
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
@@ -99,4 +130,3 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-

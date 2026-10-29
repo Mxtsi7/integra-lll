@@ -24,7 +24,7 @@ class EscrituraOrganizacionMiddleware:
             estado = bloquear_organizacion(org)
             if estado.eliminada:
                 return JsonResponse({"code": "organizacion_eliminada"}, status=410)
-            respuesta = self.get_response(request)
-            if respuesta.status_code >= 400:
-                transaction.set_rollback(True)
-            return respuesta
+            # Una respuesta 400 puede confirmar un cambio deliberado, como
+            # consumir un state OAuth cuyo canje falló. La vista controla sus
+            # propias transacciones; el middleware solo serializa con limpieza.
+            return self.get_response(request)

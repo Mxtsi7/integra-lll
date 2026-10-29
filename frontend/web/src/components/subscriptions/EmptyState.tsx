@@ -11,6 +11,12 @@ interface EmptyStateProps {
   actionLabel?: string;
   onAction?: () => void;
   icon?: React.ReactNode;
+  /**
+   * Ícono del botón. Por defecto un "+", porque casi siempre invita a agregar;
+   * cuando la acción es otra (p. ej. limpiar filtros) se cambia para no
+   * sugerir que falta crear algo.
+   */
+  actionIcon?: React.ReactNode;
   className?: string;
 }
 
@@ -24,6 +30,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   actionLabel,
   onAction,
   icon,
+  actionIcon,
   className = "",
 }) => {
   return (
@@ -32,7 +39,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
       <h2 className={styles.titulo}>{title}</h2>
       {description && <p className={styles.descripcion}>{description}</p>}
       {actionLabel && onAction && (
-        <Boton onClick={onAction} icono={<Plus size={16} aria-hidden="true" />}>
+        <Boton onClick={onAction} icono={actionIcon ?? <Plus size={16} aria-hidden="true" />}>
           {actionLabel}
         </Boton>
       )}

@@ -86,25 +86,32 @@ El nombre histórico del exchange `suscripciones` también abarca alertas y los 
 |---|---|---|---|
 | `recomendacion.generada` | El puntaje supera el umbral | `suscripcion_id`, `puntaje`, `motivo`, `ahorro_estimado` | notifications |
 | `solapamiento.detectado` v1 | Dos servicios cubren lo mismo | `suscripcion_ids`, `categoria` | notifications |
-
-| `recomendacion.consolidacion_generada` v1 | Un solapamiento explícito y evidencia reciente de uso/costo habilitan una revisión de consolidación | `tipo`, `categoria`, `suscripcion_candidata`, `suscripciones_relacionadas`, `motivo`, `ahorro_potencial`, `evidencia`, `evento_origen_id` | notifications |
+| `recomendacion.consolidacion_generada` v1 | Un solapamiento explícito y evidencia reciente de uso/costo habilitan una revisión de consolidación | `tipo`, `categoria`, `suscripcion_candidata`, `suscripciones_relacionadas`, `motivo`, `ahorro_potencial`, `evidencia`, `evento_origen_id`, `ocurrido_en_origen` | notifications |
 
 Para `solapamiento.detectado` v2, el routing key es
 `solapamiento.detectado.v2`; `suscripciones` contiene el snapshot completo del
 grupo y cada registro lleva `id`, `organizacion_id`, `nombre`, `categoria`,
 `estado`, `activa`, `moneda`, `monto`, `frecuencia`, `uso_observado_desde` y
 `ultimo_uso`.
-> **Nota de integración (VI-20):** La emisión de `solapamiento.detectado` v2 con
 
-> de solapamientos con catálogo de evidencias**, encargada de emitir dicho evento.
-> Por su parte, `analytics` (VI-20) implementa el consumidor (`consumir_solapamientos`)
-> para procesar dicho contrato. A su vez, las recomendaciones emitidas a la cola
-> `analytics.recomendaciones.emitidas` cuentan con límite `x-max-length: 10000`
-> hasta que VI-17 implemente la persistencia y consumo de recomendaciones.
+> **Nota de integración (VI-20/VI-17):** la emisión de `solapamiento.detectado` v2
+> con evidencia real depende de una tarea productora con catálogo de evidencias.
+> `analytics` (VI-20) implementa el consumidor (`consumir_solapamientos`) para
+> procesar ese contrato y, desde VI-17, persiste cada
+> `recomendacion.consolidacion_generada` antes de publicarla. El listado queda en
+> `GET /api/recomendaciones/` (Analytics, expuesto por el gateway) y aplica
+> RN-REC-001 por moneda; la cola `analytics.recomendaciones.emitidas` mantiene
+> `x-max-length: 10000` como límite de seguridad para sus consumidores.
 
 La versión 1 sigue disponible para sus consumidores existentes, pero no habilita
 recomendaciones de consolidación. La salida se publica con el routing key
 `recomendacion.consolidacion_generada.v1`.
+
+El `id` del evento identifica la entrega y cambia si el productor vuelve a
+detectar el mismo hallazgo. Para consolidar snapshots equivalentes, Analytics
+usa como identidad de negocio `(organizacion_id, tipo, suscripcion_candidata.id
+y evidencia.id)` y `ocurrido_en_origen` para no reemplazar datos con un snapshot
+fuera de orden. Una evidencia distinta es un hallazgo distinto.
 
 ### Publica `auth`
 

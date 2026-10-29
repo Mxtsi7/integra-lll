@@ -221,5 +221,3 @@ services:
 
 volumes:
   datos_postgres:
-
-

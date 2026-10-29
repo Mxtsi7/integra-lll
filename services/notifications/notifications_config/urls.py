@@ -15,4 +15,3 @@ urlpatterns = [
     # en /api/alertas/. El gateway reenvía esa ruta tal cual.
     path("api/", include("notifications.urls")),
 ]
-

@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { restablecerContrasena, solicitarRecuperacion } from '@ojoalgasto/shared';
+import { restablecerContrasena, solicitarRecuperacion, RECOMENDACIONES_DISPONIBLES } from '@ojoalgasto/shared';
 import { DashboardPage } from './pages/DashboardPage';
 import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/ConfiguracionPage';
@@ -15,6 +15,7 @@ import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
+import { RecomendacionesPage } from './pages/RecomendacionesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
@@ -74,20 +75,32 @@ export function App() {
               <Route path="/home" element={<Homepage />} />
               <Route path="/perfil" element={<PerfilPage />} />
               <Route path="/configuracion" element={<ConfiguracionPage />} />
-              <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+                            <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
 
               {/* Secciones del menú. Las que todavía no tienen backend muestran
                   ProximamentePage; antes caían al comodín y devolvían al Panel
                   en silencio. */}
               <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
               <Route path={RUTA_AGENDA} element={<AgendaPage />} />
-              <Route path="/recomendaciones" element={<ProximamentePage seccion="recomendaciones" />} />
+              {/* AN-20: mientras VI-17 no exista (RECOMENDACIONES_DISPONIBLES = false),
+                  se muestra Próximamente y no se llama al backend. */}
+              <Route
+                path="/recomendaciones"
+                element={
+                  RECOMENDACIONES_DISPONIBLES ? (
+                    <RecomendacionesPage />
+                  ) : (
+                    <ProximamentePage seccion="recomendaciones" />
+                  )
+                }
+              />
               {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
                   accionConectar (ConectarCorreo). Sin ellas, la página dice
                   que todavía no está disponible. */}
               <Route path="/cuentas" element={<CuentasConectadasPage />} />
               <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
             </Route>
+
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
