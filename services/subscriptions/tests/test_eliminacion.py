@@ -1,11 +1,15 @@
 import json
 import uuid
+from datetime import date
 from unittest.mock import patch
 
 import pytest
 from rest_framework.test import APIClient
 
-from app.models import Cobro, Proveedor, RegistroUso, Subscription, TransicionEstado
+from app.models import (
+    Cobro, HallazgoCobro, Proveedor, RegistroUso, ResumenOrganizacion, Subscription,
+    TrabajoDerivado, TransicionEstado,
+)
 from app.models import OutboxEvento, Presupuesto
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
@@ -33,7 +37,7 @@ def test_limpieza_idempotente_conserva_otros_tenants_y_catalogo(monkeypatch):
     proveedor = Proveedor.objects.create(nombre="Proveedor global")
     propia, ajena = suscripcion(org, proveedor), suscripcion(otra, proveedor)
     for sub in (propia, ajena):
-        Cobro.objects.create(organizacion_id=sub.organizacion_id, suscripcion=sub, monto=1000, fecha="2026-10-01")
+        Cobro.objects.create(organizacion_id=sub.organizacion_id, suscripcion=sub, monto=1000, fecha=date(2026, 10, 1))
         RegistroUso.objects.create(organizacion_id=sub.organizacion_id, suscripcion=sub, minutos=5, fecha="2026-10-01")
     for _ in range(2):
         assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
@@ -60,7 +64,7 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
-    cobro = Cobro.objects.create(organizacion_id=otra, suscripcion=propia, monto=1000, fecha="2026-10-01")
+    cobro = Cobro.objects.create(organizacion_id=otra, suscripcion=propia, monto=1000, fecha=date(2026, 10, 1))
     assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
     assert Cobro.objects.filter(pk=cobro.pk).exists()
     assert Subscription.objects.filter(pk=propia.pk).exists()
@@ -84,6 +88,88 @@ def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
     for _ in range(2):
         assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
     for modelo in (Presupuesto, OutboxEvento):
+        assert not modelo.objects.filter(organizacion_id=org).exists()
+        assert modelo.objects.filter(organizacion_id=otra).count() == 1
+
+
+def hallazgo(org, sub, cobro, relacionado, clave):
+    return HallazgoCobro.objects.create(
+        organizacion_id=org, suscripcion=sub, cobro=cobro,
+        cobro_relacionado=relacionado, tipo=HallazgoCobro.Tipo.DOBLE_COBRO,
+        monto=1000, fecha_cobro="2026-10-01", clave_deduplicacion=clave,
+    )
+
+
+def test_limpieza_borra_hallazgos_propios_con_padres_ajenos_y_es_idempotente(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    proveedor = Proveedor.objects.create(nombre="Proveedor")
+    propia, ajena = suscripcion(org, proveedor), suscripcion(otra, proveedor)
+    cobro_propio = Cobro.objects.create(
+        organizacion_id=org, suscripcion=propia, monto=1000, fecha=date(2026, 10, 1),
+    )
+    cobro_ajeno = Cobro.objects.create(
+        organizacion_id=otra, suscripcion=ajena, monto=1000, fecha=date(2026, 10, 1),
+    )
+    hallazgo(org, propia, cobro_propio, None, "propio")
+    hallazgo(org, ajena, cobro_ajeno, cobro_ajeno, "padres-ajenos")
+    ajeno = hallazgo(otra, ajena, cobro_ajeno, None, "ajeno")
+
+    for _ in range(2):
+        assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+
+    assert not HallazgoCobro.objects.filter(organizacion_id=org).exists()
+    assert HallazgoCobro.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=ajena.pk).exists()
+    assert Cobro.objects.filter(pk=cobro_ajeno.pk).exists()
+
+
+@pytest.mark.parametrize("relacion", ["suscripcion", "cobro", "cobro_relacionado"])
+def test_hallazgo_ajeno_inconsistente_bloquea_cada_cascada_y_permite_reintentar(relacion, monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    proveedor = Proveedor.objects.create(nombre="Proveedor")
+    propia, ajena = suscripcion(org, proveedor), suscripcion(otra, proveedor)
+    cobro_propio = Cobro.objects.create(
+        organizacion_id=org, suscripcion=propia, monto=1000, fecha=date(2026, 10, 1),
+    )
+    cobro_ajeno = Cobro.objects.create(
+        organizacion_id=otra, suscripcion=ajena, monto=1000, fecha=date(2026, 10, 1),
+    )
+    padres = {"suscripcion": ajena, "cobro": cobro_ajeno, "cobro_relacionado": cobro_ajeno}
+    padres[relacion] = propia if relacion == "suscripcion" else cobro_propio
+    ajeno = hallazgo(otra, padres["suscripcion"], padres["cobro"], padres["cobro_relacionado"], "ajeno")
+
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
+    assert HallazgoCobro.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk__in=[propia.pk, ajena.pk]).count() == 2
+    assert Cobro.objects.filter(pk__in=[cobro_propio.pk, cobro_ajeno.pk]).count() == 2
+    assert not EstadoOrganizacion.objects.filter(organizacion_id=org, eliminada=True).exists()
+
+    setattr(ajeno, relacion, ajena if relacion == "suscripcion" else cobro_ajeno)
+    ajeno.save(update_fields=[relacion])
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+    assert HallazgoCobro.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=ajena.pk).exists()
+    assert Cobro.objects.filter(pk=cobro_ajeno.pk).exists()
+
+
+def test_limpieza_borra_resumen_y_trabajo_derivado_solo_del_tenant_con_doble_entrega(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    evento_org, evento_otra = uuid.uuid4(), uuid.uuid4()
+    for tenant, evento in ((org, evento_org), (otra, evento_otra)):
+        ResumenOrganizacion.objects.create(
+            organizacion_id=tenant, moneda="CLP", total_mensual=1000, cantidad_activas=1,
+        )
+        TrabajoDerivado.objects.create(
+            organizacion_id=tenant, evento_id=evento, hecho_por="consumidor",
+        )
+
+    for _ in range(2):
+        assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
+
+    for modelo in (ResumenOrganizacion, TrabajoDerivado):
         assert not modelo.objects.filter(organizacion_id=org).exists()
         assert modelo.objects.filter(organizacion_id=otra).count() == 1
 

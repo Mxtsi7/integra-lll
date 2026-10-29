@@ -257,6 +257,30 @@ export function haySesionValida(ahoraMs: number = Date.now()): boolean {
   return token !== null && !tokenExpirado(token, ahoraMs + desfaseReloj());
 }
 
+// ── De qué sesión es un token ─────────────────────────────────────────
+// Un refresh cambia el access token pero no la sesión: el servicio auth
+// rota el token conservando el usuario (`user_id`), la organización y el
+// id de la sesión (`sid`). Otro login, aunque sea de la misma cuenta,
+// trae otro `sid`.
+
+function textoDeClaim(valor: unknown): string | null {
+  return typeof valor === "string" || typeof valor === "number" ? String(valor) : null;
+}
+
+/**
+ * A qué sesión pertenece el token: dos tokens con el mismo valor son de la
+ * misma (uno es el refresh del otro). null si no se puede leer o no dice de
+ * qué usuario es; quien compara lo trata como otra sesión.
+ */
+export function sesionDelToken(token: string): string | null {
+  const payload = decodificarPayloadJwt(token);
+  if (!payload) return null;
+  // `user_id` es el claim que pone simplejwt; `sub`, el del estándar.
+  const usuario = textoDeClaim(payload.user_id) ?? textoDeClaim(payload.sub);
+  if (usuario === null) return null;
+  return JSON.stringify([usuario, textoDeClaim(payload.organizacion_id), textoDeClaim(payload.sid)]);
+}
+
 // ── Revocación de la sesión en el backend ─────────────────────────────
 // Borrar los tokens locales no invalida el refresh token: sigue sirviendo
 // en el servidor hasta que vence (7 días). Por eso, al cerrar sesión, se

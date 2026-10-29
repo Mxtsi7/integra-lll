@@ -56,8 +56,10 @@ agregar su destino antes de que reciba datos.
 
 ## Datos y revocación OAuth
 
-- Subscriptions elimina outbox, presupuestos, cobros, uso, transiciones y
-  suscripciones. Conserva proveedores globales y bloquea FK ajenas inconsistentes.
+- Subscriptions elimina outbox, presupuestos, hallazgos de cobro, cobros, uso,
+  transiciones, suscripciones, resúmenes por moneda y evidencia de trabajo derivado.
+  Conserva proveedores globales y bloquea FK ajenas inconsistentes, incluidas las
+  relaciones de los hallazgos con su suscripción, cobro y cobro relacionado.
 - Connectors elimina autorizaciones pendientes, importaciones y cuentas. Antes de
   limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin evidencia.
   Un fallo devuelve 409, conserva las credenciales cifradas y revierte los cambios
@@ -84,8 +86,13 @@ vuelo y marca el tenant eliminado en la misma transacción que borra sus datos.
 Después se rechazan nuevas escrituras. El GET de preferencias también participa
 del bloqueo porque crea valores iniciales. En bases sin bloqueo compartido se
 conserva el camino ORM; la verificación de concurrencia requiere PostgreSQL.
-Los trabajos internos deben usar `escritura_organizacion`; los adaptadores de
-Analytics también comprueban la marca antes de aplicar eventos tardíos.
+Los trabajos internos deben participar del mismo bloqueo de organización.
+Subscriptions lo toma antes de consultar la evidencia del evento o leer la fuente
+del resumen y lo conserva hasta confirmar el cálculo y su evidencia; mantiene
+además el bloqueo advisory del resumen. También protege el recálculo directo.
+Un evento de un tenant eliminado se confirma como obsoleto sin recrear datos;
+los fallos reales de base o cálculo conservan su tratamiento de reintento/rechazo.
+Los adaptadores de Analytics comprueban la misma marca antes de eventos tardíos.
 
 ## Migraciones y despliegue
 
