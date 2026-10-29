@@ -30,6 +30,18 @@ data:
   # además recalcula el resumen antes de responder.
   EVENTOS_ASINCRONOS: "0"
 
+  # ── OAuth de los conectores (FE-03/FE-04/FE-05) ──────────────────
+  # OJO: `connectors` TODAVÍA NO TIENE DEPLOYMENT en este cluster. Estas dos
+  # claves van igual porque son el contrato contra el que programa el
+  # frontend (AN-15/AN-16): la URL de retorno tiene que ser exactamente esta,
+  # tanto en la consola de Google como en el canje, o el proveedor rechaza.
+  #
+  # Los client_id y client_secret NO van acá: son secretos y viven en el
+  # Secret `ojoalgasto` (ver desplegar.sh). Sin ellos el servicio arranca y
+  # responde, pero el canje falla contra el proveedor de verdad.
+  OAUTH_REDIRECT_URI: https://ojoalgasto-forellana.dev.censei.cl/oauth/retorno
+  OAUTH_RETORNOS_PERMITIDOS: https://ojoalgasto-forellana.dev.censei.cl
+
   # Con DEBUG=False Django exige Host conocido. Van los nombres internos, el
   # host público y localhost (las sondas mandan Host explícito, ver los
   # Deployments).
