@@ -54,6 +54,23 @@ def test_snapshot_y_tipos_estan_actualizados(esquema):
     subprocess.run([sys.executable, str(RAIZ / "scripts/generar-tipos-auth.py"), "--check"], check=True)
 
 
+def test_delete_publica_cuerpo_obligatorio_y_password_solo_de_entrada(esquema):
+    operacion = esquema["paths"]["/api/usuarios/me/"]["delete"]
+    cuerpo = operacion.get("requestBody")
+    assert cuerpo is not None, "DELETE requiere password y confirmacion, pero OpenAPI omite el cuerpo"
+    assert cuerpo["required"] is True
+    referencia = cuerpo["content"]["application/json"]["schema"]["$ref"]
+    nombre = referencia.rsplit("/", 1)[-1]
+    assert nombre == "EliminarCuentaRequest"
+    entrada = esquema["components"]["schemas"][nombre]
+    assert set(entrada["required"]) == {"password", "confirmacion"}
+    assert entrada["properties"]["password"]["writeOnly"] is True
+    confirmacion = entrada["properties"]["confirmacion_organizacion"]
+    assert "último titular" in confirmacion["description"].lower()
+    assert "password" not in esquema["components"]["schemas"]["EliminacionAceptada"]["properties"]
+    assert "content" not in operacion["responses"]["204"]
+
+
 def test_publicas_coinciden_con_gateway_y_el_contexto_no_lo_decide_cliente(esquema):
     arbol = ast.parse((RAIZ / "gateway/config/settings.py").read_text(encoding="utf-8"))
     asignacion = next(n for n in arbol.body if isinstance(n, ast.Assign) and
@@ -111,3 +128,27 @@ def test_eliminacion_202_documenta_operacion_asincrona(esquema):
     }, format="json", HTTP_X_USUARIO_ID=str(user.pk), HTTP_X_ORGANIZACION_ID=str(org.pk))
     assert respuesta.status_code == 202
     validar(esquema, "/api/usuarios/me/", "delete", respuesta)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("ultimo_titular,cuerpo,codigo", [
+    (True, None, 400),
+    (True, {"password": "DemoClave123", "confirmacion": "ELIMINAR"}, 409),
+    (False, {"password": "DemoClave123", "confirmacion": "ELIMINAR"}, 204),
+])
+def test_delete_contrato_cubre_cuerpo_ausente_confirmacion_condicional_y_204(esquema, ultimo_titular, cuerpo, codigo):
+    from app.models import Organizacion
+    org = Organizacion.objects.create(nombre="Contrato DELETE") if ultimo_titular else None
+    user = User.objects.create_user(email="contrato-delete@example.com", password="DemoClave123", nombre="Demo",
+                                    organizacion=org, rol="titular" if ultimo_titular else None)
+    cabeceras = {"HTTP_X_USUARIO_ID": str(user.pk)}
+    if org:
+        cabeceras["HTTP_X_ORGANIZACION_ID"] = str(org.pk)
+    respuesta = APIClient().delete("/api/usuarios/me/", cuerpo, format="json", **cabeceras)
+    assert respuesta.status_code == codigo
+    validar(esquema, "/api/usuarios/me/", "delete", respuesta)
+    if codigo == 400:
+        assert set(respuesta.json()) == {"password", "confirmacion"}
+    if codigo == 409:
+        assert respuesta.json()["code"] == "confirmacion_organizacion_requerida"
+    assert User.objects.filter(pk=user.pk).exists() is (codigo != 204)

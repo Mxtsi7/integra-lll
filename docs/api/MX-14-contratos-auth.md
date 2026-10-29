@@ -42,6 +42,13 @@ un cuerpo JSON. `id` de usuario es numérico y `organizacion_id` puede ser null:
 el adaptador compartido normaliza esos valores para el tipo de presentación
 existente. `plan` en el wire usa `free`/`premium`.
 
+DELETE publica un `requestBody` obligatorio con `EliminarCuentaRequest`:
+`password` (solo entrada) y `confirmacion=ELIMINAR` son obligatorios.
+`confirmacion_organizacion=ELIMINAR` se exige al último titular; omitirla en ese
+caso produce 409. `EsquemaEliminarCuenta` resuelve el serializer anotado para
+esa operación, porque drf-spectacular 0.28.0 omite cuerpos de DELETE por defecto.
+No modifica la reautenticación ni los cuerpos de respuesta del backend.
+
 ## Regenerar y comprobar
 
 Desde `services/auth`, con las variables del entorno de desarrollo:

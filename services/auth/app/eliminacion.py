@@ -17,6 +17,7 @@ from rest_framework.response import Response
 
 from shared.eliminacion import cabeceras_eliminacion
 from .models import ConsentimientoDisociado, EliminacionOrganizacion, EliminacionUsuario, Organizacion, User
+from .openapi import EsquemaEliminarCuenta
 
 SERVICIOS = {"subscriptions": 8002, "connectors": 8003, "analytics": 8004, "notifications": 8005}
 
@@ -45,13 +46,18 @@ def conservar_consentimientos(usuarios):
 class EliminarCuentaSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     confirmacion = serializers.ChoiceField(choices=["ELIMINAR"])
-    confirmacion_organizacion = serializers.ChoiceField(choices=["ELIMINAR"], required=False)
+    confirmacion_organizacion = serializers.ChoiceField(
+        choices=["ELIMINAR"], required=False,
+        help_text="Obligatoria si el usuario es el último titular de la organización: enviar ELIMINAR; de lo contrario responde 409.",
+    )
 
 
 from .contratos_auth import EliminacionAceptadaSerializer
 
 
 class EliminarCuentaMixin:
+    schema = EsquemaEliminarCuenta()
+
     @extend_schema(
         tags=["Usuarios"], summary="Eliminar cuenta propia (RF-01.7)",
         request=EliminarCuentaSerializer,

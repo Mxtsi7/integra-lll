@@ -3498,6 +3498,26 @@
                 "tags": [
                     "Usuarios"
                 ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EliminarCuentaRequest"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EliminarCuentaRequest"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EliminarCuentaRequest"
+                            }
+                        }
+                    }
+                },
                 "responses": {
                     "204": {
                         "description": "Cuenta eliminada; organización conservada o usuario sin organización."
@@ -3912,6 +3932,13 @@
                 "type": "string",
                 "description": "* `free` - free\n* `premium` - premium"
             },
+            "ConfirmacionEliminacionEnum": {
+                "enum": [
+                    "ELIMINAR"
+                ],
+                "type": "string",
+                "description": "* `ELIMINAR` - ELIMINAR"
+            },
             "ConfirmacionRecuperacionRequest": {
                 "type": "object",
                 "properties": {
@@ -4059,6 +4086,31 @@
                 ],
                 "type": "string",
                 "description": "* `pendiente` - pendiente"
+            },
+            "EliminarCuentaRequest": {
+                "type": "object",
+                "properties": {
+                    "password": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "minLength": 1
+                    },
+                    "confirmacion": {
+                        "$ref": "#/components/schemas/ConfirmacionEliminacionEnum"
+                    },
+                    "confirmacion_organizacion": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ConfirmacionEliminacionEnum"
+                            }
+                        ],
+                        "description": "Obligatoria si el usuario es el último titular de la organización: enviar ELIMINAR; de lo contrario responde 409.\n\n* `ELIMINAR` - ELIMINAR"
+                    }
+                },
+                "required": [
+                    "confirmacion",
+                    "password"
+                ]
             },
             "ErrorConfirmacionRecuperacion": {
                 "oneOf": [

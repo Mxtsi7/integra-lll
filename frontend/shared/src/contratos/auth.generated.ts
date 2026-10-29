@@ -7,12 +7,14 @@ export interface AuthSchemas {
   "CodeEnum": "token_invalido" | "token_expirado" | "token_usado";
   "CodigoPlanCatalogoEnum": "free" | "premium";
   "CodigoPlanEnum": "free" | "premium";
+  "ConfirmacionEliminacionEnum": "ELIMINAR";
   "ConfirmacionRecuperacionRequest": { "token": string; "password": string; };
   "ConfirmacionVerificacionRequest": { "token": string; };
   "Contratacion": { "id": string; "estado": (AuthSchemas["ContratacionEstadoEnum"]); "plan_id": (AuthSchemas["CodigoPlanCatalogoEnum"]); "importe": string; "moneda": string; "precio_demo": boolean; "vigente_desde": (string) | null; "vigente_hasta": (string) | null; "url_checkout": string; "url_retorno": string; "permisos": (AuthSchemas["PermisosPlan"]); };
   "ContratacionEstadoEnum": "pendiente" | "exitosa" | "cancelada" | "fallida";
   "EliminacionAceptada": { "operacion_id": string; "estado": AuthSchemas["EliminacionAceptadaEstadoEnum"]; };
   "EliminacionAceptadaEstadoEnum": "pendiente";
+  "EliminarCuentaRequest": { "password": string; "confirmacion": AuthSchemas["ConfirmacionEliminacionEnum"]; "confirmacion_organizacion"?: (AuthSchemas["ConfirmacionEliminacionEnum"]); };
   "ErrorConfirmacionRecuperacion": (AuthSchemas["ErrorRecuperacion"] | AuthSchemas["ErrorPasswordRecuperacion"]);
   "ErrorPasswordRecuperacion": { "password": Array<string>; };
   "ErrorRecuperacion": { "code": AuthSchemas["CodeEnum"]; "detail": string; "solicitar_nuevo_enlace": string; };

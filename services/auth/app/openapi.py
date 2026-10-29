@@ -1,6 +1,21 @@
 """Describe el acceso externo por Gateway; no cambia la autorización en runtime."""
 from copy import deepcopy
 
+from drf_spectacular.openapi import AutoSchema
+
+
+class EsquemaEliminarCuenta(AutoSchema):
+    """drf-spectacular 0.28 omite DELETE aunque se anote su request serializer."""
+
+    def _get_request_body(self, direction="request"):
+        if self.method != "DELETE":
+            return super()._get_request_body(direction)
+        componente = self.resolve_serializer(self.get_request_serializer(), direction)
+        return {
+            "required": True,
+            "content": {tipo: {"schema": componente.ref} for tipo in self.map_parsers()},
+        }
+
 
 # Coincidencias exactas del Gateway. Las pruebas verifican que no se desvíen.
 RUTAS_PUBLICAS = {
