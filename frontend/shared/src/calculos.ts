@@ -44,9 +44,21 @@ export function generaCobro(s: Suscripcion): boolean {
  * suscripciones que generan cobro (ver generaCobro).
  */
 export function gastoProyectado(suscripciones: Suscripcion[]): number {
-  return suscripciones
-    .filter(generaCobro)
-    .reduce((total, s) => total + equivalenteMensual(s.monto, s.frecuencia), 0);
+  if (new Set(suscripciones.filter(generaCobro).map((s) => s.moneda)).size > 1) {
+    throw new RangeError('El gasto debe calcularse por moneda.');
+  }
+  return gastosPorMoneda(suscripciones)[0]?.total ?? 0;
+}
+
+/** Proyección de toda la lista, sin convertir ni mezclar divisas. */
+export function gastosPorMoneda(suscripciones: Suscripcion[]): { moneda: Moneda; total: number }[] {
+  // Doceavos de centavo: sumar antes de redondear conserva los anuales pequeños.
+  const sumas = new Map<Moneda, number>();
+  for (const s of suscripciones.filter(generaCobro)) {
+    const unidades = Math.round(s.monto * 100) * (s.frecuencia === 'anual' ? 1 : 12);
+    sumas.set(s.moneda, (sumas.get(s.moneda) ?? 0) + unidades);
+  }
+  return [...sumas].map(([moneda, unidades]) => ({ moneda, total: Math.round(unidades / 12) / 100 }));
 }
 
 /** Cuántas suscripciones hay en cada estado. Alimenta el conteo del panel (RF-09). */

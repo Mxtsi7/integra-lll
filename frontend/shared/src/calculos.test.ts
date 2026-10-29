@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado, generaCobro } from './calculos';
+import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado, gastosPorMoneda, generaCobro } from './calculos';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './api/ejemplo';
 
 describe('equivalenteMensual', () => {
@@ -22,6 +22,20 @@ describe('costoPorHora', () => {
 });
 
 describe('gastoProyectado', () => {
+  it('separa monedas y evita que un consumidor antiguo las sume', () => {
+    const clp = { ...SUSCRIPCIONES_DE_EJEMPLO[0], monto: 10000 };
+    const usd = { ...clp, moneda: 'USD', monto: 4.99 };
+    const eur = { ...clp, moneda: 'EUR', monto: 59.99, frecuencia: 'anual' as const };
+    expect(gastosPorMoneda([clp, usd, usd, eur, { ...usd, estado: 'cancelado' }])).toEqual([
+      { moneda: 'CLP', total: 10000 }, { moneda: 'USD', total: 9.98 }, { moneda: 'EUR', total: 5 },
+    ]);
+    expect(() => gastoProyectado([clp, usd])).toThrow(RangeError);
+    expect(gastosPorMoneda([])).toEqual([]);
+  });
+  it('redondea el total después de sumar los equivalentes anuales', () => {
+    const anual = { ...SUSCRIPCIONES_DE_EJEMPLO[0], monto: 0.01, frecuencia: 'anual' as const };
+    expect(gastosPorMoneda(Array(12).fill(anual))).toEqual([{ moneda: anual.moneda, total: 0.01 }]);
+  });
   it('suma activas, fantasmas y pruebas con monto, en equivalente mensual', () => {
     // activo 9990 + 4990 + 1290, fantasma 25000, prueba 6990. Excluye por_confirmar y cancelado.
     expect(gastoProyectado(SUSCRIPCIONES_DE_EJEMPLO)).toBe(9990 + 4990 + 1290 + 25000 + 6990);

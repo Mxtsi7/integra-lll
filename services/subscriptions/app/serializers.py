@@ -281,6 +281,20 @@ class PresupuestoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El monto presupuestado debe ser mayor a 0.")
         return value
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        codigo = attrs.get("moneda", "CLP").upper()
+        anterior = Presupuesto.objects.filter(
+            organizacion_id=self.context.get("organizacion_id"),
+            mes=attrs["mes"], moneda=codigo,
+        ).first()
+        try:
+            validar_asignacion(Moneda, codigo, anterior.moneda if anterior else None)
+        except ErrorModelo as error:
+            raise serializers.ValidationError({"moneda": error.messages})
+        attrs["moneda"] = codigo
+        return attrs
+
 
 class PresupuestoComparacionSerializer(serializers.Serializer):
     """Contrato de comparación entre presupuesto mensual y proyección/gasto (VI-05)."""

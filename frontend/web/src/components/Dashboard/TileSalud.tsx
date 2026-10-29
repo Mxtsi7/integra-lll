@@ -6,6 +6,7 @@ import styles from './Tiles.module.css';
 
 interface TileSaludProps {
   suscripciones: Suscripcion[];
+  moneda: string;
 }
 
 /**
@@ -14,7 +15,7 @@ interface TileSaludProps {
  * frase. El anillo es verde cuando casi todo se usa y coral cuando la
  * fuga pesa (más del 10 % del gasto en fantasmas, RN-REC-002).
  */
-export function TileSalud({ suscripciones }: TileSaludProps) {
+export function TileSalud({ suscripciones, moneda }: TileSaludProps) {
   let total = 0;
   let sinUso = 0;
   let fantasmas = 0;
@@ -71,7 +72,7 @@ export function TileSalud({ suscripciones }: TileSaludProps) {
             <span className={styles.saludDatoTexto}>
               <span className={styles.saludDatoEtiqueta}>Sin uso</span>
               <span className={styles.saludDatoValor}>
-                {formatearMonto(sinUso)} {fantasmas > 0 && `(${fantasmas})`}
+                {formatearMonto(sinUso, moneda)} {fantasmas > 0 && `(${fantasmas})`}
               </span>
             </span>
           </div>

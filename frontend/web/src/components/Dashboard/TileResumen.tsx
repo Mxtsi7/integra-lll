@@ -6,6 +6,7 @@ import styles from './Tiles.module.css';
 
 interface TileResumenProps {
   suscripciones: Suscripcion[];
+  moneda: string;
   nombreHogar: string;
 }
 
@@ -25,7 +26,7 @@ function fechaDeHoy(): string {
  *
  * Mismo criterio que gastoProyectado() en shared/calculos.ts (RN-CIC-005).
  */
-export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
+export function TileResumen({ suscripciones, moneda, nombreHogar }: TileResumenProps) {
   let total = 0;
   let sinUso = 0;
   let activas = 0;
@@ -59,7 +60,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
         <span className={styles.resumenOrbe} aria-hidden="true" />
         <div>
           <p className={styles.resumenCifra}>
-            {formatearMonto(Math.round(totalMostrado))}
+            {formatearMonto(totalMostrado, moneda)}
             <span className={styles.resumenCifraSufijo}>al mes</span>
           </p>
           <p className={styles.resumenDescripcion}>
@@ -84,7 +85,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
           </span>
           <span className={styles.resumenDatoTexto}>
             <span className={styles.resumenDatoEtiqueta}>Esta semana</span>
-            <span className={styles.resumenDatoValor}>{formatearMonto(semana)}</span>
+            <span className={styles.resumenDatoValor}>{formatearMonto(semana, moneda)}</span>
           </span>
         </div>
         <div className={`${styles.resumenDato} ${sinUso > 0 ? styles.resumenDatoCoral : ''}`}>
@@ -93,7 +94,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
           </span>
           <span className={styles.resumenDatoTexto}>
             <span className={styles.resumenDatoEtiqueta}>Sin uso</span>
-            <span className={styles.resumenDatoValor}>{formatearMonto(sinUso)}</span>
+            <span className={styles.resumenDatoValor}>{formatearMonto(sinUso, moneda)}</span>
           </span>
         </div>
       </div>

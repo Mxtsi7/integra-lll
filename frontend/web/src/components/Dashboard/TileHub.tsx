@@ -9,6 +9,7 @@ import styles from './Tiles.module.css';
 
 interface TileHubProps {
   suscripciones: Suscripcion[];
+  moneda: string;
   alExportar: () => void;
 }
 
@@ -55,7 +56,7 @@ function useEsAngosto(): boolean {
  * El hub: el ojo al centro y, alrededor, las suscripciones que más pesan,
  * como los dispositivos de una casa. Las pestañas cambian la categoría.
  */
-export function TileHub({ suscripciones, alExportar }: TileHubProps) {
+export function TileHub({ suscripciones, moneda, alExportar }: TileHubProps) {
   const categoriaVisual = usePresentacionCategoria();
   const [pestana, setPestana] = useState<Pestana>(null);
   const angosto = useEsAngosto();
@@ -128,7 +129,7 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
                 {visibles.length === 1 ? 'La más grande: ' : `Las ${visibles.length} más grandes: `}
               </span>
             )}
-            {visibles.length === 0 ? 'Nada por acá' : `${formatearMonto(totalVisible)} al mes`}
+            {visibles.length === 0 ? 'Nada por acá' : `${formatearMonto(totalVisible, moneda)} al mes`}
           </span>
         </div>
 

@@ -94,7 +94,7 @@ describe('formularios con catálogos', () => {
   });
 
   it('una categoría nueva aparece en tarjetas, gráfico y pestañas con su etiqueta de BD', async () => {
-    montar(<><ul><TarjetaSuscripcion suscripcion={sub} /></ul><TileCategorias suscripciones={[sub]} /><TileHub suscripciones={[sub]} alExportar={() => {}} /></>);
+    montar(<><ul><TarjetaSuscripcion suscripcion={sub} /></ul><TileCategorias suscripciones={[sub]} moneda={sub.moneda} /><TileHub suscripciones={[sub]} moneda={sub.moneda} alExportar={() => {}} /></>);
     await screen.findByRole('tab', { name: 'Casa y hogar' });
     expect(screen.getAllByText('Casa y hogar').length).toBeGreaterThanOrEqual(3);
     expect(getCatalogosSuscripciones).toHaveBeenCalledTimes(1);
@@ -105,7 +105,7 @@ describe('formularios con catálogos', () => {
       categorias: [opcion('constructor', 'Construcción'), opcion('todas', 'Servicios de casa')],
     });
     const suscripciones = [{ ...sub, categoria: 'constructor' }, { ...sub, id: 's2', categoria: 'todas', nombre: 'Otra' }];
-    montar(<><ul><TarjetaSuscripcion suscripcion={suscripciones[0]} /></ul><TileHub suscripciones={suscripciones} alExportar={() => {}} /></>);
+    montar(<><ul><TarjetaSuscripcion suscripcion={suscripciones[0]} /></ul><TileHub suscripciones={suscripciones} moneda={sub.moneda} alExportar={() => {}} /></>);
     await screen.findByRole('tab', { name: 'Construcción' });
     fireEvent.click(screen.getByRole('tab', { name: 'Servicios de casa' }));
     expect(screen.getByRole('tab', { name: 'Todas' })).toHaveAttribute('aria-selected', 'false');

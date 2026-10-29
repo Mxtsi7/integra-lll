@@ -119,6 +119,20 @@ afterEach(() => {
   cleanup();
 });
 
+it('muestra el total completo y el gasto sin uso separados por moneda', async () => {
+  vi.mocked(getSuscripciones).mockResolvedValue([
+    SPOTIFY,
+    { ...SPOTIFY, id: 'usd', nombre: 'USD', moneda: 'USD', monto: 4.99, estado: 'fantasma' },
+    { ...SPOTIFY, id: 'eur', nombre: 'EUR', moneda: 'EUR', monto: 12.34 },
+  ]);
+  await montar();
+  const resumen = screen.getByRole('region', { name: 'Resumen' });
+  expect(resumen).toHaveTextContent('CLP $5.990 · USD US$4,99 · EUR');
+  expect(resumen).toHaveTextContent('12,34');
+  expect(within(resumen).getByText('Pagas sin usar').parentElement).toHaveTextContent('USD US$4,99');
+  expect(resumen).not.toHaveTextContent('$6.007');
+});
+
 describe("Cambios sin guardar al crear (CH-16)", () => {
   it("un formulario limpio se cierra sin aviso", async () => {
     await montar();

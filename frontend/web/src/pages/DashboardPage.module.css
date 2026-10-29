@@ -1,3 +1,21 @@
+.moneda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.moneda select {
+  font: inherit;
+  color: inherit;
+  background: var(--superficie-solida);
+  padding: 8px;
+  border: 1px solid var(--vidrio-borde-fuerte);
+  border-radius: 8px;
+  max-width: 100%;
+}
+
 .grilla {
   display: grid;
   grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);

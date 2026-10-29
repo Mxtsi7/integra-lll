@@ -19,13 +19,12 @@ import {
   actualizarSuscripcion,
   crearSuscripcion,
   eliminarSuscripcion,
-  equivalenteMensual,
   ErrorDeApi,
   esFechaReal,
   esOrdenSuscripciones,
   formatearFecha,
-  formatearMonto,
-  gastoProyectado,
+  formatearTotales,
+  gastosPorMoneda,
   getSuscripciones,
   type OrdenSuscripciones,
   type Suscripcion,
@@ -463,10 +462,8 @@ export const Homepage: React.FC = () => {
   }, []);
 
   const isEmpty = !isLoading && !error && suscripciones.length === 0;
-  const totalMensual = gastoProyectado(suscripciones);
-  const fantasmasMensual = suscripciones
-    .filter((s) => s.estado === "fantasma")
-    .reduce((suma, s) => suma + equivalenteMensual(s.monto, s.frecuencia), 0);
+  const totalMensual = gastosPorMoneda(suscripciones);
+  const fantasmasMensual = gastosPorMoneda(suscripciones.filter((s) => s.estado === "fantasma"));
 
   const botonAgregar = !isEmpty ? (
     <Boton
@@ -504,15 +501,15 @@ export const Homepage: React.FC = () => {
           <section className={`tile ${styles.resumen}`} aria-label="Resumen">
             <div className={styles.dato}>
               <p className={styles.datoEtiqueta}>Al mes</p>
-              <p className={styles.datoValor}>{isLoading ? "···" : formatearMonto(totalMensual)}</p>
+              <p className={styles.datoValor}>{isLoading ? "···" : formatearTotales(totalMensual)}</p>
             </div>
             <div className={styles.dato}>
               <p className={styles.datoEtiqueta}>Suscripciones</p>
               <p className={styles.datoValor}>{isLoading ? "··" : suscripciones.length}</p>
             </div>
-            <div className={`${styles.dato} ${fantasmasMensual > 0 ? styles.datoCoral : ""}`}>
+            <div className={`${styles.dato} ${fantasmasMensual.some((t) => t.total > 0) ? styles.datoCoral : ""}`}>
               <p className={styles.datoEtiqueta}>Pagas sin usar</p>
-              <p className={styles.datoValor}>{isLoading ? "···" : formatearMonto(fantasmasMensual)}</p>
+              <p className={styles.datoValor}>{isLoading ? "···" : formatearTotales(fantasmasMensual)}</p>
             </div>
           </section>
 
