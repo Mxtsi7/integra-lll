@@ -17,7 +17,7 @@
 | Tarea A fase 2 — registrar la decisión | Completada | `1c1e0ba` |
 | Tarea A fase 2 — implementación y pruebas | Completada | `f2a9b50` |
 | Tarea C — actualizar el flujo de eliminación | Completada | `56f79ab` |
-| Tarea C — informe y cuerpo propuesto del PR | Completada | commit de cierre de este informe |
+| Tarea C — informe y cuerpo propuesto del PR | Completada | `6e7c3bf` (informe) + `30d05ef` y `2cd433c` (precisión) |
 
 La Tarea A fase 2 no creó migraciones: la limpieza ya borra las filas de `CuentaConectada`, así que la política se resolvió en código. `services/connectors/connectors/migrations/0003_autorizacion_y_revocacion.py` sigue idéntica a `main`.
 
