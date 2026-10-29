@@ -54,6 +54,11 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
   // Sin handler real (CH-07) la funcionalidad no está disponible: no se simula éxito.
   const isAvailable = Boolean(onSubmitNewPassword);
 
+  // Después del render: el campo pudo estar deshabilitado mientras se enviaba.
+  const enfocar = (id: 'password' | 'confirmPassword') => {
+    setTimeout(() => document.getElementById(id)?.focus());
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!onSubmitNewPassword || !token || isLoading) return;
@@ -66,7 +71,11 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
     else if (password !== confirmPassword) locales.confirmacion = 'Las contraseñas no coinciden.';
     setErrores(locales);
     setErrorGeneral(null);
-    if (locales.password || locales.confirmacion) return;
+    if (locales.password || locales.confirmacion) {
+      // CH-25: el foco va al primer campo con error, como en el registro.
+      enfocar(locales.password ? 'password' : 'confirmPassword');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -83,6 +92,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
         setEstado(ESTADO_POR_CODIGO[err.codigo as CodigoErrorEnlace]);
       } else if (err instanceof AuthError && err.campos?.password) {
         setErrores({ password: err.campos.password.join(' ') });
+        enfocar('password');
       } else if (err instanceof TypeError) {
         setErrorGeneral('No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.');
       } else if (err instanceof AuthError) {

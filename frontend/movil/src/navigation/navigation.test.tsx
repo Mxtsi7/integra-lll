@@ -200,10 +200,10 @@ describe('Navegación Móvil (SE-06)', () => {
 
       fireEvent.click(screen.getByTestId('go-perfil'));
       expect(await screen.findByTestId('screen-perfil')).toBeTruthy();
-      expect(screen.getByText('Nombre: Valeria Integrante')).toBeTruthy();
-      expect(screen.getByText('Correo: valeria@empresa.cl')).toBeTruthy();
-      expect(screen.getByText('Rol: integrante')).toBeTruthy();
-      expect(screen.getByText('Plan: premium')).toBeTruthy();
+      expect((await screen.findByTestId('nombre-actual')).textContent).toBe('Valeria Integrante');
+      expect((await screen.findByTestId('perfil-correo')).textContent).toBe('valeria@empresa.cl');
+      expect((await screen.findByTestId('perfil-rol')).textContent).toBe('integrante');
+      expect((await screen.findByTestId('perfil-plan')).textContent).toBe('premium');
     });
 
     it('permite alternar visibilidad de contraseña (Ver/Ocultar)', async () => {
