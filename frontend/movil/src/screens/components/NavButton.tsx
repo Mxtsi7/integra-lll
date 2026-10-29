@@ -1,30 +1,73 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  ViewStyle,
+} from 'react-native';
+
+export interface NavButtonProps {
+  testID?: string;
+  title: string;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary' | 'danger';
+  disabled?: boolean;
+  loading?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  style?: StyleProp<ViewStyle>;
+}
 
 export function NavButton({
   testID,
   title,
   onPress,
   variant = 'primary',
-}: {
-  testID?: string;
-  title: string;
-  onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'danger';
-}) {
+  disabled = false,
+  loading = false,
+  accessibilityLabel,
+  accessibilityHint,
+  style,
+}: NavButtonProps) {
+  const isBloqueado = Boolean(disabled || loading);
+
   return (
     <Pressable
       testID={testID}
+      disabled={isBloqueado}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{
+        disabled: isBloqueado,
+        busy: Boolean(loading),
+      }}
       style={({ pressed }) => [
         styles.button,
         styles[variant],
-        pressed && styles.pressed,
+        pressed && !isBloqueado && styles.pressed,
+        isBloqueado && styles.disabled,
+        style,
       ]}
-      onPress={onPress}
+      onPress={() => {
+        if (!isBloqueado) {
+          onPress();
+        }
+      }}
     >
-      <Text style={[styles.text, variant === 'secondary' && styles.secondaryText]}>
-        {title}
-      </Text>
+      {loading ? (
+        <ActivityIndicator
+          size="small"
+          color={variant === 'secondary' ? '#0f172a' : '#ffffff'}
+          testID={testID ? `${testID}-loading` : 'button-loading'}
+        />
+      ) : (
+        <Text style={[styles.text, variant === 'secondary' && styles.secondaryText]}>
+          {title}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -36,6 +79,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 48, // Tamaño táctil mínimo accesible (WCAG / Material)
   },
   primary: {
     backgroundColor: '#0f172a',
@@ -50,6 +94,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.8,
+  },
+  disabled: {
+    opacity: 0.55,
   },
   text: {
     color: '#ffffff',

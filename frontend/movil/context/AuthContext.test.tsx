@@ -8,20 +8,25 @@ import {
   configurarApi,
   guardarTokens,
   haySesionValida,
+  obtenerAccessToken,
   logout,
   getUsuarioActual,
   type Usuario,
 } from '@ojoalgasto/shared';
+import * as SecureStore from 'expo-secure-store';
+import {
+  guardarTokensSeguros,
+  limpiarSesionSegura,
+  inicializarStorageSeguro,
+  CLAVES_SEGURAS,
+} from '../src/services/storageSeguro';
 import { AuthProvider, useAuth, type Tokens } from './AuthContext';
-
-const almacen: Record<string, string> = {};
-
 function jwtValido(expSegundos: number = Math.floor(Date.now() / 1000) + 3600): string {
   const base64url = (texto: string) =>
     btoa(texto).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return [
     base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
-    base64url(JSON.stringify({ exp: expSegundos, user_id: 'usr-1', rol: 'titular' })),
+    base64url(JSON.stringify({ exp: expSegundos, user_id: 'usr-1', rol: 'titular', iat: Math.floor(Date.now() / 1000) })),
     'firma',
   ].join('.');
 }
@@ -39,17 +44,9 @@ describe('AuthContext móvil', () => {
   const fetchMock = vi.fn();
   const URL_BASE = 'https://api.staging.ojoalgasto.cl/api';
 
-  beforeEach(() => {
-    for (const k of Object.keys(almacen)) delete almacen[k];
-    configurarTokenStorage({
-      getItem: (k: string) => almacen[k] ?? null,
-      setItem: (k: string, v: string) => {
-        almacen[k] = v;
-      },
-      removeItem: (k: string) => {
-        delete almacen[k];
-      },
-    });
+  beforeEach(async () => {
+    await limpiarSesionSegura();
+    inicializarStorageSeguro();
 
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
@@ -58,8 +55,9 @@ describe('AuthContext móvil', () => {
     configureAuthApi({ baseUrl: URL_BASE });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
+    await limpiarSesionSegura();
     logout();
   });
 
@@ -93,11 +91,12 @@ describe('AuthContext móvil', () => {
     expect(result.current.estado).toBe('autenticado');
     expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
     expect(haySesionValida()).toBe(true);
-    expect(almacen['access_token']).toBe(tokens.access_token);
-    expect(almacen['refresh_token']).toBe(tokens.refresh_token);
+    expect(await SecureStore.getItemAsync('access_token')).toBe(tokens.access_token);
+    expect(await SecureStore.getItemAsync('refresh_token')).toBe(tokens.refresh_token);
+    expect(obtenerAccessToken()).toBe(tokens.access_token);
   });
 
-  it('iniciarSesion rechaza tokens inválidos y no transiciona a autenticado [P1]', () => {
+  it('iniciarSesion rechaza tokens inválidos y no transiciona a autenticado [P1]', async () => {
     const tokensInvalidos: Tokens = {
       access_token: 'token-basura-no-jwt',
       refresh_token: 'refresh-xyz',
@@ -118,7 +117,8 @@ describe('AuthContext móvil', () => {
     expect(result.current.haySesion).toBe(false);
     expect(result.current.estado).toBe('anonimo');
     expect(haySesionValida()).toBe(false);
-    expect(almacen['access_token']).toBeUndefined();
+    expect(await SecureStore.getItemAsync('access_token')).toBeNull();
+    expect(obtenerAccessToken()).toBeNull();
   });
 
   it('cerrarSesion revoca en la URL configurada por EXPO_PUBLIC_API_URL y limpia storage [P1]', async () => {
@@ -160,10 +160,11 @@ describe('AuthContext móvil', () => {
     expect(opciones.method).toBe('POST');
     expect(JSON.parse(opciones.body)).toEqual({ refresh_token: 'refresh-12345' });
 
-    // Verificación de que se limpió el storage local compartido
+    // Verificación de que se limpió el storage local compartido y SecureStore
     expect(haySesionValida()).toBe(false);
-    expect(almacen['access_token']).toBeUndefined();
-    expect(almacen['refresh_token']).toBeUndefined();
+    expect(await SecureStore.getItemAsync('access_token')).toBeNull();
+    expect(await SecureStore.getItemAsync('refresh_token')).toBeNull();
+    expect(obtenerAccessToken()).toBeNull();
   });
 
   it('cerrarSesion limpia localmente incluso si la revocación en backend falla [P1]', async () => {
@@ -190,7 +191,8 @@ describe('AuthContext móvil', () => {
     expect(result.current.haySesion).toBe(false);
     expect(result.current.estado).toBe('anonimo');
     expect(haySesionValida()).toBe(false);
-    expect(almacen['access_token']).toBeUndefined();
+    expect(await SecureStore.getItemAsync('access_token')).toBeNull();
+    expect(obtenerAccessToken()).toBeNull();
   });
 
   it('bootstrap inicial: sin sesión válida queda en anónimo', async () => {
@@ -207,6 +209,61 @@ describe('AuthContext móvil', () => {
 
     expect(result.current.haySesion).toBe(false);
     expect(result.current.estado).toBe('anonimo');
+  });
+
+  it('reinicio: bootstrap con tokens válidos en SecureStore hidrata y recupera sesión [SE-08]', async () => {
+    const tokensGuardados = {
+      access_token: jwtValido(),
+      refresh_token: 'refresh-persistente-secure-store',
+    };
+    await SecureStore.setItemAsync('access_token', tokensGuardados.access_token);
+    await SecureStore.setItemAsync('refresh_token', tokensGuardados.refresh_token);
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(USUARIO_PRUEBA), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    // Esperar a la hidratación asíncrona de SecureStore y carga del perfil
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(result.current.haySesion).toBe(true);
+    expect(result.current.estado).toBe('autenticado');
+    expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
+    expect(result.current.estadoPerfil).toBe('cargado');
+    expect(haySesionValida()).toBe(true);
+    expect(obtenerAccessToken()).toBe(tokensGuardados.access_token);
+  });
+
+  it('bootstrap con token expirado en SecureStore purga SecureStore y conmuta a anónimo [SE-08]', async () => {
+    const tokenExpirado = jwtValido(Math.floor(Date.now() / 1000) - 3600);
+    await SecureStore.setItemAsync('access_token', tokenExpirado);
+    await SecureStore.setItemAsync('refresh_token', 'refresh-expirado');
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider>{children}</AuthProvider>
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(result.current.haySesion).toBe(false);
+    expect(result.current.estado).toBe('anonimo');
+    expect(await SecureStore.getItemAsync('access_token')).toBeNull();
+    expect(obtenerAccessToken()).toBeNull();
   });
 
   it('arnés de pruebas aislado permite inyectar estado autenticado sin bypass público', () => {
@@ -500,7 +557,8 @@ describe('AuthContext móvil', () => {
       expect(result.current.estado).toBe('anonimo');
       expect(result.current.usuario).toBeNull();
       expect(haySesionValida()).toBe(false);
-      expect(almacen['access_token']).toBeUndefined();
+      expect(obtenerAccessToken()).toBeNull();
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeNull();
     });
   });
 });

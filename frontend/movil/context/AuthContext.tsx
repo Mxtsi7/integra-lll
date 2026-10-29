@@ -1,14 +1,17 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  guardarTokens,
   haySesionValida,
-  logout,
   revocarSesion,
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
   type Usuario,
 } from '@ojoalgasto/shared';
+import {
+  hidratarSesionSegura,
+  guardarTokensSeguros,
+  limpiarSesionSegura,
+} from '../src/services/storageSeguro';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
@@ -77,7 +80,7 @@ export function AuthProvider({
 
       if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
         // Token revocado o usuario inexistente: la sesión no sirve
-        logout();
+        void limpiarSesionSegura();
         setUsuario(null);
         setEstado('anonimo');
         setEstadoPerfil('inactivo');
@@ -92,15 +95,21 @@ export function AuthProvider({
     }
   }, []);
 
-  // Bootstrap al arrancar la app: valida si hay sesión guardada en shared
+  // Bootstrap al arrancar la app: hidrata tokens desde SecureStore y valida la sesión
   useEffect(() => {
     if (initialEstado || initialUsuario) return;
 
     const idSesion = ++sesionVigente.current;
 
     async function verificarSesionInicial() {
+      // 1. Hidratación asíncrona desde SecureStore hacia caché síncrono en memoria
+      await hidratarSesionSegura();
+
+      if (idSesion !== sesionVigente.current) return;
+
+      // 2. Verificación de vigencia y desfase de reloj del token recuperado
       if (!haySesionValida()) {
-        logout();
+        await limpiarSesionSegura();
         if (idSesion === sesionVigente.current) {
           setUsuario(null);
           setEstado('anonimo');
@@ -124,7 +133,7 @@ export function AuthProvider({
     configurarManejador401(() => {
       sesionVigente.current++;
       ultimaPeticion.current++;
-      logout();
+      void limpiarSesionSegura();
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
@@ -137,9 +146,9 @@ export function AuthProvider({
 
   const iniciarSesion = useCallback(
     (tokens: Tokens, u?: Usuario) => {
-      guardarTokens(tokens);
+      void guardarTokensSeguros(tokens);
       if (!haySesionValida()) {
-        logout();
+        void limpiarSesionSegura();
         setUsuario(null);
         setEstado('anonimo');
         setEstadoPerfil('inactivo');
@@ -172,7 +181,7 @@ export function AuthProvider({
     } catch {
       // Ignorar error si el backend no responde
     } finally {
-      logout();
+      await limpiarSesionSegura();
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
@@ -182,7 +191,7 @@ export function AuthProvider({
 
   const recargarPerfil = useCallback(async () => {
     if (!haySesionValida()) {
-      logout();
+      await limpiarSesionSegura();
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
