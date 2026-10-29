@@ -51,6 +51,7 @@ from django.db import connection, transaction
 ESPACIOS = {
     "uso_mensual": 28,        # analytics · FE-28, por (tenant, suscripción, mes)
     "resumen_organizacion": 29,  # subscriptions · por organización
+    "cobertura_uso": 30,      # analytics · FE-29, por (tenant, suscripción)
 }
 
 
