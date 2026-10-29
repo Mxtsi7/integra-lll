@@ -330,4 +330,5 @@ class TestValidar:
         """Django ya recorta la ruta al recibir el multipart; esto es la
         segunda capa, para quien llame a `validar` desde FE-09 o un comando."""
         assert archivos.nombre_seguro(nombre) == esperado
-        assert validar(nombre, CSV, tamano_maximo=10_000).nombre == esperado
+        contenido = PDF if esperado.endswith(".pdf") else CSV
+        assert validar(nombre, contenido, tamano_maximo=10_000).nombre == esperado
