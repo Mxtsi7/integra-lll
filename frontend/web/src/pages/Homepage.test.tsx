@@ -133,6 +133,19 @@ it('muestra el total completo y el gasto sin uso separados por moneda', async ()
   expect(resumen).not.toHaveTextContent('$6.007');
 });
 
+it.each([
+  ['EUR', 5.03, 6, '2,52'],
+  ['CLP', 5.94, 1, '$0'],
+] as const)('Inicio redondea una sola vez las proyecciones anuales en %s', async (moneda, monto, cantidad, esperado) => {
+  vi.mocked(getSuscripciones).mockResolvedValue(Array.from({ length: cantidad }, (_, i) => ({
+    ...SPOTIFY, id: String(i), monto, moneda, frecuencia: 'anual', estado: 'fantasma',
+  })));
+  await montar();
+  const resumen = screen.getByRole('region', { name: 'Resumen' });
+  expect(within(resumen).getByText('Al mes').parentElement).toHaveTextContent(esperado);
+  expect(within(resumen).getByText('Pagas sin usar').parentElement).toHaveTextContent(esperado);
+});
+
 describe("Cambios sin guardar al crear (CH-16)", () => {
   it("un formulario limpio se cierra sin aviso", async () => {
     await montar();

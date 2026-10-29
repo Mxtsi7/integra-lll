@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Zap } from 'lucide-react';
 import { useConteo } from '../../hooks/useConteo';
 import { usePresentacionCategoria } from '../subscriptions/presentacion';
@@ -15,22 +15,23 @@ interface TileCategoriasProps {
  */
 export function TileCategorias({ suscripciones, moneda }: TileCategoriasProps) {
   const categoriaVisual = usePresentacionCategoria();
-  // Solo las que efectivamente pesan en el gasto mensual: mismo criterio
-  // que gastoProyectado() en shared/calculos.ts (activo + fantasma).
+  // Esta métrica conserva activo + fantasma, sin incluir pruebas.
   const relevantes = suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma');
 
-  const porCategoria = new Map<Suscripcion['categoria'], number>();
+  const porCategoria = new Map<Suscripcion['categoria'], Suscripcion[]>();
   for (const s of relevantes) {
-    porCategoria.set(s.categoria, (porCategoria.get(s.categoria) ?? 0) + equivalenteMensual(s.monto, s.frecuencia));
+    const grupo = porCategoria.get(s.categoria) ?? [];
+    grupo.push(s);
+    porCategoria.set(s.categoria, grupo);
   }
 
   const datos = Array.from(porCategoria.entries())
-    .map(([categoria, monto]) => ({ categoria, monto }))
+    .map(([categoria, grupo]) => ({ categoria, monto: sumarEquivalentesMensuales(grupo) }))
     .sort((a, b) => b.monto - a.monto)
     .slice(0, 6);
 
   const maximo = datos[0]?.monto ?? 0;
-  const total = [...porCategoria.values()].reduce((suma, monto) => suma + monto, 0);
+  const total = sumarEquivalentesMensuales(relevantes);
   const totalMostrado = useConteo(total, 900);
 
   return (

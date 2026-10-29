@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado, gastosPorMoneda, generaCobro } from './calculos';
+import { conteoPorEstado, costoPorHora, equivalenteMensual, gastoProyectado, gastosPorMoneda, generaCobro, sumarEquivalentesMensuales } from './calculos';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './api/ejemplo';
 
 describe('equivalenteMensual', () => {
@@ -21,13 +21,30 @@ describe('costoPorHora', () => {
   });
 });
 
+describe('sumarEquivalentesMensuales', () => {
+  it('suma en unidades enteras y deja el redondeo a la presentación', () => {
+    const anual = { ...SUSCRIPCIONES_DE_EJEMPLO[0], moneda: 'EUR', monto: 5.03, frecuencia: 'anual' as const };
+    expect(sumarEquivalentesMensuales(Array(6).fill(anual))).toBe(2.515);
+    expect(sumarEquivalentesMensuales([{ ...anual, monto: 5.94, moneda: 'CLP' }])).toBe(0.495);
+    expect(sumarEquivalentesMensuales([{ ...anual, monto: 0.10, frecuencia: 'mensual' },
+      { ...anual, monto: 0.20, frecuencia: 'mensual' }])).toBe(0.30);
+    expect(sumarEquivalentesMensuales([])).toBe(0);
+  });
+  it('conserva la selección de estados del consumidor y rechaza mezclar monedas', () => {
+    const sub = { ...SUSCRIPCIONES_DE_EJEMPLO[0], monto: 1, moneda: 'EUR' };
+    expect(sumarEquivalentesMensuales([{ ...sub, estado: 'por_confirmar' },
+      { ...sub, estado: 'prueba', fin_prueba: undefined }])).toBe(2);
+    expect(() => sumarEquivalentesMensuales([sub, { ...sub, moneda: 'CLP' }])).toThrow(RangeError);
+  });
+});
+
 describe('gastoProyectado', () => {
   it('separa monedas y evita que un consumidor antiguo las sume', () => {
     const clp = { ...SUSCRIPCIONES_DE_EJEMPLO[0], monto: 10000 };
     const usd = { ...clp, moneda: 'USD', monto: 4.99 };
     const eur = { ...clp, moneda: 'EUR', monto: 59.99, frecuencia: 'anual' as const };
     expect(gastosPorMoneda([clp, usd, usd, eur, { ...usd, estado: 'cancelado' }])).toEqual([
-      { moneda: 'CLP', total: 10000 }, { moneda: 'USD', total: 9.98 }, { moneda: 'EUR', total: 5 },
+      { moneda: 'CLP', total: 10000 }, { moneda: 'USD', total: 9.98 }, { moneda: 'EUR', total: 4.9991666666666665 },
     ]);
     expect(() => gastoProyectado([clp, usd])).toThrow(RangeError);
     expect(gastosPorMoneda([])).toEqual([]);

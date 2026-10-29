@@ -34,13 +34,20 @@ y moneda; esta entrega no altera su consumidor ni su contrato.
 
 Se mantiene el contrato de importes con dos decimales en backend, serializados
 como texto. Más decimales se rechazan. El frontend recibe números; la proyección
-agrupa doceavos de centavo por moneda y redondea al final, evitando redondear
-cada suscripción anual antes de sumar. `Intl.NumberFormat` define la presentación
-de cada moneda (CLP sin decimales, EUR/USD con dos). No se agrega soporte de
+agrupa doceavos de centavo por moneda, sin redondear el resultado numérico.
+Inicio y las sumas del Panel usan las mismas unidades enteras; cada indicador
+conserva su selección de estados. El único redondeo ocurre al presentar con
+`Intl.NumberFormat` (CLP sin decimales, EUR/USD con dos). Así, seis anuales de
+EUR 5,03 muestran EUR 2,52 al mes y un anual de CLP 5,94 muestra $0, sin el doble
+redondeo 0,495 → 0,50 → $1. Los porcentajes de salud usan el valor sin redondear
+y el total de categorías se calcula antes de formatear sus subtotales.
+No se agrega soporte de
 almacenamiento de tres decimales ni conversión de divisas.
 
 Aplicar `python manage.py migrate` en Suscripciones antes de desplegar la nueva
-versión. La migración 0015 altera los campos sin modificar códigos ni importes.
+versión. La migración 0015 altera los campos sin modificar códigos ni importes;
+0016 une esa rama con 0015_hallazgo_cobro, incorporada en main, sin operaciones
+adicionales sobre los datos.
 Agregar/renombrar/desactivar monedas usa `gestionar_catalogo`, como en ADR-007.
 
 ## Verificación

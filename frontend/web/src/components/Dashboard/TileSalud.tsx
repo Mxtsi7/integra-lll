@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Ghost, Leaf, Timer } from 'lucide-react';
 import { useConteo } from '../../hooks/useConteo';
 import { Anillo } from './Medidores';
@@ -16,20 +16,11 @@ interface TileSaludProps {
  * fuga pesa (más del 10 % del gasto en fantasmas, RN-REC-002).
  */
 export function TileSalud({ suscripciones, moneda }: TileSaludProps) {
-  let total = 0;
-  let sinUso = 0;
-  let fantasmas = 0;
-  let pruebas = 0;
-  for (const s of suscripciones) {
-    const mensual = equivalenteMensual(s.monto, s.frecuencia);
-    if (s.estado === 'activo') total += mensual;
-    if (s.estado === 'fantasma') {
-      total += mensual;
-      sinUso += mensual;
-      fantasmas += 1;
-    }
-    if (s.estado === 'prueba') pruebas += 1;
-  }
+  const sinUsoLista = suscripciones.filter((s) => s.estado === 'fantasma');
+  const total = sumarEquivalentesMensuales(suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma'));
+  const sinUso = sumarEquivalentesMensuales(sinUsoLista);
+  const fantasmas = sinUsoLista.length;
+  const pruebas = suscripciones.filter((s) => s.estado === 'prueba').length;
   const enUso = total > 0 ? Math.round(((total - sinUso) / total) * 100) : 100;
   const fuga = total > 0 ? sinUso / total : 0;
   const sano = fuga <= 0.1;

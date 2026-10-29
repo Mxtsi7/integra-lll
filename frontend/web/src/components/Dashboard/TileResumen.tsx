@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { gastoProyectado, sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { CalendarClock, Ghost, Home, Layers } from 'lucide-react';
 import { diasHasta } from '../../utils/fechas';
 import { useConteo } from '../../hooks/useConteo';
@@ -27,19 +27,9 @@ function fechaDeHoy(): string {
  * Mismo criterio que gastoProyectado() en shared/calculos.ts (RN-CIC-005).
  */
 export function TileResumen({ suscripciones, moneda, nombreHogar }: TileResumenProps) {
-  let total = 0;
-  let sinUso = 0;
-  let activas = 0;
-  for (const s of suscripciones) {
-    const mensual = equivalenteMensual(s.monto, s.frecuencia);
-    if (s.estado === 'activo' || s.estado === 'fantasma') {
-      total += mensual;
-      activas += 1;
-      if (s.estado === 'fantasma') sinUso += mensual;
-    } else if (s.estado === 'prueba' && s.monto > 0 && s.fin_prueba) {
-      total += mensual;
-    }
-  }
+  const total = gastoProyectado(suscripciones);
+  const sinUso = sumarEquivalentesMensuales(suscripciones.filter((s) => s.estado === 'fantasma'));
+  const activas = suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma').length;
   const semana = suscripciones
     .filter((s) => s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7)
     .reduce((suma, s) => suma + s.monto, 0);
