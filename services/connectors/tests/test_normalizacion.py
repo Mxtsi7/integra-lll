@@ -216,7 +216,11 @@ class TestLimpiar:
 
     def test_quita_dominios_formas_juridicas_y_lugares(self):
         assert limpiar("Spotify AB Stockholm") == "spotify stockholm"
-        assert limpiar("Canva Pty Ltd Sydney") == "canva pty sydney"
+        # `pty` se agregó a RUIDO al marcar `canva` como alias débil: sin eso,
+        # "Canva Pty Ltd" dejaba de reconocerse porque el texto limpio no
+        # quedaba en solo "canva". Es un sufijo societario como `inc` o `ltd`.
+        assert limpiar("Canva Pty Ltd Sydney") == "canva sydney"
+        assert limpiar("Canva Pty Ltd") == "canva"
         assert limpiar("NETFLIX.COM SANTIAGO CL") == "netflix"
 
     def test_quita_los_codigos_con_digitos(self):
@@ -287,3 +291,142 @@ class TestCatalogo:
         for p in PROVEEDORES:
             r = normalizar(p.nombre)
             assert r.proveedor == p.nombre, (p.nombre, r)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Alias débiles: palabra común o nombre de persona
+# (hallazgo de la revisión de #118)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestAliasDebiles:
+    """Un alias que es palabra común no asigna proveedor por sí solo.
+
+    `_calza` acepta el alias en cualquier posición, así que
+    `TRANSFERENCIA A CLAUDE PEREZ` quedaba **reconocido como Claude (ia)**,
+    siendo plata a una persona. Lo mismo con `zoom`, `slack`, `notion`,
+    `steam`, `valve` y `canva` dentro de comercios o glosas de cartola.
+
+    La prueba que había usaba `TRANSFERENCIA A JUAN PEREZ`, y por eso no lo
+    veía: ningún alias calzaba con "juan".
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "TRANSFERENCIA A CLAUDE PEREZ",
+            "ZOOM SPA MUEBLES",
+            "COMERCIAL SLACK LTDA",
+            "VALVULAS VALVE SPA",
+            "IMPORTADORA CANVA CHILE",
+            "LIBRERIA NOTION SANTIAGO",
+            "MAESTRANZA STEAM SPA",
+        ],
+    )
+    def test_un_alias_debil_en_contexto_ajeno_no_asigna(self, texto):
+        r = normalizar(texto)
+        assert r.resultado == DESCONOCIDO, f"{texto} -> {r.proveedor}"
+        assert r.proveedor is None
+        assert r.para_revision is True
+
+    @pytest.mark.parametrize(
+        "texto, esperado",
+        [
+            ("NOTION", "Notion"),
+            ("CANVA", "Canva"),
+            ("ZOOM", "Zoom"),
+            ("SLACK", "Slack"),
+            ("STEAM", "Steam"),
+            ("CLAUDE", "Claude"),
+        ],
+    )
+    def test_un_alias_debil_SOLO_si_reconoce(self, texto, esperado):
+        """El control: si viene solo, es la marca."""
+        r = normalizar(texto)
+        assert r.resultado == RECONOCIDO, texto
+        assert r.proveedor == esperado
+
+    @pytest.mark.parametrize(
+        "texto, esperado",
+        [
+            ("CLAUDE.AI SUBSCRIPTION", "Claude"),
+            ("ANTHROPIC*CLAUDE", "Claude"),
+            ("ZOOM VIDEO COMMUNICATIONS", "Zoom"),
+            ("STEAM GAMES", "Steam"),
+            ("SLACK TECHNOLOGIES INC", "Slack"),
+            ("NOTION LABS", "Notion"),
+        ],
+    )
+    def test_en_contexto_decide_un_alias_mas_largo(self, texto, esperado):
+        """Los alias se prueban del más largo al más corto, así que el
+        calificador gana antes de que el débil alcance a opinar."""
+        r = normalizar(texto)
+        assert r.resultado == RECONOCIDO, texto
+        assert r.proveedor == esperado
+
+    def test_la_regla_dice_por_que_quedo_sin_asignar(self):
+        """FE-09/FE-13 lo muestran: sin motivo nadie sabe qué revisar."""
+        r = normalizar("ZOOM SPA MUEBLES")
+        assert "debil" in r.regla
+        assert "revision" in r.regla
+
+    def test_un_alias_fuerte_en_contexto_SI_asigna(self):
+        """La corrección no puede volver inútil el resto del catálogo."""
+        for texto in ("COMPRA NETFLIX", "PAYPAL *SPOTIFY", "CRUNCHYROLL CHILE"):
+            assert normalizar(texto).resultado == RECONOCIDO, texto
+
+
+class TestTransferencias:
+    """Una transferencia entre personas no asigna proveedor, pase lo que pase.
+
+    Va antes de mirar los alias: si el nombre de la persona coincide con una
+    marca, igual es plata a una persona.
+    """
+
+    @pytest.mark.parametrize(
+        "texto",
+        [
+            "TRANSFERENCIA A CLAUDE PEREZ",
+            "TRANSF CLAUDE",
+            "TEF NETFLIX GONZALEZ",
+            "TRASPASO A SPOTIFY SOTO",
+        ],
+    )
+    def test_una_transferencia_nunca_asigna(self, texto):
+        r = normalizar(texto)
+        assert r.resultado == DESCONOCIDO, f"{texto} -> {r.proveedor}"
+        assert "transferencia" in r.regla
+
+    def test_sin_marca_de_transferencia_sigue_funcionando(self):
+        assert normalizar("NETFLIX").proveedor == "Netflix"
+
+
+class TestCatalogoDeDebiles:
+    """Comprobaciones del catálogo, para que no se desarme al editarlo."""
+
+    def test_todo_alias_debil_esta_declarado_como_alias(self):
+        """Un débil que no está en `alias` no se probaría nunca."""
+        for p in PROVEEDORES:
+            sobran = p.debiles - set(p.alias)
+            assert not sobran, f"{p.nombre}: debiles fuera de alias: {sorted(sobran)}"
+
+    def test_ningun_debil_esta_tambien_en_ambiguos(self):
+        """Son dos mecanismos distintos: ambiguo devuelve candidatos, débil
+        no. Estar en los dos haría que uno tapara al otro."""
+        for p in PROVEEDORES:
+            choque = p.debiles & set(AMBIGUOS)
+            assert not choque, f"{p.nombre}: {sorted(choque)} está en débiles Y en ambiguos"
+
+    def test_los_debiles_son_de_una_sola_palabra(self):
+        """Un alias de dos palabras ya trae su propio contexto: marcarlo débil
+        lo volvería irreconocible sin razón."""
+        for p in PROVEEDORES:
+            for d in p.debiles:
+                assert " " not in d, f"{p.nombre}: '{d}' tiene espacio, no debería ser débil"
+
+    def test_cada_proveedor_se_reconoce_por_su_propio_nombre(self):
+        """La que ya existía: sigue valiendo, porque el nombre canónico
+        limpio es todo el texto."""
+        for p in PROVEEDORES:
+            r = normalizar(p.nombre)
+            assert r.resultado in (RECONOCIDO, AMBIGUO), f"{p.nombre} -> {r.resultado}"

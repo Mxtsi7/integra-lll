@@ -64,6 +64,21 @@ class Proveedor:
     #: Variantes ya normalizadas (minúsculas, sin tildes, sin ruido).
     alias: tuple[str, ...]
 
+    #: Los alias que son palabra común o nombre de persona. Un alias débil
+    #: SOLO reconoce si es todo el texto limpio.
+    #:
+    #: Sin esto, `claude` calzaba en cualquier posición y
+    #: `TRANSFERENCIA A CLAUDE PEREZ` quedaba reconocido como Claude (ia),
+    #: siendo una transferencia a una persona. Lo mismo con `zoom`, `slack`,
+    #: `notion`, `steam`, `valve` y `canva` dentro de glosas de cartola. Lo
+    #: encontró la revisión de la PR, y la prueba que había usaba
+    #: `JUAN PEREZ`, por eso no lo veía.
+    #:
+    #: En contexto se reconocen por un alias MÁS LARGO del mismo proveedor
+    #: (`claude ai`, `anthropic`, `zoom video`, `steam games`), que gana
+    #: antes porque los alias se prueban del más largo al más corto.
+    debiles: frozenset[str] = frozenset()
+
 
 #: El catálogo. Los nombres canónicos coinciden con `subscriptions`.
 #: Un alias no puede estar en dos proveedores (lo comprueba una prueba); si
@@ -84,20 +99,20 @@ PROVEEDORES: tuple[Proveedor, ...] = (
     Proveedor("Dropbox", "nube", ("dropbox",)),
     Proveedor("Microsoft 365", "productividad", ("microsoft 365", "office 365", "msft 365", "microsoft office")),
     Proveedor("Adobe Creative Cloud", "productividad", ("adobe creative cloud", "adobe", "adobe systems")),
-    Proveedor("Canva", "productividad", ("canva",)),
-    Proveedor("Notion", "productividad", ("notion", "notion labs")),
+    Proveedor("Canva", "productividad", ("canva",), frozenset({"canva"})),
+    Proveedor("Notion", "productividad", ("notion", "notion labs"), frozenset({"notion"})),
     Proveedor("Xbox Game Pass", "juegos", ("xbox game pass", "xbox", "game pass")),
     Proveedor("PlayStation Plus", "juegos", ("playstation plus", "playstation", "sony playstation", "ps plus")),
     Proveedor("Nintendo Switch Online", "juegos", ("nintendo switch online", "nintendo")),
-    Proveedor("Steam", "juegos", ("steam", "steam games", "valve")),
+    Proveedor("Steam", "juegos", ("steam", "steam games", "valve"), frozenset({"steam", "valve"})),
     Proveedor("Duolingo", "educacion", ("duolingo", "duolingo plus", "duolingo super")),
     Proveedor("Coursera", "educacion", ("coursera",)),
     Proveedor("Platzi", "educacion", ("platzi",)),
     Proveedor("ChatGPT", "ia", ("chatgpt", "openai", "chatgpt plus")),
-    Proveedor("Claude", "ia", ("claude", "anthropic", "claude ai")),
+    Proveedor("Claude", "ia", ("claude", "anthropic", "claude ai"), frozenset({"claude"})),
     Proveedor("GitHub", "productividad", ("github", "github copilot")),
-    Proveedor("Zoom", "productividad", ("zoom", "zoom video")),
-    Proveedor("Slack", "productividad", ("slack", "slack technologies")),
+    Proveedor("Zoom", "productividad", ("zoom", "zoom video"), frozenset({"zoom"})),
+    Proveedor("Slack", "productividad", ("slack", "slack technologies"), frozenset({"slack"})),
 )
 
 #: Palabras que calzan con MÁS de un proveedor. Un cobro que diga solo esto
@@ -123,6 +138,10 @@ RUIDO = frozenset({
     "www", "com", "net", "org", "cl", "es", "co", "io", "http", "https",
     # formas jurídicas
     "inc", "ltd", "llc", "spa", "ltda", "sa", "s", "a", "ab", "gmbh", "bv", "co",
+    # `pty` faltaba y se notó al marcar `canva` como alias débil: "Canva Pty
+    # Ltd" dejaba de reconocerse porque el texto limpio no quedaba en solo
+    # "canva". Es un sufijo societario como los de arriba.
+    "pty",
     # países, ciudades y regiones que aparecen en las cartolas
     "chile", "santiago", "stgo", "usa", "us", "eeuu", "uk", "gb", "ie", "irlanda", "nl", "lu",
     "luxembourg", "sg", "singapore", "ca", "mx", "br", "ar", "pe", "internacional", "international",
@@ -219,13 +238,18 @@ def limpiar(texto: str) -> str:
     return " ".join(tokens)
 
 
-def _alias_ordenados() -> list[tuple[str, Proveedor | None]]:
-    """Todos los alias, del más largo al más corto; los ambiguos con None."""
-    salida: list[tuple[str, Proveedor | None]] = []
+def _alias_ordenados() -> list[tuple[str, "Proveedor | None", bool]]:
+    """Todos los alias, del más largo al más corto, con si son débiles.
+
+    Del más largo al más corto importa: así `claude ai` y `anthropic` deciden
+    antes de que el débil `claude` alcance a opinar, y `apple music` antes que
+    el ambiguo `apple`.
+    """
+    salida: list[tuple[str, Proveedor | None, bool]] = []
     for p in PROVEEDORES:
-        salida.extend((a, p) for a in p.alias)
-    salida.extend((a, None) for a in AMBIGUOS)
-    return sorted(salida, key=lambda par: (-len(par[0]), par[0]))
+        salida.extend((a, p, a in p.debiles) for a in p.alias)
+    salida.extend((a, None, False) for a in AMBIGUOS)
+    return sorted(salida, key=lambda trio: (-len(trio[0]), trio[0]))
 
 
 def _calza(alias: str, limpio: str) -> bool:
@@ -237,6 +261,22 @@ def _calza(alias: str, limpio: str) -> bool:
     `APPLE.COM/BILL APPLE MUSIC`.
     """
     return re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", limpio) is not None
+
+
+#: Palabras que delatan una transferencia entre personas, no un cobro de un
+#: servicio. Si aparecen, el texto NO asigna proveedor aunque adentro haya un
+#: alias: `TRANSFERENCIA A CLAUDE PEREZ` es plata a una persona que se llama
+#: Claude, no una suscripción a Claude.
+#:
+#: Van acá y no en RUIDO a propósito: en RUIDO se borrarían antes de poder
+#: mirarlas, y lo que hacen falta es justamente que se vean.
+MARCAS_DE_TRANSFERENCIA = frozenset({
+    "transferencia", "transferencias", "transf", "tef", "traspaso", "traspasos",
+})
+
+
+def _es_transferencia(limpio: str) -> bool:
+    return any(t in MARCAS_DE_TRANSFERENCIA for t in limpio.split())
 
 
 def normalizar(texto: str) -> Normalizacion:
@@ -252,9 +292,27 @@ def normalizar(texto: str) -> Normalizacion:
             categoria=None, candidatos=(), regla="sin texto util",
         )
 
-    for alias, proveedor in _alias_ordenados():
+    if _es_transferencia(limpio):
+        # Antes de mirar alias: una transferencia entre personas no asigna
+        # proveedor ni aunque el nombre de la persona sea el de una marca.
+        return Normalizacion(
+            original=original, limpio=limpio, resultado=DESCONOCIDO, proveedor=None,
+            categoria=None, candidatos=(),
+            regla="parece una transferencia entre personas",
+        )
+
+    for alias, proveedor, debil in _alias_ordenados():
         if not _calza(alias, limpio):
             continue
+        if debil and limpio != alias:
+            # Un alias débil es palabra común o nombre de persona: solo
+            # reconoce si es TODO el texto. En contexto decide un alias más
+            # largo del mismo proveedor, que ya se probó antes que este.
+            return Normalizacion(
+                original=original, limpio=limpio, resultado=DESCONOCIDO,
+                proveedor=None, categoria=None, candidatos=(),
+                regla=f"'{alias}' es un alias debil y no viene solo; queda para revision",
+            )
         if proveedor is None:
             return Normalizacion(
                 original=original, limpio=limpio, resultado=AMBIGUO, proveedor=None,
