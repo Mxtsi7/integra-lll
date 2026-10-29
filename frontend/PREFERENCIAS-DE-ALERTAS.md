@@ -54,6 +54,21 @@ Rutas relativas a `frontend/`.
 - **Fuera:** "Consejos para gastar menos" no existe en FE-21. Era un interruptor que no guardaba nada,
   así que se quitó.
 
+## Cambio de sesión (revisión de #129)
+
+Si otra pestaña entraba como B, el formulario seguía con el borrador de A, y "Guardar cambios" lo
+mandaba con el token de B.
+
+- **El límite común de #128.** `<RutaPrivada>` usa la marca de sesión de `AuthContext` como `key`: al
+  cambiar de cuenta, Configuración se vuelve a montar desde cero. Se descartan lo guardado, el borrador,
+  los errores, el indicador de guardado y el bloqueo de navegación, y se piden las preferencias de B,
+  aunque `/usuarios/me/` de B siga pendiente. Un refresh del token no cambia la marca.
+- **El formulario anota su sesión.** `PreferenciasAvisos` guarda la sesión con que se montó y cubre el
+  instante entre el cambio y el nuevo montaje:
+  - con la sesión ya cambiada no se manda el PATCH;
+  - si la confirmación llega para la sesión anterior, o con la página ya cerrada, no reemplaza lo que
+    se ve, no avisa ni ejecuta `proceed()` de una navegación retenida.
+
 ## Cómo se comprobó
 
 - `shared/src/api/preferencias.test.ts`: rutas y métodos, que los cambios sean solo lo distinto y que lo
@@ -66,6 +81,20 @@ Rutas relativas a `frontend/`.
   - el fallo sin red, con 400 y con 500, conservando lo editado y con reintento;
   - Descartar, el doble clic y los canales apagados;
   - navegación retenida con Seguir editando, Descartar cambios y guardar, y sin cambios no se retiene.
+- `web/src/components/Configuracion/PreferenciasAvisos.sesion.test.tsx` (revisión de #129):
+  `AuthProvider`, guarda privada, router de datos y tokens reales; solo se simula la red. Son 9 pruebas:
+  - editar como A y entrar B por `storage`: se ven las de B y Guardar no manda nada;
+  - un clic en Guardar en el mismo instante del cambio;
+  - el GET de A y el PATCH de A que terminan después del cambio;
+  - la confirmación de A en el mismo instante, con la navegación retenida, que no sigue;
+  - cerrar sesión y entrar B;
+  - salir de la página mientras guarda;
+  - el fallo dentro de la misma sesión, con reintento;
+  - el refresh del token durante el guardado, que no lo invalida.
+- **Mutaciones de la revisión:** sin `key` en la guarda, guardar sin revisar la sesión antes de enviar o
+  después de la respuesta, la sesión vigente sin mirar el montaje o sin mirar la sesión, y un refresh
+  como cambio de cuenta. En las 6 falla alguna prueba.
+- **Sobre `main` actualizado** (con #128): shared 219, web 385 y móvil 37 pruebas, typecheck y build.
 - **Contrato con las vistas reales** de `services/notifications` (código de main, SQLite), con lo que
   manda la web: 5 pruebas temporales, fuera del repo, más las 32 de FE-21, todas pasan.
   - El GET trae exactamente las claves que lee la web.
@@ -93,6 +122,11 @@ Rutas relativas a `frontend/`.
   - Contraste en tema claro y oscuro: el subtítulo y el aviso de pendiente usaban `--tinta-3` y
     `--acento`, cerca de 3:1 en tema claro. Ahora usan `--tinta-2` y `--tinta` (más de 6:1), y el
     pendiente lleva un punto de color.
+  - Dos pestañas (revisión de #129), con preferencias distintas por cuenta:
+    - con un borrador de A, la otra pestaña entró como B; la página pasó sola a las preferencias de B,
+      sin el borrador, y Guardar no mandó nada;
+    - con el guardado de A en vuelo entró B; la confirmación no mostró aviso ni error, y ningún PATCH
+      salió con la cuenta de B.
 - CI local desde `frontend/`: typecheck, pruebas de todos los paquetes y build.
 
 ## Fuera de esta tarea

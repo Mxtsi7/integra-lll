@@ -16,6 +16,7 @@ import AvisoCambiosSinGuardar from '../subscriptions/AvisoCambiosSinGuardar';
 import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
 import { Fila, Seccion } from '../ui/Seccion';
+import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useAvisoAlSalir } from '../../hooks/useAvisoAlSalir';
 import { MENSAJE_SIN_RED } from '../../utils/mensajes';
@@ -83,6 +84,13 @@ export function PreferenciasAvisos() {
       montado.current = false;
     };
   }, []);
+  // De qué sesión es el formulario: lo guardado y el borrador son de la
+  // cuenta con que se montó. Si cambia, <RutaPrivada> lo vuelve a montar con
+  // los datos de la nueva; esto cubre el instante entre el cambio y ese nuevo
+  // montaje, y lo que llega con la página ya cerrada (revisión de #129).
+  const { capturarSesion } = useAuth();
+  const [sesion] = useState(capturarSesion);
+  const sigueVigente = () => montado.current && capturarSesion() === sesion;
 
   useEffect(() => {
     let vigente = true;
@@ -132,6 +140,9 @@ export function PreferenciasAvisos() {
 
   const guardar = async () => {
     if (carga.tipo !== 'listo' || !editadas || guardandoRef.current) return;
+    // Con la sesión ya cambiada, el borrador es de la cuenta anterior: no se
+    // manda con el token de la nueva.
+    if (!sigueVigente()) return;
     const enviar = cambiosDePreferencias(carga.guardadas, editadas);
     if (Object.keys(enviar).length === 0) return;
     guardandoRef.current = true;
@@ -139,7 +150,9 @@ export function PreferenciasAvisos() {
     setErrorGuardado(null);
     try {
       const guardadas = await guardarPreferenciasAlertas(enviar);
-      if (!montado.current) return;
+      // Confirmado para la sesión anterior, o con la página ya cerrada: no
+      // reemplaza lo que se ve, no avisa ni sigue una navegación retenida.
+      if (!sigueVigente()) return;
       // Lo confirmado por el servidor es lo que queda. Mientras viajaba no se
       // podía editar, así que no hay nada nuevo que se pierda.
       hayCambiosRef.current = false;

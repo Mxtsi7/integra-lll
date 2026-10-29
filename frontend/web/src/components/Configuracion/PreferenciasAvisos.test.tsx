@@ -9,6 +9,7 @@ import {
   guardarPreferenciasAlertas,
   type PreferenciasAlertas,
 } from "@ojoalgasto/shared";
+import { AuthProvider } from "../../context/AuthContext";
 import { ToastProvider } from "../../context/ToastContext";
 import { PreferenciasAvisos } from "./PreferenciasAvisos";
 
@@ -63,9 +64,12 @@ async function montar() {
     ],
     { initialEntries: ["/configuracion"] },
   );
+  // El formulario anota la sesión con que se montó (revisión de #129).
   render(
     <ToastProvider>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </ToastProvider>,
   );
   await act(async () => {});
