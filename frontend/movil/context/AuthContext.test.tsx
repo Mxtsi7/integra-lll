@@ -480,9 +480,16 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
       expect(result.current.haySesion).toBe(true);
 
-      // Simular que una petición protegida cualquiera recibe 401
+      // Simular que una petición protegida cualquiera recibe 401 y que el
+      // refresh tampoco sirve: el cliente debe cerrar la sesión.
       fetchMock.mockResolvedValueOnce(
         new Response(JSON.stringify({ detail: 'Token inválido o expirado' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'Refresh inválido' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' },
         })

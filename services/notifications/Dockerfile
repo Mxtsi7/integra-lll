@@ -13,4 +13,6 @@ COPY . .
 EXPOSE 8005
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s   CMD curl -f http://localhost:8005/health/ || exit 1
 
+# "sh" explícito: el bind mount desde Windows no garantiza el bit de ejecución
+ENTRYPOINT ["sh", "entrypoint.sh"]
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8005"]

@@ -10,6 +10,8 @@ import {
   haySesionValida,
   logout,
   obtenerAccessToken,
+  obtenerRefreshToken,
+  renovarSesion,
   revocarSesion,
   tokenExpirado,
 } from "./auth";
@@ -222,6 +224,136 @@ describe("revocarSesion (logout en el backend, MX-29)", () => {
     logout();
     expect(await revocarSesion()).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("renovarSesion (refresh con rotación, VI-16)", () => {
+  const fetchMock = vi.fn();
+  const json = (status: number, cuerpo: unknown) =>
+    new Response(JSON.stringify(cuerpo), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    configureAuthApi({ baseUrl: "http://api.test/api", endpoints: { refresh: "/auth/refresh/" } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("manda el refresh sin Authorization y guarda LOS DOS tokens nuevos", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco-viejo" });
+    fetchMock.mockResolvedValue(
+      json(200, { access_token: "nuevo", refresh_token: "refresco-nuevo" }),
+    );
+
+    expect(await renovarSesion()).toBe(true);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://api.test/api/auth/refresh/");
+    expect(init.method).toBe("POST");
+    expect(init.headers).not.toHaveProperty("Authorization");
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: "refresco-viejo" });
+    expect(obtenerAccessToken()).toBe("nuevo");
+    expect(obtenerRefreshToken()).toBe("refresco-nuevo");
+  });
+
+  it("peticiones concurrentes comparten una sola renovación", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    let liberar: ((r: Response) => void) | undefined;
+    fetchMock.mockImplementation(
+      () => new Promise<Response>((resolver) => { liberar = resolver; }),
+    );
+
+    const primera = renovarSesion();
+    const segunda = renovarSesion();
+    expect(segunda).toBe(primera);
+
+    liberar?.(json(200, { access_token: "nuevo", refresh_token: "otro" }));
+    expect(await primera).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("un 401 descarta la sesión y NO reintenta", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock.mockResolvedValue(json(401, { detail: "Refresh inválido" }));
+
+    expect(await renovarSesion()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
+  });
+
+  it("un 503 conserva los tokens y reintenta una vez", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock
+      .mockResolvedValueOnce(json(503, { detail: "Redis caído" }))
+      .mockResolvedValueOnce(
+        json(200, { access_token: "nuevo", refresh_token: "refresco-nuevo" }),
+      );
+
+    expect(await renovarSesion()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(obtenerAccessToken()).toBe("nuevo");
+  });
+
+  it("si el 503 persiste conserva ambos tokens para reintentar después", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock.mockResolvedValue(json(503, { detail: "Redis caído" }));
+
+    expect(await renovarSesion()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(obtenerAccessToken()).toBe("viejo");
+    expect(obtenerRefreshToken()).toBe("refresco");
+  });
+
+  it("sin red conserva la sesión y no repite el refresh consumido", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    expect(await renovarSesion()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(obtenerAccessToken()).toBe("viejo");
+    expect(obtenerRefreshToken()).toBe("refresco");
+  });
+
+  it("un 200 fuera de contrato no se reintenta", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock.mockResolvedValue(json(200, { access_token: "solo-uno" }));
+
+    expect(await renovarSesion()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(obtenerAccessToken()).toBe("viejo");
+  });
+
+  it("sin refresh guardado no llama al backend", async () => {
+    guardarTokens({ access_token: "viejo", refresh_token: "" });
+
+    expect(await renovarSesion()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("si el servidor no responde, corta a los 8 s y conserva los tokens", async () => {
+    vi.useFakeTimers();
+    guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_res, rej) => {
+          init.signal?.addEventListener("abort", () =>
+            rej(new DOMException("Abortado", "AbortError")),
+          );
+        }),
+    );
+
+    const resultado = renovarSesion();
+    await vi.advanceTimersByTimeAsync(8_000);
+
+    expect(await resultado).toBe(false);
+    expect(obtenerRefreshToken()).toBe("refresco");
   });
 });
 

@@ -54,7 +54,15 @@ traduce: `/api/suscripciones/` en el gateway llega a `subscriptions` como
 | `/api/auth/` | auth, **pública** |
 | `/api/usuarios/`, `/api/organizacion/` | auth |
 | `/api/suscripciones/`, `/api/usos/` | subscriptions |
-| `/api/conectores/` · `/api/recomendaciones/`, `/api/asistente/` · `/api/alertas/` | connectors · analytics · notifications (sin implementar: responden 502) |
+| `/api/conectores/`, `/api/importaciones/` | connectors |
+| `/api/recomendaciones/`, `/api/analitica/`, `/api/asistente/` | analytics |
+| `/api/alertas/`, `/api/preferencias-alertas/` | notifications |
+
+`/api/asistente/` es el único prefijo de IA que atiende a clientes. El gateway
+valida el JWT y, cuando la ruta lo exige, inyecta `X-Plan: premium` con el plan
+verificado en la base de Auth. Un usuario Free recibe **403** y nunca llega a
+Analytics. Ningún cliente habla directo con el proveedor externo ni con
+`analytics:8004`: el wrapper común está en `shared/ia/cliente.py`.
 
 ### Paso 3: decodificar y validar el JWT
 

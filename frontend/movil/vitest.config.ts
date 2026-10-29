@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // En pruebas la URL es obligatoria igual que en la app. Se usa una IP LAN
+    // ficticia (no localhost) porque Platform.OS se simula como "ios".
+    env: {
+      EXPO_PUBLIC_API_URL: 'http://192.168.1.10:8000/api',
+    },
     server: {
       deps: {
         inline: [/@react-navigation/],
@@ -23,6 +28,7 @@ export default defineConfig({
       'react-native-safe-area-context': path.resolve(__dirname, './test/safe-area-shim.tsx'),
       'react-native-screens': path.resolve(__dirname, './test/react-native-screens-shim.tsx'),
       'expo-status-bar': path.resolve(__dirname, './test/expo-status-bar-shim.tsx'),
+      'expo-secure-store': path.resolve(__dirname, './test/expo-secure-store-shim.ts'),
     },
   },
 });

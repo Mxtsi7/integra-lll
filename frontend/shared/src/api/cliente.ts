@@ -1,4 +1,4 @@
-import { obtenerAccessToken, logout } from "../auth";
+import { obtenerAccessToken, obtenerRefreshToken, logout, renovarSesion } from "../auth";
 
 let urlBase = "";
 
@@ -78,27 +78,58 @@ export async function pedir<T>(
     );
   }
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+  const token = obtenerAccessToken();
+
+  const enviar = (autorizacion: string | null) => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (autorizacion) headers.Authorization = `Bearer ${autorizacion}`;
+    return fetch(`${urlBase}${path}`, {
+      method: opciones.method ?? "GET",
+      headers,
+      body:
+        opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+    });
   };
 
-  const token = obtenerAccessToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
+  let tokenUsado = token;
+  let res = await enviar(token);
+  let notificado = false;
+  let conservarSesion = false;
 
-  const res = await fetch(`${urlBase}${path}`, {
-    method: opciones.method ?? "GET",
-    headers,
-    body:
-      opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
-  });
+  // VI-16: un 401 con un token guardado puede ser sólo un access vencido.
+  // Se intenta renovar UNA vez y se repite la petición con el token nuevo.
+  // Si la renovación falla por red o 503, `renovarSesion()` conserva los
+  // tokens: no se cierra la sesión y la UI muestra el error de red en vez de
+  // datos viejos. Sólo se conserva si el token rechazado sigue siendo el
+  // actual; si el usuario volvió a entrar mientras viajaba la petición, el
+  // 401 es del token viejo y no hay nada que renovar.
+  if (res.status === 401 && token !== null && obtenerAccessToken() === token) {
+    const renovado = await renovarSesion();
+    if (renovado) {
+      tokenUsado = obtenerAccessToken();
+      res = await enviar(tokenUsado);
+    } else if (obtenerRefreshToken() === null) {
+      // El refresh fue rechazado: renovarSesion ya borró los tokens.
+      manejadorNoAutorizado?.();
+      notificado = true;
+    } else {
+      // Fallo temporal (red/503): los tokens siguen guardados.
+      conservarSesion = true;
+    }
+  }
 
   // Solo se cierra la sesión si el token rechazado sigue siendo el actual.
   // Si mientras la petición viajaba el usuario cerró sesión y volvió a
   // entrar, el 401 corresponde al token VIEJO: borrar los tokens nuevos
   // echaría a alguien que acaba de iniciar sesión bien.
-  if (res.status === 401 && obtenerAccessToken() === token) {
+  if (
+    res.status === 401 &&
+    !notificado &&
+    !conservarSesion &&
+    obtenerAccessToken() === tokenUsado
+  ) {
     logout();
     manejadorNoAutorizado?.();
   }

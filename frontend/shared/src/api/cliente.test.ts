@@ -7,6 +7,7 @@ import {
 } from "./cliente";
 import {
   configurarTokenStorage,
+  configureAuthApi,
   guardarTokens,
   obtenerAccessToken,
   obtenerRefreshToken,
@@ -41,6 +42,7 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     configurarApi({ urlBase: "http://api.test/api" });
+    configureAuthApi({ baseUrl: "http://api.test/api" });
     manejador401 = vi.fn();
     configurarManejador401(manejador401);
   });
@@ -135,6 +137,70 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
 
       expect(manejador401).not.toHaveBeenCalled();
       expect(obtenerAccessToken()).toBe("valido");
+    });
+  });
+
+  describe("renovación automática (VI-16)", () => {
+    it("ante un 401 renueva y repite la petición con el token nuevo", async () => {
+      guardarTokens({ access_token: "vencido", refresh_token: "refresco" });
+      fetchMock.mockImplementation(
+        async (url: string, init: RequestInit) => {
+          if (url.endsWith("/auth/refresh/")) {
+            return respuesta(200, {
+              access_token: "nuevo",
+              refresh_token: "refresco-nuevo",
+            });
+          }
+          const autorizacion = (init.headers as Record<string, string>)
+            .Authorization;
+          return autorizacion === "Bearer nuevo"
+            ? respuesta(200, { ok: true })
+            : respuesta(401, { detail: "Token vencido" });
+        },
+      );
+
+      await expect(pedir("/suscripciones/")).resolves.toEqual({ ok: true });
+
+      expect(obtenerAccessToken()).toBe("nuevo");
+      expect(manejador401).not.toHaveBeenCalled();
+      const urls = fetchMock.mock.calls.map(([url]) => url);
+      expect(urls).toEqual([
+        "http://api.test/api/suscripciones/",
+        "http://api.test/api/auth/refresh/",
+        "http://api.test/api/suscripciones/",
+      ]);
+    });
+
+    it("si el refresh también da 401 cierra la sesión y no repite la petición", async () => {
+      guardarTokens({ access_token: "vencido", refresh_token: "refresco" });
+      fetchMock.mockResolvedValue(respuesta(401, { detail: "Token vencido" }));
+
+      await expect(pedir("/suscripciones/")).rejects.toMatchObject({
+        status: 401,
+      });
+
+      expect(obtenerAccessToken()).toBeNull();
+      expect(obtenerRefreshToken()).toBeNull();
+      expect(manejador401).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // original + refresh
+    });
+
+    it("si el refresh da 503 conserva la sesión y propaga el error", async () => {
+      guardarTokens({ access_token: "vencido", refresh_token: "refresco" });
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.endsWith("/auth/refresh/")) {
+          return respuesta(503, { detail: "Redis caído" });
+        }
+        return respuesta(401, { detail: "Token vencido" });
+      });
+
+      await expect(pedir("/suscripciones/")).rejects.toMatchObject({
+        status: 401,
+      });
+
+      expect(obtenerAccessToken()).toBe("vencido");
+      expect(obtenerRefreshToken()).toBe("refresco");
+      expect(manejador401).not.toHaveBeenCalled();
     });
   });
 });

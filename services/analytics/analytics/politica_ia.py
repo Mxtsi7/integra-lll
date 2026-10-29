@@ -13,6 +13,8 @@ from django.conf import settings
 from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.db.models import Sum
 from django.utils import timezone
+from shared.ia.politica import ProveedorNoConfigurado
+
 from .models import CupoIngesta, DocumentoIngesta, IntentoPDF, ConsumoMensualIA
 
 
@@ -26,6 +28,10 @@ class DocumentoEnProceso(Exception):
 
 def bloquear_usuario(usuario):
     # Contador por usuario incluso si cambia de organización; sin FK a Auth.
+    # SQLite (tests locales) no tiene advisory locks: el aislamiento entre
+    # organizaciones no depende de este lock, sólo la serialización del cupo.
+    if connection.vendor != "postgresql":
+        return
     llave = int.from_bytes(hashlib.sha256(f"analytics:ia:{usuario}".encode()).digest()[:8], "big", signed=True)
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [llave])
@@ -134,6 +140,39 @@ class PoliticaIA:
                 if not isinstance(datos, dict):
                     return self.degradar(datos_calculados, "respuesta_invalida")
                 return {"estado": "ok", "motivo": None, "datos": datos}
+            except TimeoutError:
+                return self.degradar(datos_calculados, "timeout")
+            except Exception:
+                return self.degradar(datos_calculados, "proveedor_no_disponible")
+        finally:
+            self._plazas.release()
+
+    def ejecutar_sync(self, proveedor, datos_calculados, *, organizacion_id, usuario_id):
+        """Variante síncrona para vistas Django y scripts (VI-22 / VI-24).
+
+        Aplica la misma cuota, concurrencia y degradación que `ejecutar`, pero
+        no cambia de hilo: en SQLite en memoria (tests) y en transacciones
+        abiertas por la vista, `sync_to_async` estrenaría otra conexión. El
+        proveedor recibe el timeout y debe respetarlo en su I/O.
+        """
+        if not callable(proveedor):
+            raise TypeError("El proveedor debe ser una función síncrona")
+        if not self._plazas.acquire(blocking=False):
+            return self.degradar(datos_calculados, "capacidad")
+        try:
+            try:
+                consumir_llamada(organizacion_id, usuario_id, self.max_llamadas_mes)
+            except CuotaAgotada:
+                return self.degradar(datos_calculados, "cuota_agotada")
+            except DatabaseError:
+                return self.degradar(datos_calculados, "cuota_no_disponible")
+            try:
+                datos = proveedor(self.timeout)
+                if not isinstance(datos, dict):
+                    return self.degradar(datos_calculados, "respuesta_invalida")
+                return {"estado": "ok", "motivo": None, "datos": datos}
+            except ProveedorNoConfigurado:
+                return self.degradar(datos_calculados, "no_configurado")
             except TimeoutError:
                 return self.degradar(datos_calculados, "timeout")
             except Exception:

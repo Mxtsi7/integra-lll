@@ -2,8 +2,12 @@
 # Levanta el sistema completo con un solo comando:
 #     docker compose up --build
 #
-# Para trabajar en un servicio puntual, levanta solo sus dependencias:
-#     docker compose up postgres rabbitmq auth
+# Sólo los servicios con healthcheck pueden ser dependencia de otro con
+# `condition: service_healthy`. Un proceso que arrancó no es un servicio
+# sano: los HTTP prueban su base/Redis, y los workers prueban su cola.
+#
+# Para trabajar en un servicio puntual, levanta sólo sus dependencias:
+#     docker compose up postgres rabbitmq redis auth
 # ══════════════════════════════════════════════════════════════════
 
 services:
@@ -22,9 +26,11 @@ services:
       # Crea un esquema por servicio en el primer arranque
       - ./infra/migraciones/01-esquemas.sql:/docker-entrypoint-initdb.d/01-esquemas.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-suscripciones}"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 5s
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -34,11 +40,19 @@ services:
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
+      timeout: 10s
       retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
 
   # ─── Gateway ────────────────────────────────────────────────────
 
@@ -52,11 +66,22 @@ services:
       URL_CONNECTORS: http://connectors:8003
       URL_ANALYTICS: http://analytics:8004
       URL_NOTIFICATIONS: http://notifications:8005
-    depends_on: [auth, subscriptions, connectors, analytics, notifications, redis]
+    depends_on:
+      auth: { condition: service_healthy }
+      subscriptions: { condition: service_healthy }
+      connectors: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
 
   # ─── Servicios de dominio ───────────────────────────────────────
-  # Todos comparten la misma forma: build, env, depends_on, volumes.
 
   auth:
     build: ./services/auth
@@ -64,11 +89,17 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: auth
-      SEED_DEMO: "1"   # usuario de demostracion al arrancar (solo desarrollo)
+      SEED_DEMO: "1"   # usuario de demostración al arrancar (sólo desarrollo)
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
-      redis: { condition: service_started }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   subscriptions:
@@ -80,6 +111,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   # El actor Temporizador (RF-13): beat programa las tareas periódicas,
@@ -102,7 +140,8 @@ services:
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
-      redis: { condition: service_started }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   subscriptions-beat:
@@ -110,6 +149,9 @@ services:
     entrypoint: ["celery", "-A", "config"]
     # El archivo de estado de beat va fuera de /app para no aparecer en el repo
     command: ["beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
+    # Beat no expone un canal de consulta. Se declara explícitamente sin
+    # healthcheck para no fingir salud: `docker compose ps` lo muestra
+    # "running", no "healthy", y ningún servicio depende de él.
     healthcheck:
       disable: true
     env_file: .env
@@ -117,7 +159,8 @@ services:
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
-      redis: { condition: service_started }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   connectors:
@@ -130,17 +173,35 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8003/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   # Trabajador que ejecuta las sincronizaciones periódicas.
-  # Mismo código que connectors, distinto punto de entrada.
+  # Mismo código que connectors, distinto punto de entrada. No migra:
+  # espera a que el servicio HTTP haya aplicado las migraciones.
   connectors-worker:
     build: ./services/connectors
-    command: celery -A config worker --beat --loglevel=info
+    entrypoint: ["celery", "-A", "config"]
+    command: ["worker", "--beat", "--loglevel=info"]
+    healthcheck:
+      test: ["CMD", "celery", "-A", "config", "inspect", "ping", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     env_file: .env
     environment:
       ESQUEMA_BD: connectors
-    depends_on: [connectors, redis]
+    depends_on:
+      connectors: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_healthy }
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   analytics:
@@ -153,18 +214,34 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8004/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # Consumidor pika de solapamientos. No migra: analytics ya lo hizo.
+  # `verificar_worker` comprueba que el proceso siga vivo y que RabbitMQ
+  # siga alcanzable; no declara sano un contenedor cuyo consumidor murió.
   analytics-worker:
     build: ./services/analytics
-    command: ["python", "manage.py", "consumir_solapamientos"]
+    entrypoint: ["python", "manage.py"]
+    command: ["consumir_solapamientos"]
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "manage.py", "verificar_worker"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped
     env_file: .env
     environment:
       ESQUEMA_BD: analytics
     depends_on:
+      analytics: { condition: service_healthy }
+      postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
@@ -178,6 +255,12 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8005/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/notifications:/app", "./shared:/app/shared:ro"]
 
   # ─── Frontend ───────────────────────────────────────────────────
@@ -201,4 +284,3 @@ services:
 
 volumes:
   datos_postgres:
-

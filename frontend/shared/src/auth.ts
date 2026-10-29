@@ -20,10 +20,16 @@ export class AuthError extends Error {
   }
 }
 
-let apiUrl = "http://localhost:8000/api";
+// Sin valor por defecto a propósito (VI-14): en un teléfono `localhost` es el
+// propio teléfono, no la máquina de desarrollo. Cada cliente debe configurar
+// la URL real del gateway al arrancar con configureAuthApi({ baseUrl }).
+let apiUrl = "";
 let endpoints = {
   login: "/auth/login/",
   register: "/auth/register/",
+  // Contrato de refresh (MX-29 / VI-16): POST { refresh_token } → 200 con
+  // access_token y un refresh_token NUEVO (rotación). No exige access.
+  refresh: "/auth/refresh/",
   // Revocación de la sesión en el backend (MX-29). Contrato acordado:
   // POST { refresh_token } → 2xx si quedó revocado. Configurable con
   // configureAuthApi({ endpoints: { logout } }) si el backend usa otra ruta.
@@ -42,8 +48,27 @@ export function configureAuthApi(config: {
   if (config.endpoints) endpoints = { ...endpoints, ...config.endpoints };
 }
 
+/**
+ * URL base configurada. Si nadie la configuró, no se inventa una: el error
+ * explica qué falta en vez de mandar la petición al localhost del teléfono.
+ */
+function urlApi(): string {
+  if (!apiUrl) {
+    throw new AuthError(
+      "API sin configurar: llamar configureAuthApi({ baseUrl }) al iniciar la app",
+      0,
+    );
+  }
+  return apiUrl;
+}
+
+/** true si configureAuthApi ya recibió una URL. Útil para scripts y tests. */
+export function apiConfigurada(): boolean {
+  return apiUrl !== "";
+}
+
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${apiUrl}${path}`, {
+  const res = await fetch(`${urlApi()}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -263,6 +288,152 @@ export function haySesionValida(ahoraMs: number = Date.now()): boolean {
   return token !== null && !tokenExpirado(token, ahoraMs + desfaseReloj());
 }
 
+// ── Renovación de la sesión (VI-16) ───────────────────────────────────
+// Contrato de MX-29:
+//   · POST /auth/refresh/ { refresh_token } → 200 { access_token, refresh_token }
+//     El refresh rota: hay que guardar LOS DOS tokens antes de reintentar.
+//   · 401: el refresh no sirve → se descarta la sesión y se vuelve al login.
+//   · 503: indisponibilidad temporal → se conservan los tokens y se reintenta
+//     con una espera acotada.
+//
+// Una sola renovación en vuelo por sesión: si cinco peticiones reciben 401 a
+// la vez, las cinco esperan la misma promesa. En web, además, se usa
+// navigator.locks para que dos pestañas no quemen el mismo refresh (el
+// segundo cerraría la familia de tokens). Al tomar el turno se releen los
+// tokens del storage por si otra pestaña ya renovó.
+
+const TIEMPO_MAX_RENOVACION_MS = 8_000;
+const ESPERA_REINTENTO_503_MS = 200;
+const MAX_INTENTOS_RENOVACION = 2;
+
+type ResultadoRefresh =
+  | { tipo: "ok"; access: string; refresh: string }
+  | { tipo: "invalido" }
+  | { tipo: "temporal"; reintentable: boolean };
+
+let renovacionEnCurso: Promise<boolean> | null = null;
+
+/**
+ * Intenta renovar el par de tokens. Devuelve true sólo si hay un access
+ * token nuevo guardado y listo para usar.
+ *
+ * No lanza: un fallo de red o un 503 devuelve false y **conserva** los
+ * tokens (se podrá reintentar); un 400/401/403 los borra porque el refresh
+ * ya no sirve. Nunca se reintenta un 401: insistir sólo consume la familia.
+ */
+export function renovarSesion(): Promise<boolean> {
+  if (renovacionEnCurso) return renovacionEnCurso;
+
+  const accessAntes = obtenerAccessToken();
+  const operacion = conBloqueoDePestanas(() => renovarConTurno(accessAntes)).finally(() => {
+    if (renovacionEnCurso === operacion) renovacionEnCurso = null;
+  });
+  renovacionEnCurso = operacion;
+  return operacion;
+}
+
+async function renovarConTurno(accessAntes: string | null): Promise<boolean> {
+  if (!apiConfigurada()) {
+    // Sin URL no hay forma de renovar; conservar tokens sólo alargaría una
+    // sesión que ya no se puede usar.
+    logout();
+    return false;
+  }
+
+  const refresh = obtenerRefreshToken();
+  if (!refresh) return false;
+
+  const accessActual = obtenerAccessToken();
+  if (
+    accessActual !== null &&
+    accessActual !== accessAntes &&
+    !tokenExpirado(accessActual, Date.now() + desfaseReloj())
+  ) {
+    return true; // otra pestaña ya renovó mientras esperábamos el turno
+  }
+
+  for (let intento = 0; intento < MAX_INTENTOS_RENOVACION; intento++) {
+    if (intento > 0) {
+      await new Promise((resolver) => setTimeout(resolver, ESPERA_REINTENTO_503_MS));
+    }
+
+    const resultado = await enviarRefresh(refresh);
+    if (resultado.tipo === "ok") {
+      guardarTokens({
+        access_token: resultado.access,
+        refresh_token: resultado.refresh,
+      });
+      return true;
+    }
+    if (resultado.tipo === "invalido") {
+      logout();
+      return false;
+    }
+    // temporal: sólo se reintenta un 503 declarado. Perder la respuesta de
+    // un 200 en la red no se puede distinguir de un fallo, y repetir el
+    // refresh consumido cerraría la familia.
+    if (!resultado.reintentable || intento + 1 >= MAX_INTENTOS_RENOVACION) {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function enviarRefresh(refresh: string): Promise<ResultadoRefresh> {
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAX_RENOVACION_MS);
+  try {
+    const res = await fetch(`${urlApi()}${endpoints.refresh}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+      signal: controlador.signal,
+    });
+
+    if (res.ok) {
+      const datos = (await res.json()) as Record<string, unknown>;
+      if (
+        typeof datos.access_token === "string" &&
+        datos.access_token !== "" &&
+        typeof datos.refresh_token === "string" &&
+        datos.refresh_token !== ""
+      ) {
+        return {
+          tipo: "ok",
+          access: datos.access_token,
+          refresh: datos.refresh_token,
+        };
+      }
+      // Un 200 fuera de contrato no es un 503: no se puede reintentar a
+      // ciegas con el mismo refresh.
+      return { tipo: "temporal", reintentable: false };
+    }
+
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      return { tipo: "invalido" };
+    }
+    return { tipo: "temporal", reintentable: res.status === 503 };
+  } catch {
+    // Sin red, CORS o timeout (AbortError): conservar los tokens.
+    return { tipo: "temporal", reintentable: false };
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
+type BloqueoDePestanas = {
+  request<T>(nombre: string, callback: () => Promise<T>): Promise<T>;
+};
+
+/** Serializa la renovación entre pestañas cuando el navegador lo permite. */
+async function conBloqueoDePestanas<T>(fn: () => Promise<T>): Promise<T> {
+  const navegador = (globalThis as { navigator?: { locks?: BloqueoDePestanas } }).navigator;
+  if (navegador?.locks && typeof navegador.locks.request === "function") {
+    return navegador.locks.request("ojoalgasto:refresh", fn);
+  }
+  return fn();
+}
+
 // ── Revocación de la sesión en el backend ─────────────────────────────
 // Borrar los tokens locales no invalida el refresh token: sigue sirviendo
 // en el servidor hasta que vence (7 días). Por eso, al cerrar sesión, se
@@ -289,6 +460,7 @@ const TIEMPO_MAX_REVOCACION_MS = 5_000;
 export async function revocarSesion(): Promise<boolean> {
   const refresh = obtenerRefreshToken();
   if (!refresh) return true; // no hay sesión guardada que revocar
+  if (!apiConfigurada()) return false;
 
   const access = obtenerAccessToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -301,7 +473,7 @@ export async function revocarSesion(): Promise<boolean> {
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAX_REVOCACION_MS);
   try {
-    const res = await fetch(`${apiUrl}${endpoints.logout}`, {
+    const res = await fetch(`${urlApi()}${endpoints.logout}`, {
       method: "POST",
       headers,
       body: JSON.stringify({ refresh_token: refresh }),

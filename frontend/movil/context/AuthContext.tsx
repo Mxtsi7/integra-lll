@@ -3,12 +3,15 @@ import {
   guardarTokens,
   haySesionValida,
   logout,
+  renovarSesion,
+  obtenerRefreshToken,
   revocarSesion,
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
   type Usuario,
 } from '@ojoalgasto/shared';
+import { hidratarSesion } from '../src/storage/sesionSegura';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
@@ -99,20 +102,34 @@ export function AuthProvider({
     const idSesion = ++sesionVigente.current;
 
     async function verificarSesionInicial() {
-      if (!haySesionValida()) {
-        logout();
-        if (idSesion === sesionVigente.current) {
-          setUsuario(null);
-          setEstado('anonimo');
-          setEstadoPerfil('inactivo');
-          setErrorPerfil(null);
-        }
+      // VI-16: el espejo en memoria arranca vacío; primero se leen los tokens
+      // cifrados. Sin esta espera se decidiría "sin sesión" antes de leerlos.
+      await hidratarSesion();
+
+      let valida = haySesionValida();
+      const teniaRefresh = obtenerRefreshToken() !== null;
+
+      // El access dura 30 min; si venció pero hay refresh, se renueva antes
+      // de mandar al login. Si el backend está caído, renovarSesion() devuelve
+      // false y CONSERVA los tokens: no se muestran datos previos, pero la
+      // sesión se puede recuperar cuando el backend vuelva (o al reabrir).
+      if (!valida && teniaRefresh) {
+        valida = await renovarSesion();
+      }
+
+      if (idSesion !== sesionVigente.current) return;
+
+      if (!valida) {
+        // Un access vencido sin refresh no tiene recuperación posible.
+        if (!teniaRefresh) logout();
+        setUsuario(null);
+        setEstado('anonimo');
+        setEstadoPerfil('inactivo');
+        setErrorPerfil(null);
         return;
       }
 
-      if (idSesion === sesionVigente.current) {
-        setEstado('autenticado');
-      }
+      setEstado('autenticado');
       await cargarPerfil(idSesion);
     }
 

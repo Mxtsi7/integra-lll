@@ -174,6 +174,67 @@ existe aún en los servicios disponibles. El worker no inventa esos datos: hasta
 que un productor confiable publique el evento v2, no habrá recomendaciones. Los
 ejemplos y fixtures de prueba son mocks, no evidencia de servicios reales.
 
+## Asistente financiero (VI-22, VI-24)
+
+`POST /api/asistente/` es el único endpoint de IA que consumen los clientes y
+scripts. Se llega por el gateway (`/api/asistente/`); **no** existe un segundo
+proxy ni acceso directo del frontend al proveedor externo.
+
+Autorización en dos capas:
+
+1. El gateway valida el JWT y consulta el plan real en Auth. Si no es Premium,
+   responde **403** y no reenvía la petición. Si es Premium, agrega
+   `X-Plan: premium`.
+2. Analytics revalida `X-Plan: premium`. Un acceso directo al contenedor, un job
+   mal configurado o una cabecera ausente también reciben **403**.
+
+El contexto que se envía al proveedor se arma en el servidor y sólo incluye
+datos de la organización autenticada: usos mensuales y recomendaciones
+saneados, sin UUID internos, sin JWT, sin cabeceras y sin el body crudo del
+cliente. Los topes de contexto están en `analytics/asistente.py`.
+
+```http
+POST /api/asistente/
+Authorization: Bearer <access>
+Content-Type: application/json
+
+{"mensaje": "¿Qué reviso primero este mes?"}
+```
+
+Respuesta `200`:
+
+```json
+{
+  "estado": "ok",
+  "motivo": null,
+  "respuesta": "…",
+  "datos": {"…": "contexto saneado"}
+}
+```
+
+Si el proveedor no está configurado, tarda más de 3,5 s, se agota la cuota o
+devuelve una respuesta inválida, el endpoint **no falla con 500**: responde
+`200` con `estado: "degradado"`, un `motivo` legible y un resumen local
+determinista calculado con los mismos datos. Un usuario Free nunca ve ese
+resumen: recibe `403` antes de llegar a Analytics.
+
+El wrapper común es `shared/ia/cliente.py` (timeout máximo y reintentos sólo
+para 429/503; nunca reintenta 401/403). El comando de Analytics lo usa sin
+conocer la URL interna ni la API key:
+
+```bash
+cd services/analytics
+python manage.py consultar_asistente \
+  --token "$ACCESS" \
+  --url http://localhost:8000/api \
+  --mensaje "¿Qué reviso primero este mes?"
+```
+
+Sale con código distinto de cero y un `[timeout]`, `[sin_autorizacion]`,
+`[sin_conexion]` o `[reintentar]` controlado si no puede completar la consulta.
+La política compartida (timeout, cuota mensual, intentos por PDF y
+concurrencia) vive en `shared/ia/politica.py`.
+
 ## Pruebas
 
 Desde `services/analytics/`:
