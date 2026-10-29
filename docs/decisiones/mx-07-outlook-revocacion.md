@@ -290,21 +290,27 @@ La propuesta incluye estas condiciones mínimas:
 
 **Advertencia:** esta recomendación **no** debe interpretarse como aprobada. Si Maxi o Felipe consideran inaceptable el riesgo de que el refresh token siga vivo hasta 90 días, la opción 3 no sirve y habría que elegir entre limitar el producto a cuentas de trabajo/escuela con consentimiento administrativo (opción 1), aceptar la intervención manual (opción 4) o mantener la PR bloqueada.
 
-## 8. Preguntas concretas para la decisión
+## 8. Respuestas registradas y decisiones de producto pendientes
 
-Estas preguntas conservan el análisis original. Las respuestas vigentes de Felipe están en [su comentario de aprobación](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231) y se incorporan en la sección 0: no se exige un campo nuevo, se cubre todo Outlook, se aplica a operaciones pendientes y se revalida la versión de credenciales bajo bloqueo. No son preguntas técnicas todavía sin responder.
+Fuente de las respuestas: [Felipe Orellana, dueño de Connectors / FE-05, 29-10-2026](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231). Sustituyen las preguntas técnicas originales; no se presentan como una aprobación de producto ni una firma de otra persona.
 
-### Para Felipe Orellana (Connectors / FE-05)
+### Respuestas de Felipe Orellana (Connectors / FE-05)
 
-1. ¿Acepta que exista un estado distinto de `revocado_en` para “el proveedor no ofrece revocación por token”, sin reutilizar ese campo?
-2. ¿Qué nombre y qué estados propone para el campo? ¿`LIMITACION_PROVEEDOR` es suficiente o prefiere separar “credenciales destruidas localmente” de “revocación no disponible”?
-3. ¿La limitación se aplica a **todo** Outlook o solo a cuentas personales? Si es solo a personales, ¿acepta guardar `tid`/tipo de cuenta en el callback y hacer una migración nueva?
-4. ¿Debe la evidencia sobrevivir al borrado de `CuentaConectada` en un log/auditoría? ¿Dónde y por cuánto tiempo?
-5. ¿Cómo interactúa el nuevo estado con `credenciales_version`, una reconexión y el comando `reintentar_revocaciones`?
-6. ¿Acepta que Gmail conserve exactamente su comportamiento actual y que el nuevo estado sea exclusivo de Outlook?
-7. ¿Qué prueba de aceptación considera suficiente para demostrar que un fallo no destruye credenciales y que un reintento con evidencia termina en 204?
+| Tema consultado | Respuesta y aplicación |
+|---|---|
+| Campo nuevo y nombre de estados | No se necesita un campo nuevo: la fila desaparece en la transacción final. `revocado_en` conserva exclusivamente el significado de confirmación del proveedor y queda nulo para Outlook. No se agrega migración. |
+| Alcance de Outlook | Todo Outlook, personal y de trabajo/escuela. No se añade `tid`; una eventual integración Graph con consentimiento administrativo exigiría revisar la decisión. |
+| Evidencia posterior al borrado | Un conteo sin correos ni tokens en la operación de Auth sería opcional, no una condición de aprobación. Esta PR no incorpora ese campo; sus logs estructurados existentes cuentan los cierres sin revocación, sin acreditar revocación Microsoft. |
+| Reconexión y versión de credenciales | Se comparan cuentas y `credenciales_version` bajo el bloqueo final. Una diferencia produce 409 y conserva las nuevas credenciales. El siguiente intento vuelve a preparar la misma operación. Outlook no se incluye en los reintentos de revocación por token de FE-05. |
+| Gmail | Conserva su comportamiento: necesita confirmación del proveedor para acreditar revocación y completar la limpieza. |
+| Prueba de aceptación | Fallo Gmail conserva ciphertext y devuelve 409; confirmación posterior permite 204; Outlook solo termina en 204 sin llamada al proveedor ni `revocado_en`; Gmail pendiente conserva también el ciphertext de Outlook; una clave ilegible en el camino de revocación no destruye credenciales. Se agregan las regresiones de reconexión y cuenta nueva. |
+| Operaciones Outlook ya pendientes | Sí se aplica la política a las operaciones existentes. Se reintenta el mismo identificador, sin retirar destinos ni fabricar evidencia retrospectiva. |
 
-### Para Maximiliano Sáez (producto / PR #72)
+Las condiciones adicionales de Felipe quedan trazadas: aviso web previo a la confirmación implementado, enmienda propuesta en RF-01.7/MX-22 y desconexión Outlook ordinaria a cargo de Felipe fuera de esta PR. La confirmación móvil se mantiene como seguimiento de AN-19.
+
+### Decisiones de Maximiliano Sáez (producto / PR #72) sin respuesta registrada
+
+El comentario de Felipe no responde ni firma en nombre de producto. Las preguntas siguientes se conservan pendientes hasta recibir esa aceptación; no se vuelve a solicitar la aprobación técnica ya otorgada.
 
 1. ¿Acepta que, para Outlook, “eliminación completa” signifique cierre local + limitación documentada + instrucción al usuario, en vez de revocación confirmada por Microsoft?
 2. ¿Acepta el riesgo residual de que el refresh token pueda seguir válido hasta 90 días si el usuario no retira el acceso?
@@ -314,21 +320,18 @@ Estas preguntas conservan el análisis original. Las respuestas vigentes de Feli
 6. Si no se aprueba la opción 3, ¿la PR queda en draft y se documenta que MX-07 no puede cumplir 72 horas para Outlook, o se elige la opción 1/4?
 7. ¿Quién firma la decisión y con qué fecha, para poder citarla en el informe y en el flujo `07-eliminar-cuenta.md`?
 
-## 9. Prueba de aceptación que debía cumplir la opción elegida
+## 9. Aceptación técnica vigente de la opción 3
 
-La fase 1 no la implementó. La fase 2 implementó las pruebas de `services/connectors/tests/test_eliminacion.py`; las condiciones 1 y 2 de esta lista describían el comportamiento anterior de Outlook y quedaron reemplazadas por la decisión de la sección 0: Outlook ya no devuelve 409 por sí solo. Se conserva la lista como registro de lo que se esperaba antes de decidir.
+Los siguientes casos corresponden a las respuestas de Felipe y a las pruebas de `services/connectors/tests/test_eliminacion.py`. Sustituyen la expectativa anterior de que Outlook devolviera 409 indefinidamente.
 
-1. **Fallo inicial:** organización con Outlook; el primer `DELETE` interno devuelve 409, `revocado_en` sigue `NULL`, el ciphertext sigue intacto, la cuenta sigue en estado conectado y la organización no queda marcada como eliminada.
-2. **Reintento sin evidencia:** un segundo `DELETE` vuelve a devolver 409; no se borra nada y no se escribe evidencia falsa.
-3. **Evidencia aceptada:**
-   - opción 1: Graph responde 2xx y se escribe `revocado_en`;
-   - opción 3 original: se registraba el estado de limitación con timestamp y versión de política, sin escribir `revocado_en`;
-   - opción 3 implementada en la fase 2: no se agrega un estado nuevo ni una migración; Outlook se acepta como limitación conocida, no escribe `revocado_en` y sus credenciales se borran con la fila al final.
-4. **Cierre:** el siguiente `DELETE` devuelve 204, la cuenta y sus datos se borran, y la organización queda eliminada.
-5. **Repetibilidad:** un `DELETE` posterior vuelve a devolver 204 sin volver a llamar al proveedor ni duplicar evidencia.
-6. **Gmail conviviendo con Outlook:** Gmail confirmado no se vuelve a revocar; Outlook se acepta como limitación conocida y la limpieza termina en 204. Se verifica el número de llamadas al proveedor y que Outlook no tenga `revocado_en`.
-7. **Aislamiento:** una organización B no se ve afectada por la limpieza de A.
-8. **Credenciales ilegibles:** se conserva el ciphertext y no se llama al proveedor, igual que hoy.
+1. **Fallo Gmail:** devuelve 409, conserva sus credenciales y las de Outlook, y no marca eliminada la organización.
+2. **Recuperación:** la misma operación termina en 204 cuando Gmail obtiene confirmación; no vuelve a revocar una concesión ya confirmada.
+3. **Outlook solo:** termina en 204 sin llamar al proveedor ni escribir `revocado_en`; sus credenciales se destruyen únicamente con la fila en la transacción final.
+4. **Reconexión o cuenta nueva:** un cambio entre preparación y borrado produce `409 credenciales_cambiadas`; conserva las credenciales nuevas y permite volver a preparar la misma operación.
+5. **Repetibilidad:** una reentrega posterior devuelve 204 sin duplicar efectos.
+6. **Aislamiento y bloqueo:** una organización B no se ve afectada; una relación inconsistente bloquea el borrado y conserva los datos.
+7. **Credenciales ilegibles o proveedor desconocido:** el camino que exige revocación conserva el ciphertext ante el bloqueo y no fabrica una confirmación.
+8. **Aviso previo:** el diálogo web informa de la limitación Outlook y de la retirada del acceso antes de confirmar, cubierto por `EliminarCuenta.test.tsx`. La bandera de disponibilidad no cambia.
 
 ## 10. Impacto técnico considerado (la fase 2 implementó la opción 3 sin migración)
 
