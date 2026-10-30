@@ -74,3 +74,78 @@ spec:
           resources:
             requests: { cpu: 50m,  memory: 96Mi }
             limits:   { cpu: 150m, memory: 256Mi }
+
+---
+# Reintentos durables de organización e integrante, usando la imagen de Auth.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-eliminaciones
+  labels:
+    app.kubernetes.io/part-of: ojoalgasto
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: auth-eliminaciones
+  template:
+    metadata:
+      labels:
+        app: auth-eliminaciones
+        app.kubernetes.io/part-of: ojoalgasto
+    spec:
+      imagePullSecrets:
+      - name: ghcr
+      initContainers:
+      - name: esperar-migraciones
+        image: IMAGEN_AUTH
+        imagePullPolicy: Always
+        command:
+        - sh
+        - -c
+        - until python manage.py migrate --check; do sleep 3; done
+        envFrom:
+        - configMapRef:
+            name: ojoalgasto
+        - secretRef:
+            name: ojoalgasto
+        env:
+        - name: ESQUEMA_BD
+          value: auth
+        - name: SEED_DEMO
+          value: '0'
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi
+      containers:
+      - name: worker
+        image: IMAGEN_AUTH
+        imagePullPolicy: Always
+        command:
+        - python
+        - manage.py
+        - procesar_eliminaciones
+        - --continuo
+        envFrom:
+        - configMapRef:
+            name: ojoalgasto
+        - secretRef:
+            name: ojoalgasto
+        env:
+        - name: ESQUEMA_BD
+          value: auth
+        - name: SEED_DEMO
+          value: '0'
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 256Mi

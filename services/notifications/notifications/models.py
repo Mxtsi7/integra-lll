@@ -201,6 +201,18 @@ class Alerta(ModeloTenant):
         return f"{self.get_tipo_display()}: {self.titulo} ({self.get_lectura_display()})"
 
 
+class UsuarioEliminado(ModeloTenant):
+    """Marca mínima que impide recrear preferencias con solicitudes en vuelo."""
+
+    usuario_id = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "usuario_eliminado"
+        constraints = [models.UniqueConstraint(
+            fields=["organizacion_id", "usuario_id"], name="usuario_eliminado_tenant",
+        )]
+
+
 class PreferenciaNotificacion(ModeloTenant):
     """Qué avisos quiere recibir una persona, y por dónde (FE-21 / RF-09).
 
