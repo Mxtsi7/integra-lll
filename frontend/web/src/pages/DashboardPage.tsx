@@ -9,7 +9,6 @@ import { TileResumen } from '../components/Dashboard/TileResumen';
 import { TileSalud } from '../components/Dashboard/TileSalud';
 import { useAuth } from '../context/AuthContext';
 import { useCatalogos } from '../context/CatalogosContext';
-import { diasHasta } from '../utils/fechas';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
 import styles from './DashboardPage.module.css';
 
@@ -17,15 +16,6 @@ type EstadoCarga =
   | { tipo: 'cargando' }
   | { tipo: 'error'; mensaje: string }
   | { tipo: 'listo'; suscripciones: Suscripcion[] };
-
-/** Cuántas cosas piden atención: cobros de la semana y suscripciones sin uso. */
-export function contarAvisos(suscripciones: Suscripcion[]): number {
-  return suscripciones.filter(
-    (s) =>
-      s.estado === 'fantasma' ||
-      (s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7),
-  ).length;
-}
 
 export function DashboardPage() {
   const { datos: catalogos } = useCatalogos();
@@ -59,7 +49,6 @@ export function DashboardPage() {
     <AppLayout
       headerTitulo="Panel"
       headerSubtitulo="Cuánto gastas, en qué, y qué viene."
-      avisos={estado.tipo === 'listo' ? contarAvisos(estado.suscripciones) : undefined}
     >
       {estado.tipo === 'cargando' && <EsqueletoPanel />}
       {estado.tipo === 'error' && <p className={styles.mensaje}>{estado.mensaje}</p>}
