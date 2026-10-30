@@ -13,14 +13,22 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Case, Count, DecimalField, F, Sum, When
+from rest_framework.exceptions import PermissionDenied
 
 from shared.bloqueo import bloquear
+from shared.borrado.bloqueo import bloquear_organizacion
 
 from app.models import ResumenOrganizacion, Subscription, TrabajoDerivado
 
 #: Quién hizo el trabajo, para la evidencia.
 HECHO_POR_API = "api"
 HECHO_POR_CONSUMIDOR = "consumidor"
+
+
+class OrganizacionEliminada(PermissionDenied):
+    """El trabajo quedó obsoleto por el borrado, sin acreditar un recálculo."""
+
+    default_detail = "La organización fue eliminada"
 
 
 def ya_acreditado(evento_id) -> bool:
@@ -32,6 +40,8 @@ def ya_acreditado(evento_id) -> bool:
 
 def recalcular_resumen_por_evento(evento_id, organizacion_id, *, hecho_por: str) -> bool:
     """Hace el trabajo de un evento, salvo que ya esté acreditado. True si lo hizo.
+
+    OrganizacionEliminada señala una entrega obsoleta: no recalcula ni acredita.
 
     ── La evidencia va en la MISMA transacción que el trabajo ─────────────
     O quedan las dos cosas, o ninguna. Si el recálculo falla no queda una
@@ -50,6 +60,10 @@ def recalcular_resumen_por_evento(evento_id, organizacion_id, *, hecho_por: str)
     fila del primero en vez de reventar con la restricción única.
     """
     with transaction.atomic():
+        # La limpieza toma FOR UPDATE: espera hasta confirmar trabajo y evidencia.
+        estado = bloquear_organizacion(organizacion_id, compartido=True)
+        if estado.eliminada:
+            raise OrganizacionEliminada()
         if ya_acreditado(evento_id):
             return False
         recalcular_resumen(organizacion_id)
@@ -79,7 +93,7 @@ def recalcular_resumen(organizacion_id) -> list[ResumenOrganizacion]:
 
     Devuelve las filas vigentes. Las monedas que la organización dejó de usar
     se borran, para que no queden totales fantasma de una divisa sin
-    suscripciones.
+    suscripciones. Lanza OrganizacionEliminada si el tenant ya fue borrado.
     """
     # ── El atomic empieza ANTES de leer, y lo primero es el lock ──────────
     # La versión anterior construía el queryset acá y abría el atomic recién
@@ -93,6 +107,9 @@ def recalcular_resumen(organizacion_id) -> list[ResumenOrganizacion]:
     # hipotético. Y no se arregla solo porque después exista el outbox: el
     # modo síncrono no debería depender de que la cola lo corrija.
     with transaction.atomic():
+        estado = bloquear_organizacion(organizacion_id, compartido=True)
+        if estado.eliminada:
+            raise OrganizacionEliminada()
         bloquear("resumen_organizacion", organizacion_id)
         return _recalcular_ya_bloqueado(organizacion_id)
 

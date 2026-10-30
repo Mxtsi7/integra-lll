@@ -121,7 +121,8 @@ class TestCarreraEntreDosConexiones:
 
         def fetch_que_se_detiene_en_A(self):
             fetch_original(self)
-            if threading.current_thread().name == "A" and not a_leyo.is_set():
+            if (self.model is Subscription and self.query.group_by
+                    and threading.current_thread().name == "A" and not a_leyo.is_set()):
                 a_leyo.set()
                 assert a_puede_seguir.wait(ESPERA), "nadie soltó a A"
 
@@ -172,7 +173,8 @@ class TestCarreraEntreDosConexiones:
 
         def fetch_que_se_detiene_en_A(self):
             fetch_original(self)
-            if threading.current_thread().name == "A" and not a_leyo.is_set():
+            if (self.model is Subscription and self.query.group_by
+                    and threading.current_thread().name == "A" and not a_leyo.is_set()):
                 a_leyo.set()
                 assert a_puede_seguir.wait(ESPERA), "nadie soltó a A"
 
