@@ -8,6 +8,7 @@ import {
   actualizarSuscripcion,
   cancelarSuscripcion,
   crearSuscripcion,
+  eliminarSuscripcion,
   ErrorDeApi,
   getCatalogosSuscripciones,
   getSuscripciones,
@@ -32,6 +33,7 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     actualizarSuscripcion: vi.fn(),
     cancelarSuscripcion: vi.fn(),
     reactivarSuscripcion: vi.fn(),
+    eliminarSuscripcion: vi.fn(),
   };
 });
 
@@ -120,6 +122,7 @@ beforeEach(() => {
   vi.mocked(actualizarSuscripcion).mockReset();
   vi.mocked(cancelarSuscripcion).mockReset();
   vi.mocked(reactivarSuscripcion).mockReset();
+  vi.mocked(eliminarSuscripcion).mockReset();
 });
 
 afterEach(() => {
@@ -944,4 +947,142 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
     expect(screen.getByRole("heading", { name: "Panel de prueba" })).toBeInTheDocument();
     expect(screen.queryByText(/Reactivaste/)).not.toBeInTheDocument();
   });
+  describe("Lecturas viejas y recargas fallidas (revisión de #134)", () => {
+    const HBO: Suscripcion = { ...NETFLIX, id: "s3", nombre: "HBO" };
+    const MENSAJE_RECARGA = "No pudimos actualizar el resumen y los conteos: puede que no estén al día. Intenta de nuevo.";
+    const verSpotify = () => screen.queryByRole("button", { name: /^Ver Spotify/, hidden: true });
+    const totalSuscripciones = () =>
+      within(screen.getByRole("region", { name: "Resumen", hidden: true })).getByText("Suscripciones").nextElementSibling;
+
+    /**
+     * HBO ya no existe en el servidor: reactivarla da 404 y vuelve a pedir las
+     * dos listas. La completa responde `leerCompleta()`; la de la grilla,
+     * `leerGrilla()` si se pasa, si no lo que tiene el servidor.
+     */
+    async function con404EnHbo(leerCompleta: () => Promise<Suscripcion[]>, leerGrilla?: () => Promise<Suscripcion[]>) {
+      servidor = [{ ...SPOTIFY }, { ...NETFLIX }, { ...HBO }];
+      await montar();
+      vi.mocked(getSuscripciones).mockImplementation((c) =>
+        c === undefined ? leerCompleta() : leerGrilla ? leerGrilla() : Promise.resolve(leerServidor(c.estado)),
+      );
+      servidor = servidor.filter((s) => s.id !== "s3");
+      vi.mocked(reactivarSuscripcion).mockRejectedValueOnce(new ErrorDeApi("No encontrado.", 404));
+      await clic(interruptor("HBO"));
+    }
+    /** Desde acá, cada lectura responde lo que tiene el servidor. */
+    const leerAlDia = () => vi.mocked(getSuscripciones).mockImplementation(async (c) => leerServidor(c?.estado));
+
+    it("una lectura completa que salió antes de un cambio y falla después no tapa Inicio", async () => {
+      const vieja = diferida<Suscripcion[]>();
+      await con404EnHbo(() => vieja.promesa);
+      await clic(interruptor("Netflix"));
+
+      leerAlDia();
+      await act(async () => vieja.rechazar(new TypeError("Failed to fetch")));
+      expect(verSpotify()).toBeInTheDocument();
+      expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+      // Era de antes del cambio: su error no cuenta y se pidió de nuevo.
+      expect(screen.queryByText(MENSAJE_RECARGA)).not.toBeInTheDocument();
+      expect(chip(/^Todas/)).toHaveTextContent("2");
+      expect(chip(/^Activas/)).toHaveTextContent("2");
+    });
+
+    it("si la recarga completa de un 404 falla, Inicio sigue a la vista y Reintentar lo recupera", async () => {
+      const recarga = diferida<Suscripcion[]>();
+      await con404EnHbo(() => recarga.promesa);
+      await act(async () => recarga.rechazar(new TypeError("Failed to fetch")));
+
+      // Se sigue viendo lo último que se supo, con sus controles.
+      expect(verSpotify()).toBeInTheDocument();
+      expect(interruptor("Netflix")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Agregar suscripción" })).toBeEnabled();
+      expect(chip(/^Todas/)).toHaveTextContent("3");
+      const alerta = screen.getByText(MENSAJE_RECARGA).closest<HTMLElement>("[role=alert]")!;
+
+      leerAlDia();
+      await clic(within(alerta).getByRole("button", { name: "Reintentar" }));
+      expect(screen.queryByText(MENSAJE_RECARGA)).not.toBeInTheDocument();
+      expect(chip(/^Todas/)).toHaveTextContent("2");
+    });
+
+    it("editar no se deshace con una lectura completa de antes: tarjeta y resumen coinciden", async () => {
+      const vieja = diferida<Suscripcion[]>();
+      await con404EnHbo(() => vieja.promesa);
+      vi.mocked(actualizarSuscripcion).mockImplementation(async (id, datos) => {
+        servidor = servidor.map((s) => (s.id === id ? { ...s, ...datos } : s));
+        return { ...servidor.find((s) => s.id === id)! };
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Editar Spotify" }));
+      fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "7990" } });
+      await act(async () => fireEvent.click(enDialogo().getByRole("button", { name: "Guardar cambios" })));
+      expect(alMes()).toHaveTextContent("$7.990");
+
+      leerAlDia();
+      await act(async () => vieja.resolver([{ ...SPOTIFY }, { ...NETFLIX }]));
+      expect(alMes()).toHaveTextContent("$7.990");
+      expect(verSpotify()).toHaveTextContent("$7.990");
+    });
+
+    it("crear no se deshace con una lectura completa de antes", async () => {
+      const vieja = diferida<Suscripcion[]>();
+      await con404EnHbo(() => vieja.promesa);
+      vi.mocked(crearSuscripcion).mockImplementation(async (datos) => {
+        const creada: Suscripcion = { ...datos, id: "s9" };
+        servidor = [...servidor, creada];
+        return { ...creada };
+      });
+      abrirNueva();
+      fireEvent.change(enDialogo().getByLabelText("Servicio"), { target: { value: "Disney+" } });
+      fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "9990" } });
+      fireEvent.change(enDialogo().getByLabelText("Próximo cobro"), { target: { value: "2026-11-05" } });
+      await act(async () => fireEvent.click(enDialogo().getByRole("button", { name: "Guardar suscripción" })));
+
+      leerAlDia();
+      await act(async () => vieja.resolver([{ ...SPOTIFY }, { ...NETFLIX }]));
+      expect(totalSuscripciones()).toHaveTextContent("3");
+      expect(chip(/^Todas/)).toHaveTextContent("3");
+    });
+
+    it("eliminar no vuelve a contarla con lecturas de antes, aunque la de la grilla falle", async () => {
+      const completa = diferida<Suscripcion[]>();
+      const grilla = diferida<Suscripcion[]>();
+      await con404EnHbo(
+        () => completa.promesa,
+        () => grilla.promesa,
+      );
+      vi.mocked(eliminarSuscripcion).mockImplementation(async (id) => {
+        servidor = servidor.filter((s) => s.id !== id);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Eliminar Spotify", hidden: true }));
+      await act(async () => fireEvent.click(enAlerta().getByRole("button", { name: "Eliminar" })));
+
+      // Las dos lecturas en vuelo son de antes del DELETE: llegan durante la animación.
+      leerAlDia();
+      await act(async () => {
+        completa.resolver([{ ...SPOTIFY }, { ...NETFLIX }]);
+        grilla.rechazar(new TypeError("Failed to fetch"));
+      });
+      await act(() => new Promise((r) => setTimeout(r, 320)));
+
+      expect(verSpotify()).not.toBeInTheDocument();
+      expect(totalSuscripciones()).toHaveTextContent("1");
+      expect(alMes()).toHaveTextContent("$0");
+      expect(screen.queryByText(/No pudimos cargar tus suscripciones con estos filtros/)).not.toBeInTheDocument();
+      expect(screen.queryByText(MENSAJE_RECARGA)).not.toBeInTheDocument();
+    });
+
+    it("si la primera carga falla, lo dice con Reintentar y al reintentar se ve Inicio", async () => {
+      vi.mocked(getSuscripciones).mockRejectedValue(new TypeError("Failed to fetch"));
+      await montar();
+      expect(screen.getByText("No pudimos cargar tus suscripciones. Intenta de nuevo.")).toHaveAttribute("role", "alert");
+      expect(verSpotify()).not.toBeInTheDocument();
+
+      leerAlDia();
+      await clic(screen.getByRole("button", { name: "Reintentar" }));
+      expect(screen.queryByText("No pudimos cargar tus suscripciones. Intenta de nuevo.")).not.toBeInTheDocument();
+      expect(verSpotify()).toBeInTheDocument();
+      expect(totalSuscripciones()).toHaveTextContent("2");
+    });
+  });
+
 });

@@ -15,6 +15,7 @@ import AvisoCambiosSinGuardar from "../components/subscriptions/AvisoCambiosSinG
 import { useAvisoAlSalir } from "../hooks/useAvisoAlSalir";
 import { Modal } from "../components/ui/Modal";
 import { Boton } from "../components/ui/Boton";
+import { ErrorConReintento } from "../components/ui/ErrorConReintento";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { contarAvisos } from "./DashboardPage";
@@ -128,6 +129,8 @@ function entraEnLaClave(s: Suscripcion, clave: string): boolean {
   return (filtro === "todas" || s.estado === filtro) && (fecha === "" || s.fecha_proximo_cobro === fecha);
 }
 
+const MENSAJE_ERROR_CARGA = "No pudimos cargar tus suscripciones. Intenta de nuevo.";
+const MENSAJE_ERROR_RECARGA = "No pudimos actualizar el resumen y los conteos: puede que no estén al día. Intenta de nuevo.";
 const MENSAJE_ERROR_LISTADO = "No pudimos cargar tus suscripciones con estos filtros. Intenta de nuevo.";
 const MENSAJE_CAMBIO_SIN_LISTADO = "Guardamos el cambio, pero no pudimos actualizar la lista. Intenta de nuevo.";
 
@@ -152,7 +155,11 @@ export const Homepage: React.FC = () => {
   // Todas las suscripciones, sin filtros: el resumen, los conteos de cada
   // estado y saber si la cuenta está vacía salen de acá (CH-13).
   const [isLoading, setIsLoading] = useState(true);
+  // Falló la primera carga: no hay nada que mostrar.
   const [error, setError] = useState<string | null>(null);
+  // Falló una recarga: se sigue viendo la última lista válida (revisión de #134).
+  const [errorRecarga, setErrorRecarga] = useState<string | null>(null);
+  const listaCargada = useRef(false);
   const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -212,13 +219,18 @@ export const Homepage: React.FC = () => {
   const [cancelando, setCancelando] = useState<Suscripcion | null>(null);
   const idCancelando = useRef<string | null>(null);
   const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null);
-  // Sube con cada cancelación o reactivación confirmada. Una lectura que
-  // salió antes puede traer el estado anterior: no pisa el nuevo.
+  // Sube con cada escritura que el servidor confirma: crear, editar, eliminar,
+  // cancelar y reactivar. Una lectura que salió antes puede traer lo de antes
+  // (o fallar por algo que ya no importa): se descarta y se pide de nuevo.
   const generacion = useRef(0);
+  const invalidarLecturas = () => {
+    generacion.current += 1;
+  };
   // La generación de la lista que se ve: si es más vieja y la recarga falla,
   // el cambio ya está guardado y lo que falta es actualizar la lista.
   const generacionListado = useRef(0);
   const [recargaTodas, setRecargaTodas] = useState(0);
+  const recargarTodas = useCallback(() => setRecargaTodas((n) => n + 1), []);
 
   // CH-16: si el formulario abierto (crear o editar; nunca hay dos a la vez)
   // tiene cambios sin guardar. Es una ref y no estado a propósito: el Modal
@@ -263,37 +275,49 @@ export const Homepage: React.FC = () => {
   useEffect(() => {
     let cancelado = false;
     const generacionAlPedir = generacion.current;
+    const vieja = () => generacion.current !== generacionAlPedir;
 
     getSuscripciones()
       .then((lista) => {
         if (cancelado) return;
-        // Salió antes de cancelar o reactivar: puede traer el estado anterior. Se pide de nuevo.
-        if (generacion.current !== generacionAlPedir) {
-          setRecargaTodas((n) => n + 1);
+        if (vieja()) {
+          recargarTodas();
           return;
         }
+        listaCargada.current = true;
         setSuscripciones(lista);
+        setErrorRecarga(null);
         setIsLoading(false);
       })
       .catch(() => {
         if (cancelado) return;
-        setError("No pudimos cargar tus suscripciones. Intenta de nuevo en unos segundos.");
-        setIsLoading(false);
+        if (vieja()) {
+          recargarTodas();
+          return;
+        }
+        // Con una lista ya a la vista, una recarga fallida no tapa Inicio: se
+        // sigue viendo lo último, con sus controles, y se ofrece reintentar.
+        if (listaCargada.current) {
+          setErrorRecarga(MENSAJE_ERROR_RECARGA);
+        } else {
+          setError(MENSAJE_ERROR_CARGA);
+          setIsLoading(false);
+        }
       });
 
     return () => {
       cancelado = true;
     };
-  }, [recargaTodas]);
+  }, [recargaTodas, recargarTodas]);
 
   // Estado, fecha y orden se mandan a la API, que filtra y ordena ANTES de
   // paginar (CH-11, CH-12). Una respuesta de una consulta anterior se descarta,
-  // y también una que salió antes de cancelar o reactivar: esas operaciones
-  // piden la lista de nuevo.
+  // y una que salió antes de una escritura confirmada se descarta y se pide
+  // de nuevo.
   useEffect(() => {
     let cancelado = false;
     const generacionAlPedir = generacion.current;
-    const vigente = () => !cancelado && generacion.current === generacionAlPedir;
+    const vieja = () => generacion.current !== generacionAlPedir;
     setErrorListado(null);
 
     getSuscripciones({
@@ -302,19 +326,27 @@ export const Homepage: React.FC = () => {
       orden,
     })
       .then((items) => {
-        if (!vigente()) return;
+        if (cancelado) return;
+        if (vieja()) {
+          recargarListado();
+          return;
+        }
         generacionListado.current = generacionAlPedir;
         setListado({ clave, recarga: recargaListado, items });
       })
       .catch(() => {
-        if (!vigente()) return;
+        if (cancelado) return;
+        if (vieja()) {
+          recargarListado();
+          return;
+        }
         setErrorListado(generacionListado.current < generacionAlPedir ? MENSAJE_CAMBIO_SIN_LISTADO : MENSAJE_ERROR_LISTADO);
       });
 
     return () => {
       cancelado = true;
     };
-  }, [clave, filtro, fecha, orden, recargaListado]);
+  }, [clave, filtro, fecha, orden, recargaListado, recargarListado]);
 
   // Cambiar un filtro, el orden o la búsqueda (también con Atrás/Adelante)
   // vuelve a la primera página.
@@ -410,6 +442,7 @@ export const Homepage: React.FC = () => {
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
+      invalidarLecturas();
       setSuscripciones((prev) => [...prev, creada]);
       // Guardado: ya no hay nada que perder. También se quita el aviso, por si
       // se guardó con él visible (antes quedaba pendiente al reabrir).
@@ -460,6 +493,7 @@ export const Homepage: React.FC = () => {
         frecuencia: data.frecuencia,
         categoria: data.categoria,
       });
+      invalidarLecturas();
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
       // Se ve el cambio de inmediato y se vuelve a pedir la lista: con otro
       // monto o nombre puede quedar en otro lugar del orden.
@@ -487,6 +521,9 @@ export const Homepage: React.FC = () => {
     setIsDeleting(true);
     try {
       await eliminarSuscripcion(idToRemove);
+      // Al confirmarlo el servidor, no al terminar la animación: una lectura
+      // de antes no la vuelve a contar mientras se desvanece.
+      invalidarLecturas();
       setEliminando(null);
       setRemovingId(idToRemove);
 
@@ -554,7 +591,7 @@ export const Homepage: React.FC = () => {
     try {
       const actualizada = accion === "cancelar" ? await cancelarSuscripcion(s.id) : await reactivarSuscripcion(s.id);
       if (!sigueVigente()) return;
-      generacion.current += 1;
+      invalidarLecturas();
       // Conteos, resumen y campana salen de la lista completa.
       setSuscripciones((prev) => prev.map((x) => (x.id === actualizada.id ? actualizada : x)));
       // En la grilla se ve enseguida con los filtros actuales (una cancelada no
@@ -582,7 +619,7 @@ export const Homepage: React.FC = () => {
         idCancelando.current = null;
         setCancelando(null);
         toast.error(mensaje);
-        setRecargaTodas((n) => n + 1);
+        recargarTodas();
         recargarListado();
       } else if (accion === "cancelar") {
         // Se ve dentro de la confirmación, que sigue abierta para reintentar.
@@ -617,6 +654,14 @@ export const Homepage: React.FC = () => {
     setCancelando(null);
   }, [sigueVigente]);
 
+  // La primera carga falló: se vuelve a pedir todo, mostrando la carga.
+  const reintentarCarga = () => {
+    setError(null);
+    setIsLoading(true);
+    recargarTodas();
+    recargarListado();
+  };
+
   const isEmpty = !isLoading && !error && suscripciones.length === 0;
   const totalMensual = gastoProyectado(suscripciones);
   const fantasmasMensual = suscripciones
@@ -643,7 +688,7 @@ export const Homepage: React.FC = () => {
       avisos={isLoading ? undefined : contarAvisos(suscripciones)}
     >
       {error ? (
-        <p className={styles.mensaje}>{error}</p>
+        <ErrorConReintento mensaje={error} onReintentar={reintentarCarga} />
       ) : isEmpty ? (
         <EmptyState
           title="Todavía no registras suscripciones"
@@ -670,6 +715,16 @@ export const Homepage: React.FC = () => {
               <p className={styles.datoValor}>{isLoading ? "···" : formatearMonto(fantasmasMensual)}</p>
             </div>
           </section>
+
+          {errorRecarga && (
+            <div className={styles.errorListado} role="alert">
+              <p>{errorRecarga}</p>
+              {/* El aviso se quita cuando una recarga sale bien. */}
+              <Boton variante="secundario" tamano="s" onClick={recargarTodas}>
+                Reintentar
+              </Boton>
+            </div>
+          )}
 
           <div className={styles.filtros} role="group" aria-label="Filtrar por estado">
             {/* El filtro elegido se ve aunque hoy no tenga ninguna (p. ej. llegó por la URL). */}

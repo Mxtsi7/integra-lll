@@ -59,9 +59,9 @@ cancelada está apagada, y cada tarjeta conserva su etiqueta.
   - se reemplaza en la lista completa (conteos, resumen, campana);
   - en la grilla, con los filtros actuales, una cancelada sale de «Activas» sin esperar la recarga;
   - después se vuelve a pedir la lista.
-- **Lecturas viejas:** cada cambio confirmado sube una generación.
-  - Una lectura que salió antes no pisa el resultado.
-  - La lista completa se vuelve a pedir; la grilla espera la recarga que pide el cambio.
+- **Lecturas viejas:** cada escritura que confirma el servidor sube una generación: crear, editar,
+  eliminar, cancelar y reactivar (ver revisión de #134).
+  - Una lectura que salió antes no pisa el resultado: se descarta y se pide de nuevo.
 - **Errores:**
   - al cancelar, el mensaje queda en la confirmación para reintentar;
   - al reactivar, va en un aviso;
@@ -101,6 +101,27 @@ ventana y midiendo dónde termina el riel.
 - La animación se llena desde vacío. Antes partía de `stroke-dashoffset: 1000` y el trazo daba
   vueltas antes de quedar quieto.
 
+## Revisión de #134
+
+Dos problemas de Inicio que aparecieron con la recarga que pide un 404 del interruptor. Antes la
+lista completa se cargaba una sola vez, con la grilla bloqueada mientras tanto.
+
+- **Una recarga fallida tapaba Inicio.** El error de la lista completa reemplazaba toda la página,
+  aunque la recarga fuera de antes de un cambio ya guardado, y nada lo quitaba.
+  - Un error de una lectura vieja ahora se descarta y se pide de nuevo, igual que su respuesta.
+  - Si falla una recarga con la lista ya a la vista, se siguen viendo la lista y sus controles, con
+    el aviso «No pudimos actualizar el resumen y los conteos» y «Reintentar». Lo quita la próxima
+    recarga que sale bien.
+  - Si falla la primera carga, sin nada que mostrar, el error trae «Reintentar». Antes era un
+    párrafo sin salida.
+- **Una lectura vieja deshacía una edición en el resumen.** Solo cancelar y reactivar invalidaban
+  las lecturas. Con la recarga de un 404 en vuelo, editar Spotify a $7.990 terminaba con la tarjeta
+  en $7.990 y el resumen de vuelta en $5.990.
+  - Ahora crear, editar y eliminar también invalidan.
+  - Eliminar invalida al confirmarlo el servidor, no al terminar la animación.
+  - Una lectura vieja de la grilla también se descarta y se pide de nuevo: eliminar no recarga la
+    grilla por su cuenta.
+
 ## Cómo se comprobó
 
 - **Pruebas nuevas:**
@@ -112,14 +133,19 @@ ventana y midiendo dónde termina el riel.
   - `TarjetaSuscripcion.test.tsx` (10): los cinco estados; el interruptor no abre el detalle; las
     acciones son independientes; no hay controles anidados; «Guardando…» y bloqueo; insignia sin
     la acción.
-  - `Homepage.test.tsx` (+12), todas con StrictMode:
+  - `Homepage.test.tsx` (+18), todas con StrictMode:
     - confirmar y «Volver»;
     - doble clic;
     - «Activas» sin esperar la recarga;
     - reactivar sin confirmar;
     - errores de cancelar y de reactivar, un 404, y una recarga fallida tras guardar;
     - la lista completa vieja y una lectura de la grilla que llega junto con el cambio;
-    - cambio de cuenta y salir de Inicio mientras se espera.
+    - cambio de cuenta y salir de Inicio mientras se espera;
+    - revisión de #134:
+      - una lectura completa vieja que falla después de un cambio;
+      - un 404 cuya recarga completa falla, y Reintentar;
+      - lecturas viejas después de editar, crear y eliminar (con la de la grilla fallando);
+      - la primera carga que falla, y Reintentar.
   - `Medidores.test.tsx` (17): 0, 1, 50, 99, 100 y fuera de rango; color igual al trazo; `--inicio`;
     sin punto en 0 %; tamaño y etiqueta; varias instancias.
 - **Navegador**, contra la API falsa:
@@ -133,7 +159,12 @@ ventana y midiendo dónde termina el riel.
     - un 500 dejó la suscripción como estaba y el reintento funcionó;
   - el riel y el layout en la tabla de arriba;
   - el anillo verde y el arco naranja sin recorte;
-  - la sombra del filtro sin borde recto.
+  - la sombra del filtro sin borde recto;
+  - revisión de #134, con HBO Max eliminada «desde otro cliente»:
+    - reactivarla dio 404 y la recarga completa falló;
+    - Inicio siguió a la vista, con el aviso y Reintentar;
+    - al reintentar pasó de 13 a 12 suscripciones y el aviso se fue;
+    - con la primera carga fallando, el error trajo Reintentar y cargó.
 - **Mutaciones:** se rompió a propósito cada comportamiento y en las 28 falla alguna prueba:
   - campana: Panel, nombre con el número, sin descripción;
   - tarjeta: abre el detalle, encendido como antes, sin bloqueo, sin «Guardando…», insignia;
@@ -146,7 +177,16 @@ ventana y midiendo dónde termina el riel.
   Dos se escapaban al principio (los clics en el mismo instante y la lista completa vieja tras un
   404): se reforzaron esas pruebas. Otra mostró una comprobación repetida en `cambiarSeguimiento`,
   y se quitó.
-- Desde `frontend/`: typecheck, pruebas (shared 223, web 463, móvil 101) y build.
+
+  Para la revisión de #134, otras 11 y en todas falla alguna prueba:
+  - el error de una lectura vieja cuenta;
+  - una recarga fallida tapa Inicio, o una buena no quita el aviso;
+  - el primer error sin Reintentar;
+  - crear, editar, eliminar, cancelar o reactivar sin invalidar;
+  - eliminar invalida al terminar la animación;
+  - una lectura vieja de la grilla se aplica o su error cuenta;
+  - una lectura completa vieja se aplica.
+- Desde `frontend/`: typecheck, pruebas (shared 223, web 469, móvil 101) y build.
 
 ## Fuera de esta corrección
 
