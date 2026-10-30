@@ -1,6 +1,6 @@
 // Doble de pruebas de expo-secure-store. Guarda en memoria y expone la misma
-// API asíncrona que usa src/storage/sesionSegura.ts.
-const almacen = new Map<string, string>();
+// API asíncrona que usan src/services/storageSeguro.ts y src/storage/sesionSegura.ts.
+const store = new Map<string, string>();
 
 type Demora = { promesa: Promise<void>; liberar: () => void };
 
@@ -43,19 +43,19 @@ export function __fallarBorrados(fallar = true): void {
 }
 
 export async function getItemAsync(clave: string): Promise<string | null> {
-  const valor = almacen.get(clave) ?? null;
+  const valor = store.get(clave) ?? null;
   if (demoraLectura) await demoraLectura.promesa;
   return valor;
 }
 
 export async function setItemAsync(clave: string, valor: string): Promise<void> {
   if (demoraEscritura) await demoraEscritura.promesa;
-  almacen.set(clave, valor);
+  store.set(clave, valor);
 }
 
 export async function deleteItemAsync(clave: string): Promise<void> {
   if (fallarBorrados) throw new Error('deleteItemAsync rechazado');
-  almacen.delete(clave);
+  store.delete(clave);
 }
 
 export async function isAvailableAsync(): Promise<boolean> {
@@ -64,9 +64,18 @@ export async function isAvailableAsync(): Promise<boolean> {
 
 export const WHEN_UNLOCKED_THIS_DEVICE_ONLY = 'WHEN_UNLOCKED_THIS_DEVICE_ONLY';
 
+/** Deja el doble como recién instalado. */
 export function __limpiar(): void {
-  almacen.clear();
+  store.clear();
   demoraEscritura = null;
   demoraLectura = null;
   fallarBorrados = false;
+}
+
+export function __limpiarStoreParaPruebas(): void {
+  store.clear();
+}
+
+export function __obtenerStoreParaPruebas(): Map<string, string> {
+  return store;
 }

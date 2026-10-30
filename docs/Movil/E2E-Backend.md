@@ -123,7 +123,7 @@ hidratado al arrancar.
 | `frontend/shared/src/auth.test.ts` → `renovarSesion` | Rotación, single-flight, 401 descarta, 503 conserva y reintenta una vez, sin red conserva |
 | `frontend/shared/src/api/cliente.test.ts` | 401 → renueva y repite una vez; refresh fallido cierra; 503 conserva la sesión |
 | `frontend/movil/src/config/api.test.ts` | La URL exige `/api`, rechaza localhost en nativo, https en producción y credenciales embebidas |
-| `frontend/movil/src/storage/sesionSegura.test.ts` | Los tokens sobreviven a reabrir la app y el logout borra lo persistido |
+| `frontend/movil/src/services/storageSeguro.test.ts` | Los tokens sobreviven a reabrir la app, el cierre durable se confirma o queda pendiente, y el logout no resucita sesiones previas |
 | `shared/ia/tests/test_sin_urls_internas.py` | `shared/` no contiene URLs internas que el móvil heredaría |
 
 ## Backend caído sin exponer datos previos

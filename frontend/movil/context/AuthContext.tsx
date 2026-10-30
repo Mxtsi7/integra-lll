@@ -1,17 +1,20 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  guardarTokens,
   haySesionValida,
-  logout,
-  renovarSesion,
-  obtenerRefreshToken,
-  revocarSesion,
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
   type Usuario,
 } from '@ojoalgasto/shared';
-import { hidratarSesion, confirmarCierrePersistente, hayCierrePendiente, reintentarCierrePersistente } from '../src/storage/sesionSegura';
+import {
+  hidratarSesionSegura,
+  guardarTokensSeguros,
+  limpiarSesionSegura,
+  obtenerTokensSeguros,
+  validarFormatoToken,
+  hayLimpiezaPendienteSegura,
+} from '../src/services/storageSeguro';
+import { revocarTokensRemotos } from '../src/services/clienteHttp';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
@@ -25,14 +28,25 @@ type AuthValue = {
   haySesion: boolean;
   estadoPerfil: EstadoPerfil;
   errorPerfil: string | null;
+  /**
+   * P1 (VI-16): mensaje cuando el borrado durable de la sesión no pudo
+   * confirmarse. Mientras esté presente, el login queda bloqueado hasta que
+   * `reintentarCierre()` confirme la limpieza.
+   */
   errorCierre: string | null;
-  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => void;
+  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => Promise<void>;
   cerrarSesion: () => Promise<void>;
   reintentarCierre: () => Promise<boolean>;
   recargarPerfil: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
+
+const MENSAJE_CIERRE_PENDIENTE =
+  'No se pudo confirmar el borrado seguro de la sesión. Las pantallas privadas seguirán cerradas hasta reintentar.';
+
+const MENSAJE_CIERRE_PENDIENTE_ARRANQUE =
+  'El cierre de sesión anterior no se pudo confirmar. Reintenta la limpieza antes de volver a entrar.';
 
 export function AuthProvider({
   initialUsuario = null,
@@ -62,124 +76,121 @@ export function AuthProvider({
   // Contador de generación de sesión para invalidar respuestas tardías (race conditions)
   const sesionVigente = useRef(0);
   const ultimaPeticion = useRef(0);
+  // Evita que un login nuevo se acepte mientras el cierre anterior no se
+  // confirmó en el keystore (se consulta de forma síncrona).
+  const cierrePendiente = useRef(false);
 
-  const confirmarCierre = useCallback(async (): Promise<boolean> => {
-    const resultado = await confirmarCierrePersistente();
-    if (!resultado.ok) {
-      setErrorCierre(
-        'No se pudo confirmar el borrado seguro de la sesión. Las pantallas privadas seguirán cerradas hasta reintentar.'
-      );
-      return false;
-    }
-    setErrorCierre(null);
-    return true;
+  const marcarCierrePendiente = useCallback((mensaje = MENSAJE_CIERRE_PENDIENTE) => {
+    cierrePendiente.current = true;
+    setErrorCierre(mensaje);
   }, []);
 
-  /** Deja la UI en anónimo y confirma la limpieza durable en segundo plano. */
-  const cerrarLocalmente = useCallback(() => {
-    sesionVigente.current++;
-    ultimaPeticion.current++;
-    logout();
+  const limpiarEstadoVisible = useCallback(() => {
     setUsuario(null);
     setEstado('anonimo');
     setEstadoPerfil('inactivo');
     setErrorPerfil(null);
-    void confirmarCierre();
-  }, [confirmarCierre]);
+  }, []);
 
-  const cargarPerfil = useCallback(async (idSesion: number) => {
-    const idPeticion = ++ultimaPeticion.current;
-    const esVigente = () =>
-      idSesion === sesionVigente.current && idPeticion === ultimaPeticion.current;
-
-    setEstadoPerfil('cargando');
-    setErrorPerfil(null);
+  /** Deja la UI en anónimo y confirma la limpieza durable. */
+  const cerrarLocalmente = useCallback(async () => {
+    sesionVigente.current++;
+    ultimaPeticion.current++;
+    limpiarEstadoVisible();
 
     try {
-      const u = await getUsuarioActual();
-      if (!esVigente()) return;
-
-      setUsuario(u);
-      setEstadoPerfil('cargado');
-      setErrorPerfil(null);
-    } catch (err: unknown) {
-      if (!esVigente()) return;
-
-      if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
-        // Token revocado o usuario inexistente: la sesión no sirve
-        cerrarLocalmente();
-        setErrorPerfil(null);
-        return;
-      }
-
-      // Error transitorio (red/servidor): el token sigue vigente, pero el perfil no se inventa
-      setUsuario(null);
-      setEstadoPerfil('error');
-      setErrorPerfil(err instanceof Error ? err.message : 'Error al cargar perfil');
+      await limpiarSesionSegura();
+      cierrePendiente.current = false;
+      setErrorCierre(null);
+    } catch {
+      // La navegación pública ya ocurrió; el fallo durable se expone para
+      // que el usuario pueda reintentar desde el login.
+      marcarCierrePendiente();
     }
-  }, [cerrarLocalmente]);
+  }, [limpiarEstadoVisible, marcarCierrePendiente]);
 
-  // Bootstrap al arrancar la app: valida si hay sesión guardada en shared
+  const cargarPerfil = useCallback(
+    async (idSesion: number) => {
+      const idPeticion = ++ultimaPeticion.current;
+      const esVigente = () =>
+        idSesion === sesionVigente.current && idPeticion === ultimaPeticion.current;
+
+      setEstadoPerfil('cargando');
+      setErrorPerfil(null);
+
+      try {
+        const u = await getUsuarioActual();
+        if (!esVigente()) return;
+
+        setUsuario(u);
+        setEstadoPerfil('cargado');
+        setErrorPerfil(null);
+      } catch (err: unknown) {
+        if (!esVigente()) return;
+
+        if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
+          // Token revocado o usuario inexistente: la sesión no sirve
+          await cerrarLocalmente();
+          return;
+        }
+
+        // Error transitorio (red/servidor): el token sigue vigente, pero el perfil no se inventa
+        setUsuario(null);
+        setEstadoPerfil('error');
+        setErrorPerfil(err instanceof Error ? err.message : 'Error al cargar perfil');
+      }
+    },
+    [cerrarLocalmente]
+  );
+
+  // Bootstrap al arrancar la app: hidrata tokens desde SecureStore y valida la sesión
   useEffect(() => {
     if (initialEstado || initialUsuario) return;
 
     const idSesion = ++sesionVigente.current;
 
     async function verificarSesionInicial() {
-      // VI-16: el espejo en memoria arranca vacío; primero se leen los tokens
-      // cifrados. Sin esta espera se decidiría "sin sesión" antes de leerlos.
-      await hidratarSesion();
-
-      // Si el cierre anterior no pudo confirmarse, no se acepta la sesión
-      // persistida: se mantiene el login y el aviso recuperable.
-      if (hayCierrePendiente()) {
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
-        setErrorCierre(
-          'El cierre de sesión anterior no se pudo confirmar. Reintenta la limpieza antes de volver a entrar.'
-        );
-        return;
-      }
-
-      let valida = haySesionValida();
-      const teniaRefresh = obtenerRefreshToken() !== null;
-
-      // El access dura 30 min; si venció pero hay refresh, se renueva antes
-      // de mandar al login. Si el backend está caído, renovarSesion() devuelve
-      // false y CONSERVA los tokens: no se muestran datos previos, pero la
-      // sesión se puede recuperar cuando el backend vuelva (o al reabrir).
-      if (!valida && teniaRefresh) {
-        valida = await renovarSesion();
-      }
+      // 1. Hidratación asíncrona desde SecureStore hacia caché síncrono en memoria
+      await hidratarSesionSegura();
 
       if (idSesion !== sesionVigente.current) return;
 
-      if (!valida) {
-        // Un access vencido sin refresh no tiene recuperación posible.
-        if (!teniaRefresh) {
-          cerrarLocalmente();
-          return;
-        }
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+      // 2. Si el cierre anterior no pudo confirmarse, no se acepta la sesión
+      // persistida: se mantiene el login y el aviso recuperable.
+      if (hayLimpiezaPendienteSegura()) {
+        cierrePendiente.current = true;
+        limpiarEstadoVisible();
+        setErrorCierre(MENSAJE_CIERRE_PENDIENTE_ARRANQUE);
         return;
       }
 
-      setEstado('autenticado');
+      // 3. Verificación de vigencia y desfase de reloj del token recuperado
+      if (!haySesionValida()) {
+        try {
+          await limpiarSesionSegura();
+        } catch {
+          // El arranque no debe romper por un keystore que rechaza borrados:
+          // queda como anónimo y el fallo es visible al reintentar el cierre.
+        }
+        if (idSesion === sesionVigente.current) {
+          limpiarEstadoVisible();
+        }
+        return;
+      }
+
+      if (idSesion === sesionVigente.current) {
+        setEstado('autenticado');
+      }
       await cargarPerfil(idSesion);
     }
 
     void verificarSesionInicial();
-  }, [initialEstado, initialUsuario, cargarPerfil, cerrarLocalmente]);
+  }, [initialEstado, initialUsuario, cargarPerfil, limpiarEstadoVisible]);
 
   // Interceptor 401 de cliente API: si un endpoint protegido devuelve 401, limpia la sesión
   useEffect(() => {
     configurarManejador401(() => {
-      cerrarLocalmente();
+      void cerrarLocalmente();
     });
     return () => {
       configurarManejador401(() => {});
@@ -187,23 +198,63 @@ export function AuthProvider({
   }, [cerrarLocalmente]);
 
   const iniciarSesion = useCallback(
-    (tokens: Tokens, u?: Usuario) => {
-      if (hayCierrePendiente()) {
+    async (tokens: Tokens, u?: Usuario) => {
+      // Un cierre no confirmado debe resolverse antes de aceptar otra sesión.
+      if (cierrePendiente.current) {
         throw new Error(
           'Hay un cierre de sesión pendiente; reintenta la limpieza antes de volver a entrar.'
         );
       }
-      guardarTokens(tokens);
-      if (!haySesionValida()) {
-        logout();
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+
+      // 0. Capturar la identidad de esta operación antes de cualquier paso asíncrono
+      const idSesion = ++sesionVigente.current;
+      ultimaPeticion.current++;
+      const esVigente = () => idSesion === sesionVigente.current;
+
+      // 1. Prevalidación de estructura y formato del token recibido
+      if (!tokens.access_token || !validarFormatoToken(tokens.access_token)) {
+        if (esVigente()) {
+          limpiarEstadoVisible();
+        }
         throw new Error('Token inválido o expirado');
       }
 
-      const idSesion = ++sesionVigente.current;
+      // 2. Persistencia segura atómica en hardware esperando su confirmación
+      try {
+        await guardarTokensSeguros(tokens);
+      } catch (err) {
+        // Rollback del contexto SOLO si esta operación sigue siendo la vigente
+        if (esVigente()) {
+          limpiarEstadoVisible();
+        }
+        throw err;
+      }
+
+      // Si durante la persistencia se inició otra sesión o logout, abortar
+      if (!esVigente()) {
+        return;
+      }
+
+      // 3. Validación de vigencia del token guardado (con desfase de reloj)
+      if (!haySesionValida()) {
+        try {
+          await limpiarSesionSegura();
+        } catch {
+          // El token ya no sirve; el fallo de borrado se reintenta al cerrar.
+        }
+        if (esVigente()) {
+          limpiarEstadoVisible();
+        }
+        throw new Error('Token inválido o expirado');
+      }
+
+      if (!esVigente()) {
+        return;
+      }
+
+      // 4. Transicionar a autenticado SOLO tras persistencia y validación exitosas
+      cierrePendiente.current = false;
+      setErrorCierre(null);
       setEstado('autenticado');
 
       if (u) {
@@ -215,46 +266,54 @@ export function AuthProvider({
         void cargarPerfil(idSesion);
       }
     },
-    [cargarPerfil]
+    [cargarPerfil, limpiarEstadoVisible]
   );
 
   const cerrarSesion = useCallback(async () => {
-    // Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
+    // 1. Invalida inmediatamente cualquier petición asíncrona de perfil o sesión en vuelo
     sesionVigente.current++;
     ultimaPeticion.current++;
 
-    try {
-      await revocarSesion();
-    } catch {
-      // El backend no respondió: la revocación queda no confirmada, pero la
-      // sesión local debe cerrarse igual y su borrado durable se verifica.
+    // 2. Capturar credenciales activas y vigencia del access token antes de limpiar memoria
+    const credenciales = obtenerTokensSeguros();
+    const accesoVigente = haySesionValida();
+
+    // 3. Cierre inmediato en memoria para navegación pública instantánea
+    limpiarEstadoVisible();
+
+    // 4. Revocación remota aislada en segundo plano con las credenciales capturadas y vigencia
+    if (credenciales.refresh_token) {
+      void revocarTokensRemotos(credenciales, accesoVigente);
     }
 
-    // La UI pasa a anónimo antes de esperar al keystore: las rutas privadas
-    // no dependen de que SecureStore termine.
-    logout();
-    setUsuario(null);
-    setEstado('anonimo');
-    setEstadoPerfil('inactivo');
-    setErrorPerfil(null);
-    await confirmarCierre();
-  }, [confirmarCierre]);
+    // 5. Limpieza persistente en hardware seguro: se ejecuta inmediatamente (no después de la red)
+    try {
+      await limpiarSesionSegura();
+      cierrePendiente.current = false;
+      setErrorCierre(null);
+    } catch {
+      // P1: el cierre no se declara exitoso si el keystore no confirmó el
+      // borrado. La UI ya está en anónimo y el login queda bloqueado hasta
+      // que `reintentarCierre()` lo confirme.
+      marcarCierrePendiente();
+    }
+  }, [limpiarEstadoVisible, marcarCierrePendiente]);
 
   const reintentarCierre = useCallback(async () => {
-    const resultado = await reintentarCierrePersistente();
-    if (!resultado.ok) {
-      setErrorCierre(
-        'No se pudo confirmar el borrado seguro de la sesión. Las pantallas privadas seguirán cerradas hasta reintentar.'
-      );
+    try {
+      await limpiarSesionSegura();
+      cierrePendiente.current = false;
+      setErrorCierre(null);
+      return true;
+    } catch {
+      marcarCierrePendiente();
       return false;
     }
-    setErrorCierre(null);
-    return true;
-  }, []);
+  }, [marcarCierrePendiente]);
 
   const recargarPerfil = useCallback(async () => {
     if (!haySesionValida()) {
-      cerrarLocalmente();
+      await cerrarLocalmente();
       return;
     }
     await cargarPerfil(sesionVigente.current);

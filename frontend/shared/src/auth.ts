@@ -67,6 +67,11 @@ export function apiConfigurada(): boolean {
   return apiUrl !== "";
 }
 
+/** URL base configurada (vacía si todavía no se llamó a configureAuthApi). */
+export function obtenerAuthApiUrl(): string {
+  return apiUrl;
+}
+
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${urlApi()}${path}`, {
     method: "POST",

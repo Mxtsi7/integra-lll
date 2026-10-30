@@ -6,12 +6,13 @@ import {
   NavigationContainer,
   type LinkingOptions,
 } from '@react-navigation/native';
-import { configurarApi, configureAuthApi, type Usuario } from '@ojoalgasto/shared';
+import { type Usuario } from '@ojoalgasto/shared';
 import { AuthProvider, type EstadoAuth } from './context/AuthContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import type { RootStackParamList } from './src/navigation/types';
 import { resolverUrlApi } from './src/config/api';
-import { instalarAlmacenSeguro } from './src/storage/sesionSegura';
+import { configurarClienteHttp } from './src/services/clienteHttp';
+import { inicializarStorageSeguro } from './src/services/storageSeguro';
 
 // VI-14: la URL se exige explícitamente. Si falta o usa localhost en un
 // teléfono, la app muestra el motivo en pantalla en vez de fallar con un
@@ -19,10 +20,10 @@ import { instalarAlmacenSeguro } from './src/storage/sesionSegura';
 let errorConfiguracion: string | null = null;
 try {
   const urlBase = resolverUrlApi();
-  configurarApi({ urlBase });
-  configureAuthApi({ baseUrl: urlBase });
-  // VI-16: los tokens se persisten cifrados; ver src/storage/sesionSegura.ts.
-  instalarAlmacenSeguro();
+  // Cliente HTTP de main: configura API y auth con la MISMA URL base.
+  configurarClienteHttp(urlBase);
+  // VI-16 / SE-07: los tokens se persisten cifrados y nunca en localStorage.
+  inicializarStorageSeguro();
 } catch (error) {
   errorConfiguracion =
     error instanceof Error ? error.message : 'Configuración de API inválida';
