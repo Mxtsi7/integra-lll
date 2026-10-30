@@ -402,3 +402,37 @@ class TestEntrarTardeALasVentanas:
         ]
         if resultado.creadas:
             assert resultado.creadas[0].datos["ventana_horas"] == 24
+
+
+# ══════════════════════════════════════════════════════════════════════
+# El monto del mensaje es el del cobro, sin redondear
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestMontoEnElMensaje:
+    """El formato anterior (`:,.0f`) anunciaba 9.99 USD como "10 USD". Se
+    comprueba el MENSAJE, no solo `datos.monto`, en los dos tipos de aviso."""
+
+    @pytest.mark.parametrize("monto, moneda, esperado", [
+        ("9.99", "USD", "9,99 USD"),
+        ("0.49", "USD", "0,49 USD"),
+        ("1234.50", "USD", "1.234,50 USD"),
+        ("9990.00", "CLP", "9.990 CLP"),
+        ("1000000.00", "CLP", "1.000.000 CLP"),
+    ])
+    def test_proximo_cobro(self, monto, moneda, esperado):
+        vigilada(nombre="Servicio", cobro=dt.date(2026, 11, 22), monto=monto, moneda=moneda)
+        alerta = generar_proximos_cobros(ahora=HOY).creadas[0]
+        assert f"El cobro de {esperado} de Servicio" in alerta.mensaje
+        assert alerta.datos["monto"] == monto
+
+    @pytest.mark.parametrize("monto, moneda, esperado", [
+        ("9.99", "USD", "9,99 USD"),
+        ("0.49", "USD", "0,49 USD"),
+        ("9990.00", "CLP", "9.990 CLP"),
+    ])
+    def test_fin_de_prueba(self, monto, moneda, esperado):
+        vigilada(nombre="Servicio", estado="prueba", fin_prueba=dt.date(2026, 11, 23),
+                 monto=monto, moneda=moneda)
+        alerta = generar_fin_de_prueba(ahora=HOY).creadas[0]
+        assert f"se cobra {esperado}." in alerta.mensaje

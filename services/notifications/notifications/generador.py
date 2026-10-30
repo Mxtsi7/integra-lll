@@ -50,6 +50,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -130,8 +131,21 @@ def _crear_una_vez(**campos) -> tuple[Alerta | None, bool]:
 
 
 def _texto_monto(suscripcion: SuscripcionVigilada) -> str:
-    monto = f"{suscripcion.monto:,.0f}".replace(",", ".")
-    return f"{monto} {suscripcion.moneda}"
+    """El monto como se lee en Chile: punto de miles y coma decimal.
+
+    Sin decimales cuando no hay fracción (9.990 CLP) y con dos cuando la hay
+    (9,99 USD). La versión anterior usaba `:,.0f` para todas las monedas y
+    anunciaba 9.99 USD como "10 USD": el aviso decía otro monto que el cobro.
+    Lo encontró la revisión de la PR.
+
+    Todo en Decimal: `format` de un Decimal no pasa por float, así que no hay
+    redondeo binario de por medio.
+    """
+    monto = Decimal(suscripcion.monto).quantize(Decimal("0.01"))
+    formato = ",.0f" if monto == monto.to_integral_value() else ",.2f"
+    ingles = format(monto, formato)              # 1,234.50
+    texto = ingles.replace(",", "_").replace(".", ",").replace("_", ".")
+    return f"{texto} {suscripcion.moneda}"
 
 
 def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
