@@ -16,6 +16,7 @@ export {
   actualizarSuscripcion,
   eliminarSuscripcion,
   cancelarSuscripcion,
+  reactivarSuscripcion,
   registrarUso,
   getUsos,
   type RegistroUso,
