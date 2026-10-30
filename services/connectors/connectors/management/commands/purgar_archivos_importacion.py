@@ -10,13 +10,89 @@ candidatos y sus errores no se tocan: lo que sobra es el archivo, no el
 resultado.
 
 En seco por omisión, como los demás comandos que borran algo.
+
+── La decisión se toma sobre la fila VIGENTE, bloqueada ────────────────────
+La versión anterior elegía las importaciones antes de abrir la transacción,
+ignoraba lo que devolvía `avanzar_a` y borraba todos los archivos vencidos
+igual. Si otro proceso reclamaba la importación entre la selección y la
+transición (pendiente → procesando), el CAS de `avanzar_a` perdía, la
+importación seguía en `procesando` y el archivo desaparecía: una importación
+activa sin archivo. Lo reprodujo la revisión de #120.
+
+Ahora cada archivo se trata en su propia transacción:
+
+    1. se bloquea la importación (FOR UPDATE) y después el archivo;
+    2. se vuelve a leer: si el archivo ya no está o ya no está vencido, no se
+       hace nada (otra purga lo borró, o se renovó);
+    3. si la importación ya es TERMINAL (completada o fallida), solo se borra
+       el archivo: no se tocan su estado ni sus errores, que pueden venir de
+       un procesamiento que terminó mientras esta purga preparaba la lista;
+    4. si está pendiente o procesando, se anota el error y se pasa a
+       `fallida`, y recién con esa transición persistida se borra el archivo.
+       Si la transición no se pudiera hacer, se revierte todo y no se borra.
+
+Con la fila bloqueada, quien quiera mover el estado al mismo tiempo (FE-09
+marcando `completada`) espera, y al soltarse su CAS encuentra `fallida` y no
+pisa nada. Dos purgas a la vez tampoco se pisan: la segunda espera y después
+ya no encuentra el archivo.
 """
+
+from collections import Counter
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
 from connectors.models import ArchivoImportacion, Importacion
+
+FALLIDA = "fallida"          # estaba activa: quedó fallida y se borró el archivo
+TERMINAL = "terminal"        # ya estaba terminada: solo se borró el archivo
+YA_NO_ESTABA = "ya_no_estaba"  # otra purga lo borró, o se renovó el vencimiento
+OMITIDA = "omitida"          # no se pudo hacer la transición: no se borró nada
+
+
+def candidatos(ahora):
+    """(archivo, importación) vencidos al empezar. Es solo una lista de trabajo:
+    cada uno se vuelve a decidir con la fila bloqueada."""
+    return list(
+        ArchivoImportacion.objects.filter(vence_en__lt=ahora)
+        .order_by("pk")
+        .values_list("pk", "importacion_id")
+    )
+
+
+def purgar_uno(archivo_pk, importacion_pk, ahora) -> str:
+    """Purga UN archivo vencido, decidiendo sobre el estado vigente."""
+    with transaction.atomic():
+        # Primero la importación y después el archivo: el mismo orden en que
+        # los crea la subida, para que dos procesos no se bloqueen en cruz.
+        importacion = (
+            Importacion.objects.select_for_update().filter(pk=importacion_pk).first()
+        )
+        archivo = (
+            ArchivoImportacion.objects.select_for_update()
+            .filter(pk=archivo_pk, vence_en__lt=ahora)
+            .first()
+        )
+        if archivo is None:
+            return YA_NO_ESTABA
+
+        if importacion is not None and not importacion.terminada:
+            importacion.anotar_error(
+                "archivo_vencido",
+                "El archivo se purgó por retención antes de procesarse.",
+            )
+            importacion.save(update_fields=["errores", "errores_totales", "actualizado_en"])
+            if not importacion.avanzar_a(Importacion.Estado.FALLIDA):
+                # Con la fila bloqueada no debería pasar. Si pasa, no se borra
+                # el archivo de una importación cuyo estado no se pudo fijar.
+                transaction.set_rollback(True)
+                return OMITIDA
+            archivo.delete()
+            return FALLIDA
+
+        archivo.delete()
+        return TERMINAL
 
 
 class Command(BaseCommand):
@@ -26,37 +102,19 @@ class Command(BaseCommand):
         parser.add_argument("--aplicar", action="store_true", help="Sin esto solo cuenta.")
 
     def handle(self, *args, **opciones):
-        vencidos = ArchivoImportacion.objects.filter(vence_en__lt=timezone.now())
-        cantidad = vencidos.count()
+        ahora = timezone.now()
+        lista = candidatos(ahora)
         if not opciones["aplicar"]:
             self.stdout.write(
-                f"{cantidad} archivo(s) vencido(s). Modo ensayo: para borrarlos, --aplicar"
+                f"{len(lista)} archivo(s) vencido(s). Modo ensayo: para borrarlos, --aplicar"
             )
             return
-        # ── Las importaciones sin archivo quedan FALLIDAS ──────────────────
-        # Borrar el archivo y dejar la importación en `pendiente` la vuelve
-        # imposible de procesar: FE-09 la tomaría, buscaría el archivo y no
-        # habría nada. Lo encontró la revisión de #120.
-        #
-        # Va en la MISMA transacción que el borrado: si falla una, no queda ni
-        # la importación huérfana ni el archivo a medio borrar.
-        importaciones = list(
-            Importacion.objects.filter(
-                archivo__in=vencidos,
-                estado__in=(Importacion.Estado.PENDIENTE, Importacion.Estado.PROCESANDO),
-            )
-        )
-        with transaction.atomic():
-            for importacion in importaciones:
-                importacion.anotar_error(
-                    "archivo_vencido",
-                    "El archivo se purgó por retención antes de procesarse.",
-                )
-                importacion.save(update_fields=["errores", "errores_totales"])
-                importacion.avanzar_a(Importacion.Estado.FALLIDA)
-            borrados, _ = vencidos.delete()
 
+        resultado = Counter(purgar_uno(a, i, ahora) for a, i in lista)
+        borrados = resultado[FALLIDA] + resultado[TERMINAL]
         self.stdout.write(
-            f"Borrados {borrados} archivo(s) vencido(s). "
-            f"{len(importaciones)} importacion(es) sin procesar quedaron FALLIDAS."
+            f"Borrados {borrados} archivo(s) vencido(s): "
+            f"{resultado[FALLIDA]} importacion(es) sin procesar quedaron FALLIDAS, "
+            f"{resultado[TERMINAL]} ya estaban terminadas. "
+            f"{resultado[YA_NO_ESTABA]} ya no estaban, {resultado[OMITIDA]} se omitieron."
         )
