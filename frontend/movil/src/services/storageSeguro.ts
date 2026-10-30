@@ -326,9 +326,16 @@ export async function guardarTokensSeguros(tokens: {
 
   try {
     guardarTokens(tokens);
-    encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
     const promesas = promesasPorGeneracion.get(gen) ?? [];
     await Promise.all(promesas);
+
+    // La marca de un cierre anterior sólo se retira cuando las credenciales
+    // nuevas ya quedaron confirmadas en hardware. Si la escritura falla, la
+    // marca debe seguir protegiendo el almacenamiento (no se pierde junto con
+    // operaciones cuyo resultado todavía se desconoce).
+    if (gen === generacionActual) {
+      await encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
+    }
   } catch (err) {
     // Si otra operación posterior ya inició (gen < generacionActual),
     // este guardado obsoleto NO debe limpiar la RAM ni invalidar la nueva sesión.
@@ -382,13 +389,26 @@ export async function limpiarSesionSegura(): Promise<void> {
     cacheMemoria = {};
     logout();
 
-    // 2. Borrado explícito de marca de limpieza previa
-    encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
-
-    // 3. Esperar a que se completen todos los borrados de esta generación
+    // 2. Esperar a que se completen los borrados de credenciales de esta
+    // generación. La marca LIMPIEZA_PENDIENTE NO se encola aquí: si algún
+    // borrado falla, `ejecutarDeleteConReintentos` la escribe y debe
+    // sobrevivir al reinicio para impedir que se restaure la sesión.
     const promesas = promesasPorGeneracion.get(gen) ?? [];
-    await Promise.all(promesas);
-    cierreSinConfirmar = false;
+    const resultados = await Promise.allSettled(promesas);
+    const fallo = resultados.find(
+      (resultado): resultado is PromiseRejectedResult => resultado.status === 'rejected'
+    );
+    if (fallo) {
+      throw fallo.reason;
+    }
+
+    // 3. Sólo tras confirmar la eliminación de las credenciales se retira la
+    // marca. Si este borrado falla, la marca queda viva y el cierre no se
+    // declara confirmado: el siguiente reintento/arranque volverá a limpiar.
+    if (gen === generacionActual) {
+      await encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
+      cierreSinConfirmar = false;
+    }
   } catch (err) {
     // La memoria ya está limpia (la navegación pública queda protegida de inmediato),
     // pero no confirmamos el cierre como exitoso si la persistencia falló

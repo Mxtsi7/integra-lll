@@ -4,6 +4,7 @@ import {
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
+  sesionDelToken,
   type Usuario,
 } from '@ojoalgasto/shared';
 import {
@@ -47,6 +48,17 @@ const MENSAJE_CIERRE_PENDIENTE =
 
 const MENSAJE_CIERRE_PENDIENTE_ARRANQUE =
   'El cierre de sesión anterior no se pudo confirmar. Reintenta la limpieza antes de volver a entrar.';
+
+/**
+ * true si ambos tokens pertenecen a la misma sesión (uno es el refresh del
+ * otro). Con tokens opacos no se puede afirmar: se devuelve false para no
+ * reutilizar credenciales de una sesión distinta.
+ */
+function esLaMismaSesion(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return false;
+  const sesionA = sesionDelToken(a);
+  return sesionA !== null && sesionA === sesionDelToken(b);
+}
 
 export function AuthProvider({
   initialUsuario = null,
@@ -118,26 +130,63 @@ export function AuthProvider({
       setEstadoPerfil('cargando');
       setErrorPerfil(null);
 
-      try {
-        const u = await getUsuarioActual();
-        if (!esVigente()) return;
+      // El perfil puede rechazarse con el access anterior mientras una
+      // rotación de la misma sesión ya guardó otro. En ese caso se vuelve a
+      // consultar con el vigente, sin cerrar la sesión.
+      for (;;) {
+        const tokenDeLaConsulta = obtenerTokensSeguros().access_token;
 
-        setUsuario(u);
-        setEstadoPerfil('cargado');
-        setErrorPerfil(null);
-      } catch (err: unknown) {
-        if (!esVigente()) return;
+        try {
+          const u = await getUsuarioActual();
+          if (!esVigente()) return;
 
-        if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
-          // Token revocado o usuario inexistente: la sesión no sirve
-          await cerrarLocalmente();
+          setUsuario(u);
+          setEstadoPerfil('cargado');
+          setErrorPerfil(null);
+          return;
+        } catch (err: unknown) {
+          if (!esVigente()) return;
+
+          if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
+            const tokenActual = obtenerTokensSeguros().access_token;
+
+            if (tokenActual !== tokenDeLaConsulta) {
+              if (tokenActual !== null && esLaMismaSesion(tokenActual, tokenDeLaConsulta)) {
+                // Rotación válida de la misma sesión: el 401 pertenece al
+                // access anterior, no a la sesión vigente.
+                continue;
+              }
+              // Otra sesión (A→B): su carga la hará quien inició B. Esta
+              // respuesta tardía no debe borrar ni pisar credenciales ajenas.
+              return;
+            }
+
+            // Un 401 de la petición original no demuestra que el refresh
+            // haya sido rechazado. Red/503/timeout conserva los tokens y
+            // deja el perfil en estado recuperable (recargarPerfil).
+            const motivo = err.sesion?.motivo;
+            if (
+              err.status === 401 &&
+              (motivo === 'renovacion_temporal' || motivo === 'token_obsoleto')
+            ) {
+              setUsuario(null);
+              setEstadoPerfil('error');
+              setErrorPerfil(err.message);
+              return;
+            }
+
+            // 404 (usuario inexistente) o rechazo definitivo del refresh
+            // vigente: la sesión ya no sirve.
+            await cerrarLocalmente();
+            return;
+          }
+
+          // Error transitorio (red/servidor): el token sigue vigente, pero el perfil no se inventa
+          setUsuario(null);
+          setEstadoPerfil('error');
+          setErrorPerfil(err instanceof Error ? err.message : 'Error al cargar perfil');
           return;
         }
-
-        // Error transitorio (red/servidor): el token sigue vigente, pero el perfil no se inventa
-        setUsuario(null);
-        setEstadoPerfil('error');
-        setErrorPerfil(err instanceof Error ? err.message : 'Error al cargar perfil');
       }
     },
     [cerrarLocalmente]

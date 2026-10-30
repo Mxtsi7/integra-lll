@@ -39,6 +39,31 @@ function jwtValido(expSegundos: number = Math.floor(Date.now() / 1000) + 3600): 
   ].join('.');
 }
 
+/** JWT de una sesión concreta (mismo `sid` = misma sesión tras una rotación). */
+function jwtConSesion(
+  sid: string,
+  jti: string,
+  expSegundos: number = Math.floor(Date.now() / 1000) + 3600
+): string {
+  const base64url = (texto: string) =>
+    btoa(texto).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return [
+    base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+    base64url(
+      JSON.stringify({
+        exp: expSegundos,
+        iat: Math.floor(Date.now() / 1000),
+        user_id: 'usr-1',
+        organizacion_id: 'org-1',
+        sid,
+        jti,
+        rol: 'titular',
+      })
+    ),
+    'firma',
+  ].join('.');
+}
+
 const USUARIO_PRUEBA: Usuario = {
   id: 'usr-1',
   nombre: 'Usuario Prueba',
@@ -633,6 +658,143 @@ describe('AuthContext móvil', () => {
       expect(haySesionValida()).toBe(false);
       expect(obtenerAccessToken()).toBeNull();
       expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeNull();
+    });
+  });
+
+  describe('Carga de perfil: refresh temporal y rotación de la misma sesión (Revisión 132)', () => {
+    it('un 503 temporal al renovar /me conserva los tokens y deja el perfil recuperable [P2]', async () => {
+      const tokens: Tokens = {
+        access_token: jwtConSesion('sesion-a', 'a-1'),
+        refresh_token: 'refresh-a-1',
+      };
+
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.endsWith('/usuarios/me/')) {
+          return new Response(JSON.stringify({ detail: 'Token vencido' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/auth/refresh/')) {
+          return new Response(JSON.stringify({ detail: 'Redis caído' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`URL inesperada en la prueba: ${url}`);
+      });
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await act(async () => {
+        await result.current.iniciarSesion(tokens);
+      });
+
+      // Dos intentos de refresh con 503 y su espera de 200 ms.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 700));
+      });
+
+      // La sesión sigue viva y el perfil queda en error recuperable, no se borra.
+      expect(result.current.haySesion).toBe(true);
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.usuario).toBeNull();
+      expect(result.current.estadoPerfil).toBe('error');
+      expect(result.current.errorPerfil).toBe('Token vencido');
+      expect(obtenerAccessToken()).toBe(tokens.access_token);
+      expect(obtenerRefreshToken()).toBe(tokens.refresh_token);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(
+        tokens.access_token
+      );
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(
+        tokens.refresh_token
+      );
+
+      // Cuando vuelve el backend, el reintento del perfil no exige otro login.
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify(USUARIO_PRUEBA), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      await act(async () => {
+        await result.current.recargarPerfil();
+      });
+
+      expect(result.current.estadoPerfil).toBe('cargado');
+      expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
+      expect(obtenerAccessToken()).toBe(tokens.access_token);
+      expect(obtenerRefreshToken()).toBe(tokens.refresh_token);
+    });
+
+    it('un 401 tardío de A1 no borra A2 y recarga el perfil con la rotación vigente [P2]', async () => {
+      const A1 = jwtConSesion('sesion-a', 'a-1');
+      const A2 = jwtConSesion('sesion-a', 'a-2');
+      const tokensA1: Tokens = { access_token: A1, refresh_token: 'refresh-a-1' };
+      const tokensA2: Tokens = { access_token: A2, refresh_token: 'refresh-a-2' };
+
+      let resolverPerfilA1: (respuesta: Response) => void = () => {};
+      const perfilA1Pendiente = new Promise<Response>((resolver) => {
+        resolverPerfilA1 = resolver;
+      });
+      fetchMock.mockReturnValueOnce(perfilA1Pendiente);
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await act(async () => {
+        await result.current.iniciarSesion(tokensA1);
+      });
+      expect(result.current.estadoPerfil).toBe('cargando');
+
+      // Mientras el perfil de A1 viaja, una rotación válida guarda A2/R2.
+      await act(async () => {
+        await guardarTokensSeguros(tokensA2);
+      });
+      expect(obtenerAccessToken()).toBe(A2);
+      expect(obtenerRefreshToken()).toBe(tokensA2.refresh_token);
+
+      // El perfil viejo responde 401; el reintento con A2 sí trae el usuario.
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify(USUARIO_PRUEBA), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      await act(async () => {
+        resolverPerfilA1(
+          new Response(JSON.stringify({ detail: 'Token vencido' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(result.current.haySesion).toBe(true);
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.estadoPerfil).toBe('cargado');
+      expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
+      expect(obtenerAccessToken()).toBe(A2);
+      expect(obtenerRefreshToken()).toBe(tokensA2.refresh_token);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(A2);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(
+        tokensA2.refresh_token
+      );
+
+      const autorizaciones = fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith('/usuarios/me/'))
+        .map(([, opciones]) => opciones.headers.Authorization);
+      expect(autorizaciones).toEqual([`Bearer ${A1}`, `Bearer ${A2}`]);
     });
   });
 

@@ -17,6 +17,7 @@ import {
   esTokenValido,
   validarFormatoToken,
   decodificarPayloadJwt,
+  hayLimpiezaPendienteSegura,
   __reiniciarEstadoParaPruebas,
 } from './storageSeguro';
 
@@ -599,6 +600,103 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
         expect(res.hidratado).toBe(false);
         expect(res.hayTokens).toBe(false);
         expect(obtenerAccessToken()).toBeNull();
+      } finally {
+        configurarBackendStorage(backendMock);
+      }
+    });
+
+    it('fallos de borrado/sobrescritura por clave conservan la marca y no restauran la sesión tras reiniciar [P1 Revisión 132]', async () => {
+      const tokens = {
+        access_token: jwtValido(),
+        refresh_token: 'refresh-con-fallo-por-clave',
+      };
+      almacenamientoSimulado.set(CLAVES_SEGURAS.ACCESS_TOKEN, tokens.access_token);
+      almacenamientoSimulado.set(CLAVES_SEGURAS.REFRESH_TOKEN, tokens.refresh_token);
+
+      let fallarCredenciales = true;
+      let intentosBorrarMarca = 0;
+      const backendPorClave: IBackendStorageSeguro = {
+        getItemAsync: vi.fn(async (k) => almacenamientoSimulado.get(k) ?? null),
+        setItemAsync: vi.fn(async (k, v) => {
+          // El borrado falla y la sobrescritura de respaldo también: los
+          // tokens antiguos siguen íntegros en el almacenamiento.
+          if (
+            fallarCredenciales &&
+            (k === CLAVES_SEGURAS.ACCESS_TOKEN || k === CLAVES_SEGURAS.REFRESH_TOKEN)
+          ) {
+            throw new Error(`Fallo de escritura en '${k}'`);
+          }
+          almacenamientoSimulado.set(k, v);
+        }),
+        deleteItemAsync: vi.fn(async (k) => {
+          if (
+            fallarCredenciales &&
+            (k === CLAVES_SEGURAS.ACCESS_TOKEN || k === CLAVES_SEGURAS.REFRESH_TOKEN)
+          ) {
+            throw new Error(`Fallo de borrado en '${k}'`);
+          }
+          if (k === CLAVES_SEGURAS.LIMPIEZA_PENDIENTE) {
+            intentosBorrarMarca++;
+          }
+          almacenamientoSimulado.delete(k);
+        }),
+      };
+      configurarBackendStorage(backendPorClave);
+
+      try {
+        // 1. El cierre rechaza y limpia RAM, pero no puede confirmar hardware.
+        await expect(limpiarSesionSegura()).rejects.toThrow(
+          'Fallo al limpiar sesión en almacenamiento seguro'
+        );
+        expect(obtenerAccessToken()).toBeNull();
+        expect(obtenerRefreshToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+
+        // 2. La marca durable sobrevive aunque borrar la marca funcionaría:
+        // no se encola junto con las credenciales cuyo resultado es incierto.
+        expect(intentosBorrarMarca).toBe(0);
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBe('1');
+        expect(hayLimpiezaPendienteSegura()).toBe(true);
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(
+          tokens.access_token
+        );
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(
+          tokens.refresh_token
+        );
+
+        // 3. Reinicio: la marca impide que los tokens antiguos restauren la sesión.
+        __reiniciarEstadoParaPruebas();
+        configurarBackendStorage(backendPorClave);
+        const hidratadoConFallo = await hidratarSesionSegura();
+        expect(hidratadoConFallo.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+        expect(haySesionValida()).toBe(false);
+        expect(hayLimpiezaPendienteSegura()).toBe(true);
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBe('1');
+
+        // 4. Un reintento con el hardware aún roto tampoco pierde la marca.
+        await expect(limpiarSesionSegura()).rejects.toThrow(
+          'Fallo al limpiar sesión en almacenamiento seguro'
+        );
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBe('1');
+        expect(hayLimpiezaPendienteSegura()).toBe(true);
+
+        // 5. Recuperado el hardware, el reintento completa el borrado y sólo
+        // entonces retira la marca y habilita un nuevo login.
+        fallarCredenciales = false;
+        await limpiarSesionSegura();
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeUndefined();
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.REFRESH_TOKEN)).toBeUndefined();
+        expect(almacenamientoSimulado.get(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE)).toBeUndefined();
+        expect(hayLimpiezaPendienteSegura()).toBe(false);
+
+        // 6. Reinicio posterior: no hay sesión ni marca pendiente.
+        __reiniciarEstadoParaPruebas();
+        configurarBackendStorage(backendPorClave);
+        const hidratadoLimpio = await hidratarSesionSegura();
+        expect(hidratadoLimpio.hayTokens).toBe(false);
+        expect(obtenerAccessToken()).toBeNull();
+        expect(hayLimpiezaPendienteSegura()).toBe(false);
       } finally {
         configurarBackendStorage(backendMock);
       }

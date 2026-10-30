@@ -26,6 +26,27 @@ export function configurarApi(config: { urlBase: string }) {
   urlBase = config.urlBase.replace(/\/+$/, "");
 }
 
+/**
+ * Qué se sabe de la sesión cuando `pedir()` rechaza con un 401. Un 401 de la
+ * petición original NO implica que el refresh haya sido rechazado: puede ser
+ * un fallo temporal de red/503 o el rechazo de un access que ya fue rotado.
+ */
+export type MotivoSesionError =
+  // El refresh falló por red/503/timeout: los tokens se conservaron.
+  | "renovacion_temporal"
+  // El refresh vigente fue rechazado: la sesión ya no sirve.
+  | "sesion_rechazada"
+  // El 401 corresponde a un access anterior; ya hay otro vigente.
+  | "token_obsoleto"
+  // No había access token con el que hacer la petición.
+  | "sin_sesion";
+
+export type ContextoSesionError = {
+  motivo: MotivoSesionError;
+  /** Access con el que salió la petición que terminó en 401. */
+  tokenUsado: string | null;
+};
+
 export class ErrorDeApi extends Error {
   status: number;
   /**
@@ -34,10 +55,18 @@ export class ErrorDeApi extends Error {
    * error junto a su campo (CH-09, CH-14); antes solo llegaba el primero.
    */
   campos?: Record<string, string[]>;
-  constructor(message: string, status: number, campos?: Record<string, string[]>) {
+  /** Contexto de sesión cuando el error es un 401. */
+  sesion?: ContextoSesionError;
+  constructor(
+    message: string,
+    status: number,
+    campos?: Record<string, string[]>,
+    sesion?: ContextoSesionError,
+  ) {
     super(message);
     this.status = status;
     this.campos = campos;
+    this.sesion = sesion;
   }
 }
 
@@ -117,6 +146,7 @@ export async function pedir<T>(
   let res = await enviar(token);
   let notificado = false;
   let conservarSesion = false;
+  let motivoSesion: MotivoSesionError | undefined;
 
   // VI-16: un 401 con un token guardado puede ser sólo un access vencido.
   // Se intenta renovar UNA vez y se repite la petición con el token nuevo.
@@ -125,24 +155,41 @@ export async function pedir<T>(
   // datos viejos. Sólo se conserva si el token rechazado sigue siendo el
   // actual; si el usuario volvió a entrar mientras viajaba la petición, el
   // 401 es del token viejo y no hay nada que renovar.
-  if (res.status === 401 && token !== null && obtenerAccessToken() === token) {
-    const renovado = await renovarSesion();
-    const accessRenovado = renovado ? obtenerAccessToken() : null;
-    if (accessRenovado !== null && mismaSesion(token, accessRenovado)) {
-      tokenUsado = accessRenovado;
-      res = await enviar(tokenUsado);
-    } else if (renovado) {
-      // La renovación resolvió, pero el access nuevo es de otra sesión: entre
-      // el 401 y la respuesta alguien volvió a entrar. Reintentar con ese
-      // token usaría credenciales ajenas; la sesión nueva tampoco se cierra.
-      conservarSesion = true;
-    } else if (obtenerRefreshToken() === null) {
-      // El refresh fue rechazado: renovarSesion ya borró los tokens.
-      manejadorNoAutorizado?.();
-      notificado = true;
+  if (res.status === 401) {
+    if (token === null) {
+      motivoSesion = "sin_sesion";
+    } else if (obtenerAccessToken() !== token) {
+      // El 401 es de un access que ya fue reemplazado: no se renueva ni se
+      // toca la sesión vigente.
+      motivoSesion = "token_obsoleto";
     } else {
-      // Fallo temporal (red/503): los tokens siguen guardados.
-      conservarSesion = true;
+      const renovado = await renovarSesion();
+      const accessRenovado = renovado ? obtenerAccessToken() : null;
+      if (accessRenovado !== null && mismaSesion(token, accessRenovado)) {
+        tokenUsado = accessRenovado;
+        res = await enviar(tokenUsado);
+      } else if (renovado) {
+        // La renovación resolvió, pero el access nuevo es de otra sesión:
+        // entre el 401 y la respuesta alguien volvió a entrar. Reintentar con
+        // ese token usaría credenciales ajenas; la sesión nueva tampoco se
+        // cierra.
+        conservarSesion = true;
+        motivoSesion = "token_obsoleto";
+      } else if (obtenerRefreshToken() === null) {
+        // El refresh fue rechazado: renovarSesion ya borró los tokens.
+        manejadorNoAutorizado?.();
+        notificado = true;
+        motivoSesion = "sesion_rechazada";
+      } else if (obtenerAccessToken() !== token) {
+        // Otra operación (p. ej. otra petición de la misma sesión) rotó el
+        // access mientras renovábamos. El rechazo es del token anterior.
+        conservarSesion = true;
+        motivoSesion = "token_obsoleto";
+      } else {
+        // Fallo temporal (red/503/timeout): los tokens siguen guardados.
+        conservarSesion = true;
+        motivoSesion = "renovacion_temporal";
+      }
     }
   }
 
@@ -150,14 +197,19 @@ export async function pedir<T>(
   // Si mientras la petición viajaba el usuario cerró sesión y volvió a
   // entrar, el 401 corresponde al token VIEJO: borrar los tokens nuevos
   // echaría a alguien que acaba de iniciar sesión bien.
-  if (
-    res.status === 401 &&
-    !notificado &&
-    !conservarSesion &&
-    obtenerAccessToken() === tokenUsado
-  ) {
-    logout();
-    manejadorNoAutorizado?.();
+  if (res.status === 401) {
+    if (
+      !notificado &&
+      !conservarSesion &&
+      obtenerAccessToken() === tokenUsado
+    ) {
+      logout();
+      manejadorNoAutorizado?.();
+      motivoSesion = "sesion_rechazada";
+    } else if (motivoSesion === undefined) {
+      motivoSesion =
+        obtenerAccessToken() === tokenUsado ? "sesion_rechazada" : "token_obsoleto";
+    }
   }
 
   if (!res.ok) {
@@ -170,7 +222,12 @@ export async function pedir<T>(
     } catch {
       // el cuerpo no era JSON
     }
-    throw new ErrorDeApi(message, res.status, campos);
+    throw new ErrorDeApi(
+      message,
+      res.status,
+      campos,
+      motivoSesion ? { motivo: motivoSesion, tokenUsado } : undefined,
+    );
   }
 
   if (res.status === 204) return undefined as T;
