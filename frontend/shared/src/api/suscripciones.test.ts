@@ -10,7 +10,7 @@ import {
 } from "./suscripciones";
 import { gastoProyectado } from "../calculos";
 import { validarUso } from "../validacionesSuscripcion";
-import { cancelarSuscripcion } from "./suscripciones";
+import { cancelarSuscripcion, reactivarSuscripcion } from "./suscripciones";
 
 beforeEach(() => {
   configurarApi({ urlBase: "http://api.test/api" });
@@ -339,6 +339,47 @@ describe("cancelarSuscripcion (CH-10, sobre VI-03)", () => {
 
     expect(error).toBeInstanceOf(ErrorDeApi);
     expect(error.status).toBe(403);
+  });
+});
+
+describe("reactivarSuscripcion (interruptor de Inicio, sobre VI-09)", () => {
+  it("usa la acción reactivar del backend (no PATCH ni DELETE) y devuelve lo que responde", async () => {
+    const fetchFalso = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...RESPUESTA_REAL.results[0], estado: "activo", horas_uso_mes: "1.50" }),
+    });
+    vi.stubGlobal("fetch", fetchFalso);
+
+    const reactivada = await reactivarSuscripcion("abc-123");
+
+    expect(fetchFalso).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchFalso.mock.calls[0] as [string, { method: string; body?: string }];
+    expect(url).toBe("http://api.test/api/suscripciones/abc-123/reactivar/");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+    expect(reactivada.estado).toBe("activo");
+    // Se traduce igual que el resto: los Decimal llegan como texto.
+    expect(reactivada.monto).toBe(5990);
+    expect(reactivada.horas_uso_mes).toBe(1.5);
+    expect(reactivada.fin_prueba).toBeUndefined();
+  });
+
+  it("un rechazo del backend llega como ErrorDeApi con su estado y su mensaje", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ estado: ["El evento reactivacion_usuario no está permitido desde prueba."] }),
+      }),
+    );
+
+    const error = (await reactivarSuscripcion("abc-123").catch((e: unknown) => e)) as ErrorDeApi;
+
+    expect(error).toBeInstanceOf(ErrorDeApi);
+    expect(error.status).toBe(400);
+    expect(error.message).toContain("no está permitido");
   });
 });
 

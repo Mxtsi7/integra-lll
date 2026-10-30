@@ -10,13 +10,18 @@ import EditarSuscripcionForm, {
   type EditarSuscripcionFormData,
 } from "../components/subscriptions/EditarSuscripcionForm";
 import EliminarSuscripcionDialog from "../components/subscriptions/EliminarSus";
+import CancelarSuscripcionDialog from "../components/subscriptions/CancelarSus";
 import AvisoCambiosSinGuardar from "../components/subscriptions/AvisoCambiosSinGuardar";
 import { useAvisoAlSalir } from "../hooks/useAvisoAlSalir";
 import { Modal } from "../components/ui/Modal";
 import { Boton } from "../components/ui/Boton";
+import { ErrorConReintento } from "../components/ui/ErrorConReintento";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { contarAvisos } from "./DashboardPage";
 import {
   actualizarSuscripcion,
+  cancelarSuscripcion,
   crearSuscripcion,
   eliminarSuscripcion,
   ErrorDeApi,
@@ -26,6 +31,7 @@ import {
   formatearTotales,
   gastosPorMoneda,
   getSuscripciones,
+  reactivarSuscripcion,
   type OrdenSuscripciones,
   type Suscripcion,
 } from "@ojoalgasto/shared";
@@ -105,6 +111,28 @@ function mensajeDeError(e: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Qué decir si el interruptor no pudo cancelar o reactivar. La suscripción no cambió. */
+function mensajeErrorSeguimiento(e: unknown, accion: "cancelar" | "reactivar"): string {
+  if (e instanceof TypeError) return "No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.";
+  if (e instanceof ErrorDeApi) {
+    if (e.status === 403) return `No tienes permiso para ${accion} esta suscripción.`;
+    if (e.status === 404) return "Esta suscripción ya no existe. Actualizamos tu lista.";
+    if (e.status < 500 && e.message) return e.message;
+  }
+  return `No pudimos ${accion} la suscripción. Intenta de nuevo.`;
+}
+
+/** Si `s` sigue entrando en la consulta de esa clave (su estado y su fecha de cobro). */
+function entraEnLaClave(s: Suscripcion, clave: string): boolean {
+  const [filtro, fecha] = clave.split("|");
+  return (filtro === "todas" || s.estado === filtro) && (fecha === "" || s.fecha_proximo_cobro === fecha);
+}
+
+const MENSAJE_ERROR_CARGA = "No pudimos cargar tus suscripciones. Intenta de nuevo.";
+const MENSAJE_ERROR_RECARGA = "No pudimos actualizar el resumen y los conteos: puede que no estén al día. Intenta de nuevo.";
+const MENSAJE_ERROR_LISTADO = "No pudimos cargar tus suscripciones con estos filtros. Intenta de nuevo.";
+const MENSAJE_CAMBIO_SIN_LISTADO = "Guardamos el cambio, pero no pudimos actualizar la lista. Intenta de nuevo.";
+
 /** "Netflíx" y "netflix" se encuentran igual. */
 function normalizar(texto: string): string {
   return texto
@@ -126,7 +154,11 @@ export const Homepage: React.FC = () => {
   // Todas las suscripciones, sin filtros: el resumen, los conteos de cada
   // estado y saber si la cuenta está vacía salen de acá (CH-13).
   const [isLoading, setIsLoading] = useState(true);
+  // Falló la primera carga: no hay nada que mostrar.
   const [error, setError] = useState<string | null>(null);
+  // Falló una recarga: se sigue viendo la última lista válida (revisión de #134).
+  const [errorRecarga, setErrorRecarga] = useState<string | null>(null);
+  const listaCargada = useRef(false);
   const [suscripciones, setSuscripciones] = useState<Suscripcion[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -161,6 +193,43 @@ export const Homepage: React.FC = () => {
   const [eliminando, setEliminando] = useState<Suscripcion | null>(null);
   // id de la suscripción que está haciendo fade-out ahora mismo
   const [removingId, setRemovingId] = useState<string | null>(null);
+
+  // La sesión con que se montó Inicio. Si cambia, <RutaPrivada> la vuelve a
+  // montar; esto cubre el instante antes de ese montaje: un resultado de la
+  // cuenta anterior no se aplica, y no se cancela ni reactiva con el token
+  // de la nueva.
+  const toast = useToast();
+  const { capturarSesion } = useAuth();
+  const [sesion] = useState(capturarSesion);
+  const montada = useRef(true);
+  useEffect(() => {
+    montada.current = true;
+    return () => {
+      montada.current = false;
+    };
+  }, []);
+  const sigueVigente = useCallback(() => montada.current && capturarSesion() === sesion, [capturarSesion, sesion]);
+
+  // Interruptor de seguimiento: una operación por suscripción a la vez. La
+  // ref decide en el mismo instante (doble clic); el estado bloquea la tarjeta.
+  const cambiosEnCurso = useRef(new Set<string>());
+  const [cambiando, setCambiando] = useState<ReadonlySet<string>>(() => new Set());
+  // Qué suscripción se está por cancelar (null = confirmación cerrada).
+  const [cancelando, setCancelando] = useState<Suscripcion | null>(null);
+  const idCancelando = useRef<string | null>(null);
+  const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null);
+  // Sube con cada escritura que el servidor confirma: crear, editar, eliminar,
+  // cancelar y reactivar. Una lectura que salió antes puede traer lo de antes
+  // (o fallar por algo que ya no importa): se descarta y se pide de nuevo.
+  const generacion = useRef(0);
+  const invalidarLecturas = () => {
+    generacion.current += 1;
+  };
+  // La generación de la lista que se ve: si es más vieja y la recarga falla,
+  // el cambio ya está guardado y lo que falta es actualizar la lista.
+  const generacionListado = useRef(0);
+  const [recargaTodas, setRecargaTodas] = useState(0);
+  const recargarTodas = useCallback(() => setRecargaTodas((n) => n + 1), []);
 
   // CH-16: si el formulario abierto (crear o editar; nunca hay dos a la vez)
   // tiene cambios sin guardar. Es una ref y no estado a propósito: el Modal
@@ -204,28 +273,50 @@ export const Homepage: React.FC = () => {
 
   useEffect(() => {
     let cancelado = false;
+    const generacionAlPedir = generacion.current;
+    const vieja = () => generacion.current !== generacionAlPedir;
 
     getSuscripciones()
       .then((lista) => {
         if (cancelado) return;
+        if (vieja()) {
+          recargarTodas();
+          return;
+        }
+        listaCargada.current = true;
         setSuscripciones(lista);
+        setErrorRecarga(null);
         setIsLoading(false);
       })
       .catch(() => {
         if (cancelado) return;
-        setError("No pudimos cargar tus suscripciones. Intenta de nuevo en unos segundos.");
-        setIsLoading(false);
+        if (vieja()) {
+          recargarTodas();
+          return;
+        }
+        // Con una lista ya a la vista, una recarga fallida no tapa Inicio: se
+        // sigue viendo lo último, con sus controles, y se ofrece reintentar.
+        if (listaCargada.current) {
+          setErrorRecarga(MENSAJE_ERROR_RECARGA);
+        } else {
+          setError(MENSAJE_ERROR_CARGA);
+          setIsLoading(false);
+        }
       });
 
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [recargaTodas, recargarTodas]);
 
   // Estado, fecha y orden se mandan a la API, que filtra y ordena ANTES de
-  // paginar (CH-11, CH-12). Una respuesta de una consulta anterior se descarta.
+  // paginar (CH-11, CH-12). Una respuesta de una consulta anterior se descarta,
+  // y una que salió antes de una escritura confirmada se descarta y se pide
+  // de nuevo.
   useEffect(() => {
     let cancelado = false;
+    const generacionAlPedir = generacion.current;
+    const vieja = () => generacion.current !== generacionAlPedir;
     setErrorListado(null);
 
     getSuscripciones({
@@ -234,16 +325,27 @@ export const Homepage: React.FC = () => {
       orden,
     })
       .then((items) => {
-        if (!cancelado) setListado({ clave, recarga: recargaListado, items });
+        if (cancelado) return;
+        if (vieja()) {
+          recargarListado();
+          return;
+        }
+        generacionListado.current = generacionAlPedir;
+        setListado({ clave, recarga: recargaListado, items });
       })
       .catch(() => {
-        if (!cancelado) setErrorListado("No pudimos cargar tus suscripciones con estos filtros. Intenta de nuevo.");
+        if (cancelado) return;
+        if (vieja()) {
+          recargarListado();
+          return;
+        }
+        setErrorListado(generacionListado.current < generacionAlPedir ? MENSAJE_CAMBIO_SIN_LISTADO : MENSAJE_ERROR_LISTADO);
       });
 
     return () => {
       cancelado = true;
     };
-  }, [clave, filtro, fecha, orden, recargaListado]);
+  }, [clave, filtro, fecha, orden, recargaListado, recargarListado]);
 
   // Cambiar un filtro, el orden o la búsqueda (también con Atrás/Adelante)
   // vuelve a la primera página.
@@ -339,6 +441,7 @@ export const Homepage: React.FC = () => {
     setIsSavingAdd(true);
     try {
       const creada = await crearSuscripcion(nueva);
+      invalidarLecturas();
       setSuscripciones((prev) => [...prev, creada]);
       // Guardado: ya no hay nada que perder. También se quita el aviso, por si
       // se guardó con él visible (antes quedaba pendiente al reabrir).
@@ -389,6 +492,7 @@ export const Homepage: React.FC = () => {
         frecuencia: data.frecuencia,
         categoria: data.categoria,
       });
+      invalidarLecturas();
       setSuscripciones((prev) => prev.map((s) => (s.id === data.id ? actualizada : s)));
       // Se ve el cambio de inmediato y se vuelve a pedir la lista: con otro
       // monto o nombre puede quedar en otro lugar del orden.
@@ -416,6 +520,9 @@ export const Homepage: React.FC = () => {
     setIsDeleting(true);
     try {
       await eliminarSuscripcion(idToRemove);
+      // Al confirmarlo el servidor, no al terminar la animación: una lectura
+      // de antes no la vuelve a contar mientras se desvanece.
+      invalidarLecturas();
       setEliminando(null);
       setRemovingId(idToRemove);
 
@@ -461,6 +568,99 @@ export const Homepage: React.FC = () => {
     setEliminando(null);
   }, []);
 
+  /** Reserva la suscripción para cancelar o reactivar; false si ya hay una operación en vuelo sobre ella. */
+  const reservarCambio = (id: string): boolean => {
+    if (!sigueVigente() || cambiosEnCurso.current.has(id)) return false;
+    cambiosEnCurso.current.add(id);
+    setCambiando(new Set(cambiosEnCurso.current));
+    return true;
+  };
+
+  const liberarCambio = (id: string) => {
+    cambiosEnCurso.current.delete(id);
+    if (sigueVigente()) setCambiando(new Set(cambiosEnCurso.current));
+  };
+
+  // El interruptor de la tarjeta. Usa las transiciones del backend (VI-03 y
+  // VI-09), nunca un PATCH al estado ni el campo `activo` (que es eliminar).
+  // Lo que se ve después es la suscripción que devuelve el servidor.
+  const aplicarSeguimiento = async (s: Suscripcion, accion: "cancelar" | "reactivar") => {
+    if (!reservarCambio(s.id)) return; // doble clic, o ya hay otra en vuelo sobre ella
+    if (accion === "cancelar") setErrorCancelacion(null);
+    try {
+      const actualizada = accion === "cancelar" ? await cancelarSuscripcion(s.id) : await reactivarSuscripcion(s.id);
+      if (!sigueVigente()) return;
+      invalidarLecturas();
+      // Conteos, resumen y campana salen de la lista completa.
+      setSuscripciones((prev) => prev.map((x) => (x.id === actualizada.id ? actualizada : x)));
+      // En la grilla se ve enseguida con los filtros actuales (una cancelada no
+      // se queda en Activas) y se vuelve a pedir: su lugar puede cambiar.
+      setListado(
+        (l) =>
+          l && {
+            ...l,
+            items: l.items.flatMap((x) => (x.id !== actualizada.id ? [x] : entraEnLaClave(actualizada, l.clave) ? [actualizada] : [])),
+          },
+      );
+      recargarListado();
+      if (accion === "cancelar") {
+        idCancelando.current = null;
+        setCancelando(null);
+        toast.exito(`Cancelaste ${s.nombre}. Ya no contamos sus próximos cobros.`);
+      } else {
+        toast.exito(`Reactivaste ${s.nombre}. Volvemos a contar sus cobros.`);
+      }
+    } catch (e) {
+      if (!sigueVigente()) return;
+      const mensaje = mensajeErrorSeguimiento(e, accion);
+      if (e instanceof ErrorDeApi && e.status === 404) {
+        // Ya no existe (p. ej. la eliminaron en otro dispositivo): se cierra y se recarga la lista.
+        idCancelando.current = null;
+        setCancelando(null);
+        toast.error(mensaje);
+        recargarTodas();
+        recargarListado();
+      } else if (accion === "cancelar") {
+        // Se ve dentro de la confirmación, que sigue abierta para reintentar.
+        setErrorCancelacion(mensaje);
+      } else {
+        toast.error(mensaje);
+      }
+    } finally {
+      liberarCambio(s.id);
+    }
+  };
+
+  // Apagar pide confirmar (cancelar); prender reactiva enseguida.
+  const cambiarSeguimiento = (s: Suscripcion) => {
+    if (!sigueVigente()) return;
+    if (s.estado === "cancelado") {
+      void aplicarSeguimiento(s, "reactivar");
+      return;
+    }
+    setErrorCancelacion(null);
+    idCancelando.current = s.id;
+    setCancelando(s);
+  };
+
+  // "Volver", la X y Escape: no se llama a la API. Mientras la cancelación
+  // viaja no se cierra: el resultado decide qué se muestra.
+  const cerrarCancelacion = useCallback(() => {
+    if (!sigueVigente()) return;
+    if (idCancelando.current && cambiosEnCurso.current.has(idCancelando.current)) return;
+    idCancelando.current = null;
+    setErrorCancelacion(null);
+    setCancelando(null);
+  }, [sigueVigente]);
+
+  // La primera carga falló: se vuelve a pedir todo, mostrando la carga.
+  const reintentarCarga = () => {
+    setError(null);
+    setIsLoading(true);
+    recargarTodas();
+    recargarListado();
+  };
+
   const isEmpty = !isLoading && !error && suscripciones.length === 0;
   const totalMensual = gastosPorMoneda(suscripciones);
   const fantasmasMensual = gastosPorMoneda(suscripciones.filter((s) => s.estado === "fantasma"));
@@ -485,7 +685,7 @@ export const Homepage: React.FC = () => {
       avisos={isLoading ? undefined : contarAvisos(suscripciones)}
     >
       {error ? (
-        <p className={styles.mensaje}>{error}</p>
+        <ErrorConReintento mensaje={error} onReintentar={reintentarCarga} />
       ) : isEmpty ? (
         <EmptyState
           title="Todavía no registras suscripciones"
@@ -512,6 +712,16 @@ export const Homepage: React.FC = () => {
               <p className={styles.datoValor}>{isLoading ? "···" : formatearTotales(fantasmasMensual)}</p>
             </div>
           </section>
+
+          {errorRecarga && (
+            <div className={styles.errorListado} role="alert">
+              <p>{errorRecarga}</p>
+              {/* El aviso se quita cuando una recarga sale bien. */}
+              <Boton variante="secundario" tamano="s" onClick={recargarTodas}>
+                Reintentar
+              </Boton>
+            </div>
+          )}
 
           <div className={styles.filtros} role="group" aria-label="Filtrar por estado">
             {/* El filtro elegido se ve aunque hoy no tenga ninguna (p. ej. llegó por la URL). */}
@@ -611,6 +821,8 @@ export const Homepage: React.FC = () => {
                       setDeleteError(null);
                       setEliminando(s);
                     }}
+                    onCambiarSeguimiento={cambiarSeguimiento}
+                    isChangingState={cambiando.has(s.id)}
                     isRemoving={s.id === removingId}
                   />
                 ))}
@@ -696,6 +908,18 @@ export const Homepage: React.FC = () => {
             onCancel={cerrarEliminar}
             isDeleting={isDeleting}
             error={deleteError}
+          />
+        </Modal>
+      )}
+
+      {cancelando && (
+        <Modal titulo={`¿Cancelar ${cancelando.nombre}?`} alCerrar={cerrarCancelacion} tipo="alerta">
+          <CancelarSuscripcionDialog
+            nombreSuscripcion={cancelando.nombre}
+            onConfirm={() => void aplicarSeguimiento(cancelando, "cancelar")}
+            onVolver={cerrarCancelacion}
+            isCancelling={cambiando.has(cancelando.id)}
+            error={errorCancelacion}
           />
         </Modal>
       )}

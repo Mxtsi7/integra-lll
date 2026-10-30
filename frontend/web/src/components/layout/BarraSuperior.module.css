@@ -1,8 +1,14 @@
+/* Mismo ancho y padding que el contenido (AppLayout .contenido): en pantallas
+   anchas la marca, la campana y la cuenta quedan alineadas con lo de abajo,
+   no en los bordes de la ventana. */
 .barra {
   display: flex;
   align-items: center;
   gap: 20px;
+  width: 100%;
+  max-width: calc(var(--ancho-contenido) + 56px);
   min-height: var(--alto-barra);
+  margin: 0 auto;
   padding: 14px 28px 0;
 }
 
@@ -13,6 +19,7 @@
 .buscador {
   position: relative;
   flex: 1;
+  min-width: 0;
   max-width: 520px;
   margin: 0 auto;
 }
