@@ -1,14 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  guardarTokens,
   haySesionValida,
-  logout,
-  revocarSesion,
   getUsuarioActual,
   configurarManejador401,
   ErrorDeApi,
   type Usuario,
 } from '@ojoalgasto/shared';
+import {
+  hidratarSesionSegura,
+  guardarTokensSeguros,
+  limpiarSesionSegura,
+  obtenerTokensSeguros,
+  validarFormatoToken,
+} from '../src/services/storageSeguro';
+import { revocarTokensRemotos } from '../src/services/clienteHttp';
 
 export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
@@ -22,7 +27,7 @@ type AuthValue = {
   haySesion: boolean;
   estadoPerfil: EstadoPerfil;
   errorPerfil: string | null;
-  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => void;
+  iniciarSesion: (tokens: Tokens, usuario?: Usuario) => Promise<void>;
   cerrarSesion: () => Promise<void>;
   recargarPerfil: () => Promise<void>;
 };
@@ -77,7 +82,7 @@ export function AuthProvider({
 
       if (err instanceof ErrorDeApi && (err.status === 401 || err.status === 404)) {
         // Token revocado o usuario inexistente: la sesión no sirve
-        logout();
+        void limpiarSesionSegura().catch(() => {});
         setUsuario(null);
         setEstado('anonimo');
         setEstadoPerfil('inactivo');
@@ -92,15 +97,23 @@ export function AuthProvider({
     }
   }, []);
 
-  // Bootstrap al arrancar la app: valida si hay sesión guardada en shared
+  // Bootstrap al arrancar la app: hidrata tokens desde SecureStore y valida la sesión
   useEffect(() => {
     if (initialEstado || initialUsuario) return;
 
     const idSesion = ++sesionVigente.current;
 
     async function verificarSesionInicial() {
+      // 1. Hidratación asíncrona desde SecureStore hacia caché síncrono en memoria
+      await hidratarSesionSegura();
+
+      if (idSesion !== sesionVigente.current) return;
+
+      // 2. Verificación de vigencia y desfase de reloj del token recuperado
       if (!haySesionValida()) {
-        logout();
+        try {
+          await limpiarSesionSegura();
+        } catch {}
         if (idSesion === sesionVigente.current) {
           setUsuario(null);
           setEstado('anonimo');
@@ -124,11 +137,13 @@ export function AuthProvider({
     configurarManejador401(() => {
       sesionVigente.current++;
       ultimaPeticion.current++;
-      logout();
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
       setErrorPerfil(null);
+      void limpiarSesionSegura().catch((err) => {
+        console.warn('[AuthContext] Error al limpiar sesión en interceptor 401:', err);
+      });
     });
     return () => {
       configurarManejador401(() => {});
@@ -136,18 +151,61 @@ export function AuthProvider({
   }, []);
 
   const iniciarSesion = useCallback(
-    (tokens: Tokens, u?: Usuario) => {
-      guardarTokens(tokens);
-      if (!haySesionValida()) {
-        logout();
-        setUsuario(null);
-        setEstado('anonimo');
-        setEstadoPerfil('inactivo');
-        setErrorPerfil(null);
+    async (tokens: Tokens, u?: Usuario) => {
+      // 0. Capturar la identidad de esta operación antes de cualquier paso asíncrono
+      const idSesion = ++sesionVigente.current;
+      ultimaPeticion.current++;
+      const esVigente = () => idSesion === sesionVigente.current;
+
+      // 1. Prevalidación de estructura y formato del token recibido
+      if (!tokens.access_token || !validarFormatoToken(tokens.access_token)) {
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
         throw new Error('Token inválido o expirado');
       }
 
-      const idSesion = ++sesionVigente.current;
+      // 2. Persistencia segura atómica en hardware esperando su confirmación
+      try {
+        await guardarTokensSeguros(tokens);
+      } catch (err) {
+        // Rollback del contexto SOLO si esta operación sigue siendo la vigente
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
+        throw err;
+      }
+
+      // Si durante la persistencia se inició otra sesión o logout, abortar
+      if (!esVigente()) {
+        return;
+      }
+
+      // 3. Validación de vigencia del token guardado (con desfase de reloj)
+      if (!haySesionValida()) {
+        try {
+          await limpiarSesionSegura();
+        } catch {}
+        if (esVigente()) {
+          setUsuario(null);
+          setEstado('anonimo');
+          setEstadoPerfil('inactivo');
+          setErrorPerfil(null);
+        }
+        throw new Error('Token inválido o expirado');
+      }
+
+      if (!esVigente()) {
+        return;
+      }
+
+      // 4. Transicionar a autenticado SOLO tras persistencia y validación exitosas
       setEstado('autenticado');
 
       if (u) {
@@ -163,26 +221,34 @@ export function AuthProvider({
   );
 
   const cerrarSesion = useCallback(async () => {
-    // Invalida inmediatamente cualquier petición asíncrona de perfil en vuelo
+    // 1. Invalida inmediatamente cualquier petición asíncrona de perfil o sesión en vuelo
     sesionVigente.current++;
     ultimaPeticion.current++;
 
-    try {
-      await revocarSesion();
-    } catch {
-      // Ignorar error si el backend no responde
-    } finally {
-      logout();
-      setUsuario(null);
-      setEstado('anonimo');
-      setEstadoPerfil('inactivo');
-      setErrorPerfil(null);
+    // 2. Capturar credenciales activas y vigencia del access token antes de limpiar memoria
+    const credenciales = obtenerTokensSeguros();
+    const accesoVigente = haySesionValida();
+
+    // 3. Cierre inmediato en memoria para navegación pública instantánea
+    setUsuario(null);
+    setEstado('anonimo');
+    setEstadoPerfil('inactivo');
+    setErrorPerfil(null);
+
+    // 4. Revocación remota aislada en segundo plano con las credenciales capturadas y vigencia
+    if (credenciales.refresh_token) {
+      void revocarTokensRemotos(credenciales, accesoVigente);
     }
+
+    // 5. Limpieza persistente en hardware seguro: se ejecuta inmediatamente (no después de la red)
+    await limpiarSesionSegura();
   }, []);
 
   const recargarPerfil = useCallback(async () => {
     if (!haySesionValida()) {
-      logout();
+      try {
+        await limpiarSesionSegura();
+      } catch {}
       setUsuario(null);
       setEstado('anonimo');
       setEstadoPerfil('inactivo');
