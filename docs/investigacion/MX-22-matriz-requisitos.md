@@ -260,9 +260,14 @@ un requisito nuevo. La matriz expresa cobertura prevista, no prueba de cumplimie
 Actualización de MX-07, 29-10-2026: [Felipe aprobó técnicamente la opción 3 para Outlook](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
 La [enmienda RF-01.7](requisitos-vigentes.md#rf-017--eliminar-cuenta-y-datos-personales)
 registra destrucción local y aviso previo al titular, también para operaciones
-pendientes. Se mantiene separada su ratificación de producto/equipo. El aviso
+pendientes. El responsable MX-07/MX-22 ratificó ese alcance expresamente el
+30-10-2026 en la sesión de corrección de PR #72; se registra en la
+[tarjeta MX-07](https://trello.com/c/50Mkov2i). El aviso
 está incluido en el diálogo web AN-18; AN-19 debe incorporarlo cuando implemente
-su flujo móvil. La desconexión Outlook ordinaria de FE-05 queda a cargo de Felipe,
+su flujo móvil. La aceptación se limita a Outlook, exige instrucciones personales
+y corporativas y no registra avisos o aceptaciones retroactivas para operaciones
+antiguas; se comunica la limitación si existe canal sin bloquear el borrado.
+La desconexión Outlook ordinaria de FE-05 queda a cargo de Felipe,
 fuera del cierre de organización. Esta actualización no declara aprobados ni
 desplegados los demás elementos de la captura histórica de la tabla.
 
@@ -271,7 +276,7 @@ desplegados los demás elementos de la captura histórica de la tabla.
 | MX-02/03/04, MX-30 | Ya en GitHub: #60 y #55; no duplicar |
 | MX-05/06, MX-10/29 | Ya integradas: #69 y #68 |
 | MX-28, MX-11 | Integradas durante esta ejecución: #70 y #71 |
-| MX-07 | #72 draft; Gmail usa FE-05. Outlook cuenta con visto bueno técnico para cierre local sin `revocado_en`; enmienda RF-01.7 propuesta para ratificación. Credenciales nuevas o errores conservan 409 y no se destruyen |
+| MX-07 | #72; integra FE-05/#133 conservando evidencia: `invalid_token` no confirma revocación. Outlook cuenta con visto bueno técnico y ratificación del responsable MX-07/MX-22 (30-10-2026) para cierre local sin `revocado_en`, aviso previo y operaciones antiguas. Credenciales nuevas o errores conservan 409 y no se destruyen. La aceptación del alcance no acredita despliegue |
 | MX-12/13 | #73; conserva dependencia de eliminación |
 | MX-08/15 | [#85](https://github.com/Mxtsi7/integra-lll/pull/85), Maxi-planes |
 | MX-09/16 | [#86](https://github.com/Mxtsi7/integra-lll/pull/86), Maxi-permisos-planes, base #85 |

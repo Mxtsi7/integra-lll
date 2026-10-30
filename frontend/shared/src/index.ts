@@ -33,6 +33,7 @@ export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/preferencias';
+export * from './api/alertas';
 export * from './api/planes';
 export * from './api/eliminarCuenta';
 export * from './api/verificacionCorreo';

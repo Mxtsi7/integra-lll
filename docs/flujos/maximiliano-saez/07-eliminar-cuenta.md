@@ -69,8 +69,10 @@ agregar su destino antes de que reciba datos.
   Conserva proveedores globales y bloquea FK ajenas inconsistentes, incluidas las
   relaciones de los hallazgos con su suscripción, cobro y cobro relacionado.
 - Connectors elimina autorizaciones pendientes, importaciones y cuentas. Antes de
-  limpiar invoca `revocar_y_desconectar` de FE-05 para cada concesión sin
-  evidencia **cuyo proveedor ofrece revocación**; Outlook se omite y se trata en
+  limpiar invoca `revocar_y_desconectar` de FE-05 integrado desde #133 para cada concesión sin
+  evidencia **cuyo proveedor ofrece revocación**; prefiere refresh legible y usa
+  access si no hay refresh legible. Un `invalid_token`, incluso del refresh,
+  conserva el pendiente y los tokens: no prueba la revocación de la autorización; Outlook se omite y se trata en
   el punto siguiente. Un fallo devuelve 409, conserva las credenciales cifradas y
   revierte los cambios locales de esa cuenta. Una confirmación real guarda
   `revocado_en` y retira tokens. Cada éxito queda confirmado en su propia
@@ -90,7 +92,7 @@ agregar su destino antes de que reciba datos.
   y, para trabajo/escuela, exige consentimiento administrativo y afecta a todas
   las aplicaciones del usuario. Esto es una **mitigación con riesgo residual** y
   cuenta con el [visto bueno técnico de Felipe / FE-05](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
-  La enmienda de RF-01.7 está registrada para ratificación del equipo; la decisión completa está en
+  El responsable MX-07/MX-22 ratificó esta excepción el 30-10-2026, sin aprobar el resto de la PR; la decisión completa está en
   `docs/decisiones/mx-07-outlook-revocacion.md`.
 - Riesgo residual de Outlook: un refresh token ya emitido por Microsoft podría
   seguir válido hasta que expire o hasta que el usuario retire el acceso. Ya no
@@ -100,16 +102,20 @@ agregar su destino antes de que reciba datos.
   - cuenta personal: retirar el acceso de la aplicación en
     <https://account.live.com/consent/Manage>. La fuente es una respuesta de
     Microsoft Q&A, **no documentación oficial**;
-  - cuenta de trabajo/escuela: el administrador del tenant o el portal de
-    aplicaciones de Microsoft. Esta vía **no está verificada** y queda fuera del
-    alcance de esta PR.
+  - cuenta de trabajo/escuela: abrir [My Apps](https://myapplications.microsoft.com/),
+    seleccionar la aplicación, administrar y revocar permisos. Si fueron concedidos
+    por la organización o no puede retirarlos, contactar a su administrador.
+    Instrucciones verificadas en [Microsoft Support](https://support.microsoft.com/en-us/accounts-billing/work-school/edit-or-revoke-application-permissions-in-the-my-apps-portal).
   El diálogo web (AN-18) muestra el aviso antes de confirmar, sin habilitar su
   bandera de disponibilidad. El flujo móvil AN-19 debe mostrarlo al implementarse.
   La política también permite resolver operaciones durables Outlook ya pendientes;
   el worker vuelve a intentar sus mismos destinos y solo retira Connectors tras 204.
+  No se registran avisos ni aceptaciones retroactivas. Si soporte dispone de un
+  canal autorizado, comunica la limitación sin exigir respuesta para borrar;
+  sin canal no se recrean datos personales ni se simula un envío.
 - `pendientes_de_revocar` y `reintentar_revocaciones` excluyen a Outlook: su
   limitación es permanente, no un fallo reintentable. La limpieza registra en
-  logs estructurados cuántas cuentas se cerraron sin revocación del proveedor,
+  logs estructurados `resultado=cierre_local` y cuántas cuentas se cerraron sin revocación del proveedor,
   sin correos ni tokens. No se añadió cuerpo al 204 para no romper al consumidor.
 - Analytics elimina datos de ingesta/uso, cobertura, recomendaciones y descartes,
   conservando umbrales globales; bloquea cascadas que afectarían otro tenant.
@@ -153,7 +159,11 @@ Subscriptions, por eso configura `ELIMINACION_DESTINOS=subscriptions`; esto no
 despliega ni acredita Connectors, Analytics o Notifications en ese cluster.
 El HPA de Gateway queda en máximo 2, igual que Subscriptions: 10 pods en reposo y
 12 al escalar. Presupuesto máximo: 2688 MiB de límite de memoria y 1750 milicores.
-La CI comprueba ese presupuesto. No se ejecutó un despliegue ni revocación real.
+La CI incluye explícitamente el generador externo en el escenario. Con carga
+local se requieren 13 pods y 2816 MiB y la comprobación falla. La demo usa otro
+namespace con DNS completo y Host del servicio, sin apagar workers. Los parches
+de secretos usan archivos temporales privados, eliminados aun si kubectl falla.
+No se ejecutó un despliegue Kubernetes ni revocación OAuth real.
 
 ## Validación
 
@@ -164,7 +174,11 @@ revocación, credenciales ilegibles, migraciones y aislamiento A/B. PostgreSQL
 comprueba escrituras concurrentes por HTTP, que la limpieza espere una escritura
 en vuelo en ambos modos de eventos y que una revocación ya confirmada sobreviva a
 que otra conexión termine la de la limpieza.
-El proveedor OAuth y el transporte entre servicios usan dobles explícitos.
+Las pruebas unitarias usan dobles explícitos. La [verificación integrada del
+30-10-2026](../../revisiones/pr72-correcciones-20261030.md) ejecuta cinco procesos
+HTTP con PostgreSQL y el worker real: fallo recuperable, reintento y 204 con la
+misma operación, aislamiento y una operación antigua Outlook. Solo Google OAuth
+y la caché de sesiones de esa demo usan dobles; no acredita Redis ni un despliegue.
 La prueba de Gateway ejecuta `gateway.app.proxy` y Auth en un proceso; no acredita
 servidores desplegados. Las dos pruebas de DELETE de #73 pasan a
 `tests/test_aislamiento_eliminacion_gateway.py`; registro y GET/PATCH se separan

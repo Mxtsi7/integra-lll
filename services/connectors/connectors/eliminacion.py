@@ -50,6 +50,7 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
             logger.info(
                 "limpieza_connectors_sin_revocacion_proveedor",
                 extra={
+                    "resultado": "cierre_local",
                     "organizacion_id": str(organizacion_id),
                     "cuentas_sin_revocacion": self._cuentas_sin_revocacion,
                     "proveedores_sin_revocacion": self._proveedores_sin_revocacion,

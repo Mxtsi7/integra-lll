@@ -160,16 +160,23 @@ Permite cerrar la sesión en el dispositivo actual. Tras el cierre, el token de 
 
 ## RF-01.7 — Eliminar cuenta y datos personales
 
-**Enmienda de Outlook — 29-10-2026, para ratificación del equipo (MX-22).**
+**Enmienda de Outlook — propuesta 29-10-2026, ratificada 30-10-2026 por el responsable MX-07/MX-22.**
 Para proveedores que no ofrecen revocación por token (Outlook), la eliminación
 destruye las credenciales locales dentro del plazo e informa al titular cómo
 retirar el acceso desde su cuenta; la revocación del lado del proveedor queda
 a cargo del titular. Esta excepción se limita a Outlook y también se aplica a
 operaciones de eliminación ya pendientes. Gmail conserva la confirmación del
 proveedor; `revocado_en` nunca representa una desconexión o destrucción local.
+Se ofrecen instrucciones para cuentas personales y de trabajo/escuela. Para
+operaciones antiguas no se registran avisos ni aceptaciones retroactivas; si
+hay un canal legítimo disponible se comunica la limitación sin exigir respuesta
+para completar el borrado. La ratificación solo cubre esta excepción Outlook,
+no el resto de la PR ni sus verificaciones técnicas.
 El [visto bueno técnico de Felipe / FE-05](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231)
-respalda esta propuesta; no sustituye la ratificación de producto/equipo ni
-acredita por sí solo el cumplimiento operativo del plazo. Véase la
+respalda la decisión técnica; la aceptación del alcance fue confirmada
+expresamente por el responsable MX-07/MX-22 («Sí, ratifico ese alcance») en la
+sesión de corrección de PR #72 y se registra en la [tarjeta MX-07](https://trello.com/c/50Mkov2i).
+Esta aceptación no acredita por sí sola el cumplimiento operativo del plazo. Véase la
 [decisión de MX-07](../decisiones/mx-07-outlook-revocacion.md).
 
 Permite eliminar la cuenta de forma permanente, previa confirmación de identidad (contraseña vigente o reautenticación con Google) y confirmación explícita de la acción. Antes de confirmar, el sistema informa qué se eliminará y qué se conservará anonimizado. La eliminación aplica la siguiente regla de retención, propuesta para hacer compatibles RF-01.7, RNF-10 (Ley 21.719: eliminación definitiva y retención acotada) y RNF-13 (auditoría); queda registrada como V-03 en la matriz de trazabilidad para ratificación del equipo en el acta:
@@ -185,7 +192,7 @@ Permite eliminar la cuenta de forma permanente, previa confirmación de identida
 
 **Criterios de aceptación**
 
-- Dado que confirma la eliminación con su identidad verificada, entonces sus sesiones quedan revocadas de inmediato y ya no puede autenticar; la revocación de conectores conserva la excepción Outlook propuesta arriba.
+- Dado que confirma la eliminación con su identidad verificada, entonces sus sesiones quedan revocadas de inmediato y ya no puede autenticar; la revocación de conectores conserva la excepción Outlook ratificada arriba.
 - Para la enmienda Outlook: antes de confirmar se informa al titular cómo retirar el acceso; la limpieza conserva las credenciales ante un 409 y solo las destruye en el borrado final, sin escribir `revocado_en` ni llamar a Microsoft para simular una revocación.
 - Dado que transcurren 72 horas desde la confirmación, entonces ninguna consulta ni exportación de la aplicación devuelve datos personales del titular, y su correo puede registrarse como cuenta nueva sin heredar ningún dato.
 - Dado un registro de auditoría de esa cuenta consultado después de la eliminación, entonces no contiene correo, nombre ni identificador que permita reidentificar al titular.

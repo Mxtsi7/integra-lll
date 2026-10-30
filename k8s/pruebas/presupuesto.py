@@ -1,6 +1,6 @@
 """Comprueba que los manifiestos entren en la cuota del namespace.
 
-    python k8s/pruebas/presupuesto.py k8s
+    python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-carga
 
 No toca el cluster: lee los YAML y suma. Calcula el recurso efectivo de cada
 pod como Kubernetes lo hace -- max(suma de containers, mayor initContainer) --
@@ -13,6 +13,7 @@ Si el peor caso no entra, el autoescalado no sirve: el pod extra recibiria
 Los topes estan fijos abajo (TOPE) porque `kubectl describe quota` no se puede
 leer desde CI. Si el ramo cambia la cuota, actualizarlos aca.
 """
+import argparse
 import sys, glob, yaml
 MI = 1024*1024
 def mem(s):
@@ -35,15 +36,42 @@ def efectivo(spec):
             out[f"{campo}.{rec}"]=max(suma,maxi)
     return out
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("directorio")
+parser.add_argument("--namespace", default="student-forellana")
+parser.add_argument("--generador", required=True, help="Job del escenario anunciado")
+parser.add_argument("--namespace-generador", required=True, help="Namespace donde se ejecutará el Job")
+args = parser.parse_args()
+
 cargas={}; hpas={}
-for ruta in sorted(glob.glob(sys.argv[1]+"/*.yaml")):
+for ruta in sorted(glob.glob(args.directorio+"/*.yaml")):
     for doc in yaml.safe_load_all(open(ruta,encoding="utf-8")):
         if not doc: continue
+        if doc.get("metadata", {}).get("namespace", args.namespace) != args.namespace:
+            continue
         k=doc.get("kind")
         if k in ("Deployment","StatefulSet"):
             cargas[doc["metadata"]["name"]]=(doc["spec"].get("replicas",1), efectivo(doc["spec"]["template"]["spec"]))
         elif k=="HorizontalPodAutoscaler":
             hpas[doc["spec"]["scaleTargetRef"]["name"]]=doc["spec"]["maxReplicas"]
+
+with open(args.generador, encoding="utf-8") as archivo:
+    generadores = [doc for doc in yaml.safe_load_all(archivo) if doc]
+if not generadores or any(doc.get("kind") != "Job" for doc in generadores):
+    parser.error("El generador debe contener Jobs explícitos")
+for doc in generadores:
+    namespace = doc.get("metadata", {}).get("namespace", args.namespace_generador)
+    if namespace != args.namespace_generador:
+        parser.error("El namespace declarado del Job no coincide con --namespace-generador")
+    nombre = doc["metadata"]["name"]
+    recursos = efectivo(doc["spec"]["template"]["spec"])
+    replicas = doc["spec"].get("parallelism", 1)
+    replicas = min(replicas, doc["spec"].get("completions", replicas))
+    print(f"Generador {nombre}: namespace={namespace}, pods={replicas}, lim={recursos['limits.memory']//MI}Mi cpu={recursos['limits.cpu']}m")
+    if namespace == args.namespace:
+        cargas["Job/" + nombre] = (replicas, recursos)
+    else:
+        print(f"  Fuera de la cuota de {args.namespace}; verificar la cuota propia de {namespace} antes de ejecutarlo.")
 
 TOPE={"limits.memory":2752*MI,"requests.memory":1152*MI,"limits.cpu":2000,"requests.cpu":1000,"pods":12}
 

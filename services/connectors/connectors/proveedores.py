@@ -239,10 +239,46 @@ def canjear_codigo(
     return datos
 
 
-def revocar(proveedor: str, *, access_token: str) -> bool:
+class _TokenInvalido:
+    """El proveedor contestó, y lo que dijo es que ese token ya no es válido.
+
+    Es FALSO como booleano a propósito: quien trate la respuesta de `revocar`
+    como un bool lo lee como "no confirmó", que es la lectura segura. Solo
+    `revocacion.py` lo distingue, porque es la que sabe QUÉ token mandó.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "TOKEN_INVALIDO"
+
+
+#: Lo que devuelve `revocar` cuando Google responde 400 con
+#: `error=invalid_token`. No es lo mismo que "no confirmó" (red caída, 5xx):
+#: el proveedor sí contestó, pero rechazó una credencial. No acredita que
+#: toda la autorización haya sido revocada, tampoco si se envió un refresh.
+TOKEN_INVALIDO = _TokenInvalido()
+
+
+def _error_oauth(respuesta) -> str:
+    """El campo `error` del cuerpo JSON (RFC 6749), o "" si no hay."""
+    try:
+        cuerpo = respuesta.json()
+    except ValueError:
+        return ""
+    return str(cuerpo.get("error") or "") if isinstance(cuerpo, dict) else ""
+
+
+def revocar(proveedor: str, *, access_token: str):
     """Pide al proveedor que invalide el token. True si lo confirmó.
 
-    ── Por qué devuelve bool y no lanza ─────────────────────────────────────
+    Devuelve True (200/204), `TOKEN_INVALIDO` (400 `invalid_token`) o False
+    (cualquier otra cosa: red, timeout, 5xx, otro 4xx). El argumento se sigue
+    llamando `access_token` por compatibilidad, pero es el token que se quiere
+    revocar, y `revocacion.py` manda el de REFRESCO cuando lo hay.
+
+    ── Por qué devuelve y no lanza ──────────────────────────────────────────
     Desconectar tiene que funcionar aunque el proveedor no conteste. Lo que el
     usuario pidió es dejar de darnos acceso, y de eso nos encargamos nosotros
     borrando las credenciales. Si además el proveedor confirma, mejor; si no,
@@ -270,7 +306,11 @@ def revocar(proveedor: str, *, access_token: str) -> bool:
         )
     except requests.RequestException:
         return False
-    return respuesta.status_code in (200, 204)
+    if respuesta.status_code in (200, 204):
+        return True
+    if respuesta.status_code == 400 and _error_oauth(respuesta) == "invalid_token":
+        return TOKEN_INVALIDO
+    return False
 
 
 def _emisor_aceptado(config: ConfiguracionOAuth, iss: str) -> bool:

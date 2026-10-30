@@ -78,6 +78,10 @@ class Command(BaseCommand):
             if resultado.confirmada:
                 confirmadas += 1
                 self.stdout.write(self.style.SUCCESS(f"  confirmada: {nombre}"))
+            elif resultado.ya_no_existe:
+                self.stdout.write(
+                    f"  se eliminó mientras tanto (limpieza de la organización), no se tocó: {nombre}"
+                )
             elif resultado.reconectada_mientras_tanto:
                 self.stdout.write(
                     f"  se reconectó mientras tanto, no se tocó: {nombre}"

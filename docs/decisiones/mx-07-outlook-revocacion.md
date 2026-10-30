@@ -1,12 +1,13 @@
 # MX-07 — Evidencia de revocación para Outlook
 
-- **Estado:** opción 3 implementada y con visto bueno técnico de Felipe Orellana el 29 de octubre de 2026; enmienda de RF-01.7 registrada para ratificación de producto/equipo.
+- **Estado:** opción 3 implementada, con visto bueno técnico de Felipe Orellana el 29 de octubre de 2026 y ratificada por Maximiliano Sáez como responsable MX-07/MX-22 el 30 de octubre de 2026.
 - **Fecha:** 29 de octubre de 2026.
 - **Alcance:** PR #72, eliminación de organización, servicio Connectors / FE-05.
-- **Propuesta de producto:** Maximiliano Sáez, autor de MX-07 / PR #72; la aceptación formal de producto se registra por separado, sin simular una firma.
+- **Ratificación de alcance:** el responsable MX-07/MX-22 respondió expresamente «Sí, ratifico ese alcance» en la sesión de corrección de PR #72 del 30-10-2026: cierre Outlook por destrucción local, aviso previo y aplicación a operaciones antiguas pendientes. Se registra en la [tarjeta MX-07](https://trello.com/c/50Mkov2i), RF-01.7 y MX-22. No se atribuye una aprobación adicional a otros integrantes.
+- **Condiciones expresas de la ratificación:** eliminar credenciales solo en la transacción final; conservarlas ante fallos y proteger reconexiones; registrar `resultado=cierre_local`, nunca revocación Microsoft. Avisar antes de nuevas confirmaciones con instrucciones para cuentas personales y corporativas. También resolver operaciones antiguas sin registrar avisos ni aceptaciones retroactivas; comunicar la limitación si existe un canal legítimo disponible, sin exigir respuesta para borrar. La ratificación se limita a esta excepción y no aprueba el resto de la PR.
 - **Visto bueno de Felipe Orellana (Connectors / FE-05):** [opción 3 aprobada, alcance y condiciones](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
 - **Firma de Maximiliano Sáez (producto / PR #72):** no registrada; este documento no la simula.
-- **Naturaleza:** registra la opción elegida y sus límites. No acredita que Outlook cumpla RF-01.7 ni sustituye la ratificación pendiente.
+- **Naturaleza:** registra el alcance ratificado y sus límites. Alinea la excepción de RF-01.7; no acredita una revocación Microsoft ni cumplimiento operativo del plazo.
 - **Estado de la fase 1:** investigación y documentación. No se modificaron `eliminacion.py`, `revocacion.py`, `proveedores.py` ni migraciones; no se ejecutó ninguna llamada de revocación contra Microsoft.
 - **Estado de la fase 2:** implementada la opción 3 en código y pruebas; ver la sección 0 y [el flujo vigente](../flujos/maximiliano-saez/07-eliminar-cuenta.md).
 
@@ -17,12 +18,12 @@
 - **Qué se destruye:** nuestras credenciales cifradas de Outlook, únicamente como parte final de la limpieza, en la misma transacción que borra las filas de `CuentaConectada`. Nunca en una ruta que termine en 409.
 - **Qué NO se hace:** no se escribe `revocado_en` para Outlook, no se reutiliza ese campo con otro significado, no se llama a Microsoft Graph desde la limpieza, no se retira Connectors de los destinos y no se edita la migración publicada `0003_autorizacion_y_revocacion`.
 - **Riesgo residual:** un refresh token que Microsoft ya emitió podría seguir válido hasta que expire o hasta que el usuario retire el acceso desde su cuenta Microsoft. Nosotros ya no tendremos copia, así que explotarlo exigiría que alguien hubiera obtenido el token antes. No se controla lo que Microsoft haga con tokens ya emitidos.
-- **Requisito:** la [enmienda de RF-01.7](../investigacion/requisitos-vigentes.md#rf-017--eliminar-cuenta-y-datos-personales) registra la excepción propuesta por Felipe. Su visto bueno técnico no se presenta como ratificación del equipo ni como acreditación de un despliegue o del plazo de 72 horas.
-- **Ratificación pendiente:** aceptación de producto/equipo de la enmienda, trazada en [MX-22](../investigacion/MX-22-matriz-requisitos.md). El visto bueno de Connectors / FE-05 ya está registrado y no se vuelve a pedir.
+- **Requisito:** la [enmienda de RF-01.7](../investigacion/requisitos-vigentes.md#rf-017--eliminar-cuenta-y-datos-personales) registra la excepción propuesta por Felipe y ratificada por el responsable MX-07/MX-22. Ambas decisiones son distintas de acreditar un despliegue o el plazo de 72 horas.
+- **Ratificación registrada:** el responsable MX-07/MX-22 aceptó la excepción el 30-10-2026, con las condiciones de la sección 8, trazada en [MX-22](../investigacion/MX-22-matriz-requisitos.md) y la tarjeta. No aprueba el resto de la PR.
 - **Alcance acordado:** todo Outlook, personal y de trabajo/escuela, sin agregar `tid`, campos de evidencia ni migraciones. Gmail conserva la confirmación del proveedor. Los conteos de cierre sin revocación en logs no contienen correos ni tokens; no se exige un campo nuevo en una fila que será eliminada.
 - **Operaciones ya pendientes:** la política también se aplica a las operaciones durables existentes. El siguiente intento del worker conserva su identificador y destinos; Connectors responde 204 al completar la limpieza y Auth retira ese destino. No se descartan destinos ni se fabrican confirmaciones retrospectivas.
 - **Reconexión:** la preparación captura identificadores y `credenciales_version`; la limpieza final vuelve a compararlos bajo bloqueo. Si cambia una versión o aparece una cuenta nueva, responde `409 credenciales_cambiadas`, conserva las nuevas credenciales y prepara otra vez en el siguiente intento.
-- **Aviso al titular:** el diálogo web informa antes de confirmar que Microsoft no revoca automáticamente el acceso y enlaza la retirada del consentimiento en cuentas personales. La pantalla móvil sigue siendo AN-19, sin flujo de confirmación implementado; debe incluir el aviso al implementarlo. No se habilita el borrado web cambiando su bandera en esta PR.
+- **Aviso al titular:** el diálogo web informa antes de confirmar que Microsoft no revoca automáticamente el acceso y ofrece instrucciones personales y corporativas, con intervención del administrador cuando corresponda. Para operaciones antiguas no registra avisos ni aceptaciones retroactivas; soporte comunica la limitación si dispone de canal autorizado sin exigir respuesta para borrar. La pantalla móvil sigue siendo AN-19, sin flujo de confirmación implementado; debe incluir el aviso al implementarlo. No se habilita el borrado web cambiando su bandera en esta PR.
 - **Fuera de esta PR:** Felipe conserva la tarea de alinear la desconexión Outlook ordinaria de FE-05; esta decisión regula la eliminación de organización.
 
 ### Hechos de Microsoft citados en la decisión
@@ -270,7 +271,7 @@ No significa “Microsoft revocó el token”. Significa: “cerramos el acceso 
 | Escribir `revocado_en` con la fecha de desconexión | Sería una evidencia falsa: `revocado_en` significa confirmación del proveedor. |
 | Retirar Connectors de los destinos | Evita el problema en vez de resolverlo y deja datos de Connectors sin limpiar. |
 
-## 7. Recomendación original (propuesta, no aprobada; superada por la decisión 0)
+## 7. Recomendación histórica (superada por la decisión 0 y la ratificación de la sección 8)
 
 **Nota histórica:** la fase 2 se implementó antes del visto bueno de Felipe. La condición 7 original —firma de Felipe y Maxi antes de tocar código— no se cumplió en ese orden. El visto bueno técnico posterior está enlazado en la sección 0; la aceptación de producto/equipo sigue diferenciada de esa aprobación.
 
@@ -290,7 +291,7 @@ La propuesta incluye estas condiciones mínimas:
 
 **Advertencia:** esta recomendación **no** debe interpretarse como aprobada. Si Maxi o Felipe consideran inaceptable el riesgo de que el refresh token siga vivo hasta 90 días, la opción 3 no sirve y habría que elegir entre limitar el producto a cuentas de trabajo/escuela con consentimiento administrativo (opción 1), aceptar la intervención manual (opción 4) o mantener la PR bloqueada.
 
-## 8. Respuestas registradas y decisiones de producto pendientes
+## 8. Respuestas técnicas y ratificación del alcance
 
 Fuente de las respuestas: [Felipe Orellana, dueño de Connectors / FE-05, 29-10-2026](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231). Sustituyen las preguntas técnicas originales; no se presentan como una aprobación de producto ni una firma de otra persona.
 
@@ -306,11 +307,21 @@ Fuente de las respuestas: [Felipe Orellana, dueño de Connectors / FE-05, 29-10-
 | Prueba de aceptación | Fallo Gmail conserva ciphertext y devuelve 409; confirmación posterior permite 204; Outlook solo termina en 204 sin llamada al proveedor ni `revocado_en`; Gmail pendiente conserva también el ciphertext de Outlook; una clave ilegible en el camino de revocación no destruye credenciales. Se agregan las regresiones de reconexión y cuenta nueva. |
 | Operaciones Outlook ya pendientes | Sí se aplica la política a las operaciones existentes. Se reintenta el mismo identificador, sin retirar destinos ni fabricar evidencia retrospectiva. |
 
-Las condiciones adicionales de Felipe quedan trazadas: aviso web previo a la confirmación implementado, enmienda propuesta en RF-01.7/MX-22 y desconexión Outlook ordinaria a cargo de Felipe fuera de esta PR. La confirmación móvil se mantiene como seguimiento de AN-19.
+Las condiciones adicionales de Felipe quedan trazadas: aviso web previo a la confirmación implementado, enmienda ratificada en RF-01.7/MX-22 y desconexión Outlook ordinaria a cargo de Felipe fuera de esta PR. La confirmación móvil se mantiene como seguimiento de AN-19.
 
-### Decisiones de Maximiliano Sáez (producto / PR #72) sin respuesta registrada
+### Ratificación de Maximiliano Sáez (responsable MX-07/MX-22), 30-10-2026
 
-El comentario de Felipe no responde ni firma en nombre de producto. Las preguntas siguientes se conservan pendientes hasta recibir esa aceptación; no se vuelve a solicitar la aprobación técnica ya otorgada.
+El comentario de Felipe no responde ni firma en nombre de producto. La aceptación del responsable se registró después, en esta sesión, con estas condiciones:
+
+> Ratifico la excepción de Outlook para la eliminación de organizaciones: completar la limpieza destruyendo las credenciales locales en la transacción final, sin acreditar revocación en Microsoft, con aviso previo e instrucciones para retirar el acceso.
+>
+> También se aplica a operaciones antiguas pendientes, sin registrar avisos ni aceptaciones retroactivas que no ocurrieron. Deben conservarse las credenciales ante una limpieza fallida y protegerse las reconexiones.
+>
+> Esta ratificación se limita a la excepción de Outlook; no constituye aprobación del resto de la PR.
+
+**Operación y comunicación:** para cuentas personales se facilita el enlace de permisos; para trabajo/escuela se indican My Apps y la intervención del administrador si el consentimiento fue organizacional. Instrucciones corporativas verificadas en [Microsoft Support](https://support.microsoft.com/en-us/accounts-billing/work-school/edit-or-revoke-application-permissions-in-the-my-apps-portal). En operaciones antiguas el cierre no acredita un aviso: si soporte dispone de un canal autorizado, comunica la limitación y estas instrucciones sin condicionar el borrado a respuesta. Si no existe canal tras eliminar Auth, no se recrean datos ni se registra un envío ficticio. Esta ejecución no envía comunicaciones a titulares.
+
+Las preguntas originales siguientes quedan como historial de la evaluación, no como una nueva petición de aprobación ni como evidencia de una revisión legal:
 
 1. ¿Acepta que, para Outlook, “eliminación completa” signifique cierre local + limitación documentada + instrucción al usuario, en vez de revocación confirmada por Microsoft?
 2. ¿Acepta el riesgo residual de que el refresh token pueda seguir válido hasta 90 días si el usuario no retira el acceso?
