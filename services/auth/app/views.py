@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import uuid
 
 from .models import Organizacion, User
+from .eliminacion import EliminarCuentaMixin
 from .recuperacion import ErrorTokenRecuperacion, confirmar_recuperacion, solicitar_recuperacion
 from shared.sesiones import registrar_credenciales
 from .sesiones import emitir_tokens
@@ -300,7 +301,7 @@ class ConfirmacionRecuperacionView(APIView):
         return Response({"detail": "Contraseña restablecida. Inicia sesión nuevamente."})
 
 
-class UsuarioActualView(generics.RetrieveAPIView):
+class UsuarioActualView(EliminarCuentaMixin, generics.RetrieveAPIView):
     """GET /api/usuarios/me/ — el usuario del token. Es la que llama la web."""
 
     serializer_class = UsuarioActualSerializer
