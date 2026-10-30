@@ -23,6 +23,7 @@ export default defineConfig({
       'react-native-safe-area-context': path.resolve(__dirname, './test/safe-area-shim.tsx'),
       'react-native-screens': path.resolve(__dirname, './test/react-native-screens-shim.tsx'),
       'expo-status-bar': path.resolve(__dirname, './test/expo-status-bar-shim.tsx'),
+      'expo-secure-store': path.resolve(__dirname, './test/expo-secure-store-shim.ts'),
     },
   },
 });
