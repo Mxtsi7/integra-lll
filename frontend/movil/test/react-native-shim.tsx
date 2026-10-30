@@ -10,7 +10,7 @@ if (typeof HTMLElement !== 'undefined') {
 }
 
 export const View = React.forwardRef<HTMLDivElement, any>(
-  ({ testID, children, style, onLayout, ...props }, ref) => {
+  ({ testID, children, style, onLayout, accessibilityRole, accessibilityLiveRegion, ...props }, ref) => {
     React.useEffect(() => {
       if (onLayout) {
         onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 844 } } });
@@ -18,13 +18,29 @@ export const View = React.forwardRef<HTMLDivElement, any>(
     }, [onLayout]);
 
     return (
-      <div data-testid={testID} style={typeof style === 'object' ? style : undefined} ref={ref} {...props}>
+      <div
+        data-testid={testID}
+        role={accessibilityRole}
+        aria-live={accessibilityLiveRegion}
+        style={typeof style === 'object' ? style : undefined}
+        ref={ref}
+        {...props}
+      >
         {children}
       </div>
     );
   }
 );
 View.displayName = 'View';
+
+export const KeyboardAvoidingView = React.forwardRef<HTMLDivElement, any>(
+  ({ testID, children, style, behavior, keyboardVerticalOffset, ...props }, ref) => (
+    <div data-testid={testID} style={typeof style === 'object' ? style : undefined} ref={ref} {...props}>
+      {children}
+    </div>
+  )
+);
+KeyboardAvoidingView.displayName = 'KeyboardAvoidingView';
 
 export const Text = React.forwardRef<HTMLSpanElement, any>(
   ({ testID, children, style, ...props }, ref) => (
@@ -36,24 +52,54 @@ export const Text = React.forwardRef<HTMLSpanElement, any>(
 Text.displayName = 'Text';
 
 export const Pressable = React.forwardRef<HTMLButtonElement, any>(
-  ({ testID, children, onPress, style, ...props }, ref) => (
+  ({
+    testID,
+    children,
+    onPress,
+    style,
+    disabled,
+    accessibilityRole,
+    accessibilityLabel,
+    accessibilityHint,
+    accessibilityState,
+    hitSlop,
+    ...props
+  }, ref) => (
     <button
       data-testid={testID}
       type="button"
-      onClick={onPress}
+      onClick={disabled ? undefined : onPress}
+      disabled={disabled}
+      role={accessibilityRole ?? 'button'}
+      aria-label={accessibilityLabel}
+      aria-disabled={accessibilityState?.disabled ? 'true' : undefined}
+      aria-busy={accessibilityState?.busy ? 'true' : undefined}
       style={typeof style === 'object' ? style : undefined}
       ref={ref}
       {...props}
     >
-      {children}
+      {typeof children === 'function' ? children({ pressed: false }) : children}
     </button>
   )
 );
 Pressable.displayName = 'Pressable';
 
 export const ScrollView = React.forwardRef<HTMLDivElement, any>(
-  ({ testID, children, style, ...props }, ref) => (
-    <div data-testid={testID} style={typeof style === 'object' ? style : undefined} ref={ref} {...props}>
+  ({
+    testID,
+    children,
+    style,
+    contentContainerStyle,
+    keyboardShouldPersistTaps,
+    keyboardDismissMode,
+    ...props
+  }, ref) => (
+    <div
+      data-testid={testID}
+      style={typeof style === 'object' || typeof contentContainerStyle === 'object' ? { ...style, ...contentContainerStyle } : undefined}
+      ref={ref}
+      {...props}
+    >
       {children}
     </div>
   )
@@ -163,26 +209,58 @@ export const Keyboard = {
 };
 
 export const TextInput = React.forwardRef<HTMLInputElement, any>(
-  ({ testID, value, onChangeText, onChange, secureTextEntry, style, placeholder, ...props }, ref) => (
-    <input
-      data-testid={testID}
-      type={secureTextEntry ? 'password' : 'text'}
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => {
-        if (onChangeText) onChangeText(e.target.value);
-        if (onChange) onChange(e);
-      }}
-      style={typeof style === 'object' ? style : undefined}
-      ref={ref}
-      {...props}
-    />
-  )
+  ({
+    testID,
+    value,
+    onChangeText,
+    onChange,
+    secureTextEntry,
+    keyboardType,
+    autoComplete,
+    accessibilityLabel,
+    accessibilityHint,
+    style,
+    placeholder,
+    placeholderTextColor,
+    autoCapitalize,
+    autoCorrect,
+    returnKeyType,
+    blurOnSubmit,
+    onSubmitEditing,
+    textContentType,
+    editable,
+    ...props
+  }, ref) => {
+    let inputType = secureTextEntry ? 'password' : 'text';
+    if (!secureTextEntry && keyboardType === 'email-address') {
+      inputType = 'email';
+    }
+
+    return (
+      <input
+        data-testid={testID}
+        type={inputType}
+        value={value}
+        placeholder={placeholder}
+        aria-label={accessibilityLabel}
+        autoComplete={autoComplete}
+        readOnly={editable === false}
+        onChange={(e) => {
+          if (onChangeText) onChangeText(e.target.value);
+          if (onChange) onChange(e);
+        }}
+        style={typeof style === 'object' ? style : undefined}
+        ref={ref}
+        {...props}
+      />
+    );
+  }
 );
 TextInput.displayName = 'TextInput';
 
 export default {
   View,
+  KeyboardAvoidingView,
   Text,
   Pressable,
   ScrollView,
