@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from django.db import IntegrityError, transaction
 from .models import User, Organizacion
+from .models import EliminacionOrganizacion
 from .passwords import validar_password
 from .planes import plan_vigente
 from drf_spectacular.utils import extend_schema_field
@@ -81,7 +82,12 @@ class RegisterSerializer(UserSerializer):
         with transaction.atomic():
             if codigo:
                 # Unirse a organización existente → integrante
-                organizacion = Organizacion.objects.get(id=codigo)
+                try:
+                    organizacion = Organizacion.objects.select_for_update().get(id=codigo)
+                except Organizacion.DoesNotExist:
+                    raise serializers.ValidationError({"codigo_organizacion": "La organización ya no existe."})
+                if EliminacionOrganizacion.objects.filter(organizacion_id=codigo).exists():
+                    raise serializers.ValidationError({"codigo_organizacion": "La organización está en eliminación."})
                 rol = User.Rol.INTEGRANTE
             else:
                 # Crear organización propia → titular
@@ -147,7 +153,7 @@ class UsuarioActualSerializer(serializers.ModelSerializer):
     correo = serializers.EmailField(source="email", read_only=True)
     # Declarado a mano para que salga como texto y no como objeto UUID:
     # si se deja que lo deduzca ModelSerializer queda un ReadOnlyField crudo.
-    organizacion_id = serializers.UUIDField(read_only=True)
+    organizacion_id = serializers.UUIDField(read_only=True, allow_null=True)
     plan = serializers.SerializerMethodField()
 
     @extend_schema_field(serializers.ChoiceField(choices=["free", "premium"]))

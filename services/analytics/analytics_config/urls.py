@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.urls import path, include
 
+from analytics.eliminacion import LimpiezaAnalyticsView
 from analytics.views import (
     health_check,
     recomendaciones_dismiss,
@@ -9,6 +10,7 @@ from analytics.views import (
 from analytics.explicaciones_api import recomendaciones_explicar
 
 urlpatterns = [
+    path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaAnalyticsView.as_view()),
     path('health/', health_check, name='health'),
     path('admin/', admin.site.urls),
     # El gateway reenvía la ruta sin traducirla: /api/recomendaciones/ debe

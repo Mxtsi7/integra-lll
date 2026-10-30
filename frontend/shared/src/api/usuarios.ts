@@ -1,4 +1,5 @@
 import type { Usuario } from '../tipos';
+import type { AuthSchemas } from '../contratos/auth.generated';
 import { pedir } from './cliente';
 
 export const USAR_USUARIO_DE_EJEMPLO = false;
@@ -17,10 +18,15 @@ const USUARIO_DE_EJEMPLO: Usuario = {
 const RUTA_USUARIO_ACTUAL = '/usuarios/me/';
 const RUTA_CAMBIO_CONTRASENA = '/auth/change-password/';
 
+/** Conserva el modelo de presentación previo; el contrato HTTP conserva sus tipos reales. */
+function presentarUsuario(datos: AuthSchemas['UsuarioActual']): Usuario {
+  return { ...datos, id: String(datos.id), rol: datos.rol ?? '', organizacion_id: datos.organizacion_id ?? '' };
+}
+
 /** El usuario autenticado actual (según el JWT que ya trae el token de sesión). */
 export async function getUsuarioActual(): Promise<Usuario> {
   if (USAR_USUARIO_DE_EJEMPLO) return USUARIO_DE_EJEMPLO;
-  return pedir<Usuario>(RUTA_USUARIO_ACTUAL);
+  return presentarUsuario(await pedir<AuthSchemas['UsuarioActual']>(RUTA_USUARIO_ACTUAL));
 }
 
 /**
@@ -34,15 +40,11 @@ export async function getUsuarioActual(): Promise<Usuario> {
 export async function actualizarNombre(nombre: string): Promise<Usuario> {
   // DRF recorta los espacios del CharField; se recortan acá también para
   // que lo enviado sea exactamente lo que quedará guardado.
-  return pedir<Usuario>(RUTA_USUARIO_ACTUAL, { method: 'PATCH', body: { nombre: nombre.trim() } });
+  return presentarUsuario(await pedir<AuthSchemas['UsuarioActual']>(RUTA_USUARIO_ACTUAL, { method: 'PATCH', body: { nombre: nombre.trim() } }));
 }
 
 /** Lo que espera CambioClaveSerializer (MX-05), con sus mismos nombres. */
-export type CambioContrasenaPayload = {
-  password_actual: string;
-  password: string;
-  password_confirmacion: string;
-};
+export type CambioContrasenaPayload = AuthSchemas['CambioClaveRequest'];
 
 /**
  * POST /auth/change-password/ (MX-05, para CH-29). Requiere sesión: pasa por
