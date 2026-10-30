@@ -162,6 +162,7 @@ describe('AuthContext móvil', () => {
     const [url, opciones] = fetchMock.mock.calls[0];
     expect(url).toBe(`${URL_BASE}/auth/logout/`);
     expect(opciones.method).toBe('POST');
+    expect(opciones.headers['Authorization']).toBe(`Bearer ${tokens.access_token}`);
     expect(JSON.parse(opciones.body)).toEqual({ refresh_token: 'refresh-12345' });
 
     // Verificación de que se limpió el storage local compartido y SecureStore
@@ -906,6 +907,68 @@ describe('AuthContext móvil', () => {
         dateSpy.mockRestore();
       }
     });
+
+    it('cerrarSesion con sesión de más de 30 min (access token vencido) NO envía header Authorization para evitar 401 en DRF, pero sí envía refresh_token [P2]', async () => {
+      const ahoraServidor = Math.floor(Date.now() / 1000);
+      const base64url = (t: string) =>
+        btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      // Token emitido con 30 min de vigencia
+      const tokens: Tokens = {
+        access_token: [
+          base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+          base64url(
+            JSON.stringify({
+              iat: ahoraServidor,
+              exp: ahoraServidor + 30 * 60,
+              user_id: 'usr-1',
+              rol: 'titular',
+            })
+          ),
+          'firma',
+        ].join('.'),
+        refresh_token: 'refresh-vencido-123',
+      };
+
+      guardarTokens(tokens);
+
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'Sesión revocada' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="autenticado" initialUsuario={USUARIO_PRUEBA}>
+          {children}
+        </AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      // Avanzamos el reloj 35 minutos (más allá de los 30 min de vigencia del token de acceso)
+      const realNow = Date.now.bind(Date);
+      const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 35 * 60 * 1000);
+
+      try {
+        await act(async () => {
+          await result.current.cerrarSesion();
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        const [url, opciones] = fetchMock.mock.calls[0];
+        expect(url).toBe(`${URL_BASE}/auth/logout/`);
+        expect(opciones.method).toBe('POST');
+        // El header Authorization DEBE omitirse para no causar 401 en DRF
+        expect(opciones.headers['Authorization']).toBeUndefined();
+        // El refresh_token en el cuerpo SÍ debe enviarse
+        expect(JSON.parse(opciones.body)).toEqual({ refresh_token: 'refresh-vencido-123' });
+      } finally {
+        dateSpy.mockRestore();
+      }
+    });
   });
 });
+
 

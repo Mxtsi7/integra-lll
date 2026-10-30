@@ -15,6 +15,7 @@ import {
   limpiarSesionSegura,
   obtenerTokensSeguros,
   esTokenValido,
+  validarFormatoToken,
   decodificarPayloadJwt,
   __reiniciarEstadoParaPruebas,
 } from './storageSeguro';
@@ -603,7 +604,7 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
       }
     });
 
-    it('esTokenValido acepta tokens recién emitidos con reloj adelantado o atrasado [P2 Hallazgo 4]', () => {
+    it('esTokenValido y validarFormatoToken evalúan vigencia real y formato JWT sin derivar desfase de iat [P2 Hallazgo 4]', () => {
       const ahoraServidor = Math.floor(Date.now() / 1000);
 
       // Token recién emitido por el servidor (duración 30 min)
@@ -619,19 +620,41 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
         'sig',
       ].join('.');
 
-      // Reloj del teléfono normal
-      expect(esTokenValido(tokenRecienEmitido, ahoraServidor * 1000)).toBe(true);
+      expect(validarFormatoToken(tokenRecienEmitido)).toBe(true);
+      // Reloj normal (desfase 0)
+      expect(esTokenValido(tokenRecienEmitido, 0, ahoraServidor * 1000)).toBe(true);
 
-      // Reloj del teléfono adelantado 40 minutos
+      // Reloj del teléfono adelantado 40 minutos (desfase servidor - teléfono = -40 min)
       const relojAdelantado = (ahoraServidor + 40 * 60) * 1000;
-      expect(esTokenValido(tokenRecienEmitido, relojAdelantado)).toBe(true);
+      const desfaseAdelantado = -40 * 60 * 1000;
+      expect(esTokenValido(tokenRecienEmitido, desfaseAdelantado, relojAdelantado)).toBe(true);
+      // Sin desfase, el reloj adelantado 40 min ve el token de 30 min como vencido
+      expect(esTokenValido(tokenRecienEmitido, 0, relojAdelantado)).toBe(false);
 
-      // Reloj del teléfono atrasado 40 minutos
+      // Reloj del teléfono atrasado 40 minutos (desfase servidor - teléfono = +40 min)
       const relojAtrasado = (ahoraServidor - 40 * 60) * 1000;
-      expect(esTokenValido(tokenRecienEmitido, relojAtrasado)).toBe(true);
+      const desfaseAtrasado = 40 * 60 * 1000;
+      expect(esTokenValido(tokenRecienEmitido, desfaseAtrasado, relojAtrasado)).toBe(true);
 
-      // Token realmente expirado (exp menor o igual a iat o vencido)
-      const tokenExpirado = [
+      // Token con iat hace 1 h y exp hace 30 min: emitido hace 1h, duración 30min
+      const tokenViejo = [
+        btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=+$/, ''),
+        btoa(
+          JSON.stringify({
+            iat: ahoraServidor - 3600,
+            exp: ahoraServidor - 1800,
+            user_id: 'usr-1',
+          })
+        ).replace(/=+$/, ''),
+        'sig',
+      ].join('.');
+      // Formato válido estructuralmente
+      expect(validarFormatoToken(tokenViejo)).toBe(true);
+      // Rechazado donde se evalúe vigencia con hora actual
+      expect(esTokenValido(tokenViejo, 0, ahoraServidor * 1000)).toBe(false);
+
+      // Token con exp <= iat (incoherente)
+      const tokenIncoherente = [
         btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).replace(/=+$/, ''),
         btoa(
           JSON.stringify({
@@ -642,9 +665,12 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
         ).replace(/=+$/, ''),
         'sig',
       ].join('.');
-      expect(esTokenValido(tokenExpirado, ahoraServidor * 1000)).toBe(false);
+      expect(validarFormatoToken(tokenIncoherente)).toBe(false);
+      expect(esTokenValido(tokenIncoherente, 0, ahoraServidor * 1000)).toBe(false);
 
-      // Token malformado
+      // Token malformado o vacío
+      expect(validarFormatoToken('token.malformado')).toBe(false);
+      expect(validarFormatoToken('')).toBe(false);
       expect(esTokenValido('token.malformado')).toBe(false);
       expect(esTokenValido('')).toBe(false);
     });

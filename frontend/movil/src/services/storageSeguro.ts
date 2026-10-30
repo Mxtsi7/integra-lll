@@ -440,24 +440,45 @@ export function decodificarPayloadJwt(token: string): Record<string, unknown> | 
 }
 
 /**
- * Valida si un access token tiene estructura JWT legible y no está vencido,
- * calculando el desfase respecto al claim `iat` del propio token.
- * Evita rechazar tokens válidos recién emitidos cuando el reloj del dispositivo
- * esté adelantado respecto al reloj del servidor.
+ * Valida que una cadena tenga estructura de JWT legible y campos semánticamente coherentes:
+ * - Cadena no vacía con 3 partes separadas por '.'
+ * - Payload decodificable en JSON válido
+ * - Si existen claims exp e iat, exp debe ser estrictamente posterior a iat (exp > iat)
  */
-export function esTokenValido(accessToken: string, ahoraMs: number = Date.now()): boolean {
-  if (!accessToken || typeof accessToken !== 'string') {
+export function validarFormatoToken(token: string): boolean {
+  if (!token || typeof token !== 'string') {
     return false;
   }
-  const payload = decodificarPayloadJwt(accessToken);
+  const payload = decodificarPayloadJwt(token);
   if (!payload) {
     return false;
   }
-  if (typeof payload.exp !== 'number') {
-    return true;
+  if (typeof payload.exp === 'number' && typeof payload.iat === 'number') {
+    if (payload.exp <= payload.iat) {
+      return false;
+    }
   }
-  const desfasePropio = typeof payload.iat === 'number' ? payload.iat * 1000 - ahoraMs : 0;
-  return !tokenExpirado(accessToken, ahoraMs + desfasePropio);
+  return true;
+}
+
+/**
+ * Valida si un access token tiene formato legible y no está vencido
+ * según el tiempo de referencia y desfase horario proporcionados.
+ * No intenta adivinar el desfase a partir de `iat` para no anular la expiración de tokens antiguos.
+ *
+ * @param accessToken Cadena JWT
+ * @param desfaseMs Desfase temporal en ms (hora servidor - hora local)
+ * @param ahoraMs Marca temporal local de evaluación (por defecto Date.now())
+ */
+export function esTokenValido(
+  accessToken: string,
+  desfaseMs: number = 0,
+  ahoraMs: number = Date.now()
+): boolean {
+  if (!validarFormatoToken(accessToken)) {
+    return false;
+  }
+  return !tokenExpirado(accessToken, ahoraMs + desfaseMs);
 }
 
 /**

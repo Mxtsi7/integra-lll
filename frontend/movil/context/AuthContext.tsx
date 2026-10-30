@@ -11,7 +11,7 @@ import {
   guardarTokensSeguros,
   limpiarSesionSegura,
   obtenerTokensSeguros,
-  esTokenValido,
+  validarFormatoToken,
 } from '../src/services/storageSeguro';
 import { revocarTokensRemotos } from '../src/services/clienteHttp';
 
@@ -157,8 +157,8 @@ export function AuthProvider({
       ultimaPeticion.current++;
       const esVigente = () => idSesion === sesionVigente.current;
 
-      // 1. Validación previa de vigencia/formato del token recibido con su desfase propio
-      if (!tokens.access_token || !esTokenValido(tokens.access_token)) {
+      // 1. Prevalidación de estructura y formato del token recibido
+      if (!tokens.access_token || !validarFormatoToken(tokens.access_token)) {
         if (esVigente()) {
           setUsuario(null);
           setEstado('anonimo');
@@ -187,7 +187,7 @@ export function AuthProvider({
         return;
       }
 
-      // 3. Validación de vigencia del token guardado
+      // 3. Validación de vigencia del token guardado (con desfase de reloj)
       if (!haySesionValida()) {
         try {
           await limpiarSesionSegura();
@@ -225,8 +225,9 @@ export function AuthProvider({
     sesionVigente.current++;
     ultimaPeticion.current++;
 
-    // 2. Capturar credenciales activas antes de limpiar memoria
+    // 2. Capturar credenciales activas y vigencia del access token antes de limpiar memoria
     const credenciales = obtenerTokensSeguros();
+    const accesoVigente = haySesionValida();
 
     // 3. Cierre inmediato en memoria para navegación pública instantánea
     setUsuario(null);
@@ -234,9 +235,9 @@ export function AuthProvider({
     setEstadoPerfil('inactivo');
     setErrorPerfil(null);
 
-    // 4. Revocación remota aislada en segundo plano con las credenciales capturadas de esta sesión
+    // 4. Revocación remota aislada en segundo plano con las credenciales capturadas y vigencia
     if (credenciales.refresh_token) {
-      void revocarTokensRemotos(credenciales);
+      void revocarTokensRemotos(credenciales, accesoVigente);
     }
 
     // 5. Limpieza persistente en hardware seguro: se ejecuta inmediatamente (no después de la red)

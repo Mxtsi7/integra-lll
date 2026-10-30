@@ -6,7 +6,6 @@ import {
   AuthError,
   ErrorDeApi,
 } from '@ojoalgasto/shared';
-import { esTokenValido } from './storageSeguro';
 
 export interface ValidacionUrlApi {
   valida: boolean;
@@ -274,12 +273,17 @@ export function procesarErrorHttp(
 /**
  * Envía la revocación del refresh token al Gateway de forma aislada e idempotente,
  * utilizando las credenciales explícitas de la sesión que se está cerrando.
+ * Solo envía Authorization con el access_token si la sesión está vigente (`accesoVigente === true`),
+ * evitando que un token de acceso vencido provoque que DRF responda 401 y deje el refresh_token sin revocar.
  * No depende de la lectura en storage ni bloquea el flujo si la red falla.
  */
-export async function revocarTokensRemotos(credenciales?: {
-  access_token?: string | null;
-  refresh_token?: string | null;
-} | null): Promise<boolean> {
+export async function revocarTokensRemotos(
+  credenciales?: {
+    access_token?: string | null;
+    refresh_token?: string | null;
+  } | null,
+  accesoVigente: boolean = false
+): Promise<boolean> {
   const refreshToken = credenciales?.refresh_token;
   if (!refreshToken) {
     return false;
@@ -295,7 +299,7 @@ export async function revocarTokensRemotos(credenciales?: {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    if (credenciales?.access_token && esTokenValido(credenciales.access_token)) {
+    if (accesoVigente && credenciales?.access_token) {
       headers['Authorization'] = `Bearer ${credenciales.access_token}`;
     }
 
