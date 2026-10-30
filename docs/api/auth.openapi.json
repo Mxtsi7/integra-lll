@@ -3629,7 +3629,7 @@
                         }
                     },
                     "503": {
-                        "description": "No se pudieron revocar las sesiones; sin eliminación.",
+                        "description": "No se pudieron revocar las sesiones o la limpieza entre servicios no está configurada; sin eliminación.",
                         "content": {
                             "application/json": {
                                 "schema": {
