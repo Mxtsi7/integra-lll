@@ -203,6 +203,23 @@ export async function cancelarSuscripcion(id: string): Promise<Suscripcion> {
   return desdeLaApi(cancelada);
 }
 
+/**
+ * POST /suscripciones/<id>/reactivar/ -> 200 OK / 400 / 403 / 404 (VI-09).
+ *
+ * Vuelve a `activo` una suscripción `cancelado`, a pedido del usuario. No
+ * restaura el estado que tenía antes (prueba, sin uso) ni cambia su fecha
+ * de cobro: lo que vale es la suscripción que devuelve el backend. Es
+ * idempotente: reactivar una ya activa responde 200. Desde otro estado
+ * responde 400. Es la contraparte de cancelarSuscripcion(); un PATCH a
+ * estado="activo" no sirve, el backend lo rechaza.
+ */
+export async function reactivarSuscripcion(id: string): Promise<Suscripcion> {
+  const reactivada = await pedir<SuscripcionDeApi>(`/suscripciones/${id}/reactivar/`, {
+    method: 'POST',
+  });
+  return desdeLaApi(reactivada);
+}
+
 /** Minutos de uso que se registran manualmente (CU-23 / RF-15 / RF-16). */
 export interface UsoPayload {
   minutos: number;
