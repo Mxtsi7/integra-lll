@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Bell, LogOut, Search } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
@@ -14,6 +14,11 @@ interface BarraSuperiorProps {
   alCerrarSesion: () => void;
   /** true mientras el backend revoca la sesión. */
   cerrandoSesion?: boolean;
+}
+
+/** "1 cosa pide atención", "3 cosas piden atención". */
+function textoAvisos(avisos: number): string {
+  return avisos === 1 ? '1 cosa pide atención' : `${avisos} cosas piden atención`;
 }
 
 /**
@@ -32,6 +37,7 @@ export function BarraSuperior({
   const location = useLocation();
   const [parametros] = useSearchParams();
   const [busqueda, setBusqueda] = useState(parametros.get('q') ?? '');
+  const idAvisos = useId();
 
   // Si la URL cambia por fuera (atrás, enlace), el cuadro sigue a la URL.
   useEffect(() => {
@@ -81,14 +87,27 @@ export function BarraSuperior({
       </form>
 
       <div className={styles.derecha}>
+        {/* La campana abre los ajustes de avisos (/configuracion), no el
+            Panel. Su nombre no cambia con el número: el conteo es aparte y
+            no son notificaciones sin leer, sino cosas que piden atención. */}
         <Link
-          to="/dashboard"
+          to="/configuracion"
           className={styles.campana}
-          aria-label={avisos > 0 ? `${avisos} avisos, ver el Panel` : 'Sin avisos, ver el Panel'}
-          title={avisos > 0 ? `${avisos} avisos` : 'Sin avisos'}
+          aria-label="Configurar notificaciones"
+          aria-describedby={avisos > 0 ? idAvisos : undefined}
+          title={avisos > 0 ? `Configurar notificaciones · ${textoAvisos(avisos)}` : 'Configurar notificaciones'}
         >
           <Bell size={18} aria-hidden="true" />
-          {avisos > 0 && <span className={styles.campanaConteo}>{avisos > 9 ? '9+' : avisos}</span>}
+          {avisos > 0 && (
+            <>
+              <span className={styles.campanaConteo} aria-hidden="true">
+                {avisos > 9 ? '9+' : avisos}
+              </span>
+              <span id={idAvisos} className="solo-lectura">
+                {textoAvisos(avisos)}
+              </span>
+            </>
+          )}
         </Link>
 
         <NavLink
