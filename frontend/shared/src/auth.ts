@@ -1,4 +1,4 @@
-export class AuthError extends Error {
+﻿export class AuthError extends Error {
   status: number;
   /** `code` del cuerpo, si viene (p. ej. "token_expirado" en recuperación). */
   codigo?: string;
@@ -296,11 +296,14 @@ export function haySesionValida(ahoraMs: number = Date.now()): boolean {
 //   · 503: indisponibilidad temporal → se conservan los tokens y se reintenta
 //     con una espera acotada.
 //
-// Una sola renovación en vuelo por sesión: si cinco peticiones reciben 401 a
-// la vez, las cinco esperan la misma promesa. En web, además, se usa
-// navigator.locks para que dos pestañas no quemen el mismo refresh (el
-// segundo cerraría la familia de tokens). Al tomar el turno se releen los
-// tokens del storage por si otra pestaña ya renovó.
+// Una sola renovación en vuelo por cada refresh token: si cinco peticiones
+// reciben 401 a la vez con el mismo refresh, comparten la misma promesa. Si
+// el refresh cambió (nuevo login o logout) antes de que resuelva, se inicia
+// una nueva operación independiente para no sobreescribir la sesión activa.
+// En web, además, se usa navigator.locks para que dos pestañas no quemen el
+// mismo refresh (el segundo cerraría la familia de tokens). Al tomar el turno
+// se releen los tokens del storage por si otra pestaña ya renovó.
+
 
 const TIEMPO_MAX_RENOVACION_MS = 8_000;
 const ESPERA_REINTENTO_503_MS = 200;
@@ -311,7 +314,11 @@ type ResultadoRefresh =
   | { tipo: "invalido" }
   | { tipo: "temporal"; reintentable: boolean };
 
-let renovacionEnCurso: Promise<boolean> | null = null;
+// La renovación se asocia al refresh token con el que se inició: si al
+// llegar la respuesta el storage ya cambió (login de otro usuario, logout),
+// la respuesta tardía no se instala. La clave de deduplicación es el propio
+// refresh token; dos sesiones distintas generan entradas distintas.
+const renovacionesPorRefresh = new Map<string, Promise<boolean>>();
 
 /**
  * Intenta renovar el par de tokens. Devuelve true sólo si hay un access
@@ -320,19 +327,34 @@ let renovacionEnCurso: Promise<boolean> | null = null;
  * No lanza: un fallo de red o un 503 devuelve false y **conserva** los
  * tokens (se podrá reintentar); un 400/401/403 los borra porque el refresh
  * ya no sirve. Nunca se reintenta un 401: insistir sólo consume la familia.
+ *
+ * Dos llamadas concurrentes con el mismo refresh comparten una sola promesa.
+ * Si el refresh cambió (nuevo login, logout), se inicia una renovación
+ * independiente para ese refresh en vez de heredar la del anterior.
  */
 export function renovarSesion(): Promise<boolean> {
-  if (renovacionEnCurso) return renovacionEnCurso;
+  const refreshActual = obtenerRefreshToken();
+  if (!refreshActual) return Promise.resolve(false);
+
+  const enCurso = renovacionesPorRefresh.get(refreshActual);
+  if (enCurso) return enCurso;
 
   const accessAntes = obtenerAccessToken();
-  const operacion = conBloqueoDePestanas(() => renovarConTurno(accessAntes)).finally(() => {
-    if (renovacionEnCurso === operacion) renovacionEnCurso = null;
+  const operacion = conBloqueoDePestanas(() =>
+    renovarConTurno(accessAntes, refreshActual),
+  ).finally(() => {
+    if (renovacionesPorRefresh.get(refreshActual) === operacion) {
+      renovacionesPorRefresh.delete(refreshActual);
+    }
   });
-  renovacionEnCurso = operacion;
+  renovacionesPorRefresh.set(refreshActual, operacion);
   return operacion;
 }
 
-async function renovarConTurno(accessAntes: string | null): Promise<boolean> {
+async function renovarConTurno(
+  accessAntes: string | null,
+  refreshEsperado: string,
+): Promise<boolean> {
   if (!apiConfigurada()) {
     // Sin URL no hay forma de renovar; conservar tokens sólo alargaría una
     // sesión que ya no se puede usar.
@@ -341,7 +363,9 @@ async function renovarConTurno(accessAntes: string | null): Promise<boolean> {
   }
 
   const refresh = obtenerRefreshToken();
-  if (!refresh) return false;
+  // El refresh en storage cambió (logout, nuevo login) antes de tomar el
+  // turno: esta operación ya no corresponde a la sesión activa.
+  if (!refresh || refresh !== refreshEsperado) return false;
 
   const accessActual = obtenerAccessToken();
   if (
@@ -359,6 +383,11 @@ async function renovarConTurno(accessAntes: string | null): Promise<boolean> {
 
     const resultado = await enviarRefresh(refresh);
     if (resultado.tipo === "ok") {
+      // Antes de instalar los tokens nuevos, verificar que el refresh en
+      // storage sigue siendo el mismo: si entre el envío y la respuesta el
+      // usuario hizo logout o inició sesión con otra cuenta, esta respuesta
+      // tardía no debe sobreescribir la sesión activa.
+      if (obtenerRefreshToken() !== refreshEsperado) return false;
       guardarTokens({
         access_token: resultado.access,
         refresh_token: resultado.refresh,
@@ -366,7 +395,8 @@ async function renovarConTurno(accessAntes: string | null): Promise<boolean> {
       return true;
     }
     if (resultado.tipo === "invalido") {
-      logout();
+      // Solo revocar si el refresh sigue siendo el que iniciamos nosotros.
+      if (obtenerRefreshToken() === refreshEsperado) logout();
       return false;
     }
     // temporal: sólo se reintenta un 503 declarado. Perder la respuesta de

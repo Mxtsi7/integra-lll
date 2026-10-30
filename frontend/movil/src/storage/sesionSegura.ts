@@ -18,6 +18,10 @@ import { configurarTokenStorage } from '@ojoalgasto/shared';
 const PREFIJO = 'ojoalgasto.';
 const CLAVES = ['access_token', 'refresh_token', 'desfase_reloj_ms'] as const;
 
+// Generación de escritura: se incrementa cada vez que se borra una clave.
+// Una escritura diferida que lleva una generación antigua no se persiste,
+// evitando la carrera escritura-diferida → logout → completar-escritura.
+const generacion = new Map<string, number>();
 const memoria = new Map<string, string>();
 let hidratando: Promise<void> | null = null;
 let disponible = true;
@@ -35,8 +39,11 @@ async function leerPersistido(clave: string): Promise<string | null> {
   }
 }
 
-async function guardarPersistido(clave: string, valor: string): Promise<void> {
+async function guardarPersistido(clave: string, valor: string, gen: number): Promise<void> {
   if (!disponible) return;
+  // Si la generación de esta escritura es anterior a la actual, el valor ya
+  // fue descartado (logout u otra escritura posterior ganó): no persistir.
+  if ((generacion.get(clave) ?? 0) !== gen) return;
   try {
     await SecureStore.setItemAsync(claveFisica(clave), valor, {
       // El refresh token no debe salir del dispositivo ni aparecer en backups.
@@ -64,10 +71,14 @@ export function instalarAlmacenSeguro(): void {
     getItem: (clave) => memoria.get(clave) ?? null,
     setItem: (clave, valor) => {
       memoria.set(clave, valor);
-      void guardarPersistido(clave, valor);
+      const gen = (generacion.get(clave) ?? 0) + 1;
+      generacion.set(clave, gen);
+      void guardarPersistido(clave, valor, gen);
     },
     removeItem: (clave) => {
       memoria.delete(clave);
+      // Avanzar la generación invalida escrituras diferidas en vuelo.
+      generacion.set(clave, (generacion.get(clave) ?? 0) + 1);
       void borrarPersistido(clave);
     },
   });
@@ -95,6 +106,7 @@ export function hidratarSesion(): Promise<void> {
 /** Sólo para pruebas: deja el espejo como recién instalado. */
 export function reiniciarAlmacenSeguroParaPruebas(): void {
   memoria.clear();
+  generacion.clear();
   hidratando = null;
   disponible = true;
 }
