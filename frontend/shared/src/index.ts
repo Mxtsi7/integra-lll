@@ -47,3 +47,4 @@ export * from './api/eliminarCuenta';
 export * from './api/verificacionCorreo';
 export * from './estadoCarga';
 export * from './api/calendario';
+export type { AuthSchemas } from './contratos/auth.generated';

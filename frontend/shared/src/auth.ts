@@ -1,3 +1,5 @@
+import type { AuthSchemas } from './contratos/auth.generated';
+
 export class AuthError extends Error {
   status: number;
   /** `code` del cuerpo, si viene (p. ej. "token_expirado" en recuperación). */
@@ -134,17 +136,9 @@ export type RegisterPayload = {
   aceptaDatos: boolean;
 };
 
-export type AuthResponse = {
-  access_token: string;
-  refresh_token: string;
-  usuario: { id: number; nombre: string; correo: string };
-};
+export type AuthResponse = AuthSchemas['LoginRespuesta'];
 
-export type RegisterResponse = {
-  id: number;
-  email: string;
-  nombre: string;
-};
+export type RegisterResponse = Pick<AuthSchemas['User'], 'id' | 'email' | 'nombre'>;
 
 export function login(payload: LoginPayload): Promise<AuthResponse> {
   return postJSON<AuthResponse>(endpoints.login, {
