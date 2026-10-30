@@ -1,6 +1,6 @@
 """Comprueba que los manifiestos entren en la cuota del namespace.
 
-    python k8s/pruebas/presupuesto.py k8s
+    python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-carga
 
 No toca el cluster: lee los YAML y suma. Calcula el recurso efectivo de cada
 pod como Kubernetes lo hace -- max(suma de containers, mayor initContainer) --
@@ -13,36 +13,8 @@ Si el peor caso no entra, el autoescalado no sirve: el pod extra recibiria
 Los topes estan fijos abajo (TOPE) porque `kubectl describe quota` no se puede
 leer desde CI. Si el ramo cambia la cuota, actualizarlos aca.
 """
+import argparse
 import sys, glob, yaml
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class Escenario:
-    titulo: str
-    escalado: bool
-    con_cron: bool
-    #: Si es False, el escenario se informa pero no decide si "todo entra".
-    obliga: bool
-    nota: str
-
-
-ESCENARIOS = (
-    Escenario("En reposo (minReplicas)", False, False, True, ""),
-    Escenario("PEOR CASO sostenido: HPA al maximo", True, False, True, ""),
-    # ── Por que este tercero NO obliga ──────────────────────────────────────
-    # El pod de la purga (k8s/40-purga-importaciones.yaml) vive unos segundos,
-    # una vez al dia, a las 04:15 de Chile. Que coincida con los dos HPA en su
-    # maximo es posible, pero no es un estado sostenido: exigir cupo
-    # permanente para el peak de una tarea de segundos obligaria a bajar el
-    # autoescalado, que es peor.
-    #
-    # Se muestra igual y se dice cuanto falta. Si alguna vez el CronJob no
-    # alcanza a crearse, la salida es SUBIR LA CUOTA del namespace, no bajar
-    # el HPA ni sacar la purga. Esconderlo seria peor que mostrarlo.
-    Escenario("TRANSITORIO: HPA al maximo + la purga corriendo", True, True, False,
-              "No obliga: el pod de la purga dura segundos, una vez al dia."),
-)
 MI = 1024*1024
 def mem(s):
     s=str(s)
@@ -64,40 +36,49 @@ def efectivo(spec):
             out[f"{campo}.{rec}"]=max(suma,maxi)
     return out
 
-cargas={}; hpas={}; cronjobs={}
-for ruta in sorted(glob.glob(sys.argv[1]+"/*.yaml")):
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("directorio")
+parser.add_argument("--namespace", default="student-forellana")
+parser.add_argument("--generador", required=True, help="Job del escenario anunciado")
+parser.add_argument("--namespace-generador", required=True, help="Namespace donde se ejecutará el Job")
+args = parser.parse_args()
+
+cargas={}; hpas={}
+for ruta in sorted(glob.glob(args.directorio+"/*.yaml")):
     for doc in yaml.safe_load_all(open(ruta,encoding="utf-8")):
         if not doc: continue
+        if doc.get("metadata", {}).get("namespace", args.namespace) != args.namespace:
+            continue
         k=doc.get("kind")
         if k in ("Deployment","StatefulSet"):
             cargas[doc["metadata"]["name"]]=(doc["spec"].get("replicas",1), efectivo(doc["spec"]["template"]["spec"]))
-        elif k=="CronJob":
-            # Un CronJob no tiene replicas, pero mientras corre OCUPA un pod y
-            # cuenta para la ResourceQuota. Se suma en el peor caso: si
-            # dispara durante un pico del autoescalado, compite por el mismo
-            # cupo. Ignorarlo haria que este presupuesto mintiera justo en el
-            # escenario que importa.
-            cronjobs[doc["metadata"]["name"]]=efectivo(
-                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"])
         elif k=="HorizontalPodAutoscaler":
             hpas[doc["spec"]["scaleTargetRef"]["name"]]=doc["spec"]["maxReplicas"]
 
+with open(args.generador, encoding="utf-8") as archivo:
+    generadores = [doc for doc in yaml.safe_load_all(archivo) if doc]
+if not generadores or any(doc.get("kind") != "Job" for doc in generadores):
+    parser.error("El generador debe contener Jobs explícitos")
+for doc in generadores:
+    namespace = doc.get("metadata", {}).get("namespace", args.namespace_generador)
+    if namespace != args.namespace_generador:
+        parser.error("El namespace declarado del Job no coincide con --namespace-generador")
+    nombre = doc["metadata"]["name"]
+    recursos = efectivo(doc["spec"]["template"]["spec"])
+    replicas = doc["spec"].get("parallelism", 1)
+    replicas = min(replicas, doc["spec"].get("completions", replicas))
+    print(f"Generador {nombre}: namespace={namespace}, pods={replicas}, lim={recursos['limits.memory']//MI}Mi cpu={recursos['limits.cpu']}m")
+    if namespace == args.namespace:
+        cargas["Job/" + nombre] = (replicas, recursos)
+    else:
+        print(f"  Fuera de la cuota de {args.namespace}; verificar la cuota propia de {namespace} antes de ejecutarlo.")
+
 TOPE={"limits.memory":2752*MI,"requests.memory":1152*MI,"limits.cpu":2000,"requests.cpu":1000,"pods":12}
 
-todo_ok = True
-for escenario in ESCENARIOS:
-    escalado = escenario.escalado
-    print("")
-    print(f"===== {escenario.titulo} =====")
-    if escenario.nota:
-        print(f"  {escenario.nota}")
+fallo=False
+for escalado in (False,True):
+    print(f"\n===== {'PEOR CASO: HPA al maximo' if escalado else 'En reposo (minReplicas)'} =====")
     tot=dict.fromkeys(TOPE,0)
-    # Los CronJob solo en el escenario que los incluye.
-    if escenario.con_cron:
-        for n,r in cronjobs.items():
-            tot["pods"]+=1
-            for k in r: tot[k]+=r[k]
-            print(f"  {n:22} x1  lim={r['limits.memory']//MI:>4}Mi cpu={r['limits.cpu']:>4}m  <- CronJob")
     for n,(reps,r) in cargas.items():
         if reps==0: continue
         if escalado and n in hpas: reps=hpas[n]
@@ -114,14 +95,6 @@ for escenario in ESCENARIOS:
         else:             us,hs=str(u),str(h)
         cabe = u<=h; ok &= cabe
         print(f"  {k:18} {us:>8} / {hs:<8} {'cabe' if cabe else '*** NO CABE ***'}   holgura {h-u if 'cpu' in k or k=='pods' else (h-u)//MI}{'' if k=='pods' else ('m' if 'cpu' in k else 'Mi')}")
-    if escenario.obliga:
-        todo_ok &= ok
-        print("  => " + ("TODO ENTRA" if ok else "ALGO NO ENTRA"))
-    else:
-        print("  => " + ("entra" if ok else
-              "NO entra por poco: transitorio conocido, ver ESCENARIOS"))
-
-print()
-print("RESULTADO: " + ("todo entra en los escenarios sostenidos"
-                       if todo_ok else "ALGO NO ENTRA en un escenario sostenido"))
-sys.exit(0 if todo_ok else 1)
+    print("  => " + ("TODO ENTRA" if ok else "ALGO NO ENTRA"))
+    fallo |= not ok
+sys.exit(1 if fallo else 0)

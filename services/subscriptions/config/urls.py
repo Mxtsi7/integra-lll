@@ -5,6 +5,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework.routers import DefaultRouter
 
+from app.eliminacion import LimpiezaSubscriptionsView
 from app.views import (
     ExportarCobrosCSVView,
     HallazgoCobroViewSet,
@@ -34,6 +35,7 @@ def salud(request):
 from app.catalogos_api import CatalogosSuscripcionesView
 
 urlpatterns = [
+    path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaSubscriptionsView.as_view()),
     path("api/catalogos/suscripciones/", CatalogosSuscripcionesView.as_view()),
     path("health/", salud),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
@@ -45,4 +47,3 @@ urlpatterns = [
     ),
     path("api/", include(router.urls)),
 ]
-

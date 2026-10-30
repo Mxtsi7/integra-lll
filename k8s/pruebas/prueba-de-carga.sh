@@ -20,8 +20,8 @@
 #     ver-estres.sh   panel en vivo del gateway (peticiones/s, CPU frenada, probes)
 #     estresar.sh N   lanza un pod de Fortio DENTRO del cluster a N peticiones/s
 #   y a los manifiestos diagnostico-busybox.yaml y los `kubectl scale` que
-#   liberan o devuelven CPU. Todo corre en el namespace del proyecto
-#   (student-forellana), desde este computador.
+#   consultan cuota o restauran réplicas. El panel mira student-forellana;
+#   la carga corre en NS_CARGA, que debe ser un namespace externo autorizado.
 set -uo pipefail
 
 # ── Ubicarse: raíz del repo, sin importar desde dónde se abrió ──────────────
@@ -70,13 +70,6 @@ cpu_namespace() {  # imprime "usado libre" en milicores, o nada si no se puede l
   echo "$u $(( h - u ))"
 }
 
-cpu_fortio() {  # cuánto pide el generador según qps (igual que estresar.sh)
-  if   [ "$1" -le 50 ];  then echo 150
-  elif [ "$1" -le 120 ]; then echo 250
-  else                        echo 400
-  fi
-}
-
 # Por qué un pod quedó Pending: el evento SyncError del vcluster lo dice.
 # $1 = fragmento del nombre del pod. Imprime el mensaje, o nada.
 motivo_pending() {
@@ -89,7 +82,7 @@ explicar_pending() {  # $1 = mensaje de motivo_pending
   if printf '%s' "$1" | grep -q students-host-envelope; then
     mal "la bolsa de CPU compartida por TODO el curso está llena (no es cuota nuestra):"
     printf '%s' "$1" | grep -o 'used: limits.cpu=[0-9]*m, limited: limits.cpu=[0-9]*' | sed 's/^/      /'
-    nota "Se arregla liberando CPU de nuestro propio namespace (opción 4)."
+    nota "Comprueba la cuota del namespace externo y la disponibilidad del curso."
   elif [ -n "$1" ]; then
     mal "motivo:"; printf '      %s\n' "$1"
   else
@@ -152,8 +145,7 @@ estado() {
 
   if cpu="$(cpu_namespace)"; then
     set -- $cpu
-    ok "CPU del namespace: ${1}m en uso, ${2}m libres  (Fortio a 100 qps pide 250m)"
-    [ "$2" -lt 250 ] && nota "→ con menos de 250m libres el generador queda en Pending: usa la opción 4."
+    ok "CPU de aplicación: ${1}m en uso, ${2}m libres; Fortio corre en NS_CARGA"
   fi
   nota "La bolsa de CPU compartida por todo el curso no se puede consultar. Si está"
   nota "llena, el generador queda Pending y el menú ofrece liberar CPU y reintentar."
@@ -181,7 +173,7 @@ accion_panel() {
 }
 
 accion_carga() {
-  local qps="${1:-}" dur="${2:-30s}" cpu
+  local qps="${1:-}" dur="${2:-30s}"
   titulo "2 · LANZAR CARGA"
   nota "Levanta un pod de Fortio DENTRO del cluster que dispara N peticiones por"
   nota "segundo al /health/ del gateway. Este computador solo manda la orden:"
@@ -195,25 +187,9 @@ accion_carga() {
     read -rp "  ¿Cuánto tiempo? [30s] " dur; dur="${dur:-30s}"
   fi
   if ! [[ "$qps" =~ ^[0-9]+$ ]]; then mal "'$qps' no es un número."; return 1; fi
-  if cpu="$(cpu_namespace)"; then
-    set -- $cpu
-    if [ "$2" -lt "$(cpu_fortio "$qps")" ]; then
-      mal "faltan ${2}m libres y el generador a $qps qps necesita $(cpu_fortio "$qps")m."
-      nota "El pod quedaría en Pending. Libera CPU con la opción 4 y vuelve a intentar."
-      return 1
-    fi
-  fi
-  echo
+  nota "El generador usa otro namespace; define NS_CARGA con acceso autorizado."
   bash "$AQUI/estresar.sh" "$qps" "$dur"
-  local rc=$?
-  if [ "$rc" -ne 0 ] && preguntar "¿Libero CPU (apago rabbitmq y worker) y reintento?"; then
-    accion_liberar "$qps" || return 1
-    echo
-    nota "reintentando…"
-    bash "$AQUI/estresar.sh" "$qps" "$dur"
-    rc=$?
-  fi
-  return "$rc"
+
 }
 
 accion_demo() {
@@ -228,23 +204,9 @@ accion_demo() {
 }
 
 accion_liberar() {
-  local qps="${1:-100}" apagar="rabbitmq subscriptions-worker" libera=350
-  titulo "4 · LIBERAR CPU ANTES DE LA PRUEBA"
-  nota "El namespace tiene techo de 2000m. Los 9 pods usan 1600m; el generador"
-  nota "pide hasta 400m. Si otro namespace del curso copa la bolsa compartida,"
-  nota "o si el gateway quedó con 2 réplicas, no alcanza."
-  nota "Se apagan cosas que hoy no hacen nada: RabbitMQ (150m, nunca transportó un"
-  nota "mensaje) y el worker de Celery (200m, solo un latido). La app sigue igual."
-  if [ "$qps" -gt 120 ]; then
-    apagar="$apagar subscriptions-beat"; libera=450
-    nota "Para $qps qps el generador pide 400m, así que también se apaga beat (100m)."
-  fi
-  echo
-  local d
-  for d in $apagar; do kubectl scale "deployment/$d" --replicas=0 || return 1; done
-  nota "esperando a que los pods terminen y suelten la CPU…"
-  for d in $apagar; do kubectl wait --for=delete pod -l "app=$d" --timeout=90s >/dev/null 2>&1 || true; done
-  ok "${libera}m liberados. Devuélvelos al final con la opción 5."
+  nota "La carga corre fuera de la cuota del proyecto; no se apagan consumidores ni workers."
+  nota "Configura NS_CARGA con otro namespace y comprueba su cuota."
+  return 1
 }
 
 accion_devolver() {
@@ -285,9 +247,14 @@ accion_limpiar() {
   titulo "7 · LIMPIAR"
   nota "Borra los Jobs de Fortio que hayan quedado y el pod de diagnóstico."
   local j
-  for j in $(kubectl get jobs -l app=carga-fortio -o name 2>/dev/null); do
-    kubectl delete "$j" --ignore-not-found && ok "borrado $j"
-  done
+  if [ -n "${NS_CARGA:-}" ] && [ "$NS_CARGA" != "$NS_APP" ]; then
+    for j in $(kubectl -n "$NS_CARGA" get jobs -l app=carga-fortio -o name); do
+      kubectl -n "$NS_CARGA" delete "$j" --ignore-not-found || return 1
+      ok "borrado $j en $NS_CARGA"
+    done
+  else
+    nota "No se borraron Jobs externos: define NS_CARGA."
+  fi
   kubectl delete pod diagnostico --ignore-not-found 2>/dev/null | grep -q deleted && ok "borrado pod/diagnostico"
   ok "limpio."
 }
@@ -421,7 +388,7 @@ menu() {
     1  Abrir el panel en vivo (otra ventana)          ver-estres.sh
     2  Lanzar la carga                                estresar.sh N
     3  Demo completa: 1 + 2 seguidos                  lo de la revisión
-    4  Liberar CPU antes (apaga rabbitmq y worker)    si el pod queda Pending
+    4  Consultar cuota externa                        conserva los workers
     5  Devolver lo apagado y dejar gateway en 1       al terminar
     6  Comprobar que el gateway responde              antes de la demo
     7  Limpiar Jobs y pods de prueba
