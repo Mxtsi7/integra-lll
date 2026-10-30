@@ -1,4 +1,24 @@
-import { obtenerAccessToken, obtenerRefreshToken, logout, renovarSesion } from "../auth";
+import {
+  obtenerAccessToken,
+  obtenerRefreshToken,
+  logout,
+  renovarSesion,
+  sesionDelToken,
+} from "../auth";
+
+/**
+ * true si los dos tokens pertenecen a la misma sesión. Con tokens opacos (sin
+ * claims legibles) no se puede afirmar lo contrario: la deduplicación de
+ * `renovarSesion()` ya garantiza que no se comparte una operación entre
+ * sesiones distintas por el valor del refresh.
+ */
+function mismaSesion(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const sesionA = sesionDelToken(a);
+  const sesionB = sesionDelToken(b);
+  if (sesionA === null || sesionB === null) return true;
+  return sesionA === sesionB;
+}
 
 let urlBase = "";
 
@@ -107,9 +127,15 @@ export async function pedir<T>(
   // 401 es del token viejo y no hay nada que renovar.
   if (res.status === 401 && token !== null && obtenerAccessToken() === token) {
     const renovado = await renovarSesion();
-    if (renovado) {
-      tokenUsado = obtenerAccessToken();
+    const accessRenovado = renovado ? obtenerAccessToken() : null;
+    if (accessRenovado !== null && mismaSesion(token, accessRenovado)) {
+      tokenUsado = accessRenovado;
       res = await enviar(tokenUsado);
+    } else if (renovado) {
+      // La renovación resolvió, pero el access nuevo es de otra sesión: entre
+      // el 401 y la respuesta alguien volvió a entrar. Reintentar con ese
+      // token usaría credenciales ajenas; la sesión nueva tampoco se cierra.
+      conservarSesion = true;
     } else if (obtenerRefreshToken() === null) {
       // El refresh fue rechazado: renovarSesion ya borró los tokens.
       manejadorNoAutorizado?.();

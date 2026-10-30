@@ -10,6 +10,12 @@ import { configurarTokenStorage } from '@ojoalgasto/shared';
  * persiste cifrado en segundo plano. Antes de decidir si hay sesión, el
  * arranque llama a `hidratarSesion()` para cargar el espejo desde SecureStore.
  *
+ * Las escrituras de una misma clave se ejecutan en orden (cola serializada):
+ * un `setItemAsync` que tarda no puede completarse *después* de un
+ * `deleteItemAsync` y resucitar un token que el usuario ya cerró. Además, la
+ * generación de cada clave invalida escrituras e hidrataciones que quedaron
+ * obsoletas mientras esperaban al almacén.
+ *
  * Si SecureStore no está disponible (por ejemplo la build web o un fallo del
  * keystore), los tokens quedan sólo en memoria: la app sigue funcionando en
  * esa ejecución, pero no inventa persistencia ni cae un almacén inseguro
@@ -18,16 +24,29 @@ import { configurarTokenStorage } from '@ojoalgasto/shared';
 const PREFIJO = 'ojoalgasto.';
 const CLAVES = ['access_token', 'refresh_token', 'desfase_reloj_ms'] as const;
 
-// Generación de escritura: se incrementa cada vez que se borra una clave.
-// Una escritura diferida que lleva una generación antigua no se persiste,
-// evitando la carrera escritura-diferida → logout → completar-escritura.
+// Generación de escritura: se incrementa cada vez que se encola un cambio.
+// Una operación diferida que lleva una generación antigua ya fue reemplazada
+// por otra posterior y no debe aplicarse.
 const generacion = new Map<string, number>();
+// Cola por clave: garantiza que set/delete lleguen al almacén en el orden en
+// que la app los pidió, aunque SecureStore tarde.
+const colas = new Map<string, Promise<void>>();
 const memoria = new Map<string, string>();
 let hidratando: Promise<void> | null = null;
 let disponible = true;
 
 function claveFisica(clave: string): string {
   return `${PREFIJO}${clave}`;
+}
+
+/** Encola una operación de almacén para `clave`, respetando el orden pedido. */
+function encolar(clave: string, tarea: () => Promise<void>): void {
+  const anterior = colas.get(clave) ?? Promise.resolve();
+  const siguiente = anterior.then(tarea, tarea);
+  colas.set(clave, siguiente);
+  void siguiente.finally(() => {
+    if (colas.get(clave) === siguiente) colas.delete(clave);
+  });
 }
 
 async function leerPersistido(clave: string): Promise<string | null> {
@@ -41,8 +60,7 @@ async function leerPersistido(clave: string): Promise<string | null> {
 
 async function guardarPersistido(clave: string, valor: string, gen: number): Promise<void> {
   if (!disponible) return;
-  // Si la generación de esta escritura es anterior a la actual, el valor ya
-  // fue descartado (logout u otra escritura posterior ganó): no persistir.
+  // Otra escritura o un borrado posterior ya reemplazó a ésta: no persistir.
   if ((generacion.get(clave) ?? 0) !== gen) return;
   try {
     await SecureStore.setItemAsync(claveFisica(clave), valor, {
@@ -73,13 +91,16 @@ export function instalarAlmacenSeguro(): void {
       memoria.set(clave, valor);
       const gen = (generacion.get(clave) ?? 0) + 1;
       generacion.set(clave, gen);
-      void guardarPersistido(clave, valor, gen);
+      // Dentro de la cola se reevalúa la generación: si un borrado se encoló
+      // después, esta escritura ya no representa el estado actual.
+      encolar(clave, () => guardarPersistido(clave, valor, gen));
     },
     removeItem: (clave) => {
       memoria.delete(clave);
-      // Avanzar la generación invalida escrituras diferidas en vuelo.
       generacion.set(clave, (generacion.get(clave) ?? 0) + 1);
-      void borrarPersistido(clave);
+      // El borrado también se encola: así espera a cualquier escritura previa
+      // y el valor no reaparece cuando esa escritura termine.
+      encolar(clave, () => borrarPersistido(clave));
     },
   });
 }
@@ -95,18 +116,37 @@ export function hidratarSesion(): Promise<void> {
 
   hidratando = (async () => {
     for (const clave of CLAVES) {
+      // Si mientras se lee la app escribe o cierra sesión, esa generación es
+      // la verdad: no se reinyecta el valor viejo del almacén.
+      const gen = generacion.get(clave) ?? 0;
       const valor = await leerPersistido(clave);
-      if (valor !== null) memoria.set(clave, valor);
+      if (valor === null) continue;
+      if ((generacion.get(clave) ?? 0) !== gen) continue;
+      if (memoria.has(clave)) continue;
+      memoria.set(clave, valor);
     }
   })();
 
   return hidratando;
 }
 
+/**
+ * Sólo para pruebas: espera a que terminen las escrituras y borrados
+ * encolados. La app no lo necesita porque el espejo en memoria responde al
+ * instante.
+ */
+export async function esperarAlmacenSeguroParaPruebas(): Promise<void> {
+  // Puede haber una operación nueva encolada mientras se esperaba la anterior.
+  while (colas.size > 0) {
+    await Promise.all([...colas.values()]);
+  }
+}
+
 /** Sólo para pruebas: deja el espejo como recién instalado. */
 export function reiniciarAlmacenSeguroParaPruebas(): void {
   memoria.clear();
   generacion.clear();
+  colas.clear();
   hidratando = null;
   disponible = true;
 }

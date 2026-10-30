@@ -27,6 +27,7 @@ from .models import (
     UsoMensual,
 )
 from .politica_ia import ProveedorNoConfigurado
+from .sanitizacion_ia import construir_payload_asistente
 
 # Topes de contexto: el proveedor no necesita el historial completo y cada
 # token se paga. Doce meses alcanzan para tendencias; cinco hallazgos, para
@@ -154,8 +155,16 @@ def resumen_local(contexto: dict) -> str:
 
 
 def prompt_de_usuario(contexto: dict, mensaje: str) -> str:
-    datos = json.dumps(contexto, ensure_ascii=False, sort_keys=True)
-    pregunta = sanear_texto(mensaje, limite=500) or (
+    """Arma el prompt con el payload saneado, no con el contexto crudo.
+
+    `construir_contexto()` conserva los nombres reales porque la respuesta del
+    endpoint es para la organización dueña de los datos. Al proveedor sólo
+    puede ir `construir_payload_asistente()`: servicios aliasados, tipos
+    cerrados y textos libres redactados (VI-23).
+    """
+    payload = construir_payload_asistente(contexto, mensaje)
+    datos = json.dumps(payload["datos"], ensure_ascii=False, sort_keys=True)
+    pregunta = payload["pregunta"] or (
         "Resume la situación y sugiere qué revisar primero."
     )
     return f"DATOS (JSON):\n{datos}\n\nPREGUNTA:\n{pregunta}"

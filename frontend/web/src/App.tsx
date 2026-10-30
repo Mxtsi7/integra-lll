@@ -6,6 +6,8 @@ import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { CuentasConectadasPage } from './pages/CuentasConectadasPage';
+import { ImportacionPage } from './pages/ImportacionPage';
+import { ImportacionesPage } from './pages/ImportacionesPage';
 import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
@@ -82,8 +84,9 @@ export function App() {
                   en silencio. */}
               <Route path={RUTA_CALENDARIO} element={<CalendarioPage />} />
               <Route path={RUTA_AGENDA} element={<AgendaPage />} />
-              {/* AN-20: mientras VI-17 no exista (RECOMENDACIONES_DISPONIBLES = false),
-                  se muestra Próximamente y no se llama al backend. */}
+              {/* AN-20: con RECOMENDACIONES_DISPONIBLES = false se muestra
+                  Próximamente y no se llama al backend. VI-17 ya está en main
+                  (CH-26), así que hoy es true. */}
               <Route
                 path="/recomendaciones"
                 element={
@@ -98,6 +101,10 @@ export function App() {
                   accionConectar (ConectarCorreo). Sin ellas, la página dice
                   que todavía no está disponible. */}
               <Route path="/cuentas" element={<CuentasConectadasPage />} />
+              {/* CH-27: el progreso de una importación (FE-08). FE-07 lleva
+                  acá después de subir un archivo. */}
+              <Route path="/importaciones" element={<ImportacionesPage />} />
+              <Route path="/importaciones/:id" element={<ImportacionPage />} />
               <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
             </Route>
 

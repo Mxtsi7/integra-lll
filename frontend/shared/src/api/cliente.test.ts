@@ -22,6 +22,17 @@ function respuesta(status: number, cuerpo: unknown = {}) {
   });
 }
 
+/** Arma un JWT con el payload dado. La firma da igual: el front no la verifica. */
+function jwt(payload: Record<string, unknown>): string {
+  const base64url = (texto: string) =>
+    btoa(texto).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return [
+    base64url(JSON.stringify({ alg: "HS256", typ: "JWT" })),
+    base64url(JSON.stringify(payload)),
+    "firma",
+  ].join(".");
+}
+
 describe("pedir(): JWT en cada petición e interceptor 401", () => {
   const fetchMock = vi.fn();
   let manejador401: ReturnType<typeof vi.fn>;
@@ -168,6 +179,55 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
         "http://api.test/api/suscripciones/",
         "http://api.test/api/auth/refresh/",
         "http://api.test/api/suscripciones/",
+      ]);
+    });
+
+    it("si el usuario inicia otra sesión durante el refresh, no reintenta con sus credenciales", async () => {
+      const sesionA = { user_id: 7, organizacion_id: "org-a", sid: "a-cliente" };
+      const sesionB = { user_id: 7, organizacion_id: "org-a", sid: "b-cliente" };
+      const accessA = jwt({ ...sesionA, jti: "a-0" });
+      const refreshA = jwt({ ...sesionA, jti: "a-1" });
+      const accessB = jwt({ ...sesionB, jti: "b-0" });
+      const refreshB = jwt({ ...sesionB, jti: "b-1" });
+      guardarTokens({ access_token: accessA, refresh_token: refreshA });
+
+      let liberarRefresh: ((r: Response) => void) | undefined;
+      let avisarRefresh: (() => void) | undefined;
+      const refreshEnCurso = new Promise<void>((listo) => {
+        avisarRefresh = listo;
+      });
+      fetchMock.mockImplementation((url: string) => {
+        if (url.endsWith("/auth/refresh/")) {
+          return new Promise<Response>((resolver) => {
+            liberarRefresh = resolver;
+            avisarRefresh?.();
+          });
+        }
+        return Promise.resolve(respuesta(401, { detail: "Token vencido" }));
+      });
+
+      const peticionA = pedir("/suscripciones/");
+      await refreshEnCurso;
+
+      // El refresh de A sigue en vuelo cuando B inicia sesión.
+      guardarTokens({ access_token: accessB, refresh_token: refreshB });
+      liberarRefresh?.(
+        respuesta(200, {
+          access_token: jwt({ ...sesionA, jti: "a-2" }),
+          refresh_token: jwt({ ...sesionA, jti: "a-3" }),
+        }),
+      );
+
+      await expect(peticionA).rejects.toMatchObject({ status: 401 });
+
+      expect(obtenerAccessToken()).toBe(accessB);
+      expect(obtenerRefreshToken()).toBe(refreshB);
+      expect(manejador401).not.toHaveBeenCalled();
+      // No se repitió la petición de A con el access renovado de A (ni de B).
+      const urls = fetchMock.mock.calls.map(([url]) => url);
+      expect(urls).toEqual([
+        "http://api.test/api/suscripciones/",
+        "http://api.test/api/auth/refresh/",
       ]);
     });
 
