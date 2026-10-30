@@ -111,12 +111,7 @@ class CuentaConectada(ModeloTenant):
         verbose_name="Detalle del estado",
     )
 
-    # ⚠️ MISMO NOMBRE Y MISMO SIGNIFICADO que el campo que agrega #72
-    # (migración `0002_cuenta_revocada`). Está así a propósito: dos campos
-    # distintos para la misma idea serían un lío silencioso para siempre,
-    # mientras que dos `AddField` con el mismo nombre son UN conflicto
-    # visible que se resuelve borrando una línea al integrar. Si #72 entra
-    # primero, se borra esta declaración y su AddField de acá.
+    # Campo publicado por FE-05 en 0003_autorizacion_y_revocacion.
     # ── La evidencia de revocación es de UNA concesión, no de la cuenta ──
     # Sin esto había dos agujeros, los dos encontrados en revisión:
     #
