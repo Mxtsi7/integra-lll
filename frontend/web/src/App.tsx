@@ -10,9 +10,11 @@ import { ImportacionPage } from './pages/ImportacionPage';
 import { ImportacionesPage } from './pages/ImportacionesPage';
 import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
+import { AlertasPage } from './pages/AlertasPage';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
 import { CatalogosLayout } from './context/CatalogosContext';
+import { ContadorAlertasProvider } from './context/ContadorAlertasContext';
 import { AuthProvider } from './context/AuthContext';
 import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
@@ -70,7 +72,9 @@ export function App() {
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
           <Route element={<RutaPrivada />}>
-            <Route element={<CatalogosLayout />}>
+            {/* CH-31: el número de la campana es uno para todas las páginas
+                privadas, y se vuelve a montar con la sesión. */}
+            <Route element={<ContadorAlertasProvider><CatalogosLayout /></ContadorAlertasProvider>}>
               <Route path="/dashboard" element={<DashboardPage />} />
               {/* Antes era "/Home" pero el menú enlaza "/home"; React Router
                   no distingue mayúsculas por defecto, se deja igual al enlace. */}
@@ -105,6 +109,9 @@ export function App() {
                   acá después de subir un archivo. */}
               <Route path="/importaciones" element={<ImportacionesPage />} />
               <Route path="/importaciones/:id" element={<ImportacionPage />} />
+              {/* SE-01 y CH-31: el Centro de alertas (FE-19, FE-20). La
+                  campana lleva acá. */}
+              <Route path="/alertas" element={<AlertasPage />} />
               <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
             </Route>
 
