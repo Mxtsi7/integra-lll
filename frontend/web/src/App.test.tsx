@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getAlertas,
   getCobrosDelMes,
+  getContadorAlertas,
   getPreferenciasAlertas,
   getRecomendaciones,
   getSuscripciones,
@@ -25,6 +27,8 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     getRecomendaciones: vi.fn(),
     getSuscripciones: vi.fn(),
     getPreferenciasAlertas: vi.fn(),
+    getAlertas: vi.fn(),
+    getContadorAlertas: vi.fn(),
   };
 });
 
@@ -37,10 +41,10 @@ const USUARIO: Usuario = {
   plan: "gratuito",
 };
 
-function jwtVigente(): string {
+function jwtVigente(claims: Record<string, string> = {}): string {
   const b64 = (o: unknown) =>
     btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `${b64({ alg: "HS256" })}.${b64({ exp: Math.floor(Date.now() / 1000) + 1800 })}.firma`;
+  return `${b64({ alg: "HS256" })}.${b64({ ...claims, exp: Math.floor(Date.now() / 1000) + 1800 })}.firma`;
 }
 
 function montar(ruta: string) {
@@ -56,6 +60,8 @@ beforeEach(() => {
   vi.mocked(getUsuarioActual).mockReset();
   vi.mocked(getUsuarioActual).mockResolvedValue(USUARIO);
   vi.mocked(getSuscripciones).mockReset().mockResolvedValue([]);
+  vi.mocked(getContadorAlertas).mockReset().mockResolvedValue({ pendientes: 2, total: 3 });
+  vi.mocked(getAlertas).mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
   vi.mocked(getPreferenciasAlertas).mockReset().mockResolvedValue({
     por_email: true,
     por_push: false,
@@ -145,16 +151,17 @@ async function montarConRouterDeDatos(ruta: string) {
   return router;
 }
 
-describe("App: la campana abre los ajustes de avisos", () => {
-  it.each(["/home", "/dashboard"])("desde %s monta Ajustes con Avisos, y Atrás vuelve", async (origen) => {
+describe("App: la campana abre el Centro de alertas (CH-31)", () => {
+  it.each(["/home", "/dashboard"])("desde %s monta el Centro con las sin leer, y Atrás vuelve", async (origen) => {
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     const router = await montarConRouterDeDatos(origen);
 
-    await act(async () => fireEvent.click(await screen.findByRole("link", { name: "Configurar notificaciones" })));
-    expect(router.state.location.pathname).toBe("/configuracion");
-    expect(await screen.findByRole("heading", { level: 1, name: "Ajustes" })).toBeInTheDocument();
-    const avisos = screen.getByRole("heading", { name: "Avisos" }).closest("section")!;
-    expect(await within(avisos).findByRole("switch", { name: "Por correo" })).toBeInTheDocument();
+    const campana = await screen.findByRole("link", { name: "Alertas" });
+    expect(campana).toHaveAccessibleDescription("2 alertas sin leer");
+    await act(async () => fireEvent.click(campana));
+    expect(router.state.location.pathname).toBe("/alertas");
+    expect(await screen.findByRole("heading", { level: 1, name: "Alertas" })).toBeInTheDocument();
+    expect(getAlertas).toHaveBeenCalled();
 
     await act(async () => {
       await router.navigate(-1);
@@ -162,19 +169,48 @@ describe("App: la campana abre los ajustes de avisos", () => {
     expect(router.state.location.pathname).toBe(origen);
   });
 
-  it("ya en Ajustes, con un cambio sin guardar, no desmonta el formulario ni pierde el borrador", async () => {
+  it("desde el Centro, «Configurar avisos» monta Ajustes con Avisos", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    const router = await montarConRouterDeDatos("/alertas");
+
+    await act(async () => fireEvent.click(await screen.findByRole("link", { name: "Configurar avisos" })));
+    expect(router.state.location.pathname).toBe("/configuracion");
+    expect(await screen.findByRole("heading", { level: 1, name: "Ajustes" })).toBeInTheDocument();
+    const avisos = screen.getByRole("heading", { name: "Avisos" }).closest("section")!;
+    expect(await within(avisos).findByRole("switch", { name: "Por correo" })).toBeInTheDocument();
+  });
+
+  it("ya en Ajustes, con un cambio sin guardar, la campana pregunta antes de salir y no pierde el borrador", async () => {
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     const router = await montarConRouterDeDatos("/configuracion");
     const alza = await screen.findByRole("switch", { name: "Alza de tarifa" });
     fireEvent.click(alza);
     expect(alza).toHaveAttribute("aria-checked", "false");
 
-    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Configurar notificaciones" })));
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Alertas" })));
     expect(router.state.location.pathname).toBe("/configuracion");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Seguir editando" })));
     // El mismo interruptor, con el cambio, y sin volver a pedir las preferencias.
     expect(screen.getByRole("switch", { name: "Alza de tarifa" })).toBe(alza);
     expect(alza).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Tienes cambios sin guardar.")).toBeInTheDocument();
     expect(getPreferenciasAlertas).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("App: el número de la campana es de la sesión", () => {
+  it("con otra cuenta en otra pestaña, la campana vuelve a preguntar y no muestra el de la anterior", async () => {
+    guardarTokens({ access_token: jwtVigente({ sid: "sesion-a" }), refresh_token: "refresh" });
+    await montarConRouterDeDatos("/alertas");
+    expect(await screen.findByRole("link", { name: "Alertas" })).toHaveAccessibleDescription("2 alertas sin leer");
+    const llamadas = vi.mocked(getContadorAlertas).mock.calls.length;
+
+    // La otra cuenta no tiene ninguna sin leer.
+    vi.mocked(getContadorAlertas).mockResolvedValue({ pendientes: 0, total: 0 });
+    await act(async () => {
+      guardarTokens({ access_token: jwtVigente({ sid: "sesion-b" }), refresh_token: "otro-refresh" });
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    });
+    expect(vi.mocked(getContadorAlertas).mock.calls.length).toBeGreaterThan(llamadas);
+    expect(screen.getByRole("link", { name: "Alertas" })).not.toHaveAttribute("aria-describedby");
   });
 });
