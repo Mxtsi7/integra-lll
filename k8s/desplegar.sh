@@ -4,7 +4,7 @@
 #     ./k8s/desplegar.sh                 # construye, publica y aplica
 #     SOLO_APLICAR=1 ./k8s/desplegar.sh  # solo aplica (no reconstruye)
 #
-# Requisitos: docker, kubectl con el contexto del ramo, y sesión en el
+# Requisitos: python3, docker, kubectl con el contexto del ramo, y sesión en el
 # registro (docker login ghcr.io).
 set -euo pipefail
 
@@ -99,13 +99,17 @@ if ! kubectl get secret ojoalgasto-rabbitmq >/dev/null 2>&1; then
   printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"ojoalgasto-rabbitmq"},"type":"Opaque","stringData":{"RABBITMQ_USER":"ojoalgasto","RABBITMQ_PASSWORD":"%s","RABBITMQ_URL":"amqp://ojoalgasto:%s@rabbitmq:5672/"}}' \
     "$CLAVE_RABBITMQ" "$CLAVE_RABBITMQ" | kubectl create -f - >/dev/null
 fi
+# Verificar/drenar el broker ANTES de reemplazarlo o reiniciar sus consumidores.
+# Si falla, no se aplica el manifiesto ni se prosigue con la migración.
+python3 k8s/actualizar-rabbitmq.py
+
 # Preparar Postgres antes de las migraciones de dominio.
 kubectl apply -f k8s/00-configuracion.yaml
 kubectl apply -f k8s/01-postgres.yaml
 kubectl rollout status statefulset/postgres --timeout=300s
 bash k8s/configurar-usuarios-bd.sh
 
-for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml k8s/02-redis-rabbitmq.yaml \
+for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml \
          k8s/10-auth.yaml k8s/11-subscriptions.yaml k8s/12-gateway.yaml \
          k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml k8s/40-red.yaml; do
   sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \

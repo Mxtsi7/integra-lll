@@ -103,7 +103,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [web] }
+              - { key: app, operator: In, values: [web, carga-fortio, carga-comparar, diagnostico] }
       ports:
         - { protocol: TCP, port: 8000 }
 ---

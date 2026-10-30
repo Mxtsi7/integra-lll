@@ -12,10 +12,9 @@
 #   -qps  peticiones por segundo (0 = tan rápido como pueda)
 #   -t    duración
 #
-# Blancos útiles, de menos a más capas:
-#   http://gateway:8000/health/        solo el gateway, sin base de datos
-#   http://auth:8001/health/           Django + una consulta a Postgres
-#   http://subscriptions:8002/health/  ídem, otro servicio
+# Blanco autorizado: http://gateway:8000/health/, sin base de datos.
+# Las APIs internas solo aceptan al gateway. Para carga de suscripciones,
+# usar comparar-cola.sh con sesiones válidas; no enviar identidad a mano.
 #
 # ⚠️ El namespace tiene un techo de 2 CPU. Los pods del sistema usan 1250m en
 # reposo, y el HPA puede pedir hasta 600m más al escalar. Por eso el límite de

@@ -24,18 +24,31 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install pytest PyYAML 'psycopg[binary]'
+      - run: pip install pytest PyYAML 'psycopg[binary]' pika
       - run: python -m pytest scripts/tests/ -q
-      - run: bash -n k8s/desplegar.sh k8s/configurar-usuarios-bd.sh
+      - name: Verificar sintaxis de cada script
+        run: |
+          bash -n k8s/desplegar.sh
+          bash -n k8s/configurar-usuarios-bd.sh
+          bash -n k8s/pruebas/comparar-cola.sh
+          bash -n k8s/pruebas/estresar.sh
+      - run: bash k8s/pruebas/probar-comparar-cola.sh
       - name: Verificar Compose y credenciales reales de RabbitMQ
         run: |
           cp .env.example .env
           docker compose config --quiet
-          docker compose up -d --wait rabbitmq
+          # Publicar AMQP solo en loopback del runner para la integración.
+          printf 'services:\n  rabbitmq:\n    ports: ["127.0.0.1:5679:5672"]\n' > "$RUNNER_TEMP/rabbitmq-pruebas.yaml"
+          docker compose -f docker-compose.yml -f "$RUNNER_TEMP/rabbitmq-pruebas.yaml" up -d --wait rabbitmq
           docker compose exec -T rabbitmq rabbitmqctl authenticate_user ojoalgasto pruebas-d11
           if docker compose exec -T rabbitmq rabbitmqctl authenticate_user guest guest; then
             echo 'guest sigue habilitado' >&2
             exit 1
           fi
+      - name: Verificar guard de migración con mensajes reales confirmados
+        run: |
+          export D11_RABBITMQ_CONTENEDOR="$(docker compose ps -q rabbitmq)"
+          export D11_RABBITMQ_URL=amqp://ojoalgasto:pruebas-d11@127.0.0.1:5679/
+          python -m pytest scripts/tests/test_migracion_rabbitmq.py -q
       - if: always()
         run: docker compose down

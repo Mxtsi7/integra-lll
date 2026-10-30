@@ -89,6 +89,12 @@ case "$1" in
       fi
       exit 0 ;;
   exec)
+      if [ "$2" = "-i" ] && [ "$3" = "deployment/gateway" ]; then
+        token="$(cat)"
+        if [ "$token" = "$TOKEN_SIN" ]; then echo '11111111-1111-4111-a111-111111111111'
+        else echo '22222222-2222-4222-a222-222222222222'; fi
+        exit 0
+      fi
       case "$2" in
         deployment/subscriptions|deployment/rabbitmq) ;;
         *) echo "Error from server (NotFound): recurso $2 inexistente" >&2; exit 1 ;;
@@ -105,11 +111,11 @@ case "$1" in
       esac
       exit 0 ;;
   delete)  exit 0 ;;
-  apply)   cat >/dev/null; exit 0 ;;
+  apply|create)   cat >/dev/null; exit 0 ;;
   wait)    exit "${FALLA_CARGA:-0}" ;;
   logs)
       case "$todo" in
-        *job/carga-comparar*) echo "Code 201 : 1000"; exit 0 ;;
+        *job/carga-comparar*) echo "Code ${HTTP_CARGA:-201} : 1000"; exit 0 ;;
         *)  for _ in $(seq 1 "${RECALCULOS:-3}"); do echo "resumen.recalculado modo=x"; done; exit 0 ;;
       esac ;;
 esac
@@ -120,6 +126,8 @@ export PATH="$DOBLES:$PATH"
 
 # Sin esperas reales: el arnes no tiene por que dormir.
 export DRENAR_INTENTOS=2 DRENAR_PAUSA=0 DURACION=1s
+export TOKEN_SIN=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.firma_sin
+export TOKEN_CON=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIyIn0.firma_con
 
 reiniciar_estado() {  # $1 = API, $2 = worker, $3 = consumidor-eventos, $4 = migrar (opcional)
   echo "$1" > "$ESTADO/env.subscriptions.subscriptions"
@@ -130,6 +138,7 @@ reiniciar_estado() {  # $1 = API, $2 = worker, $3 = consumidor-eventos, $4 = mig
   : > "$REGISTRO"
   export OUTBOX_PENDIENTES=0 COLA_MENSAJES=0 FALLA_CARGA=0 ROLLOUT_FALLA_DESDE=""
   export FALLA_RABBIT=0 COLA_AUSENTE=0
+  export HTTP_CARGA=201
 }
 
 correr() {
@@ -269,6 +278,17 @@ for origen in OUTBOX_PENDIENTES COLA_MENSAJES; do
 done
 
 echo
+echo "=== 11. una sesión rechazada invalida la carga y restaura ==="
+reiniciar_estado 0 1 ausente
+export HTTP_CARGA=401
+codigo="$(correr)"
+juzgar "HTTP 401 impide éxito aunque Fortio termine" "$(si "$codigo" != "0")"
+if dice "CON cola"; then v=0; else v=1; fi
+juzgar "no inicia la segunda corrida" "$v"
+juzgar "restaura la API" "$(si "$(api)" = "0")"
+if grep -q '^delete secret carga-comparar-token' "$REGISTRO"; then v=1; else v=0; fi
+juzgar "elimina el Secret temporal" "$v"
+
 echo "--------------------------------"
 echo "  $ok bien, $mal mal"
 [ "$mal" = "0" ] || exit 1

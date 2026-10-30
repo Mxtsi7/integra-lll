@@ -1,12 +1,8 @@
 # Carga para la comparación con y sin cola. Lo aplica comparar-cola.sh, que
-# reemplaza ORGANIZACION, DURACION, CONEXIONES y CANTIDAD_QPS.
+# reemplaza DURACION, CONEXIONES y CANTIDAD_QPS.
 #
-# No se aplica a mano: sin esos reemplazos, Fortio manda la palabra
-# "ORGANIZACION" como cabecera y el servicio responde 403.
-#
-# Le pega directo a subscriptions, sin pasar por el gateway. Por eso manda
-# X-Organizacion-Id a mano: en producción esa cabecera la inyecta el gateway
-# después de validar el JWT (ADR-004), y el servicio confía en ella.
+# Usa un token de sesión válido desde un Secret temporal. Gateway verifica
+# la sesión e inyecta la identidad; este pod no tiene acceso directo al dominio.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -23,6 +19,10 @@ spec:
       containers:
         - name: fortio
           image: fortio/fortio:1.66.3
+          env:
+            - name: TOKEN_CARGA
+              valueFrom:
+                secretKeyRef: { name: carga-comparar-token, key: token }
           args:
             - load
             - -c
@@ -32,12 +32,12 @@ spec:
             - -t
             - DURACION
             - -H
-            - "X-Organizacion-Id: ORGANIZACION"
+            - "Authorization: Bearer $(TOKEN_CARGA)"
             - -H
             - "Content-Type: application/json"
             - -payload
             - '{"nombre":"Carga","monto":"9990","moneda":"CLP","frecuencia":"mensual","fecha_proximo_cobro":"2026-11-01","categoria":"streaming","estado":"activo"}'
-            - http://subscriptions:8002/api/suscripciones/
+            - http://gateway:8000/api/suscripciones/
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits:   { cpu: 200m, memory: 128Mi }

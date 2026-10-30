@@ -95,6 +95,22 @@ def test_rabbitmq_usa_secret_y_despliegue_incluye_politicas():
     assert "gh auth token" not in script
 
 
+def test_jobs_de_carga_entran_por_gateway_sin_poder_suplantarlo():
+    for ruta in ("k8s/pruebas/carga-fortio.yaml", "k8s/pruebas/carga-comparar.yaml"):
+        pod = documentos(ruta)[0]["spec"]["template"]
+        etiquetas = pod["metadata"]["labels"]
+        app = etiquetas["app"]
+        assert permitido(app, "gateway", 8000, etiquetas_origen=etiquetas)
+        assert not permitido(app, "subscriptions", 8002, etiquetas_origen=etiquetas)
+        assert not permitido(app, "auth", 8001, etiquetas_origen=etiquetas)
+        assert not permitido(app, "gateway", 8000, namespace="otro-grupo", etiquetas_origen=etiquetas)
+        args = pod["spec"]["containers"][0]["args"]
+        assert args[-1].startswith("http://gateway:8000/")
+        assert not any("X-Organizacion-Id" in arg for arg in args)
+        if app == "carga-comparar":
+            assert "Authorization: Bearer $(TOKEN_CARGA)" in args
+
+
 def test_dominio_no_recibe_la_credencial_administrativa():
     for ruta, servicio in [("k8s/10-auth.yaml", "auth"), ("k8s/11-subscriptions.yaml", "subscriptions")]:
         for doc in documentos(ruta):
