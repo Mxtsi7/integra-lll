@@ -160,11 +160,23 @@ Permite cerrar la sesión en el dispositivo actual. Tras el cierre, el token de 
 
 ## RF-01.7 — Eliminar cuenta y datos personales
 
+**Enmienda de Outlook — 29-10-2026, para ratificación del equipo (MX-22).**
+Para proveedores que no ofrecen revocación por token (Outlook), la eliminación
+destruye las credenciales locales dentro del plazo e informa al titular cómo
+retirar el acceso desde su cuenta; la revocación del lado del proveedor queda
+a cargo del titular. Esta excepción se limita a Outlook y también se aplica a
+operaciones de eliminación ya pendientes. Gmail conserva la confirmación del
+proveedor; `revocado_en` nunca representa una desconexión o destrucción local.
+El [visto bueno técnico de Felipe / FE-05](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231)
+respalda esta propuesta; no sustituye la ratificación de producto/equipo ni
+acredita por sí solo el cumplimiento operativo del plazo. Véase la
+[decisión de MX-07](../decisiones/mx-07-outlook-revocacion.md).
+
 Permite eliminar la cuenta de forma permanente, previa confirmación de identidad (contraseña vigente o reautenticación con Google) y confirmación explícita de la acción. Antes de confirmar, el sistema informa qué se eliminará y qué se conservará anonimizado. La eliminación aplica la siguiente regla de retención, propuesta para hacer compatibles RF-01.7, RNF-10 (Ley 21.719: eliminación definitiva y retención acotada) y RNF-13 (auditoría); queda registrada como V-03 en la matriz de trazabilidad para ratificación del equipo en el acta:
 
 | Dato | Acción al eliminar la cuenta | Plazo |
 |---|---|---|
-| Sesiones activas, credenciales y tokens de conectores (correo, Google) | Revocación, invalidación y eliminación definitiva | Revocación inmediata, en la misma confirmación; eliminación definitiva en máximo 72 horas |
+| Sesiones activas, credenciales y tokens de conectores (correo, Google) | Revocación, invalidación y eliminación definitiva; excepción Outlook propuesta arriba | Revocación inmediata, en la misma confirmación; eliminación definitiva en máximo 72 horas |
 | Perfil (nombre, correo, contraseña), suscripciones, cobros, registros de uso, conversaciones del chat, alertas, presupuesto y preferencias | Eliminación definitiva | Máximo 72 horas desde la confirmación |
 | Registros de auditoría de cambios automáticos (RNF-13: cancelación, reactivación, transición post-trial) | Anonimización irreversible: se elimina toda referencia que permita reidentificar al titular (correo, nombre, identificador de usuario); se conserva solo tipo de evento, marca de tiempo, un seudónimo no reversible y la fecha de eliminación de la cuenta que los originó | Anonimización en máximo 72 horas; purga definitiva de todo registro anonimizado cuya fecha de eliminación supere los 12 meses |
 | Comprobantes de pago del plan Premium (RF-17) | Conservación disociada del resto de los datos, solo con los campos exigidos por la obligación tributaria | 6 años [base legal por validar con la investigación legal del equipo]; luego eliminación definitiva |
@@ -173,7 +185,8 @@ Permite eliminar la cuenta de forma permanente, previa confirmación de identida
 
 **Criterios de aceptación**
 
-- Dado que confirma la eliminación con su identidad verificada, entonces sus sesiones y tokens quedan revocados de inmediato y ya no puede autenticar.
+- Dado que confirma la eliminación con su identidad verificada, entonces sus sesiones quedan revocadas de inmediato y ya no puede autenticar; la revocación de conectores conserva la excepción Outlook propuesta arriba.
+- Para la enmienda Outlook: antes de confirmar se informa al titular cómo retirar el acceso; la limpieza conserva las credenciales ante un 409 y solo las destruye en el borrado final, sin escribir `revocado_en` ni llamar a Microsoft para simular una revocación.
 - Dado que transcurren 72 horas desde la confirmación, entonces ninguna consulta ni exportación de la aplicación devuelve datos personales del titular, y su correo puede registrarse como cuenta nueva sin heredar ningún dato.
 - Dado un registro de auditoría de esa cuenta consultado después de la eliminación, entonces no contiene correo, nombre ni identificador que permita reidentificar al titular.
 - Dado un registro de auditoría anonimizado cuya fecha de eliminación de cuenta supere los 12 meses, entonces ya no existe; la purga opera por esa fecha, sin necesidad de identificar la cuenta de origen.

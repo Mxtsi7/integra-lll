@@ -257,12 +257,21 @@ un requisito nuevo. La matriz expresa cobertura prevista, no prueba de cumplimie
 
 ## Entregas de Maximiliano y bloqueos comprobados
 
+Actualización de MX-07, 29-10-2026: [Felipe aprobó técnicamente la opción 3 para Outlook](https://github.com/Mxtsi7/integra-lll/pull/72#issuecomment-6509078231).
+La [enmienda RF-01.7](requisitos-vigentes.md#rf-017--eliminar-cuenta-y-datos-personales)
+registra destrucción local y aviso previo al titular, también para operaciones
+pendientes. Se mantiene separada su ratificación de producto/equipo. El aviso
+está incluido en el diálogo web AN-18; AN-19 debe incorporarlo cuando implemente
+su flujo móvil. La desconexión Outlook ordinaria de FE-05 queda a cargo de Felipe,
+fuera del cierre de organización. Esta actualización no declara aprobados ni
+desplegados los demás elementos de la captura histórica de la tabla.
+
 | Tareas | Evidencia / decisión |
 |---|---|
 | MX-02/03/04, MX-30 | Ya en GitHub: #60 y #55; no duplicar |
 | MX-05/06, MX-10/29 | Ya integradas: #69 y #68 |
 | MX-28, MX-11 | Integradas durante esta ejecución: #70 y #71 |
-| MX-07 | #72 draft; falta revocación externa FE-05. No borrar credenciales para simular esa revocación |
+| MX-07 | #72 draft; Gmail usa FE-05. Outlook cuenta con visto bueno técnico para cierre local sin `revocado_en`; enmienda RF-01.7 propuesta para ratificación. Credenciales nuevas o errores conservan 409 y no se destruyen |
 | MX-12/13 | #73; conserva dependencia de eliminación |
 | MX-08/15 | [#85](https://github.com/Mxtsi7/integra-lll/pull/85), Maxi-planes |
 | MX-09/16 | [#86](https://github.com/Mxtsi7/integra-lll/pull/86), Maxi-permisos-planes, base #85 |

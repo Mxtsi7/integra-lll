@@ -134,16 +134,17 @@ se descubren chocando. Están documentadas en `k8s/README.md`:
 - **Mínimo 25m de CPU y 64Mi de memoria** por contenedor
 - **Techo de 2 CPU (2000m) en límites para todo el namespace**
 
-Los nueve pods del sistema ya consumen **1600m**:
+Los diez pods del sistema suman **1350m** en reposo
+(`python k8s/pruebas/presupuesto.py k8s`):
 
 ```
-auth 250m · postgres 250m · subscriptions 250m · gateway 200m
-worker 200m · rabbitmq 150m · redis 100m · beat 100m · web 100m
+worker 300m · subscriptions 200m · gateway 200m · auth 150m · postgres 150m
+rabbitmq 100m · auth-eliminaciones 100m · redis 50m · beat 50m · web 50m
 ```
 
-Quedan **~400m**. Por eso el Job de carga pide 200m y el de diagnóstico 50m.
-Subir esos números puede dejar el pod en `Pending` o, peor, impedir que un
-despliegue levante los suyos.
+Con el HPA al máximo son **1750m** y quedan **250m**. Por eso el Job de carga
+pide 200m y el de diagnóstico 50m. Subir esos números puede dejar el pod en
+`Pending` o, peor, impedir que un despliegue levante los suyos.
 
 ## Antes de correr una prueba de carga
 
@@ -170,14 +171,14 @@ En la segunda, la carga:
 kubectl apply -f k8s/pruebas/carga-fortio.yaml
 ```
 
-En la primera terminal, `REPLICAS` debería pasar de 1 a 2 y a 3 en menos de
-un minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
+En la primera terminal, `REPLICAS` debería pasar de 1 a 2 en menos de un
+minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
 ventana para que no entre en vaivén.
 
 Si la columna `TARGETS` dice `<unknown>` en vez de un número, el HPA no está
 recibiendo métricas y no va a escalar nunca. Eso es metrics-server, no el
 manifiesto.
 
-**El techo no es arbitrario.** `gateway` llega a 3 y `subscriptions` a 2
-porque la cuota permite 12 pods y la base son 9. Pedir más réplicas no daría
+**El techo no es arbitrario.** `gateway` y `subscriptions` llegan a 2
+porque la cuota permite 12 pods y la base son 10. Pedir más réplicas no daría
 más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.

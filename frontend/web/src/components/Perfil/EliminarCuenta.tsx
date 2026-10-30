@@ -153,6 +153,14 @@ export function EliminarCuenta({
                     los comprobantes de pago del plan Premium (si los hubo) y los registros de auditoría anonimizados.
                   </li>
                 </ul>
+                <p>
+                  Si también se elimina tu organización y tiene cuentas Outlook conectadas, se destruyen
+                  sus credenciales guardadas aquí. Microsoft no revoca automáticamente ese acceso:
+                  debes retirarlo desde tu cuenta Microsoft.{' '}
+                  <a href="https://account.live.com/consent/Manage" target="_blank" rel="noopener noreferrer">
+                    Retirar el acceso en tu cuenta Microsoft personal
+                  </a>.
+                </p>
               </div>
 
               <CampoContrasena

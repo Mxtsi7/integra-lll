@@ -44,6 +44,10 @@ export function configureAuthApi(config: {
   if (config.endpoints) endpoints = { ...endpoints, ...config.endpoints };
 }
 
+export function obtenerAuthApiUrl(): string {
+  return apiUrl;
+}
+
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",

@@ -64,6 +64,16 @@ describe('EliminarCuenta (AN-18)', () => {
     expect(botonConfirmar().disabled).toBe(false);
   });
 
+  it('informa de la limitación de Outlook antes de confirmar la eliminación', () => {
+    const onEliminar = vi.fn();
+    abrir(onEliminar);
+    expect(screen.getByText(/Microsoft no revoca automáticamente ese acceso/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Retirar el acceso en tu cuenta Microsoft personal' }).getAttribute('href'))
+      .toBe('https://account.live.com/consent/Manage');
+    expect(botonConfirmar().disabled).toBe(true);
+    expect(onEliminar).not.toHaveBeenCalled();
+  });
+
   it('Cancelar cierra el diálogo sin hacer petición ni tocar la sesión', () => {
     const onEliminar = vi.fn();
     abrir(onEliminar);

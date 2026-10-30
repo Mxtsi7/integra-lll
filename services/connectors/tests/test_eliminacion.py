@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from connectors.models import AutorizacionPendiente, CuentaConectada, Importacion
+from connectors.eliminacion import LimpiezaConnectorsView
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
 
@@ -260,8 +261,9 @@ def test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina(monkeypatch, cl
     )
     revocar = Mock(side_effect=[False, True])
     monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    operacion = uuid.uuid4()
 
-    assert limpiar(org).status_code == 409
+    assert limpiar(org, operacion).status_code == 409
 
     gmail.refresh_from_db()
     outlook.refresh_from_db()
@@ -277,12 +279,52 @@ def test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina(monkeypatch, cl
     assert revocar.call_args.args == ("gmail",)
     assert revocar.call_args.kwargs["access_token"] == "gmail-access"
 
-    assert limpiar(org).status_code == 204
+    assert limpiar(org, operacion).status_code == 204
 
     assert revocar.call_count == 2
     assert all(call.args == ("gmail",) for call in revocar.call_args_list)
     assert not CuentaConectada.objects.filter(pk=gmail.pk).exists()
     assert not CuentaConectada.objects.filter(pk=outlook.pk).exists()
+
+
+@pytest.mark.parametrize("cambio", ["reconexion", "cuenta_nueva"])
+def test_cambio_outlook_entre_preparacion_y_borrado_conserva_credenciales_nuevas(monkeypatch, claves, cambio):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    operacion = uuid.uuid4()
+    cuenta = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="outlook", cuenta_externa="outlook@test.cl",
+        access_token="anterior", refresh_token="refresh-anterior",
+    )
+    preparar = LimpiezaConnectorsView.preparar_limpieza
+
+    def preparar_y_cambiar(self, organizacion_id):
+        respuesta = preparar(self, organizacion_id)
+        if cambio == "reconexion":
+            CuentaConectada.objects.filter(pk=cuenta.pk).update(
+                access_token="nuevo", refresh_token="refresh-nuevo",
+                credenciales_version=cuenta.credenciales_version + 1,
+            )
+        else:
+            CuentaConectada.objects.create(
+                organizacion_id=org, proveedor="outlook", cuenta_externa="nueva@test.cl",
+                access_token="nuevo", refresh_token="refresh-nuevo",
+            )
+        return respuesta
+
+    monkeypatch.setattr(LimpiezaConnectorsView, "preparar_limpieza", preparar_y_cambiar)
+    respuesta = limpiar(org, operacion)
+    assert respuesta.status_code == 409
+    assert respuesta.json()["code"] == "credenciales_cambiadas"
+    assert not EstadoOrganizacion.objects.get(organizacion_id=org).eliminada
+    nueva = CuentaConectada.objects.get(pk=cuenta.pk) if cambio == "reconexion" else CuentaConectada.objects.get(cuenta_externa="nueva@test.cl")
+    assert nueva.access_token == "nuevo"
+    assert nueva.refresh_token == "refresh-nuevo"
+    assert nueva.revocado_en is None
+    # La misma operación puede reintentarse sin destruir la concesión nueva
+    # durante el 409; el siguiente intento la prepara y completa la limpieza.
+    monkeypatch.setattr(LimpiezaConnectorsView, "preparar_limpieza", preparar)
+    assert limpiar(org, operacion).status_code == 204
 
 
 def test_gmail_ya_confirmado_no_se_vuelve_a_revocar_y_outlook_termina(monkeypatch, claves):
@@ -348,6 +390,95 @@ def test_gmail_confirmado_en_la_misma_limpieza_y_outlook_termina(monkeypatch, cl
     assert por_proveedor["outlook"]["access_token"] == "outlook-token"
     assert not CuentaConectada.objects.filter(pk=gmail.pk).exists()
     assert not CuentaConectada.objects.filter(pk=outlook.pk).exists()
+
+
+def test_revocacion_confirmada_sobrevive_a_un_fallo_con_otra_cuenta(monkeypatch, claves):
+    """Google ya revocó la primera: un fallo con la segunda no la devuelve a `conectada`."""
+    from django.db import OperationalError
+
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuentas = {
+        f"ya29.{letra}": CuentaConectada.objects.create(
+            organizacion_id=org, proveedor="gmail",
+            cuenta_externa=f"{letra.lower()}@gmail.com", access_token=f"ya29.{letra}",
+        )
+        for letra in "AB"
+    }
+    enviados = []
+
+    def revocar(proveedor, *, access_token):
+        enviados.append(access_token)
+        if len(enviados) == 2:
+            raise OperationalError("se cayó la conexión de la petición")
+        return True
+
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    with pytest.raises(OperationalError):
+        limpiar(org)
+
+    confirmada, interrumpida = (cuentas[token] for token in enviados)
+    confirmada.refresh_from_db()
+    assert confirmada.revocado_en is not None
+    assert confirmada.access_token is None
+    assert confirmada.estado == CuentaConectada.Estado.DESCONECTADA
+    interrumpida.refresh_from_db()
+    assert interrumpida.revocado_en is None
+    assert interrumpida.access_token == enviados[1]
+    assert interrumpida.estado == CuentaConectada.Estado.CONECTADA
+
+    # El reintento solo le manda al proveedor la que faltaba.
+    pendiente = enviados[1]
+    enviados.clear()
+    monkeypatch.setattr(
+        "connectors.proveedores.revocar",
+        lambda proveedor, *, access_token: enviados.append(access_token) or True,
+    )
+    assert limpiar(org).status_code == 204
+    assert enviados == [pendiente]
+    assert not CuentaConectada.objects.filter(organizacion_id=org).exists()
+
+
+def test_reconexion_despues_de_preparar_no_se_revoca_y_obliga_a_preparar_de_nuevo(monkeypatch, claves):
+    """La versión preparada manda: una concesión nueva no se le manda al proveedor."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org = uuid.uuid4()
+    cuentas = {
+        f"ya29.{letra}": CuentaConectada.objects.create(
+            organizacion_id=org, proveedor="gmail",
+            cuenta_externa=f"{letra.lower()}@gmail.com", access_token=f"ya29.{letra}",
+        )
+        for letra in "AB"
+    }
+    enviados = []
+
+    def revocar(proveedor, *, access_token):
+        enviados.append(access_token)
+        if len(enviados) == 1:
+            # Mientras se revoca la primera, la otra se reconecta: es otra concesión.
+            otra = next(c for token, c in cuentas.items() if token != access_token)
+            CuentaConectada.objects.filter(pk=otra.pk).update(
+                access_token="ya29.NUEVO", credenciales_version=otra.credenciales_version + 1,
+            )
+        return True
+
+    monkeypatch.setattr("connectors.proveedores.revocar", revocar)
+    respuesta = limpiar(org)
+    assert respuesta.status_code == 409
+    assert respuesta.json()["code"] == "credenciales_cambiadas"
+    assert len(enviados) == 1, f"le mandó al proveedor: {enviados}"
+    primera = cuentas[enviados[0]]
+    reconectada = next(c for token, c in cuentas.items() if token != enviados[0])
+    primera.refresh_from_db()
+    assert primera.revocado_en is not None and primera.access_token is None
+    reconectada.refresh_from_db()
+    assert reconectada.access_token == "ya29.NUEVO"
+    assert reconectada.revocado_en is None
+    assert reconectada.estado == CuentaConectada.Estado.CONECTADA
+
+    # Otra preparación ya ve la concesión nueva y la revoca.
+    assert limpiar(org).status_code == 204
+    assert enviados[1:] == ["ya29.NUEVO"]
 
 
 def test_reentrega_de_la_misma_operacion_no_duplica_efectos(monkeypatch, claves):

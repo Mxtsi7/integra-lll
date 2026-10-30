@@ -192,6 +192,17 @@ def test_historial_tenant_inconsistente_no_se_borra_por_cascada(monkeypatch):
     assert Subscription.objects.filter(pk=propia.pk).exists()
 
 
+def test_uso_tenant_inconsistente_no_se_borra_por_cascada(monkeypatch):
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    propia = suscripcion(org, Proveedor.objects.create(nombre="Proveedor"))
+    ajeno = RegistroUso.objects.create(organizacion_id=otra, suscripcion=propia, minutos=5, fecha="2026-10-01")
+    assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 409
+    assert RegistroUso.objects.filter(pk=ajeno.pk).exists()
+    assert Subscription.objects.filter(pk=propia.pk).exists()
+    assert not EstadoOrganizacion.objects.filter(organizacion_id=org, eliminada=True).exists()
+
+
 def test_historial_propio_se_elimina_aunque_apunte_a_suscripcion_ajena(monkeypatch):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -230,7 +241,8 @@ def test_cuerpo_json_sin_objeto_se_rechaza_sin_cambios(cuerpo, monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_limpieza_espera_escritura_en_vuelo_y_luego_borra(monkeypatch):
+@pytest.mark.parametrize("asincrono", [False, True])
+def test_limpieza_espera_escritura_en_vuelo_y_luego_borra(monkeypatch, settings, asincrono):
     from concurrent.futures import ThreadPoolExecutor, TimeoutError
     from threading import Event
     from django.db import close_old_connections, connection
@@ -239,7 +251,11 @@ def test_limpieza_espera_escritura_en_vuelo_y_luego_borra(monkeypatch):
     if connection.vendor != "postgresql":
         pytest.skip("El bloqueo de filas requiere PostgreSQL")
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    settings.EVENTOS_ASINCRONOS = asincrono
     org, operacion = uuid.uuid4(), uuid.uuid4()
+    # La fila ya existe: sin ella, el INSERT de get_or_create bloquearía a la
+    # limpieza aunque el middleware no tomara FOR SHARE.
+    EstadoOrganizacion.objects.create(organizacion_id=org)
     escribiendo, continuar = Event(), Event()
 
     def pausar_escritura(sender, instance, **kwargs):
@@ -310,3 +326,45 @@ def test_escrituras_del_mismo_tenant_avanzan_en_paralelo():
     with ThreadPoolExecutor(max_workers=2) as pool:
         ids = list(pool.map(lambda _: escribir(), range(2)))
     assert len(set(ids)) == 2
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("asincrono", [False, True])
+def test_dos_posts_del_mismo_tenant_avanzan_en_paralelo(settings, asincrono):
+    """El middleware comparte el bloqueo; con FOR UPDATE la segunda esperaría."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from django.db import close_old_connections, connection
+    from django.db.models.signals import post_save
+
+    if connection.vendor != "postgresql":
+        pytest.skip("FOR SHARE requiere PostgreSQL")
+    settings.EVENTOS_ASINCRONOS = asincrono
+    org = uuid.uuid4()
+    EstadoOrganizacion.objects.create(organizacion_id=org)
+    dentro = Barrier(2)
+
+    def esperar_a_la_otra(sender, instance, created, **kwargs):
+        # Las dos escrituras tienen que estar a la vez dentro del bloqueo.
+        if created and str(instance.organizacion_id) == str(org):
+            dentro.wait(timeout=5)
+
+    def escribir(nombre):
+        close_old_connections()
+        try:
+            return APIClient().post(
+                "/api/suscripciones/", {"nombre": nombre, "monto": 1000, "frecuencia": "mensual",
+                                        "fecha_proximo_cobro": "2026-11-01"}, format="json",
+                HTTP_X_ORGANIZACION_ID=str(org),
+            ).status_code
+        finally:
+            close_old_connections()
+
+    post_save.connect(esperar_a_la_otra, sender=Subscription, weak=False)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            estados = list(pool.map(escribir, ["Primera", "Segunda"]))
+    finally:
+        post_save.disconnect(esperar_a_la_otra, sender=Subscription)
+    assert estados == [201, 201]
+    assert Subscription.objects.filter(organizacion_id=org).count() == 2

@@ -17,7 +17,7 @@ Sin eso RabbitMQ le manda al consumidor todos los mensajes de una, y se
 pierde la razón de tener cola: que el trabajo se drene a ritmo parejo. Con 1,
 no recibe el siguiente hasta confirmar el anterior.
 
-── Los tres desenlaces de un mensaje ────────────────────────────────────────
+── Los cuatro desenlaces de un mensaje ──────────────────────────────────────
 La versión anterior tenía dos y los dos estaban mal:
 
     ilegible        → se hacía ACK, o sea se BORRABA sin dejar rastro
@@ -25,10 +25,13 @@ La versión anterior tenía dos y los dos estaban mal:
                       borraba, incluso por una desconexión pasajera de
                       Postgres, y el outbox ya lo había dado por publicado
 
-Ahora son tres y ninguno pierde el mensaje:
+Ahora son cuatro y ninguno pierde un mensaje que todavía tenga trabajo:
 
     correcto    → ack, y SOLO después de que el trabajo quedó confirmado
                   en la base (o de encontrar la evidencia de que ya estaba)
+    obsoleto    → ack sin trabajo ni evidencia: la organización ya fue
+                  eliminada (su marca durable de MX-07) y no queda resumen
+                  que recalcular
     pasajero    → se reintenta en el proceso, con espera creciente; si el
                   problema sigue, se manda a la cola de fallos
     definitivo  → derecho a la cola de fallos
@@ -163,7 +166,8 @@ def procesar(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
 
     No toca el canal: devolver el desenlace y que el llamador haga el ack es
     lo que garantiza que el ack venga SIEMPRE después de que el trabajo quedó
-    confirmado en la base. Y permite probarlo sin broker.
+    confirmado en la base, o de comprobar bajo el bloqueo que la organización
+    fue eliminada y el evento quedó obsoleto. Y permite probarlo sin broker.
     """
     avisar = avisar or (lambda _texto: None)
     try:
@@ -271,9 +275,10 @@ class Command(BaseCommand):
         """Procesa UN mensaje y lo confirma o lo aparta. Devuelve el desenlace.
 
         El ack va después de `procesar`, nunca antes: `procesar` solo devuelve
-        `confirmar=True` cuando el trabajo quedó confirmado en la base o
-        cuando encontró la evidencia de que ya estaba. Si se cae entre medio,
-        el mensaje sigue sin confirmar y RabbitMQ lo vuelve a entregar.
+        `confirmar=True` cuando el trabajo quedó confirmado en la base, cuando
+        encontró la evidencia de que ya estaba o cuando la organización ya fue
+        eliminada y el evento quedó obsoleto. Si se cae entre medio, el
+        mensaje sigue sin confirmar y RabbitMQ lo vuelve a entregar.
         """
         # Django cierra las conexiones a la base por petición HTTP; acá no
         # hay peticiones, así que hay que limpiarlas a mano o se quedan
