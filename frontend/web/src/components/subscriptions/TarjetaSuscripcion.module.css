@@ -53,12 +53,44 @@
   border: 1px solid var(--vidrio-borde);
 }
 
+/* El estado va arriba a la derecha, FUERA del botón que abre el detalle: el
+   interruptor es un control propio, no un dibujo dentro de otro botón. Queda
+   centrado con el icono de la categoría (18px + 46px / 2 = 41px). */
 .estado {
+  position: absolute;
+  top: 19px;
+  right: 18px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 2px;
   font-size: 11.5px;
   font-weight: 700;
+}
+
+/* 44×44 de área para el dedo o el puntero; el riel visible es de 34×19. */
+.interruptorBoton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: none;
+}
+
+.interruptorBoton:focus-visible {
+  outline-offset: -2px;
+}
+
+.interruptorBoton[aria-disabled='true'] {
+  cursor: progress;
+}
+
+.interruptorBoton[aria-disabled='true'] .interruptor {
+  opacity: 0.55;
 }
 
 .interruptor {
@@ -67,6 +99,11 @@
   height: 19px;
   border-radius: 999px;
   background: var(--vidrio-borde-fuerte);
+  transition: background-color var(--rapido), opacity var(--rapido);
+}
+
+.interruptorBoton:hover:not([aria-disabled='true']) .interruptor {
+  box-shadow: 0 0 0 3px var(--vidrio-2);
 }
 
 .interruptor::after {
@@ -78,15 +115,16 @@
   height: 13px;
   border-radius: 50%;
   background: #ffffff;
+  transition: transform var(--rapido);
 }
 
 .interruptorEncendido {
   background: var(--verde);
 }
 
+/* 34 - 13 - 3 - 3 = 15: de un borde al otro. */
 .interruptorEncendido::after {
-  left: auto;
-  right: 3px;
+  transform: translateX(15px);
 }
 
 .interruptorCoral {

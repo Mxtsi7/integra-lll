@@ -6,10 +6,13 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   actualizarSuscripcion,
+  cancelarSuscripcion,
   crearSuscripcion,
   ErrorDeApi,
   getCatalogosSuscripciones,
   getSuscripciones,
+  guardarTokens,
+  reactivarSuscripcion,
   type CatalogosSuscripciones,
   type Suscripcion,
 } from "@ojoalgasto/shared";
@@ -27,6 +30,8 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     getCatalogosSuscripciones: vi.fn(),
     crearSuscripcion: vi.fn(),
     actualizarSuscripcion: vi.fn(),
+    cancelarSuscripcion: vi.fn(),
+    reactivarSuscripcion: vi.fn(),
   };
 });
 
@@ -113,6 +118,8 @@ beforeEach(() => {
   vi.mocked(getCatalogosSuscripciones).mockReset().mockResolvedValue(structuredClone(CATALOGO));
   vi.mocked(crearSuscripcion).mockReset();
   vi.mocked(actualizarSuscripcion).mockReset();
+  vi.mocked(cancelarSuscripcion).mockReset();
+  vi.mocked(reactivarSuscripcion).mockReset();
 });
 
 afterEach(() => {
@@ -661,5 +668,280 @@ describe("Filtros, orden y limpiar en Inicio (CH-11, CH-12, CH-13)", () => {
     expect(parametro(router, "orden")).toBe("nombre"); // el orden elegido se respeta
     expect(paginaActual()).toHaveTextContent("2");
     expect(nombresEnGrilla()).toContain("Netflix");
+  });
+});
+
+describe("Interruptor de seguimiento en las tarjetas", () => {
+  const NETFLIX: Suscripcion = { ...SPOTIFY, id: "s2", nombre: "Netflix", monto: 9990, estado: "cancelado" };
+  const TOKEN_B = (() => {
+    const b64 = (v: unknown) => btoa(JSON.stringify(v)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const claims = { user_id: 8, organizacion_id: "org-b", sid: "sesion-b", jti: "b-1", exp: Math.floor(Date.now() / 1000) + 1800 };
+    return `${b64({ alg: "HS256" })}.${b64(claims)}.firma`;
+  })();
+
+  /** Lo que tiene el servidor: las lecturas lo filtran y cancelar o reactivar lo cambian. */
+  let servidor: Suscripcion[];
+  function leerServidor(estado?: Suscripcion["estado"]) {
+    return servidor.filter((s) => !estado || s.estado === estado).map((s) => ({ ...s }));
+  }
+  function aplicar(id: string, estado: Suscripcion["estado"]) {
+    servidor = servidor.map((s) => (s.id === id ? { ...s, estado } : s));
+    return { ...servidor.find((s) => s.id === id)! };
+  }
+
+  /** Promesa que el test resuelve o rechaza cuando quiere. */
+  function diferida<T>() {
+    let resolver!: (v: T) => void;
+    let rechazar!: (e: unknown) => void;
+    const promesa = new Promise<T>((res, rej) => {
+      resolver = res;
+      rechazar = rej;
+    });
+    return { promesa, resolver, rechazar };
+  }
+
+  const interruptor = (nombre: string) =>
+    screen.getByRole("switch", { name: `Seguimiento de cobros de ${nombre}`, hidden: true });
+  const chip = (nombre: RegExp) =>
+    within(screen.getByRole("group", { name: "Filtrar por estado", hidden: true })).queryByRole("button", {
+      name: nombre,
+      hidden: true,
+    });
+  const alMes = () => within(screen.getByRole("region", { name: "Resumen", hidden: true })).getAllByText(/^\$/)[0];
+  const clic = (elemento: HTMLElement) => act(async () => fireEvent.click(elemento));
+  // La confirmación de cancelar es una alerta (role="alertdialog").
+  const alerta = () => screen.queryByRole("alertdialog");
+  const enAlerta = () => within(screen.getByRole("alertdialog"));
+  const confirmar = () => enAlerta().getByRole("button", { name: /Cancelar suscripción|Cancelando/ });
+
+  beforeEach(() => {
+    servidor = [{ ...SPOTIFY }, { ...NETFLIX }];
+    vi.mocked(getSuscripciones).mockImplementation(async (c) => leerServidor(c?.estado));
+    vi.mocked(cancelarSuscripcion).mockImplementation(async (id) => aplicar(id, "cancelado"));
+    vi.mocked(reactivarSuscripcion).mockImplementation(async (id) => aplicar(id, "activo"));
+  });
+
+  it("apagar pide confirmar, aclara lo del proveedor, y «Volver» no manda nada", async () => {
+    const router = await montar();
+    await clic(interruptor("Spotify"));
+
+    expect(router.state.location.pathname).toBe("/home"); // no abrió el detalle
+    expect(screen.getByRole("alertdialog", { name: "¿Cancelar Spotify?" })).toBeInTheDocument();
+    expect(enAlerta().getByText(/cancela el servicio con su proveedor/)).toBeInTheDocument();
+
+    await clic(enAlerta().getByRole("button", { name: "Volver" }));
+    expect(alerta()).not.toBeInTheDocument();
+    expect(cancelarSuscripcion).not.toHaveBeenCalled();
+    expect(reactivarSuscripcion).not.toHaveBeenCalled();
+    expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("confirmar cancela una sola vez aunque se pulse dos veces, y el resultado sobrevive a la recarga", async () => {
+    const pendiente = diferida<Suscripcion>();
+    vi.mocked(cancelarSuscripcion).mockReturnValueOnce(pendiente.promesa);
+    await montar();
+    expect(alMes()).toHaveTextContent("$5.990");
+    await clic(interruptor("Spotify"));
+
+    // Los dos clics en el mismo instante, antes de que React vuelva a dibujar:
+    // el botón todavía no está deshabilitado y solo la reserva los separa.
+    await act(async () => {
+      const boton = confirmar();
+      fireEvent.click(boton);
+      fireEvent.click(boton);
+    });
+    expect(cancelarSuscripcion).toHaveBeenCalledTimes(1);
+    expect(cancelarSuscripcion).toHaveBeenCalledWith("s1");
+    expect(actualizarSuscripcion).not.toHaveBeenCalled();
+    // Mientras viaja: la tarjeta dice "Guardando…" y no se puede editar ni eliminar.
+    expect(interruptor("Spotify")).toHaveAccessibleDescription("Guardando…");
+    expect(screen.getByRole("button", { name: "Editar Spotify", hidden: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Eliminar Spotify", hidden: true })).toBeDisabled();
+    expect(confirmar()).toHaveTextContent("Cancelando…");
+
+    const lecturasAntes = vi.mocked(getSuscripciones).mock.calls.length;
+    await act(async () => pendiente.resolver(aplicar("s1", "cancelado")));
+
+    expect(alerta()).not.toBeInTheDocument();
+    expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "false");
+    expect(interruptor("Spotify")).toHaveAccessibleDescription("Cancelada");
+    expect(screen.getByText("Cancelaste Spotify. Ya no contamos sus próximos cobros.")).toBeInTheDocument();
+    // Conteos y gasto salen de la respuesta: ya no hay activas ni gasto al mes.
+    expect(chip(/^Activas/)).toBeNull();
+    expect(chip(/^Canceladas/)).toHaveTextContent("2");
+    expect(alMes()).toHaveTextContent("$0");
+    // Se volvió a pedir la lista y sigue cancelada.
+    expect(vi.mocked(getSuscripciones).mock.calls.length).toBeGreaterThan(lecturasAntes);
+    expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("con el filtro Activas, la cancelada sale de la grilla sin esperar la recarga", async () => {
+    servidor = [{ ...SPOTIFY }, { ...NETFLIX, estado: "activo" }];
+    await montar(["/dashboard", "/home?estado=activo"]);
+    // La recarga posterior al cambio no llega nunca.
+    vi.mocked(getSuscripciones).mockImplementation(() => new Promise(() => {}));
+
+    await clic(interruptor("Spotify"));
+    await clic(confirmar());
+
+    expect(screen.queryByRole("switch", { name: "Seguimiento de cobros de Spotify" })).not.toBeInTheDocument();
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+    expect(chip(/^Activas/)).toHaveTextContent("1");
+  });
+
+  it("prender reactiva enseguida, sin confirmar, y un doble clic manda una sola", async () => {
+    const pendiente = diferida<Suscripcion>();
+    vi.mocked(reactivarSuscripcion).mockReturnValueOnce(pendiente.promesa);
+    await montar();
+
+    await act(async () => {
+      const control = interruptor("Netflix");
+      fireEvent.click(control);
+      fireEvent.click(control);
+    });
+    expect(alerta()).not.toBeInTheDocument();
+    expect(reactivarSuscripcion).toHaveBeenCalledTimes(1);
+    expect(reactivarSuscripcion).toHaveBeenCalledWith("s2");
+    expect(cancelarSuscripcion).not.toHaveBeenCalled();
+    expect(interruptor("Netflix")).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => pendiente.resolver(aplicar("s2", "activo")));
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+    expect(interruptor("Netflix")).toHaveAccessibleDescription("Activa");
+    expect(interruptor("Netflix")).not.toHaveAttribute("aria-disabled");
+    expect(screen.getByText("Reactivaste Netflix. Volvemos a contar sus cobros.")).toBeInTheDocument();
+    expect(chip(/^Activas/)).toHaveTextContent("2");
+  });
+
+  it("si cancelar falla, la confirmación lo dice, nada cambia y se puede reintentar", async () => {
+    vi.mocked(cancelarSuscripcion).mockRejectedValueOnce(new ErrorDeApi("Error interno.", 500));
+    await montar();
+    await clic(interruptor("Spotify"));
+    await clic(confirmar());
+
+    expect(enAlerta().getByRole("alert")).toHaveTextContent("No pudimos cancelar la suscripción. Intenta de nuevo.");
+    expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "true");
+    expect(chip(/^Activas/)).toHaveTextContent("1");
+
+    await clic(confirmar());
+    expect(cancelarSuscripcion).toHaveBeenCalledTimes(2);
+    expect(alerta()).not.toBeInTheDocument();
+    expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("si reactivar falla, avisa con el motivo, queda apagada y se puede reintentar", async () => {
+    vi.mocked(reactivarSuscripcion).mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await montar();
+    await clic(interruptor("Netflix"));
+
+    expect(screen.getByText("No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.")).toBeInTheDocument();
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "false");
+    expect(interruptor("Netflix")).toHaveAccessibleDescription("Cancelada");
+
+    await clic(interruptor("Netflix"));
+    expect(reactivarSuscripcion).toHaveBeenCalledTimes(2);
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("un 404 avisa que ya no existe y vuelve a pedir la lista", async () => {
+    await montar();
+    servidor = servidor.filter((s) => s.id !== "s2"); // la eliminaron en otro lado
+    vi.mocked(reactivarSuscripcion).mockRejectedValueOnce(new ErrorDeApi("No encontrado.", 404));
+    await clic(interruptor("Netflix"));
+
+    expect(screen.getByText("Esta suscripción ya no existe. Actualizamos tu lista.")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Seguimiento de cobros de Netflix" })).not.toBeInTheDocument();
+    expect(chip(/^Todas/)).toHaveTextContent("1");
+  });
+
+  it("si el cambio se guardó pero la lista no se pudo actualizar, lo dice así", async () => {
+    await montar();
+    vi.mocked(getSuscripciones).mockRejectedValue(new TypeError("Failed to fetch"));
+    await clic(interruptor("Netflix"));
+
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Guardamos el cambio, pero no pudimos actualizar la lista. Intenta de nuevo.",
+    );
+  });
+
+  it("la lista completa que salió antes del cambio no pisa los conteos nuevos", async () => {
+    const HBO: Suscripcion = { ...NETFLIX, id: "s3", nombre: "HBO" };
+    servidor = [{ ...SPOTIFY }, { ...NETFLIX }, { ...HBO }];
+    await montar();
+
+    // Un 404 en HBO vuelve a pedir la lista completa, y esa lectura se demora.
+    const vieja = diferida<Suscripcion[]>();
+    vi.mocked(getSuscripciones).mockImplementation(async (c) => (c === undefined ? vieja.promesa : leerServidor(c?.estado)));
+    servidor = servidor.filter((s) => s.id !== "s3");
+    vi.mocked(reactivarSuscripcion).mockRejectedValueOnce(new ErrorDeApi("No encontrado.", 404));
+    await clic(interruptor("HBO"));
+
+    // Mientras tanto se reactiva Netflix: la lectura en vuelo es de antes.
+    await clic(interruptor("Netflix"));
+    expect(chip(/^Activas/)).toHaveTextContent("2");
+
+    vi.mocked(getSuscripciones).mockImplementation(async (c) => leerServidor(c?.estado));
+    await act(async () => vieja.resolver([{ ...SPOTIFY }, { ...NETFLIX }]));
+    expect(chip(/^Activas/)).toHaveTextContent("2");
+    expect(chip(/^Canceladas/)).toBeNull();
+    expect(chip(/^Todas/)).toHaveTextContent("2");
+  });
+
+  it("una lectura de la grilla que llega junto con el cambio no lo pisa", async () => {
+    const cambio = diferida<Suscripcion>();
+    vi.mocked(reactivarSuscripcion).mockReturnValueOnce(cambio.promesa);
+    await montar();
+    await clic(interruptor("Netflix"));
+
+    // Mientras se reactiva, se cambia el orden: esa lectura sale con Netflix cancelada.
+    const lectura = diferida<Suscripcion[]>();
+    const recarga = diferida<Suscripcion[]>();
+    vi.mocked(getSuscripciones).mockReturnValueOnce(lectura.promesa);
+    await act(async () => fireEvent.change(screen.getByLabelText("Ordenar por"), { target: { value: "nombre" } }));
+    vi.mocked(getSuscripciones).mockReturnValue(recarga.promesa);
+
+    // Llegan juntas: primero la respuesta del cambio, después la lectura vieja.
+    await act(async () => {
+      cambio.resolver(aplicar("s2", "activo"));
+      lectura.resolver([{ ...NETFLIX }, { ...SPOTIFY }]);
+    });
+    expect(screen.queryByText("Cancelada")).not.toBeInTheDocument();
+
+    await act(async () => recarga.resolver(leerServidor()));
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("si la sesión cambia mientras se espera, el resultado no se aplica ni se opera con la nueva cuenta", async () => {
+    const pendiente = diferida<Suscripcion>();
+    vi.mocked(reactivarSuscripcion).mockReturnValueOnce(pendiente.promesa);
+    await montar();
+    await clic(interruptor("Netflix"));
+
+    // Otra pestaña entra con otra cuenta: a esta solo le llega el evento `storage`.
+    await act(async () => {
+      guardarTokens({ access_token: TOKEN_B, refresh_token: "refresh-b" });
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    });
+    await act(async () => pendiente.resolver(aplicar("s2", "activo")));
+    expect(screen.queryByText(/Reactivaste/)).not.toBeInTheDocument();
+    expect(interruptor("Netflix")).toHaveAttribute("aria-checked", "false");
+
+    // Con la sesión ya cambiada, el interruptor no pide nada con el token nuevo.
+    await clic(interruptor("Spotify"));
+    expect(alerta()).not.toBeInTheDocument();
+    expect(cancelarSuscripcion).not.toHaveBeenCalled();
+  });
+
+  it("si se sale de Inicio mientras se espera, la respuesta no hace nada", async () => {
+    const pendiente = diferida<Suscripcion>();
+    vi.mocked(reactivarSuscripcion).mockReturnValueOnce(pendiente.promesa);
+    const router = await montar();
+    await clic(interruptor("Netflix"));
+
+    await navegar(router, "/dashboard");
+    await act(async () => pendiente.resolver(aplicar("s2", "activo")));
+    expect(screen.getByRole("heading", { name: "Panel de prueba" })).toBeInTheDocument();
+    expect(screen.queryByText(/Reactivaste/)).not.toBeInTheDocument();
   });
 });
