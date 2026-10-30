@@ -102,6 +102,23 @@ services:
       start_period: 40s
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
+  auth-eliminaciones:
+    build: ./services/auth
+    entrypoint: ["python", "manage.py", "procesar_eliminaciones", "--continuo"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      ESQUEMA_BD: auth
+    depends_on:
+      auth: { condition: service_healthy }
+      subscriptions: { condition: service_healthy }
+      connectors: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+    volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
+
   subscriptions:
     build: ./services/subscriptions
     ports: ["8002:8002"]
@@ -198,6 +215,7 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: connectors
+      APLICAR_MIGRACIONES: "0"
     depends_on:
       connectors: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -222,6 +240,8 @@ services:
       start_period: 30s
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # Mismo código e imagen que analytics; migra solo el servidor. Si los dos
+  # migraran el mismo esquema a la vez, uno muere con UniqueViolation.
   # Consumidor pika de solapamientos. No migra: analytics ya lo hizo.
   # `verificar_worker` comprueba que el proceso siga vivo y que RabbitMQ
   # siga alcanzable; no declara sano un contenedor cuyo consumidor murió.
@@ -239,6 +259,7 @@ services:
     env_file: .env
     environment:
       ESQUEMA_BD: analytics
+      APLICAR_MIGRACIONES: "0"
     depends_on:
       analytics: { condition: service_healthy }
       postgres: { condition: service_healthy }
