@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from unittest.mock import Mock
 
 import pytest
+import requests
 from django.db.models.signals import pre_delete
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -12,6 +13,7 @@ from connectors.models import AutorizacionPendiente, CuentaConectada, Importacio
 from connectors.eliminacion import LimpiezaConnectorsView
 from shared.eliminacion import cabeceras_eliminacion
 from shared.borrado.models import EstadoOrganizacion
+from tests.test_revocacion_refresco import _Respuesta, google_falso, INVALID_TOKEN
 
 pytestmark = pytest.mark.django_db
 
@@ -23,6 +25,44 @@ def limpiar(org, operacion=None, firma=None):
         f"/internal/organizaciones/{org}/", {"operacion_id": str(operacion)}, format="json",
         **{f"HTTP_{key.upper().replace('-', '_')}": value for key, value in firma.items()},
     )
+
+
+@pytest.mark.parametrize("fallo", [INVALID_TOKEN, _Respuesta(503), requests.ConnectTimeout()])
+def test_adaptador_real_reintenta_refresh_y_conserva_outlook(monkeypatch, claves, fallo):
+    """HTTP firmado → FE-05 real → proveedor simulado → mismo ACK durable."""
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+    org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    gmail = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="gmail", cuenta_externa="gmail@test.cl",
+        access_token="access-vencido", refresh_token="refresh-vigente",
+    )
+    outlook = CuentaConectada.objects.create(
+        organizacion_id=org, proveedor="outlook", cuenta_externa="outlook@test.cl",
+        access_token="outlook-access", refresh_token="outlook-refresh",
+    )
+    ajena = CuentaConectada.objects.create(
+        organizacion_id=otra, proveedor="gmail", cuenta_externa="ajena@test.cl",
+        access_token="ajena-access", refresh_token="ajena-refresh",
+    )
+    enviados = google_falso(monkeypatch, lambda token: fallo)
+    assert limpiar(org, operacion).status_code == 409
+    assert enviados == ["refresh-vigente"]
+    for cuenta, access, refresh in (
+        (gmail, "access-vencido", "refresh-vigente"),
+        (outlook, "outlook-access", "outlook-refresh"),
+    ):
+        cuenta.refresh_from_db()
+        assert cuenta.access_token == access and cuenta.refresh_token == refresh
+        assert cuenta.revocado_en is None
+    enviados = google_falso(monkeypatch, lambda token: _Respuesta(204))
+    with capturar_cuentas_al_borrar() as capturadas:
+        assert limpiar(org, operacion).status_code == 204
+    assert enviados == ["refresh-vigente"]
+    assert not CuentaConectada.objects.filter(organizacion_id=org).exists()
+    assert EstadoOrganizacion.objects.get(organizacion_id=org).operacion_id == operacion
+    assert next(c for c in capturadas if c["proveedor"] == "outlook")["revocado_en"] is None
+    ajena.refresh_from_db()
+    assert ajena.refresh_token == "ajena-refresh" and ajena.revocado_en is None
 
 
 @contextmanager
@@ -277,7 +317,7 @@ def test_fallo_de_gmail_conserva_tambien_outlook_y_luego_termina(monkeypatch, cl
     assert outlook.refresh_token == "outlook-refresh"
     assert revocar.call_count == 1
     assert revocar.call_args.args == ("gmail",)
-    assert revocar.call_args.kwargs["access_token"] == "gmail-access"
+    assert revocar.call_args.kwargs["access_token"] == "gmail-refresh"
 
     assert limpiar(org, operacion).status_code == 204
 
@@ -383,7 +423,7 @@ def test_gmail_confirmado_en_la_misma_limpieza_y_outlook_termina(monkeypatch, cl
     with capturar_cuentas_al_borrar() as capturadas:
         assert limpiar(org).status_code == 204
 
-    revocar.assert_called_once_with("gmail", access_token="gmail-access")
+    revocar.assert_called_once_with("gmail", access_token="gmail-refresh")
     por_proveedor = {cuenta["proveedor"]: cuenta for cuenta in capturadas}
     assert por_proveedor["gmail"]["revocado_en"] is not None
     assert por_proveedor["outlook"]["revocado_en"] is None
@@ -559,5 +599,6 @@ def test_registra_conteo_sin_revocacion_y_no_expone_datos_personales(
     assert evento.organizacion_id == str(org)
     assert evento.cuentas_sin_revocacion == 1
     assert evento.proveedores_sin_revocacion == ["outlook"]
+    assert evento.resultado == "cierre_local"
     assert "persona@outlook.cl" not in caplog.text
     assert "token-secreto" not in caplog.text

@@ -87,7 +87,7 @@ es esto.
 Para recalcular el presupuesto después de tocar un límite, sin aplicar nada:
 
 ```bash
-python k8s/pruebas/presupuesto.py k8s
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
 ```
 
 ### Los límites salen de medir

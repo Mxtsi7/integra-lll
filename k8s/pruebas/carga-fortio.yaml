@@ -17,11 +17,10 @@
 #   http://auth:8001/health/           Django + una consulta a Postgres
 #   http://subscriptions:8002/health/  ídem, otro servicio
 #
-# ⚠️ El namespace tiene un techo de 2 CPU. Los pods del sistema usan 1350m en
-# reposo, y el HPA puede pedir hasta 400m más al escalar. Por eso el límite de
-# acá es 200m: deja margen. Subirlo puede dejar el Job en Pending, o peor,
-# dejar al autoescalado sin cuota justo cuando tiene que reaccionar.
-# Recalcular con: python k8s/pruebas/presupuesto.py k8s
+# Con HPA máximo no cabe en el namespace de aplicación: 13/12 pods,
+# 2816/2752 MiB. Se conserva como ejemplo del escenario rechazado.
+# Para la demo usar carga-fortio-otro-namespace.yaml o estresar.sh con NS_CARGA.
+# Verificar con --generador y --namespace-generador explícitos en presupuesto.py.
 apiVersion: batch/v1
 kind: Job
 metadata:

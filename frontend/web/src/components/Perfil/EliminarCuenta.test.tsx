@@ -70,6 +70,9 @@ describe('EliminarCuenta (AN-18)', () => {
     expect(screen.getByText(/Microsoft no revoca automáticamente ese acceso/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Retirar el acceso en tu cuenta Microsoft personal' }).getAttribute('href'))
       .toBe('https://account.live.com/consent/Manage');
+    expect(screen.getByRole('link', { name: 'Retirar permisos en tu cuenta de trabajo o escuela' }).getAttribute('href'))
+      .toBe('https://myapplications.microsoft.com/');
+    expect(screen.getByText(/si el permiso lo concedió tu organización, contacta a su administrador/)).toBeTruthy();
     expect(botonConfirmar().disabled).toBe(true);
     expect(onEliminar).not.toHaveBeenCalled();
   });
