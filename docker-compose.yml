@@ -163,6 +163,27 @@ services:
       redis: { condition: service_started }
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
+  # Purga de los archivos de importación vencidos (FE-07). Son cartolas: no
+  # pueden quedarse más allá de `vence_en`. Corre una vez por hora; cada pasada
+  # es una consulta y unos DELETE. No migra por su cuenta: espera a que
+  # `connectors` quede sano, y ese es quien aplica las migraciones. Si una
+  # pasada falla, la siguiente vuelve a tomar los mismos archivos.
+  connectors-purga:
+    build: ./services/connectors
+    command:
+      - sh
+      - -c
+      - while true; do python manage.py purgar_archivos_importacion --aplicar || echo "purga fallida, se reintenta en una hora"; sleep 3600; done
+    env_file: .env
+    environment:
+      ESQUEMA_BD: connectors
+      APLICAR_MIGRACIONES: "0"
+    # El HEALTHCHECK de la imagen consulta el servidor HTTP, que acá no corre.
+    healthcheck: { disable: true }
+    depends_on:
+      connectors: { condition: service_healthy }
+    volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
+
   analytics:
     build: ./services/analytics
     ports: ["8004:8004"]

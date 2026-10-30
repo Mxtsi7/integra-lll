@@ -12,8 +12,8 @@ id de la importación, que es el "job" que FE-09 va a procesar.
 |---|---|
 | La validación, funciones puras sobre bytes | `connectors/archivos.py` |
 | El endpoint | `connectors/views.py` → `SubirArchivoView` |
-| El archivo guardado temporalmente | `connectors/models.py` → `ArchivoImportacion`, migración `0003` |
-| La purga de archivos vencidos | `manage.py purgar_archivos_importacion [--aplicar]` |
+| El archivo guardado temporalmente | `connectors/models.py` → `ArchivoImportacion`, migración `0004` |
+| La purga de archivos vencidos | `manage.py purgar_archivos_importacion [--aplicar]`; en compose, el servicio `connectors-purga` |
 | Los topes | `settings.py`: `IMPORTACION_TAMANO_MAXIMO_BYTES` (5 MB), `IMPORTACION_CUOTA_DIARIA` (20), `IMPORTACION_DIAS_RETENCION` (7) |
 
 ## El contrato
@@ -46,8 +46,12 @@ Después del 201, el polling es el de FE-08: `GET /api/importaciones/<id>/`.
 2. **Extensión**: `.csv` o `.pdf`, explícitos. Un `.xlsx`, `.txt` o sin
    extensión se rechaza diciendo qué se admite. No se adivina.
 3. **Tamaño**: vacío se rechaza; más de `IMPORTACION_TAMANO_MAXIMO_BYTES` se
-   rechaza con 413. La vista lee a lo más un byte por sobre el máximo, así que
-   un archivo enorme no llega a cargarse en memoria.
+   rechaza con 413. Quien evita cargar un archivo enorme es el **gateway**:
+   mira `Content-Length` antes de leer el cuerpo y responde 413 sin llamar al
+   servicio (sin `Content-Length` en esa ruta, 411). La vista vuelve a medir
+   porque el servicio también se puede llamar directo, pero su lectura
+   acotada no ahorra memoria: `MultiPartParser` ya recibió el archivo
+   completo antes de llegar a ella.
 4. **Contenido**: la extensión no prueba nada.
    - `.pdf` tiene que empezar con `%PDF-`.
    - `.csv` tiene que ser texto (sin bytes nulos; UTF-8 con o sin BOM, o
@@ -71,6 +75,21 @@ y el archivo juntos.
 - **Es temporal de verdad.** `vence_en` = subida + 7 días; el comando de purga
   borra los vencidos y deja la importación con sus candidatos y errores. En
   seco por omisión, como los otros comandos que borran.
+- **La purga decide sobre la fila vigente.** Cada archivo se trata en su
+  propia transacción: bloquea la importación y después el archivo, y vuelve
+  a leerlos. Si la importación está pendiente o procesando, anota
+  `archivo_vencido`, la pasa a `fallida` y solo entonces borra el archivo; si
+  la transición no se puede hacer, no borra nada. Si ya estaba terminada,
+  borra solo el archivo y no toca su estado ni sus errores. Dos purgas a la
+  vez no se pisan: la segunda espera y ya no encuentra el archivo.
+- **Corre donde corre `connectors`.** En compose es `connectors-purga`, cada
+  hora y después de que `connectors` migró. En Kubernetes no hay CronJob
+  porque `connectors` todavía no se despliega ahí y la cuota no tiene cupo
+  para un pod más en el peor caso (ver `k8s/README.md`).
+- **La limpieza de la organización (MX-07) también borra los archivos.** Van
+  explícitos en la limpieza de connectors, antes que su importación, y un
+  archivo de otra organización colgado de una importación propia la bloquea
+  con 409 en vez de borrarse por cascada.
 - **Separado del viewset de FE-08.** `ImportacionViewSet` sigue siendo de solo
   lectura (sus pruebas no cambian): una importación no nace de un POST suelto,
   nace de recibir un archivo, y eso es un endpoint aparte.
@@ -84,7 +103,7 @@ y el archivo juntos.
 
 ```bash
 cd services/connectors
-ESQUEMA_BD=connectors SECRET_KEY=x DEBUG=False CLAVES_CIFRADO=x pytest tests/test_subida_archivos.py -q
+ESQUEMA_BD=connectors SECRET_KEY=x DEBUG=False CLAVES_CIFRADO=x pytest tests/test_subida_archivos.py tests/test_purga_intercalada.py -q
 
 # a mano, con el stack levantado:
 curl -s -X POST http://localhost:8000/api/importaciones/archivos/ \
@@ -97,6 +116,14 @@ texto en `.pdf`, una columna, sin filas, bytes nulos, vacío, sin archivo) y
 que ninguno deje rastro; la cuota por organización, de hoy, solo de archivos,
 con el lock; el aislamiento; la purga; y la validación sin API. Verificado que
 cada validación falla al romperla.
+
+`test_purga_intercalada.py` cubre los intercalados de la purga: una
+importación reclamada entre la selección y la transición, una que termina
+mientras la purga prepara su lista, una transición que no se puede hacer, un
+borrado que falla, dos purgas seguidas y un vencimiento renovado. Con
+PostgreSQL, además, dos conexiones reales: el CAS del worker espera el
+bloqueo y no pisa `fallida`, y la segunda de dos purgas simultáneas no
+encuentra nada que borrar.
 
 ## Lo que queda para otras tarjetas
 

@@ -210,3 +210,19 @@ desplegado. Agregar Connectors/Analytics/Notifications exige desplegarlos, migra
 y agregarlos a la lista antes de que almacenen datos. No retirar destinos de un
 entorno que ya tiene datos: las operaciones existentes conservan sus ACK pendientes.
 Ver [flujo y límites](../docs/flujos/maximiliano-saez/07-eliminar-cuenta.md).
+
+## Purga de archivos de importación (FE-07)
+
+Este cluster **no tiene un CronJob de purga**, y no es un olvido:
+
+- `connectors` no tiene Deployment acá, así que nadie sube archivos y su
+  esquema no se migra. Un CronJob purgaría una tabla que no existe.
+- Con los dos HPA al máximo se usan los 12 pods de la cuota, que no se puede
+  subir. El pod de la purga sería el 13.º y no podría crearse justo en un pico.
+
+La purga corre donde corre `connectors`: en `docker-compose.yml` es el
+servicio `connectors-purga`, una vez por hora y después de que `connectors`
+migró. Cuando `connectors` se despliegue en este cluster, su purga tiene que
+llegar con él y entrar en el presupuesto: `presupuesto.py` cuenta cada
+`CronJob` en el peor caso y falla si no cabe, y una prueba exige que
+`desplegar.sh` aplique todos los manifiestos numerados de `k8s/`.
