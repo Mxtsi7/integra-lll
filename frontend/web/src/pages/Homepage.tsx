@@ -18,7 +18,6 @@ import { Boton } from "../components/ui/Boton";
 import { ErrorConReintento } from "../components/ui/ErrorConReintento";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
-import { contarAvisos } from "./DashboardPage";
 import {
   actualizarSuscripcion,
   cancelarSuscripcion,
@@ -592,7 +591,7 @@ export const Homepage: React.FC = () => {
       const actualizada = accion === "cancelar" ? await cancelarSuscripcion(s.id) : await reactivarSuscripcion(s.id);
       if (!sigueVigente()) return;
       invalidarLecturas();
-      // Conteos, resumen y campana salen de la lista completa.
+      // Conteos y resumen salen de la lista completa.
       setSuscripciones((prev) => prev.map((x) => (x.id === actualizada.id ? actualizada : x)));
       // En la grilla se ve enseguida con los filtros actuales (una cancelada no
       // se queda en Activas) y se vuelve a pedir: su lugar puede cambiar.
@@ -685,7 +684,6 @@ export const Homepage: React.FC = () => {
       headerTitulo="Inicio"
       headerSubtitulo="Tus suscripciones, una por una."
       headerAccionDerecha={botonAgregar}
-      avisos={isLoading ? undefined : contarAvisos(suscripciones)}
     >
       {error ? (
         <ErrorConReintento mensaje={error} onReintentar={reintentarCarga} />
