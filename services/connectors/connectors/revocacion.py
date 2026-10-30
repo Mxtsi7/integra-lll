@@ -81,23 +81,49 @@ class Resultado:
     #: True si el proveedor no ofrece revocación. Es una limitación permanente,
     #: no un fallo: no se reintenta y no se escribe `revocado_en`.
     no_soportada: bool = False
+    #: True si la fila desapareció mientras hablábamos con el proveedor (la
+    #: limpieza de la organización la borró). No se escribió nada.
+    ya_no_existe: bool = False
 
 
 def _credenciales_para_revocar(cuenta: CuentaConectada) -> tuple[str, str]:
-    """(token, situación). Se prefiere el de acceso y se cae al de refresco.
+    """(token, situación). Se prefiere el de REFRESCO.
 
-    Google acepta cualquiera de los dos y revoca la concesión completa; mirar
-    solo el de acceso dejaba sin intentar a las cuentas cuyo access ya había
-    vencido, que son justamente las más viejas.
+    ── Por qué el de refresco primero ───────────────────────────────────────
+    La versión anterior mandaba primero el de acceso. Google lo emite por una
+    hora y Connectors no lo refresca nunca, así que en cualquier cuenta
+    conectada hace más de una hora el de acceso ya está vencido, Google
+    responde `400 invalid_token` y la revocación no se confirmaba jamás. Con
+    eso, la limpieza de MX-07 quedaba en 409 para siempre. Lo encontró la
+    revisión de #72.
+
+    El de refresco no vence en una hora y revocarlo revoca la concesión
+    completa, que es lo que se quiere. Si no hay (o no se puede descifrar),
+    se cae al de acceso.
     """
     ilegible = False
-    for token in (cuenta.access_token, cuenta.refresh_token):
+    for token in (cuenta.refresh_token, cuenta.access_token):
         if token is SECRETO_ILEGIBLE:
             ilegible = True
             continue
         if token:
             return str(token), HAY
     return "", (ILEGIBLE if ilegible else NINGUNA)
+
+
+def _releer(cuenta: CuentaConectada) -> bool:
+    """`refresh_from_db`, pero sin reventar si la fila ya no existe.
+
+    Desde MX-07 las filas se borran (la limpieza de la organización). Si eso
+    pasa mientras se habla con el proveedor, el UPDATE condicional afecta 0
+    filas y releer lanzaba `DoesNotExist`, que tumbaba `reintentar_revocaciones`
+    entero y dejaba sin procesar las pendientes de las demás organizaciones.
+    """
+    try:
+        cuenta.refresh_from_db()
+    except CuentaConectada.DoesNotExist:
+        return False
+    return True
 
 
 def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
@@ -125,14 +151,15 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
                 detalle_del_estado=detalle[:200],
                 actualizado_en=timezone.now(),
             )
-        cuenta.refresh_from_db()
+        existe = _releer(cuenta)
         return Resultado(
             confirmada=False,
             sin_nada_que_revocar=False,
             ilegible=False,
-            reconectada_mientras_tanto=not cambiadas,
+            reconectada_mientras_tanto=not cambiadas and existe,
             detalle=detalle,
             no_soportada=True,
+            ya_no_existe=not existe,
         )
 
     token, situacion = _credenciales_para_revocar(cuenta)
@@ -153,24 +180,33 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
             detalle_del_estado=detalle[:200],
             actualizado_en=timezone.now(),
         )
-        cuenta.refresh_from_db()
+        existe = _releer(cuenta)
         return Resultado(
             confirmada=False,
             sin_nada_que_revocar=False,
             ilegible=True,
-            reconectada_mientras_tanto=not cambiadas,
+            reconectada_mientras_tanto=not cambiadas and existe,
             detalle=detalle,
+            ya_no_existe=not existe,
         )
 
     confirmada = False
+    token_invalido = False
     sin_nada = situacion == NINGUNA
     if situacion == HAY:
         try:
-            confirmada = proveedores.revocar(cuenta.proveedor, access_token=token)
+            respuesta = proveedores.revocar(cuenta.proveedor, access_token=token)
         except proveedores.ProveedorNoSoportado:
             # Una cuenta CSV no tiene nada que revocar: no hubo OAuth.
             sin_nada = True
             confirmada = False
+        else:
+            if respuesta is proveedores.TOKEN_INVALIDO:
+                # Rechazar una credencial no acredita la revocación de toda
+                # la autorización. Se conserva la misma versión pendiente.
+                token_invalido = True
+            else:
+                confirmada = bool(respuesta)
 
     if sin_nada:
         detalle = (
@@ -180,6 +216,12 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
         )
     elif confirmada:
         detalle = "Desconectada por el usuario; el proveedor confirmó la revocación."
+    elif token_invalido:
+        detalle = (
+            "Desconectada por el usuario; el proveedor rechazó el token. "
+            "Eso no acredita la revocación de la autorización completa. "
+            "Se conservan las credenciales cifradas para reintentar."
+        )
     else:
         # Importa que quede escrito: el acceso podría seguir vivo del lado del
         # proveedor hasta que expire solo.
@@ -210,13 +252,14 @@ def revocar_y_desconectar(cuenta: CuentaConectada) -> Resultado:
             pk=cuenta.pk, credenciales_version=version
         ).update(**valores)
 
-    cuenta.refresh_from_db()
+    existe = _releer(cuenta)
     return Resultado(
         confirmada=confirmada and bool(cambiadas),
         sin_nada_que_revocar=sin_nada,
         ilegible=False,
-        reconectada_mientras_tanto=not cambiadas,
+        reconectada_mientras_tanto=not cambiadas and existe,
         detalle=detalle,
+        ya_no_existe=not existe,
     )
 
 
