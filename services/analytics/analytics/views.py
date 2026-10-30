@@ -1,5 +1,6 @@
 import datetime as dt
 import re
+import threading
 import uuid
 from datetime import timedelta
 from uuid import UUID
@@ -70,6 +71,24 @@ def health_check(request):
 # VI-22: asistente financiero (proxy de IA con autorización Premium)
 # ═══════════════════════════════════════════════════════════════════
 
+# La concurrencia es un límite operativo por proceso: el semáforo debe vivir
+# más que una petición. Crear `PoliticaIA()` por request le daba a cada llamada
+# un cupo nuevo y anulaba `IA_MAX_LLAMADAS_SIMULTANEAS`.
+_politica_ia_asistente: PoliticaIA | None = None
+_politica_ia_cerrojo = threading.Lock()
+
+
+def _politica_ia() -> PoliticaIA:
+    global _politica_ia_asistente
+    if _politica_ia_asistente is None:
+        # Dos primeros requests concurrentes no deben crear dos semáforos:
+        # eso duplicaría el cupo del proceso.
+        with _politica_ia_cerrojo:
+            if _politica_ia_asistente is None:
+                _politica_ia_asistente = PoliticaIA()
+    return _politica_ia_asistente
+
+
 @extend_schema(
     request=ConsultaAsistenteSerializer,
     responses={200: None},
@@ -107,7 +126,7 @@ def asistente(request):
     def proveedor(timeout):
         return consultar_proveedor(contexto, timeout=timeout, mensaje=mensaje)
 
-    resultado = PoliticaIA().ejecutar_sync(
+    resultado = _politica_ia().ejecutar_sync(
         proveedor,
         contexto,
         organizacion_id=organizacion_id,

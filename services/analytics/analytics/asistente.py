@@ -106,7 +106,11 @@ def construir_contexto(organizacion_id) -> dict:
                 "servicio": sanear_texto(fila.suscripcion_nombre),
                 "ahorro_estimado": _decimal_texto(fila.ahorro_estimado),
                 "moneda": fila.moneda,
+                # El motivo libre se conserva para la respuesta local, pero
+                # `sanitizar_contexto_asistente` no lo deja salir: al
+                # proveedor sólo viaja este código de regla controlado.
                 "motivo": sanear_texto(fila.motivo),
+                "regla": sanear_texto(fila.tipo, limite=40),
             }
             for fila in recomendaciones
         ],
@@ -160,7 +164,8 @@ def prompt_de_usuario(contexto: dict, mensaje: str) -> str:
     `construir_contexto()` conserva los nombres reales porque la respuesta del
     endpoint es para la organización dueña de los datos. Al proveedor sólo
     puede ir `construir_payload_asistente()`: servicios aliasados, tipos
-    cerrados y textos libres redactados (VI-23).
+    cerrados, motivos sustituidos por códigos y pregunta reducida a tokens
+    controlados (VI-23).
     """
     payload = construir_payload_asistente(contexto, mensaje)
     datos = json.dumps(payload["datos"], ensure_ascii=False, sort_keys=True)

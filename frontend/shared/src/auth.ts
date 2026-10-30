@@ -388,7 +388,7 @@ export function renovarSesion(): Promise<boolean> {
 
   const accessAntes = obtenerAccessToken();
   const operacion = conBloqueoDePestanas(() =>
-    renovarConTurno(accessAntes, clave),
+    renovarConTurno(accessAntes, clave, refreshActual),
   ).finally(() => {
     if (renovacionesPorSesion.get(clave) === operacion) {
       renovacionesPorSesion.delete(clave);
@@ -401,23 +401,30 @@ export function renovarSesion(): Promise<boolean> {
 async function renovarConTurno(
   accessAntes: string | null,
   claveEsperada: string,
+  refreshOriginal: string,
 ): Promise<boolean> {
   if (!apiConfigurada()) {
     // Sin URL no hay forma de renovar; conservar tokens sólo alargaría una
     // sesión que ya no se puede usar. Si mientras tanto ya hay otra sesión
     // activa, no se toca: la operación era de la anterior.
     const refreshVigente = obtenerRefreshToken();
-    if (refreshVigente && sigueLaMismaSesion(claveEsperada, refreshVigente)) {
+    if (
+      refreshVigente &&
+      sigueLaMismaSesion(claveEsperada, refreshOriginal)
+    ) {
       logout();
     }
     return false;
   }
 
   // Se relee después del bloqueo entre pestañas: otra pestaña pudo rotar el
-  // refresh mientras esperábamos el turno. Se usa el valor vigente siempre
-  // que siga siendo la misma sesión.
+  // refresh mientras esperábamos el turno. La comparación usa SIEMPRE la
+  // instantánea original: pasar el refresh recién releído lo aceptaría por
+  // igualdad consigo mismo, incluso si ya pertenece a otra sesión (B).
   const refresh = obtenerRefreshToken();
-  if (!refresh || !sigueLaMismaSesion(claveEsperada, refresh)) return false;
+  if (!refresh || !sigueLaMismaSesion(claveEsperada, refreshOriginal)) {
+    return false;
+  }
 
   const accessActual = obtenerAccessToken();
   if (
@@ -432,6 +439,9 @@ async function renovarConTurno(
   for (let intento = 0; intento < MAX_INTENTOS_RENOVACION; intento++) {
     if (intento > 0) {
       await new Promise((resolver) => setTimeout(resolver, ESPERA_REINTENTO_503_MS));
+      // La espera es otra oportunidad para que cambie la sesión: no se
+      // consume otro intento si A ya terminó y B ocupa el almacenamiento.
+      if (!sigueLaMismaSesion(claveEsperada, refreshOriginal)) return false;
     }
 
     const resultado = await enviarRefresh(refresh);
@@ -440,7 +450,7 @@ async function renovarConTurno(
       // La comparación es por sesión, no por valor del refresh: un 200 tardío
       // de A no sobreescribe a B, pero una rotación legítima de la misma
       // sesión sí se acepta.
-      if (!sigueLaMismaSesion(claveEsperada, refresh)) return false;
+      if (!sigueLaMismaSesion(claveEsperada, refreshOriginal)) return false;
       guardarTokens({
         access_token: resultado.access,
         refresh_token: resultado.refresh,

@@ -11,7 +11,7 @@ documento fija la URL, el entorno, TLS, CORS y los deep links.
 |---|---|---|
 | Teléfono físico en la misma Wi-Fi | `http://192.168.1.20:8000/api` | La IP LAN del equipo es alcanzable desde el teléfono |
 | Emulador Android (AVD) | `http://10.0.2.2:8000/api` | `10.0.2.2` es el host visto desde el emulador |
-| Simulador iOS | `http://localhost:8000/api` | El simulador comparte la red del Mac |
+| Simulador iOS | `http://192.168.1.20:8000/api` | La app rechaza `localhost` también en nativo; se usa la IP LAN del Mac |
 | Navegador / Expo web | `http://localhost:8000/api` | El navegador corre en el mismo equipo |
 | Producción | `https://api.ejemplo.cl/api` | La app rechaza `http` en producción |
 
@@ -166,6 +166,12 @@ npx uri-scheme open "ojoalgasto://verificar-correo?token=abc123" --android
    ```powershell
    python scripts\e2e_movil_backend.py --desde-movil --url http://192.168.1.20:8000/api
    ```
+
+   `--desde-movil` sólo exige que la URL sea alcanzable desde un teléfono (sin
+   `localhost`) y ejecuta las comprobaciones HTTP desde el equipo de desarrollo.
+   **No** instala ni abre la app, así que no valida SecureStore, login nativo ni
+   la recuperación tras un 401. Eso se prueba aparte, con la app en un
+   dispositivo físico o emulador.
 
 ## 7. Firewall de Windows
 

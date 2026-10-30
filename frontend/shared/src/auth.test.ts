@@ -396,6 +396,42 @@ describe("renovarSesion (refresh con rotación, VI-16)", () => {
     expect(obtenerRefreshToken()).toBe(refreshBRotado);
   });
 
+  it("si A espera el bloqueo y entra B, A no consume el refresh de B", async () => {
+    let liberar: (() => void) | undefined;
+    const espera = new Promise<void>((resolver) => {
+      liberar = resolver;
+    });
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: <T>(_nombre: string, callback: () => Promise<T>) =>
+          espera.then(callback),
+      },
+    });
+
+    guardarTokens({ access_token: accessA, refresh_token: refreshA });
+    const operacionA = renovarSesion();
+
+    // B entra mientras el trabajo de A sigue esperando el turno del bloqueo.
+    guardarTokens({ access_token: accessB, refresh_token: refreshB });
+    const operacionB = renovarSesion();
+
+    const accessBRenovado = jwt({ ...sesionB, sid: "b-1", jti: "b-2" });
+    const refreshBRotado = jwt({ ...sesionB, sid: "b-1", jti: "b-3" });
+    fetchMock.mockResolvedValue(
+      json(200, { access_token: accessBRenovado, refresh_token: refreshBRotado }),
+    );
+
+    liberar?.();
+
+    expect(await operacionA).toBe(false);
+    expect(await operacionB).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ refresh_token: refreshB });
+    expect(obtenerAccessToken()).toBe(accessBRenovado);
+    expect(obtenerRefreshToken()).toBe(refreshBRotado);
+  });
+
   it("un 401 descarta la sesión y NO reintenta", async () => {
     guardarTokens({ access_token: "viejo", refresh_token: "refresco" });
     fetchMock.mockResolvedValue(json(401, { detail: "Refresh inválido" }));

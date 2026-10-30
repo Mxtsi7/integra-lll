@@ -6,12 +6,16 @@ import {
   obtenerRefreshToken,
 } from '@ojoalgasto/shared';
 import {
+  confirmarCierrePersistente,
   esperarAlmacenSeguroParaPruebas,
+  hayCierrePendiente,
   hidratarSesion,
   instalarAlmacenSeguro,
   reiniciarAlmacenSeguroParaPruebas,
+  reintentarCierrePersistente,
 } from './sesionSegura';
 import {
+  __fallarBorrados,
   __limpiar,
   __liberar,
   __retenerSiguienteEscritura,
@@ -91,6 +95,58 @@ describe('almacén seguro de sesión (VI-16)', () => {
     __liberar();
     await hidratacion;
 
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
+  });
+
+  it('un borrado rechazado deja el cierre pendiente y no se declara exitoso [P1]', async () => {
+    guardarTokens({ access_token: 'acceso-1', refresh_token: 'refresco-1' });
+    await esperarAlmacenSeguroParaPruebas();
+
+    __fallarBorrados();
+    logout();
+    const resultado = await confirmarCierrePersistente();
+
+    expect(resultado.ok).toBe(false);
+    expect(resultado.pendiente).toBe(true);
+    expect(hayCierrePendiente()).toBe(true);
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
+  });
+
+  it('un reinicio no recupera la sesión mientras el cierre siga pendiente [P1]', async () => {
+    guardarTokens({ access_token: 'acceso-1', refresh_token: 'refresco-1' });
+    await esperarAlmacenSeguroParaPruebas();
+
+    __fallarBorrados();
+    logout();
+    expect((await confirmarCierrePersistente()).ok).toBe(false);
+
+    // Se reinicia la app con el keystore todavía fallando: la marca durable
+    // impide que la hidratación acepte los tokens viejos.
+    await reabrirApp();
+
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
+    expect(hayCierrePendiente()).toBe(true);
+  });
+
+  it('reintentar el cierre después de recuperar el keystore lo confirma y limpia la marca [P1]', async () => {
+    guardarTokens({ access_token: 'acceso-1', refresh_token: 'refresco-1' });
+    await esperarAlmacenSeguroParaPruebas();
+
+    __fallarBorrados();
+    logout();
+    expect((await confirmarCierrePersistente()).ok).toBe(false);
+
+    __fallarBorrados(false);
+    const resultado = await reintentarCierrePersistente();
+
+    expect(resultado.ok).toBe(true);
+    expect(resultado.pendiente).toBe(false);
+    expect(hayCierrePendiente()).toBe(false);
+
+    await reabrirApp();
     expect(obtenerAccessToken()).toBeNull();
     expect(obtenerRefreshToken()).toBeNull();
   });

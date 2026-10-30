@@ -25,9 +25,12 @@ class Command(BaseCommand):
         try:
             with pika.BlockingConnection(pika.URLParameters(url)) as conexion:
                 canal = conexion.channel()
-                _, _, consumidores = canal.queue_declare(
+                # Pika devuelve pika.frame.Method (no una tupla de tres
+                # valores). El contador de consumidores vive en `.method`.
+                resultado = canal.queue_declare(
                     queue=COLA_ENTRADA, passive=True
                 )
+                consumidores = resultado.method.consumer_count
         except Exception as exc:  # pika levanta varios tipos según el fallo
             raise CommandError(f"RabbitMQ no responde: {exc}") from exc
 

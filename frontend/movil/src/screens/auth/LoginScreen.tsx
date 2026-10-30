@@ -6,7 +6,7 @@ import { NavButton } from '../components/NavButton';
 import type { AuthScreenProps } from '../../navigation/types';
 
 export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
-  const { iniciarSesion } = useAuth();
+  const { iniciarSesion, errorCierre, reintentarCierre } = useAuth();
   const [correo, setCorreo] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -53,6 +53,18 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
         {error ? (
           <View style={styles.errorBox} testID="login-error">
             <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {errorCierre ? (
+          <View style={styles.errorBox} testID="cierre-pendiente">
+            <Text style={styles.errorText}>{errorCierre}</Text>
+            <NavButton
+              testID="reintentar-cierre"
+              title="Reintentar limpieza"
+              variant="secondary"
+              onPress={() => void reintentarCierre()}
+            />
           </View>
         ) : null}
 

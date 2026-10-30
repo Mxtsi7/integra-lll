@@ -10,9 +10,20 @@ import {
   haySesionValida,
   logout,
   getUsuarioActual,
+  obtenerAccessToken,
+  obtenerRefreshToken,
   type Usuario,
 } from '@ojoalgasto/shared';
 import { AuthProvider, useAuth, type Tokens } from './AuthContext';
+import {
+  hidratarSesion,
+  instalarAlmacenSeguro,
+  reiniciarAlmacenSeguroParaPruebas,
+} from '../src/storage/sesionSegura';
+import {
+  __fallarBorrados,
+  __limpiar as limpiarSecureStore,
+} from '../test/expo-secure-store-shim';
 
 const almacen: Record<string, string> = {};
 
@@ -61,6 +72,8 @@ describe('AuthContext móvil', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     logout();
+    __fallarBorrados(false);
+    reiniciarAlmacenSeguroParaPruebas();
   });
 
   it('iniciarSesion con tokens válidos autentica y guarda en storage', async () => {
@@ -191,6 +204,62 @@ describe('AuthContext móvil', () => {
     expect(result.current.estado).toBe('anonimo');
     expect(haySesionValida()).toBe(false);
     expect(almacen['access_token']).toBeUndefined();
+  });
+
+  it('un cierre con borrado seguro rechazado se vuelve observable y bloquea hasta reintentar [P1]', async () => {
+    limpiarSecureStore();
+    reiniciarAlmacenSeguroParaPruebas();
+    instalarAlmacenSeguro();
+
+    guardarTokens({ access_token: jwtValido(), refresh_token: 'refresh-borrado' });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Sesión revocada' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider initialEstado="autenticado" initialUsuario={USUARIO_PRUEBA}>
+        {children}
+      </AuthProvider>
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    __fallarBorrados();
+    await act(async () => {
+      await result.current.cerrarSesion();
+    });
+
+    // La UI queda fuera de las rutas privadas y expone el fallo durable.
+    expect(result.current.haySesion).toBe(false);
+    expect(result.current.estado).toBe('anonimo');
+    expect(result.current.errorCierre).toMatch(/no se pudo confirmar/i);
+
+    // Un reintento con el keystore aún roto mantiene el aviso.
+    let confirmado = true;
+    await act(async () => {
+      confirmado = await result.current.reintentarCierre();
+    });
+    expect(confirmado).toBe(false);
+    expect(result.current.errorCierre).not.toBeNull();
+
+    // Recuperado el keystore, el reintento confirma y limpia el aviso.
+    __fallarBorrados(false);
+    await act(async () => {
+      confirmado = await result.current.reintentarCierre();
+    });
+    expect(confirmado).toBe(true);
+    expect(result.current.errorCierre).toBeNull();
+
+    // Un arranque posterior no recupera la sesión cerrada.
+    reiniciarAlmacenSeguroParaPruebas();
+    instalarAlmacenSeguro();
+    await hidratarSesion();
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
   });
 
   it('bootstrap inicial: sin sesión válida queda en anónimo', async () => {

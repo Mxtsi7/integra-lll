@@ -14,9 +14,11 @@ libre:
 * Los nombres de servicio se sustituyen por un alias local (``servicio_1``…).
   El proveedor puede distinguir servicios sin recibir su denominación, que
   puede contener el nombre de una persona.
-* Los textos libres (``motivo`` y la pregunta del usuario) pasan por una capa
-  defensiva que redacta correos, RUT, tarjetas, credenciales, UUID y frases de
-  inyección, además de quitar caracteres de control y recortar.
+* Los motivos libres de las recomendaciones **no salen**. En su lugar viaja un
+  código de regla controlado (``regla``), validado contra un alfabeto cerrado.
+* La pregunta del usuario no se copia: se reduce a intenciones de un catálogo
+  cerrado más importes, monedas y periodos reconocidos. Cualquier nombre,
+  correo, secreto o texto libre se queda en el servidor.
 * Todo lo que no esté en el esquema se descarta antes de salir.
 
 Los montos y los periodos se conservan: no son datos personales y son el
@@ -75,10 +77,48 @@ _PATRONES_INYECCION = (
 
 _PATRON_PERIODO = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
 _PATRON_MONEDA = re.compile(r"^[A-Z]{3}$")
+_PATRON_CODIGO = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # ``construir_contexto()`` serializa los importes como texto decimal
 # (``DecimalField(max_digits=14, decimal_places=2)``). Se aceptan sólo con esa
 # forma exacta: nada de exponentes, signos sueltos ni cadenas arbitrarias.
 _PATRON_MONTO_TEXTO = re.compile(r"^\d{1,12}(?:\.\d{1,2})?$")
+
+# Pregunta controlada: sólo se conservan patrones que no identifican personas.
+_PATRON_IMPORTE_PREGUNTA = re.compile(
+    r"(?<![\d.,])(\d{1,12}[.,]\d{1,2})(?![\d.,])"
+)
+_PATRON_PERIODO_PREGUNTA = re.compile(r"\b\d{4}-(?:0[1-9]|1[0-2])\b")
+_MONEDAS_PREGUNTA = frozenset(
+    {
+        "CLP",
+        "USD",
+        "EUR",
+        "ARS",
+        "MXN",
+        "COP",
+        "PEN",
+        "BRL",
+        "GBP",
+        "JPY",
+        "CHF",
+        "CAD",
+        "AUD",
+    }
+)
+_PATRON_MONEDA_PREGUNTA = re.compile(r"\b[A-Za-z]{3}\b")
+# Catálogo cerrado de intenciones. Una pregunta fuera del catálogo se envía
+# como ``consulta_general``, sin su texto original.
+_REGLAS_INTENCION: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("priorizar_revision", ("prioriz", "revis", "primero", "orden", "empiez")),
+    ("revisar_ahorro", ("ahorr", "barat", "desperd", "recort", "gast")),
+    ("revisar_uso", ("uso", "utiliz", "consum")),
+    ("revisar_solapamiento", ("solap", "duplic", "repet")),
+    ("revisar_presupuesto", ("presupuesto", "limite", "tope")),
+    ("cancelar_servicio", ("cancel", "baja", "termin")),
+    ("comparar_servicios", ("compar", "diferencia")),
+    ("explicar_recomendacion", ("recomend", "suger", "explic")),
+)
+INTENCION_GENERAL = "consulta_general"
 
 MARCADOR_INSTRUCCION = "[instrucción no confiable omitida]"
 MARCADOR_CORREO = "[correo omitido]"
@@ -93,6 +133,7 @@ _TIPO_PERIODO = "periodo"
 _TIPO_ENTERO = "entero"
 _TIPO_MONETARIO = "monetario"
 _TIPO_MONEDA = "moneda"
+_TIPO_CODIGO = "codigo"
 _TIPO_TEXTO = "texto"
 _TIPO_MAPA = "mapa"
 _TIPO_LISTA = "lista"
@@ -106,7 +147,7 @@ ESQUEMA_CAMPOS: dict[str, str] = {
     "dias_con_uso": _TIPO_ENTERO,
     "ahorro_estimado": _TIPO_MONETARIO,
     "moneda": _TIPO_MONEDA,
-    "motivo": _TIPO_TEXTO,
+    "regla": _TIPO_CODIGO,
 }
 
 # Claves que jamás deben copiarse aunque una futura ampliación las incluya.
@@ -136,6 +177,9 @@ CAMPOS_PROHIBIDOS = frozenset(
         "evidencia_id",
         "evidencia_url",
         "evidencia_descripcion",
+        "motivo",
+        "suscripciones_relacionadas",
+        "base_calculo",
     }
 )
 
@@ -153,7 +197,8 @@ def sanitizar_texto(texto: str, *, limite: int = MAX_TEXTO) -> str:
     """Redacta datos sensibles y frases de inyección, y recorta el texto.
 
     Es una segunda capa defensiva. La principal es que los nombres de servicio
-    nunca viajan: se reemplazan por alias.
+    y los motivos nunca viajan. También se usa antes de extraer los tokens
+    controlados de la pregunta, para que un RUT no se confunda con un importe.
     """
     limpio = texto
     for patron in _PATRONES_INYECCION:
@@ -164,6 +209,65 @@ def sanitizar_texto(texto: str, *, limite: int = MAX_TEXTO) -> str:
     limpio = _PATRON_TARJETA.sub(MARCADOR_TARJETA, limpio)
     limpio = _PATRON_CREDENCIAL.sub(MARCADOR_CREDENCIAL, limpio)
     return _limpiar_control(limpio)[:limite]
+
+
+def _normalizar_intencion(texto: str) -> str:
+    sin_acentos = "".join(
+        caracter
+        for caracter in unicodedata.normalize("NFKD", texto)
+        if unicodedata.category(caracter) != "Mn"
+    )
+    return sin_acentos.casefold()
+
+
+def _unicos(valores: list[str]) -> list[str]:
+    vistos: set[str] = set()
+    resultado: list[str] = []
+    for valor in valores:
+        if valor not in vistos:
+            vistos.add(valor)
+            resultado.append(valor)
+    return resultado
+
+
+def construir_pregunta_controlada(mensaje: str) -> str:
+    """Reduce la pregunta a intención, importes, monedas y periodos.
+
+    El texto original no se envía nunca. Si una pregunta no encaja en el
+    catálogo de intenciones, viaja como ``consulta_general``. Así un nombre
+    propio, una dirección o cualquier frase libre se quedan en el servidor.
+    """
+    if not isinstance(mensaje, str) or not mensaje.strip():
+        return f"intencion={INTENCION_GENERAL}"
+
+    # Se limpia primero: correos, RUT, tarjetas y UUID no deben colarse como
+    # "importes" ni como parte de una intención.
+    limpio = sanitizar_texto(mensaje, limite=MAX_PREGUNTA)
+    normalizado = _normalizar_intencion(limpio)
+    intenciones = [
+        codigo
+        for codigo, claves in _REGLAS_INTENCION
+        if any(clave in normalizado for clave in claves)
+    ] or [INTENCION_GENERAL]
+
+    importes = _unicos(_PATRON_IMPORTE_PREGUNTA.findall(limpio))
+    periodos = _unicos(_PATRON_PERIODO_PREGUNTA.findall(limpio))
+    monedas = _unicos(
+        [
+            coincidencia.upper()
+            for coincidencia in _PATRON_MONEDA_PREGUNTA.findall(limpio)
+            if coincidencia.upper() in _MONEDAS_PREGUNTA
+        ]
+    )
+
+    partes = [f"intencion={','.join(intenciones)}"]
+    if importes:
+        partes.append(f"importes={','.join(importes)}")
+    if monedas:
+        partes.append(f"monedas={','.join(monedas)}")
+    if periodos:
+        partes.append(f"periodos={','.join(periodos)}")
+    return "; ".join(partes)[:MAX_PREGUNTA]
 
 
 class _Contexto:
@@ -223,6 +327,13 @@ def _moneda_segura(valor: Any) -> Any:
     return codigo if _PATRON_MONEDA.fullmatch(codigo) else _DESCARTAR
 
 
+def _codigo_seguro(valor: Any) -> Any:
+    if not isinstance(valor, str):
+        return _DESCARTAR
+    codigo = valor.strip().lower()
+    return codigo if _PATRON_CODIGO.fullmatch(codigo) else _DESCARTAR
+
+
 def _servicio_seguro(valor: Any, contexto: _Contexto) -> Any:
     if not isinstance(valor, str) or not valor.strip():
         return _DESCARTAR
@@ -240,6 +351,8 @@ def _sanitizar_campo(clave: str, tipo: str, valor: Any, contexto: _Contexto) -> 
         return _monetario_seguro(valor)
     if tipo == _TIPO_MONEDA:
         return _moneda_segura(valor)
+    if tipo == _TIPO_CODIGO:
+        return _codigo_seguro(valor)
     if tipo == _TIPO_TEXTO:
         return sanitizar_texto(valor) if isinstance(valor, str) else _DESCARTAR
     return _DESCARTAR
@@ -301,11 +414,12 @@ def construir_payload_asistente(
 ) -> dict[str, Any]:
     """Payload exacto que puede llegar al proveedor externo.
 
-    ``pregunta`` pasa por la capa defensiva y ``datos`` sale ya saneado y
-    serializable (montos como cadena decimal, periodos ISO). El contexto
-    original no se modifica.
+    ``pregunta`` se reduce a tokens controlados y ``datos`` sale ya saneado y
+    serializable (montos como cadena decimal, periodos ISO, servicios como
+    alias, motivos sustituidos por códigos de regla). El contexto original no
+    se modifica.
     """
     return {
         "datos": _a_json(sanitizar_contexto_asistente(contexto)),
-        "pregunta": sanitizar_texto(mensaje, limite=MAX_PREGUNTA),
+        "pregunta": construir_pregunta_controlada(mensaje),
     }

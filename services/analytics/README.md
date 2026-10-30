@@ -193,6 +193,20 @@ datos de la organización autenticada: usos mensuales y recomendaciones
 saneados, sin UUID internos, sin JWT, sin cabeceras y sin el body crudo del
 cliente. Los topes de contexto están en `analytics/asistente.py`.
 
+La frontera de salida es `analytics/sanitizacion_ia.py`:
+
+- los nombres de servicio viajan como alias (`servicio_1`…);
+- los motivos libres **no salen**: se sustituyen por el código de regla
+  controlado `regla`;
+- la pregunta del usuario no se copia: se reduce a intenciones de un catálogo
+  cerrado más los importes, monedas y periodos reconocidos;
+- nombres propios, correos, RUT, tarjetas, credenciales y UUID se quedan en el
+  servidor; sólo se descartan o redactan antes de construir el payload.
+
+La prueba `test_messages_create_recibe_el_payload_saneado` intercepta la
+llamada real a `messages.create` y verifica que el prompt no contiene ninguno
+de esos datos personales, ni el `motivo` original.
+
 ```http
 POST /api/asistente/
 Authorization: Bearer <access>
@@ -217,6 +231,19 @@ devuelve una respuesta inválida, el endpoint **no falla con 500**: responde
 `200` con `estado: "degradado"`, un `motivo` legible y un resumen local
 determinista calculado con los mismos datos. Un usuario Free nunca ve ese
 resumen: recibe `403` antes de llegar a Analytics.
+
+La concurrencia (`IA_MAX_LLAMADAS_SIMULTANEAS`) es un límite del **proceso**:
+una única instancia de `PoliticaIA` atiende todas las peticiones del contenedor,
+de modo que crear la política por request no multiplica el cupo. Si no hay
+plaza, responde `estado: "degradado"` con `motivo: "capacidad"` antes de llamar
+al proveedor y antes de consumir la cuota mensual; la plaza se libera siempre.
+No se promete un límite distribuido entre réplicas.
+
+Resultados de regresión verificados localmente:
+`analytics/test_verificar_worker.py` cubre consumidor presente, ausente y
+broker caído con un `pika.frame.Method` real, y comprueba que el comando lee
+`.method.consumer_count`; `analytics/test_asistente_vi22.py` cubre la privacidad
+del payload y la capacidad compartida con `simultaneas=1`.
 
 El wrapper común es `shared/ia/cliente.py` (timeout máximo y reintentos sólo
 para 429/503; nunca reintenta 401/403). El comando de Analytics lo usa sin

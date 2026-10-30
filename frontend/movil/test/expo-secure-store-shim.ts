@@ -6,6 +6,7 @@ type Demora = { promesa: Promise<void>; liberar: () => void };
 
 let demoraEscritura: Demora | null = null;
 let demoraLectura: Demora | null = null;
+let fallarBorrados = false;
 
 function crearDemora(): Demora {
   let liberar!: () => void;
@@ -36,6 +37,11 @@ export function __liberar(): void {
   demoraLectura = null;
 }
 
+/** Simula un keystore que rechaza los borrados. */
+export function __fallarBorrados(fallar = true): void {
+  fallarBorrados = fallar;
+}
+
 export async function getItemAsync(clave: string): Promise<string | null> {
   const valor = almacen.get(clave) ?? null;
   if (demoraLectura) await demoraLectura.promesa;
@@ -48,6 +54,7 @@ export async function setItemAsync(clave: string, valor: string): Promise<void> 
 }
 
 export async function deleteItemAsync(clave: string): Promise<void> {
+  if (fallarBorrados) throw new Error('deleteItemAsync rechazado');
   almacen.delete(clave);
 }
 
@@ -61,4 +68,5 @@ export function __limpiar(): void {
   almacen.clear();
   demoraEscritura = null;
   demoraLectura = null;
+  fallarBorrados = false;
 }
