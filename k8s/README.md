@@ -1,5 +1,11 @@
 # Despliegue en Kubernetes
 
+Seguridad D-11: antes de migrar, leer [aislamiento de red y secretos](../docs/seguridad-d11.md).
+El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`.
+Hace falta un CNI con NetworkPolicy y un `GHCR_TOKEN` de lectura explícito.
+La contraseña histórica de PostgreSQL requiere la rotación indicada abajo;
+la PR por sí sola no la invalida.
+
 El sistema completo corriendo en el cluster del ramo:
 **https://ojoalgasto-forellana.dev.censei.cl**
 
@@ -180,9 +186,8 @@ porque todo queda en el mismo origen.
   tiene Service) y `celery inspect ping` tarda más que cualquier timeout
   razonable con el CPU acotado. Que está vivo se ve en sus logs.
 - **Las imágenes son privadas** en GHCR: el cluster las baja con el Secret
-  `ghcr`, que crea el script de despliegue. Pásale un token de solo lectura en
-  `GHCR_TOKEN` (`read:packages`); si no, usa el de `gh`, que puede publicar
-  paquetes a tu nombre y queda guardado dentro del cluster.
+  `ghcr`, que crea el script de despliegue. Es obligatorio pasar un token de
+  solo lectura en `GHCR_TOKEN` (`read:packages`).
 - **`DATABASE_URL` vive en el Secret**, no en el ConfigMap: lleva la
   contraseña adentro y se arma con la misma clave que recibe Postgres. Ojo:
   `POSTGRES_PASSWORD` solo se aplica en el primer arranque, con el disco

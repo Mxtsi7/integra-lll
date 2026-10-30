@@ -34,8 +34,46 @@ spec:
           command: ["sh", "entrypoint.sh", "echo", "migraciones listas"]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
+            - name: SPOTIFY_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_ID, optional: true }
+            - name: SPOTIFY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_SECRET, optional: true }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_ID, optional: true }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_SECRET, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ANTHROPIC_API_KEY, optional: true }
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_USER, optional: true }
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_PASSWORD, optional: true }
+            - name: PAGOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: PAGOS_WEBHOOK_SECRET, optional: true }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           resources:
             requests: { cpu: 50m,  memory: 112Mi }
@@ -48,8 +86,46 @@ spec:
           ports: [{ name: http, containerPort: 8002 }]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
+            - name: SPOTIFY_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_ID, optional: true }
+            - name: SPOTIFY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_SECRET, optional: true }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_ID, optional: true }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_SECRET, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ANTHROPIC_API_KEY, optional: true }
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_USER, optional: true }
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_PASSWORD, optional: true }
+            - name: PAGOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: PAGOS_WEBHOOK_SECRET, optional: true }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           readinessProbe:
             httpGet:
@@ -97,8 +173,46 @@ spec:
           command: ["celery", "-A", "config", "worker", "--loglevel=info", "--concurrency=2"]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
+            - name: SPOTIFY_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_ID, optional: true }
+            - name: SPOTIFY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_SECRET, optional: true }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_ID, optional: true }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_SECRET, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ANTHROPIC_API_KEY, optional: true }
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_USER, optional: true }
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_PASSWORD, optional: true }
+            - name: PAGOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: PAGOS_WEBHOOK_SECRET, optional: true }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           # Sin sonda: el worker no atiende tráfico (no tiene Service), así que
           # "listo" no significa nada para nadie, y `celery inspect ping` tarda
@@ -123,8 +237,46 @@ spec:
           command: ["python", "manage.py", "consumir_eventos"]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
+            - name: SPOTIFY_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_ID, optional: true }
+            - name: SPOTIFY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_SECRET, optional: true }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_ID, optional: true }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_SECRET, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ANTHROPIC_API_KEY, optional: true }
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_USER, optional: true }
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_PASSWORD, optional: true }
+            - name: PAGOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: PAGOS_WEBHOOK_SECRET, optional: true }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           # Sin sonda, por lo mismo que el worker: no atiende tráfico.
           resources:
@@ -157,8 +309,46 @@ spec:
           command: ["celery", "-A", "config", "beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
           env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
+            - name: SPOTIFY_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_ID, optional: true }
+            - name: SPOTIFY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SPOTIFY_CLIENT_SECRET, optional: true }
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_ID, optional: true }
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: GOOGLE_CLIENT_SECRET, optional: true }
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ANTHROPIC_API_KEY, optional: true }
+            - name: EMAIL_HOST_USER
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_USER, optional: true }
+            - name: EMAIL_HOST_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: EMAIL_HOST_PASSWORD, optional: true }
+            - name: PAGOS_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: PAGOS_WEBHOOK_SECRET, optional: true }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           resources:
             requests: { cpu: 25m,  memory: 56Mi }

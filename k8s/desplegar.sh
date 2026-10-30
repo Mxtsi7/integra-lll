@@ -36,12 +36,8 @@ echo "── credencial del registro ──"
 # El cluster solo necesita BAJAR las imágenes, así que con un token de
 # `read:packages` basta. Pásalo en GHCR_TOKEN:
 #     https://github.com/settings/tokens/new?scopes=read:packages
-# Sin él se usa el de `gh`, que tiene permiso de escritura: funciona, pero
-# deja en el cluster una credencial que puede publicar paquetes a tu nombre.
-if [ -z "${GHCR_TOKEN:-}" ]; then
-  echo "   OJO: sin GHCR_TOKEN se usa el token de gh, que puede escribir."
-  GHCR_TOKEN="$(gh auth token)"
-fi
+# No se copia al cluster el token de escritura de la cuenta de desarrollo.
+: "${GHCR_TOKEN:?Definir GHCR_TOKEN con permiso read:packages para el cluster}"
 kubectl create secret docker-registry ghcr \
   --docker-server=ghcr.io \
   --docker-username="${GHCR_USUARIO:-FelipeOrellanaCaro}" \
@@ -97,9 +93,21 @@ if ! kubectl get secret ojoalgasto -o jsonpath='{.data.CLAVES_CIFRADO}' | grep -
 fi
 
 echo "── aplicando manifiestos ──"
+# Credencial dedicada; en un despliegue existente se conserva el Secret.
+if ! kubectl get secret ojoalgasto-rabbitmq >/dev/null 2>&1; then
+  CLAVE_RABBITMQ="$(openssl rand -hex 32)"
+  printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"ojoalgasto-rabbitmq"},"type":"Opaque","stringData":{"RABBITMQ_USER":"ojoalgasto","RABBITMQ_PASSWORD":"%s","RABBITMQ_URL":"amqp://ojoalgasto:%s@rabbitmq:5672/"}}' \
+    "$CLAVE_RABBITMQ" "$CLAVE_RABBITMQ" | kubectl create -f - >/dev/null
+fi
+# Preparar Postgres antes de las migraciones de dominio.
+kubectl apply -f k8s/00-configuracion.yaml
+kubectl apply -f k8s/01-postgres.yaml
+kubectl rollout status statefulset/postgres --timeout=300s
+bash k8s/configurar-usuarios-bd.sh
+
 for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml k8s/02-redis-rabbitmq.yaml \
          k8s/10-auth.yaml k8s/11-subscriptions.yaml k8s/12-gateway.yaml \
-         k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml; do
+         k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml k8s/40-red.yaml; do
   sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \
       -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
       -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \

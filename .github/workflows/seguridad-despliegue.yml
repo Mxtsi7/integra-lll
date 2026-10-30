@@ -1,0 +1,41 @@
+name: Seguridad de despliegue
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  d11:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: pruebas-d11
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres:pruebas-d11@localhost:5432/postgres
+      POSTGRES_PASSWORD: pruebas-d11
+      RABBITMQ_PASSWORD: pruebas-d11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest PyYAML 'psycopg[binary]'
+      - run: python -m pytest scripts/tests/ -q
+      - run: bash -n k8s/desplegar.sh k8s/configurar-usuarios-bd.sh
+      - name: Verificar Compose y credenciales reales de RabbitMQ
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          docker compose up -d --wait rabbitmq
+          docker compose exec -T rabbitmq rabbitmqctl authenticate_user ojoalgasto pruebas-d11
+          if docker compose exec -T rabbitmq rabbitmqctl authenticate_user guest guest; then
+            echo 'guest sigue habilitado' >&2
+            exit 1
+          fi
+      - if: always()
+        run: docker compose down
