@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { formatearFechaHora, formatearFechaLarga, formatearMesAnio, nombresDiasSemana } from './formato';
+import { formatearFechaHora, formatearFechaLarga, formatearMesAnio, formatearMonto, formatearTotales, nombresDiasSemana } from './formato';
+
+it('identifica cada divisa y conserva sus decimales de presentación', () => {
+  expect(formatearTotales([{ moneda: 'CLP', total: 10000 }, { moneda: 'EUR', total: 4.99 }]))
+    .toBe(`CLP ${formatearMonto(10000, 'CLP')} · EUR ${formatearMonto(4.99, 'EUR')}`);
+  expect(formatearMonto(4.99, 'EUR')).toContain('4,99');
+  expect(formatearTotales([])).toBe('Sin cobros');
+});
 
 // Zona de Chile (UTC-3/-4) aunque CI corra en UTC: así un new Date('YYYY-MM-DD')
 // (medianoche UTC = el día anterior acá) hace fallar los tests de fechas.
