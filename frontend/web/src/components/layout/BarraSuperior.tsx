@@ -3,22 +3,21 @@ import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-
 import { Bell, LogOut, Search } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { Spinner } from '../Spinner';
+import { useContadorAlertas } from '../../context/ContadorAlertasContext';
 import { Marca } from './Marca';
 import styles from './BarraSuperior.module.css';
 
 interface BarraSuperiorProps {
   nombreUsuario: string;
   plan: string;
-  /** Cuántas cosas piden atención: cobros de esta semana y suscripciones sin uso. */
-  avisos?: number;
   alCerrarSesion: () => void;
   /** true mientras el backend revoca la sesión. */
   cerrandoSesion?: boolean;
 }
 
-/** "1 cosa pide atención", "3 cosas piden atención". */
-function textoAvisos(avisos: number): string {
-  return avisos === 1 ? '1 cosa pide atención' : `${avisos} cosas piden atención`;
+/** "1 alerta sin leer", "3 alertas sin leer". */
+function textoPendientes(pendientes: number): string {
+  return pendientes === 1 ? '1 alerta sin leer' : `${pendientes} alertas sin leer`;
 }
 
 /**
@@ -29,7 +28,6 @@ function textoAvisos(avisos: number): string {
 export function BarraSuperior({
   nombreUsuario,
   plan,
-  avisos = 0,
   alCerrarSesion,
   cerrandoSesion = false,
 }: BarraSuperiorProps) {
@@ -37,7 +35,11 @@ export function BarraSuperior({
   const location = useLocation();
   const [parametros] = useSearchParams();
   const [busqueda, setBusqueda] = useState(parametros.get('q') ?? '');
-  const idAvisos = useId();
+  const idPendientes = useId();
+  // El mismo número en todas las páginas; el Centro de alertas lo baja al leer.
+  // null (todavía no se sabe) se muestra igual que cero: sin número.
+  const pendientes = useContadorAlertas().pendientes ?? 0;
+  const hayPendientes = pendientes > 0;
 
   // Si la URL cambia por fuera (atrás, enlace), el cuadro sigue a la URL.
   useEffect(() => {
@@ -87,24 +89,24 @@ export function BarraSuperior({
       </form>
 
       <div className={styles.derecha}>
-        {/* La campana abre los ajustes de avisos (/configuracion), no el
-            Panel. Su nombre no cambia con el número: el conteo es aparte y
-            no son notificaciones sin leer, sino cosas que piden atención. */}
+        {/* La campana abre el Centro de alertas (CH-31); los ajustes de
+            avisos quedan a un clic desde ahí. Su nombre no cambia con el
+            número: las sin leer van como descripción. */}
         <Link
-          to="/configuracion"
+          to="/alertas"
           className={styles.campana}
-          aria-label="Configurar notificaciones"
-          aria-describedby={avisos > 0 ? idAvisos : undefined}
-          title={avisos > 0 ? `Configurar notificaciones · ${textoAvisos(avisos)}` : 'Configurar notificaciones'}
+          aria-label="Alertas"
+          aria-describedby={hayPendientes ? idPendientes : undefined}
+          title={hayPendientes ? `Alertas · ${textoPendientes(pendientes)}` : 'Alertas'}
         >
           <Bell size={18} aria-hidden="true" />
-          {avisos > 0 && (
+          {hayPendientes && (
             <>
               <span className={styles.campanaConteo} aria-hidden="true">
-                {avisos > 9 ? '9+' : avisos}
+                {pendientes > 9 ? '9+' : pendientes}
               </span>
-              <span id={idAvisos} className="solo-lectura">
-                {textoAvisos(avisos)}
+              <span id={idPendientes} className="solo-lectura">
+                {textoPendientes(pendientes)}
               </span>
             </>
           )}
