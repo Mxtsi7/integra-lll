@@ -8,6 +8,7 @@ from analytics.views import (
     recomendaciones_dismiss,
     recomendaciones_list,
 )
+from analytics.explicaciones_api import recomendaciones_explicar
 
 urlpatterns = [
     path("internal/organizaciones/<uuid:organizacion_id>/", LimpiezaAnalyticsView.as_view()),
@@ -19,6 +20,7 @@ urlpatterns = [
     # El gateway reenvía la ruta sin traducirla: /api/recomendaciones/ debe
     # existir tal cual en este servicio (gateway/config/settings.py, RUTAS).
     path('api/recomendaciones/', recomendaciones_list, name='recomendaciones_list'),
+    path('api/recomendaciones/<str:pk>/explicar/', recomendaciones_explicar, name='recomendaciones_explicar'),
     path(
         'api/recomendaciones/<str:pk>/dismiss/',
         recomendaciones_dismiss,
