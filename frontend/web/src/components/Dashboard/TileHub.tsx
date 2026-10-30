@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { equivalenteMensual, sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Download, Maximize2 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -9,6 +9,7 @@ import styles from './Tiles.module.css';
 
 interface TileHubProps {
   suscripciones: Suscripcion[];
+  moneda: string;
   alExportar: () => void;
 }
 
@@ -55,7 +56,7 @@ function useEsAngosto(): boolean {
  * El hub: el ojo al centro y, alrededor, las suscripciones que más pesan,
  * como los dispositivos de una casa. Las pestañas cambian la categoría.
  */
-export function TileHub({ suscripciones, alExportar }: TileHubProps) {
+export function TileHub({ suscripciones, moneda, alExportar }: TileHubProps) {
   const categoriaVisual = usePresentacionCategoria();
   const [pestana, setPestana] = useState<Pestana>(null);
   const angosto = useEsAngosto();
@@ -69,7 +70,7 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
     .sort((a, b) => equivalenteMensual(b.monto, b.frecuencia) - equivalenteMensual(a.monto, a.frecuencia))
     .slice(0, lugares.length);
 
-  const totalVisible = visibles.reduce((suma, s) => suma + equivalenteMensual(s.monto, s.frecuencia), 0);
+  const totalVisible = sumarEquivalentesMensuales(visibles);
   const fantasmas = suscripciones.filter((s) => s.estado === 'fantasma').length;
 
   const pestanas: { valor: Pestana; etiqueta: string; icono?: ReactNode }[] = [
@@ -128,7 +129,7 @@ export function TileHub({ suscripciones, alExportar }: TileHubProps) {
                 {visibles.length === 1 ? 'La más grande: ' : `Las ${visibles.length} más grandes: `}
               </span>
             )}
-            {visibles.length === 0 ? 'Nada por acá' : `${formatearMonto(totalVisible)} al mes`}
+            {visibles.length === 0 ? 'Nada por acá' : `${formatearMonto(totalVisible, moneda)} al mes`}
           </span>
         </div>
 

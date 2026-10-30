@@ -105,3 +105,5 @@ usaron Rust, la respuesta ya está escrita y fechada.
 - [MX-09/MX-16 — Permisos y catálogo](flujos/maximiliano-saez/09-16-permisos-catalogo.md).
 - [MX-17/MX-18 — Checkout y webhook mock](flujos/maximiliano-saez/17-18-contratacion-mock.md).
 - [MX-19/MX-20 — Sincronización y pruebas de planes](flujos/maximiliano-saez/19-20-sincronizacion-pruebas-planes.md).
+
+- [Registro y aislamiento (MX-12/MX-13)](flujos/maximiliano-saez/12-13-registro-aislamiento.md).
