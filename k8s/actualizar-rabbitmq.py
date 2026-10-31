@@ -89,12 +89,17 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
         Tumbó un despliegue entero: el drenaje confirmaba 0 mensajes, suspendía
         los listeners y moría al cerrar la primera conexión.
 
-        La primera línea es el encabezado de la columna; `--quiet` saca el
-        banner, no el encabezado. Se exige para no confundir "sin conexiones"
-        con "no se pudo leer la salida".
+        Cuando HAY conexiones, la primera línea es el encabezado de la
+        columna: `--quiet` saca el banner, no el encabezado. Cuando NO hay,
+        no se imprime nada, **ni el encabezado** —comprobado contra el
+        broker—, así que una salida vacía significa cero conexiones y no un
+        fallo de lectura. Un fallo de verdad no llega hasta acá: `kubectl()`
+        ya levanta por código de salida distinto de cero.
         """
         lineas = [l.strip() for l in ctl("list_connections", "pid").splitlines() if l.strip()]
-        if not lineas or lineas[0] != "pid":
+        if not lineas:
+            return []
+        if lineas[0] != "pid":
             raise RuntimeError("No se pudo leer la lista de conexiones; no se reemplaza RabbitMQ")
         pids = lineas[1:]
         for pid in pids:

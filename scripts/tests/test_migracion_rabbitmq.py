@@ -60,7 +60,9 @@ class Cluster:
             # El formateador por omision: encabezado de columna y una linea por
             # conexion, con el NOMBRE del nodo. `--quiet` saca el banner, no el
             # encabezado.
-            return "pid\n" if self.cerrado else "pid\n<rabbit@viejo.1793400029.726.0>\n"
+            # Sin filas, `rabbitmqctl --quiet` no imprime NADA: ni el
+            # encabezado. Comprobado contra el broker del cluster.
+            return "\n" if self.cerrado else "pid\n<rabbit@viejo.1793400029.726.0>\n"
         if "list_vhosts" in args:
             return json.dumps([{"name": "/"}, {"name": "otro"}])
         if "list_queues" in args:
@@ -231,3 +233,42 @@ def test_guard_preserva_mensaje_confirmado_con_rabbitmq_real(guard):
     # En el ensayo el pod no se reemplaza: finally debe reanudar el listener.
     with pika.BlockingConnection(pika.URLParameters(url)) as conexion:
         assert conexion.is_open
+
+
+# ── El formato del pid de las conexiones (D-11) ─────────────────────────────
+# `close_connection` solo acepta `<nodo.A.B.C>`. Estas dos cubren las dos
+# maneras de que la lista venga mal; la del caso bueno (una conexion que se
+# cierra y la lista que queda vacia) la ejercen todas las demas.
+
+def _lista_de_conexiones(cluster, texto):
+    """Reemplaza SOLO el listado en texto; el resto lo responde el cluster."""
+    def ejecutar(*args):
+        if "list_connections" in args and "--formatter=json" not in args:
+            return texto
+        return cluster(*args)
+    return ejecutar
+
+
+def test_pid_en_formato_json_no_autoriza_reemplazo(guard):
+    """La regresion del despliegue del 31-10: `#PID<13244.726.0>` es lo que
+    entrega `--formatter=json`, y el broker lo rechaza con
+    `invalid_pid_syntax`. Si alguien vuelve a leer la lista en JSON, el pid
+    llega con esta forma y hay que negarse antes de tocar el broker."""
+    cluster = Cluster()
+    with pytest.raises(RuntimeError):
+        guard.actualizar(_lista_de_conexiones(cluster, "pid\n#PID<13244.726.0>\n"),
+                         intentos=1, pausa=0)
+    assert not cluster.aplicado
+    assert not cluster.suspendido
+
+
+def test_listado_de_conexiones_ilegible_no_autoriza_reemplazo(guard):
+    """Una salida que no empieza por el encabezado no se interpreta: podria
+    ser un aviso del servidor y tomarlo por una conexion —o por ninguna—
+    dejaria reemplazar el broker sin saber que habia conectado."""
+    cluster = Cluster()
+    with pytest.raises(RuntimeError):
+        guard.actualizar(_lista_de_conexiones(cluster, "Listing connections ...\n<rabbit@viejo.1.0>\n"),
+                         intentos=1, pausa=0)
+    assert not cluster.aplicado
+    assert not cluster.suspendido
