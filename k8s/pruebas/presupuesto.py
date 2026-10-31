@@ -43,7 +43,7 @@ parser.add_argument("--generador", required=True, help="Job del escenario anunci
 parser.add_argument("--namespace-generador", required=True, help="Namespace donde se ejecutará el Job")
 args = parser.parse_args()
 
-cargas={}; hpas={}
+cargas={}; hpas={}; cronjobs={}
 for ruta in sorted(glob.glob(args.directorio+"/*.yaml")):
     for doc in yaml.safe_load_all(open(ruta,encoding="utf-8")):
         if not doc: continue
@@ -52,6 +52,15 @@ for ruta in sorted(glob.glob(args.directorio+"/*.yaml")):
         k=doc.get("kind")
         if k in ("Deployment","StatefulSet"):
             cargas[doc["metadata"]["name"]]=(doc["spec"].get("replicas",1), efectivo(doc["spec"]["template"]["spec"]))
+        elif k=="CronJob":
+            # Un CronJob no tiene replicas, pero mientras corre OCUPA un pod y
+            # cuenta para la ResourceQuota. Se suma al PEOR CASO y es
+            # obligatorio: el horario o el plazo de inicio no reservan cupo, asi
+            # que si dispara durante un pico del autoescalado compite por el
+            # mismo espacio. La version anterior lo informaba como "transitorio"
+            # y terminaba con 0 aunque no cupiera; lo rechazo la revision de #120.
+            cronjobs[doc["metadata"]["name"]]=efectivo(
+                doc["spec"]["jobTemplate"]["spec"]["template"]["spec"])
         elif k=="HorizontalPodAutoscaler":
             hpas[doc["spec"]["scaleTargetRef"]["name"]]=doc["spec"]["maxReplicas"]
 
@@ -79,6 +88,11 @@ fallo=False
 for escalado in (False,True):
     print(f"\n===== {'PEOR CASO: HPA al maximo' if escalado else 'En reposo (minReplicas)'} =====")
     tot=dict.fromkeys(TOPE,0)
+    if escalado:
+        for n,r in cronjobs.items():
+            tot["pods"]+=1
+            for k in r: tot[k]+=r[k]
+            print(f"  {n:22} x1  lim={r['limits.memory']//MI:>4}Mi cpu={r['limits.cpu']:>4}m  <- CronJob")
     for n,(reps,r) in cargas.items():
         if reps==0: continue
         if escalado and n in hpas: reps=hpas[n]

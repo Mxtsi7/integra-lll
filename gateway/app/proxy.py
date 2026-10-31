@@ -18,6 +18,7 @@ import uuid
 
 import requests
 from django.conf import settings
+from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -51,6 +52,95 @@ def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonRespo
     if estado == 401:
         respuesta["WWW-Authenticate"] = "Bearer"
     return respuesta
+
+
+# ── La subida de archivos (FE-07) ───────────────────────────────────────────
+# `request.body` lanza `RequestDataTooBig` cuando CONTENT_LENGTH supera
+# `DATA_UPLOAD_MAX_MEMORY_SIZE`, que por omisión son 2,5 MB. Como el gateway
+# no lo cambiaba, un archivo de 3 MB —válido para el servicio, que admite
+# 5 MB— moría acá con un 400 genérico sin `codigo`, y uno de 6 MB tampoco
+# recibía el `413 archivo_excedido` documentado. Las pruebas no lo veían
+# porque llamaban a Connectors directamente. Lo encontró la revisión de #120.
+#
+# No se sube el límite global: se trata SOLO esta ruta, mirando
+# CONTENT_LENGTH **antes** de tocar el cuerpo y leyendo con un tope explícito.
+RUTA_SUBIDA = "/api/importaciones/archivos/"
+
+#: Lo que el sobre multipart agrega al archivo: las cabeceras de cada parte y
+#: los delimitadores. 64 KB sobra para un formulario de un archivo y un par de
+#: campos, y mantiene el tope cerca del real en vez de duplicarlo.
+MARGEN_MULTIPART = 64 * 1024
+
+
+def _es_subida_de_archivo(request) -> bool:
+    return request.method == "POST" and request.path == RUTA_SUBIDA
+
+
+def _tope_de_subida() -> int:
+    return int(settings.IMPORTACION_TAMANO_MAXIMO_BYTES) + MARGEN_MULTIPART
+
+
+def respuesta_archivo_excedido(correlacion: str, largo: int) -> JsonResponse:
+    """413 con la MISMA forma que devuelve Connectors.
+
+    El cliente no debería notar si lo rechazó el gateway o el servicio: si acá
+    devolviéramos `{"detalle": ...}` y allá `{"codigo": ...}`, el frontend
+    tendría que mirar dos formas para el mismo caso.
+    """
+    maximo = int(settings.IMPORTACION_TAMANO_MAXIMO_BYTES)
+    respuesta = JsonResponse(
+        {
+            "codigo": "archivo_excedido",
+            "archivo": (
+                f"La petición pesa {largo:,} bytes y el máximo del archivo es "
+                f"{maximo:,}.".replace(",", ".")
+            ),
+        },
+        status=413,
+        json_dumps_params={"ensure_ascii": False},
+    )
+    respuesta["X-Correlation-ID"] = correlacion
+    return respuesta
+
+
+def _cuerpo_a_reenviar(request, correlacion):
+    """(cuerpo, error). Solo uno de los dos no es None.
+
+    En la ruta de subida se exige `Content-Length` y se lee con tope, para no
+    leer nunca un cuerpo sin límite. En el resto se usa `request.body`, que
+    conserva el límite por omisión de Django.
+    """
+    if not _es_subida_de_archivo(request):
+        try:
+            return request.body, None
+        except RequestDataTooBig:
+            # Antes salía como un 400 genérico de Django sin `codigo`.
+            return None, respuesta_archivo_excedido(
+                correlacion, int(request.META.get("CONTENT_LENGTH") or 0)
+            )
+
+    crudo = request.META.get("CONTENT_LENGTH") or ""
+    if not str(crudo).isdigit():
+        # Sin Content-Length no se puede saber cuánto va a llegar, y leer sin
+        # tope es justo lo que esto evita.
+        respuesta = JsonResponse(
+            {"codigo": "largo_requerido",
+             "archivo": "Falta la cabecera Content-Length."},
+            status=411,
+            json_dumps_params={"ensure_ascii": False},
+        )
+        respuesta["X-Correlation-ID"] = correlacion
+        return None, respuesta
+
+    largo = int(crudo)
+    if largo > _tope_de_subida():
+        # No se lee NADA del cuerpo: se corta antes.
+        return None, respuesta_archivo_excedido(correlacion, largo)
+
+    # `read` y no `body`: `body` compara contra DATA_UPLOAD_MAX_MEMORY_SIZE y
+    # lanzaría igual. El stream ya viene acotado por Content-Length, y el tope
+    # se pasa explícito para no depender de eso.
+    return request.read(largo), None
 
 
 def comprobar_feature(ruta, cabeceras):
@@ -125,13 +215,17 @@ def reenviar(request):
     except (requests.RequestException, ValueError):
         return respuesta_de_error(503, "No se pudieron comprobar los permisos. Inténtalo nuevamente", correlacion)
 
+    cuerpo, error_de_cuerpo = _cuerpo_a_reenviar(request, correlacion)
+    if error_de_cuerpo is not None:
+        return error_de_cuerpo
+
     destino = settings.SERVICIOS[servicio] + request.get_full_path()
     try:
         upstream = requests.request(
             request.method,
             destino,
             headers=cabeceras,
-            data=request.body,
+            data=cuerpo,
             timeout=settings.TIEMPO_ESPERA_SEGUNDOS,
             allow_redirects=False,
         )

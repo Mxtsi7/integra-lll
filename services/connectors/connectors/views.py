@@ -1,6 +1,6 @@
 """Vistas del servicio de conectores."""
 
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import connection, transaction
@@ -10,19 +10,23 @@ from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from shared.bloqueo import bloquear
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from . import proveedores, revocacion
-from .models import AutorizacionPendiente, CuentaConectada, Importacion
+from . import archivos, proveedores, revocacion
+from .models import ArchivoImportacion, AutorizacionPendiente, CuentaConectada, Importacion
 from .serializers import (
+    ArchivoRechazadoSerializer,
     AutorizacionIniciadaSerializer,
     CallbackAutorizacionSerializer,
     CuentaConectadaSerializer,
     ImportacionSerializer,
     IniciarAutorizacionSerializer,
+    SubidaArchivoSerializer,
 )
 
 
@@ -477,3 +481,133 @@ class ImportacionViewSet(SoloLecturaTenantViewSet):
                 raise ValidationError({"mias": "Debe ser true o false."})
 
         return qs
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Subida de archivos para importar (FE-07)
+# ═══════════════════════════════════════════════════════════════════
+
+
+@extend_schema(
+    request=SubidaArchivoSerializer,
+    responses={
+        201: ImportacionSerializer,
+        400: ArchivoRechazadoSerializer,
+        413: ArchivoRechazadoSerializer,
+    },
+    summary="Subir un CSV o una cartola PDF y crear la importación (FE-07)",
+)
+class SubirArchivoView(APIView):
+    """
+        POST /api/importaciones/archivos/      multipart, campo `archivo`
+        → 201 con la importación en `pendiente`
+
+    Recibe el archivo, lo valida ANTES de guardar nada (extensión, tamaño,
+    contenido real: ver `archivos.py`), aplica la cuota diaria de la
+    organización, guarda el archivo temporalmente y crea la importación.
+
+    ── Lo que NO hace ───────────────────────────────────────────────────────
+    No crea ni toca ninguna suscripción. Lo que devuelve es el `id` de una
+    importación `pendiente`, que es el "job": FE-09 la toma, la procesa y
+    deja candidatos; FE-11, recién con la confirmación de la persona, crea o
+    actualiza suscripciones. Es el criterio "archivo válido devuelve id de
+    importación y no crea suscripciones automáticamente".
+
+    ── Códigos ──────────────────────────────────────────────────────────────
+        400  falta el archivo, formato no admitido, vacío o contenido
+             incompatible (con `codigo` estable)
+        413  excede el tamaño máximo
+        429  la organización agotó su cuota diaria
+        403  sin contexto de organización o de usuario
+
+    ── La cuota se cuenta con un lock ───────────────────────────────────────
+    Contar y después crear deja una ventana en la que dos subidas simultáneas
+    pasan las dos. El advisory lock por organización (`shared/bloqueo.py`)
+    serializa el "contar + crear", igual que el agregado de analytics y el
+    resumen de subscriptions.
+    """
+
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request):
+        organizacion_id = getattr(request, "organizacion_id", None)
+        if not organizacion_id:
+            raise PermissionDenied("Falta el contexto de organización")
+        usuario_id = _usuario_de(request)
+
+        subido = request.FILES.get("archivo")
+        if subido is None:
+            return Response(
+                {"codigo": "falta_archivo", "archivo": "Falta el archivo: campo `archivo`, multipart."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tamano_maximo = int(settings.IMPORTACION_TAMANO_MAXIMO_BYTES)
+        # Se lee a lo más un byte por sobre el máximo: alcanza para saber que
+        # se pasó sin traer el resto a memoria.
+        #
+        # OJO con lo que esto NO hace: `MultiPartParser` ya recibió y guardó
+        # el archivo COMPLETO antes de llegar acá —en memoria o en un temporal
+        # del disco según su tamaño—, así que esta lectura acotada no evita
+        # que un archivo enorme se cargue. Un comentario anterior decía que sí
+        # y era falso; lo corrigió la revisión de #120.
+        #
+        # Quien sí corta antes de leer nada es el gateway, mirando
+        # Content-Length (ver `gateway/app/proxy.py`). Esta comprobación queda
+        # porque el servicio también se puede llamar directo.
+        contenido = subido.read(tamano_maximo + 1)
+        try:
+            validado = archivos.validar(subido.name, contenido, tamano_maximo=tamano_maximo)
+        except archivos.ArchivoRechazado as exc:
+            codigo_http = (
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+                if exc.codigo == archivos.ARCHIVO_EXCEDIDO
+                else status.HTTP_400_BAD_REQUEST
+            )
+            return Response({"codigo": exc.codigo, "archivo": exc.mensaje}, status=codigo_http)
+
+        cuota = int(settings.IMPORTACION_CUOTA_DIARIA)
+        retencion = timedelta(days=int(settings.IMPORTACION_DIAS_RETENCION))
+        ahora = timezone.now()
+        inicio_del_dia = timezone.make_aware(
+            datetime.combine(timezone.localdate(ahora), time.min),
+            timezone.get_current_timezone(),
+        )
+
+        with transaction.atomic():
+            bloquear("cuota_importacion", organizacion_id)
+            subidas_hoy = Importacion.objects.filter(
+                organizacion_id=organizacion_id,
+                origen=Importacion.Origen.CSV,
+                creado_en__gte=inicio_del_dia,
+            ).count()
+            if subidas_hoy >= cuota:
+                return Response(
+                    {
+                        "codigo": "cuota_excedida",
+                        "detail": (
+                            f"La organización ya subió {subidas_hoy} archivo(s) hoy; "
+                            f"el máximo diario es {cuota}. Vuelve a intentar mañana."
+                        ),
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS,
+                )
+            importacion = Importacion.objects.create(
+                organizacion_id=organizacion_id,
+                usuario_id=usuario_id,
+                origen=Importacion.Origen.CSV,
+                nombre_archivo=validado.nombre,
+                filas_totales=validado.filas,
+            )
+            ArchivoImportacion.objects.create(
+                organizacion_id=organizacion_id,
+                importacion=importacion,
+                formato=validado.formato,
+                tamano=validado.tamano,
+                sha256=validado.sha256,
+                contenido=contenido,
+                vence_en=ahora + retencion,
+            )
+
+        salida = ImportacionSerializer(importacion, context={"request": request})
+        return Response(salida.data, status=status.HTTP_201_CREATED)

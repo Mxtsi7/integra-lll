@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView
 from . import proveedores
-from .models import AutorizacionPendiente, CuentaConectada, Importacion
+from .models import ArchivoImportacion, AutorizacionPendiente, CuentaConectada, Importacion
 from .revocacion import revocar_y_desconectar
 
 logger = logging.getLogger(__name__)
@@ -31,12 +31,20 @@ def _revocable(proveedor):
 
 class LimpiezaConnectorsView(LimpiezaOrganizacionView):
     servicio = "connectors"
-    modelos = (AutorizacionPendiente, Importacion, CuentaConectada)
+    # ArchivoImportacion (FE-07) va explícito y antes que su importación: son
+    # cartolas, y depender de la cascada de Importacion haría que un archivo de
+    # OTRA organización colgado de una importación propia se borrara sin aviso.
+    modelos = (AutorizacionPendiente, ArchivoImportacion, Importacion, CuentaConectada)
 
     def _tenant_inconsistente(self, organizacion_id):
-        return Importacion.objects.filter(cuenta__organizacion_id=organizacion_id).exclude(
-            organizacion_id=organizacion_id,
-        ).exists()
+        return (
+            Importacion.objects.filter(cuenta__organizacion_id=organizacion_id)
+            .exclude(organizacion_id=organizacion_id)
+            .exists()
+            or ArchivoImportacion.objects.filter(importacion__organizacion_id=organizacion_id)
+            .exclude(organizacion_id=organizacion_id)
+            .exists()
+        )
 
     @extend_schema(exclude=True)
     def delete(self, request, organizacion_id):

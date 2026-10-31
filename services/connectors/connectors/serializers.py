@@ -225,3 +225,28 @@ class ImportacionSerializer(serializers.ModelSerializer):
 
     def get_candidatos_confirmados(self, obj) -> bool:
         return obj.confirmada_en is not None
+
+
+# ── Subida de archivos (FE-07) ───────────────────────────────────────
+
+
+class SubidaArchivoSerializer(serializers.Serializer):
+    """Lo que manda el cliente para importar: un archivo, y nada más.
+
+    No es un ModelSerializer: la importación la crea el servidor con lo que
+    valida del archivo (nombre, filas, formato). Si el cliente pudiera mandar
+    `estado` o `filas_totales`, inventaría una importación.
+    """
+
+    archivo = serializers.FileField(
+        help_text="Un .csv o un .pdf (cartola). Tamaño máximo en IMPORTACION_TAMANO_MAXIMO_BYTES.",
+    )
+
+
+class ArchivoRechazadoSerializer(serializers.Serializer):
+    """La forma del 400/413 cuando el archivo no sirve."""
+
+    codigo = serializers.CharField(
+        help_text="formato_no_admitido | archivo_vacio | archivo_excedido | contenido_incompatible"
+    )
+    archivo = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")

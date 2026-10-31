@@ -112,7 +112,7 @@ ESQUEMA_BD=notifications SECRET_KEY=x DEBUG=False CLAVES_CIFRADO=x pytest tests/
 python manage.py generar_alertas --ahora 2026-11-21T10:00:00-03:00
 ```
 
-61 pruebas: las ventanas de cobro y de prueba con reloj fijo, preferencias
+97 pruebas: las ventanas de cobro y de prueba con reloj fijo, preferencias
 encendidas y apagadas, sin preferencias, dos personas con anticipaciones
 distintas, dedup en la misma corrida y al día siguiente, aislamiento entre
 organizaciones, el comando con `--ahora`, y el adaptador con eventos fuera de
