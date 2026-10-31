@@ -1,7 +1,7 @@
 # D-01 · `connectors-worker` sin app Celery
 
 Hallazgo D-01 del manual (sección 6, severidad alta, servicio `connectors`).
-Rama: `Christopher/celery_connectors`, desde `origin/main` (`a5659f9`).
+Rama: `Christopher/celery_connectors`, desde `origin/main` (`a5659f9`). PR #137.
 
 ## Qué estaba roto
 
@@ -34,7 +34,8 @@ worker de subscriptions.
 | `docker-compose.yml` | modificado | `connectors-worker` usa `-A connectors_config`, guarda el estado de beat en `/tmp` y tiene un healthcheck con `celery inspect ping` |
 | `infra/k8s/base/servicios.yaml` | modificado | Mismo comando en el Deployment `connectors-worker` |
 | `.github/workflows/ci.yml` | modificado | `CELERY_BROKER_URL` en el entorno de las pruebas (connectors la exige al cargar los settings) |
-| `services/connectors/tests/test_celery.py` | nuevo | 9 pruebas, detalladas abajo |
+| `scripts/correr-tests.sh` | modificado | La misma variable en el `docker run` de cada servicio (revisión del PR #137) |
+| `services/connectors/tests/test_celery.py` | nuevo | 10 pruebas, detalladas abajo |
 | `services/connectors/WORKER-CELERY.md` | nuevo | Este documento |
 
 ### Variables de entorno
@@ -60,10 +61,23 @@ worker de subscriptions.
   `connectors.tasks`), `test_beat_solo_programa_tareas_registradas`,
   `test_las_tareas_compartidas_usan_esta_app` y `test_el_latido_se_ejecuta`.
 - `test_no_comparte_cola_ni_control_con_subscriptions`.
+- `test_el_runner_local_alcanza_sin_env`: corre `manage.py check` solo con las
+  variables que pasa `scripts/correr-tests.sh` y sin leer `.env`. Si la copia
+  tiene `.env`, el runner también lo lee y puede tapar una variable que falte.
 
 Resultado local (Python 3.13, entorno como el de CI, SQLite en memoria):
-`tests/test_celery.py` 9 pasadas; suite completa de connectors 336 pasadas y
+`tests/test_celery.py` 10 pasadas; suite completa de connectors 337 pasadas y
 4 omitidas (las que exigen Postgres); `python manage.py check` sin problemas.
+
+### Revisión del PR #137
+
+La revisión de `fac1a88` encontró un ajuste: `scripts/correr-tests.sh` no
+pasaba `CELERY_BROKER_URL`, y en una copia sin `.env`
+`./scripts/correr-tests.sh connectors` fallaba en `manage.py check` con
+`ImproperlyConfigured: Set the CELERY_BROKER_URL environment variable`. Se
+agregó al runner el mismo valor que usa el CI, y la exigencia sigue en
+producción. Con las variables del runner revisado, la comprobación reproduce
+ese error; con las del runner corregido, `manage.py check` pasa.
 
 ### El fallo en `origin/main`
 

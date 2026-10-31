@@ -10,10 +10,13 @@ Lo que tiene que quedar demostrado:
   tareas que existen
 - este worker no comparte cola ni canal de control con el de subscriptions,
   que usa el mismo Redis
+- las variables que pasa scripts/correr-tests.sh alcanzan para cargar
+  connectors aunque no haya .env (revisión del PR #137)
 """
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -29,6 +32,7 @@ from connectors_config import celery_app
 
 COMPOSE = settings.REPO_ROOT / "docker-compose.yml"
 K8S = settings.REPO_ROOT / "infra" / "k8s" / "base" / "servicios.yaml"
+RUNNER = settings.REPO_ROOT / "scripts" / "correr-tests.sh"
 
 
 def como_lista(valor):
@@ -43,13 +47,14 @@ def app_del_comando(argumentos):
     return find_app(argumentos[argumentos.index("-A") + 1])
 
 
-def en_proceso_nuevo(codigo, **variables):
+def en_proceso_nuevo(codigo, base=None, **variables):
     """Corre `codigo` en otro intérprete y devuelve el JSON que imprime.
 
     Un proceso nuevo para que nada de lo que ya cargó esta sesión de pytest
-    (settings, tareas importadas) esconda lo que se quiere comprobar. Una
-    variable en None se quita del entorno."""
-    entorno = {**os.environ}
+    (settings, tareas importadas) esconda lo que se quiere comprobar. Parte
+    del entorno `base` (por omisión, el de pytest). Una variable en None se
+    quita del entorno."""
+    entorno = {**(os.environ if base is None else base)}
     for nombre, valor in variables.items():
         if valor is None:
             entorno.pop(nombre, None)
@@ -187,3 +192,43 @@ def test_no_comparte_cola_ni_control_con_subscriptions():
     assert celery_app.conf.task_default_queue != por_omision.task_default_queue
     assert celery_app.conf.control_exchange == settings.SERVICE_NAME
     assert celery_app.conf.control_exchange != por_omision.control_exchange
+
+
+# ── Entorno de las pruebas locales ───────────────────────────────────────
+
+# `manage.py check` como lo corre scripts/correr-tests.sh, pero sin leer el
+# .env de la copia: así solo cuenta lo que pasa el runner.
+CHECK_SIN_ENV = """
+import json, runpy, sys
+import environ
+environ.Env.read_env = classmethod(lambda cls, *args, **kwargs: None)
+sys.argv = ["manage.py", "check"]
+runpy.run_path("manage.py", run_name="__main__")
+print(json.dumps("ok"))
+"""
+
+
+def variables_del_runner():
+    """Las `-e NOMBRE=valor` que scripts/correr-tests.sh pasa a cada servicio."""
+    texto = RUNNER.read_text(encoding="utf-8")
+    cuerpo = texto[texto.index("correr_servicio() {"):]
+    cuerpo = cuerpo[: cuerpo.index("\n}\n")]
+    variables = {}
+    for nombre, valor in re.findall(r'-e ([A-Z_]+)=("[^"]*"|\S+)', cuerpo):
+        valor = valor.strip('"').replace("$PG", "postgres")
+        variables[nombre] = valor.replace("$svc", settings.SERVICE_NAME)
+    return variables
+
+
+def test_el_runner_local_alcanza_sin_env():
+    """Revisión del PR #137: el runner no pasaba CELERY_BROKER_URL y en una
+    copia sin .env `manage.py check` fallaba antes de llegar a pytest. Con un
+    .env el fallo quedaba tapado; por eso aquí no se lee."""
+    if not RUNNER.exists():
+        pytest.skip("scripts/ no está: dentro del contenedor solo se monta el servicio")
+    variables = variables_del_runner()
+    assert "CELERY_BROKER_URL" in variables
+    # El runner monta el repo en /repo; aquí la raíz es la de esta copia.
+    variables["PYTHONPATH"] = str(settings.REPO_ROOT)
+    del_sistema = {n: os.environ[n] for n in ("PATH", "SYSTEMROOT") if n in os.environ}
+    assert en_proceso_nuevo(CHECK_SIN_ENV, base={**del_sistema, **variables}) == "ok"
