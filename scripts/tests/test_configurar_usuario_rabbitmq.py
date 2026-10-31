@@ -122,3 +122,20 @@ def test_siempre_deja_permisos_y_etiqueta(correr):
         assert r.returncode == 0, r.stderr
         assert "set_permissions -p / ojoalgasto .* .* .*" in r.stderr
         assert "set_user_tags ojoalgasto management" in r.stderr
+
+
+def test_la_llamada_a_kubectl_esta_protegida_de_la_traduccion_de_rutas():
+    """En Git Bash sobre Windows, MSYS traduce los argumentos que parecen
+    rutas POSIX antes de pasarlos a un ejecutable nativo. El vhost "/" llegaba
+    al broker como "C:/Program Files/Git/" y `set_permissions` respondia
+    `Virtual host ... does not exist`. Esto no se puede ejercitar corriendo el
+    guion remoto --la traduccion ocurre en la frontera con kubectl.exe-- asi
+    que se comprueba que la proteccion este puesta."""
+    lineas = [l for l in GUION.read_text(encoding="utf-8").splitlines()
+              if not l.lstrip().startswith("#")]
+    proteccion = next((i for i, l in enumerate(lineas) if "MSYS_NO_PATHCONV=1" in l), None)
+    assert proteccion is not None, "falta MSYS_NO_PATHCONV"
+    assert any("MSYS2_ARG_CONV_EXCL" in l for l in lineas), "falta MSYS2_ARG_CONV_EXCL"
+    kubectl = [i for i, l in enumerate(lineas) if "kubectl " in l]
+    assert kubectl, "no encontre ninguna llamada a kubectl"
+    assert proteccion < min(kubectl), "la proteccion tiene que ir ANTES de todo kubectl"

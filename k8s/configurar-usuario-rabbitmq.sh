@@ -27,6 +27,15 @@
 #    llego completa.
 set -euo pipefail
 
+# MSYS_NO_PATHCONV: en Git Bash sobre Windows, MSYS traduce los argumentos que
+# PARECEN rutas POSIX antes de pasarlos a un ejecutable nativo como kubectl.exe.
+# El vhost "/" llegaba al broker convertido en "C:/Program Files/Git/":
+#     Error: Virtual host C:/Program Files/Git/ does not exist
+# Las dos variables no existen fuera de MSYS, asi que en Linux y en la CI no
+# cambian nada.
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
 SECRETO="ojoalgasto-rabbitmq"
 VHOST="${VHOST:-/}"
 
