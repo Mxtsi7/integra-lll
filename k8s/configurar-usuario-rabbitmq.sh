@@ -16,6 +16,12 @@
 # Es el equivalente de `configurar-usuarios-bd.sh` para Postgres, que si
 # existe. Conserva credenciales: no rota nada, solo deja el broker de acuerdo
 # con el Secret.
+#
+# ── La trampa de la entrada estandar ───────────────────────────────────────
+# El guion remoto se arma en una VARIABLE y se pasa con `sh -c`, no con un
+# heredoc. Un heredoc redirige la entrada de `kubectl exec` y se come la
+# tuberia que trae la clave: `read` llega a fin de archivo y el guion muere
+# con salida 1 sin imprimir nada. Ya paso.
 set -euo pipefail
 
 SECRETO="ojoalgasto-rabbitmq"
@@ -31,17 +37,18 @@ if [ "$usuario" = "guest" ]; then
   exit 1
 fi
 
-# La clave viaja por stdin hasta rabbitmqctl y no se imprime en ningun momento.
-# Queda en argv DENTRO del pod del broker mientras dura el comando, que es lo
-# mismo que hace cualquier uso de `rabbitmqctl add_user`.
-kubectl get secret "$SECRETO" -o jsonpath='{.data.RABBITMQ_PASSWORD}' | base64 -d \
-  | kubectl exec -i deploy/rabbitmq -c rabbitmq -- sh -s -- "$usuario" "$VHOST" <<'REMOTO'
+# `cat` consume el heredoc, no `kubectl exec`: asi la entrada estandar del
+# exec queda libre para la tuberia con la clave.
+REMOTO="$(cat <<'EOS'
 set -eu
 USUARIO="$1"
 VHOST="$2"
-read -r CLAVE
 
-if rabbitmqctl --quiet list_users | awk '{print $1}' | grep -qx "$USUARIO"; then
+read -r CLAVE || { echo "No llego la clave por la entrada estandar." >&2; exit 1; }
+[ -n "$CLAVE" ] || { echo "La clave del Secret vino vacia." >&2; exit 1; }
+
+# `list_users` sale separado por tabulacion: usuario y etiquetas.
+if rabbitmqctl --quiet list_users | cut -f1 | grep -qx "$USUARIO"; then
   # Ya existe: se alinea la clave con la del Secret en vez de fallar, para que
   # el guion se pueda volver a correr despues de rotar el Secret.
   rabbitmqctl --quiet change_password "$USUARIO" "$CLAVE"
@@ -55,6 +62,13 @@ unset CLAVE
 rabbitmqctl --quiet set_permissions -p "$VHOST" "$USUARIO" ".*" ".*" ".*"
 rabbitmqctl --quiet set_user_tags "$USUARIO" management
 echo "usuario $USUARIO: permisos sobre '$VHOST' y etiqueta management"
-REMOTO
+EOS
+)"
+
+# La clave viaja por la tuberia hasta la entrada estandar del pod y no se
+# imprime en ningun momento. Queda en argv DENTRO del pod del broker mientras
+# dura el comando, que es lo mismo que hace cualquier `rabbitmqctl add_user`.
+kubectl get secret "$SECRETO" -o jsonpath='{.data.RABBITMQ_PASSWORD}' | base64 -d \
+  | kubectl exec -i deploy/rabbitmq -c rabbitmq -- sh -c "$REMOTO" sh "$usuario" "$VHOST"
 
 echo "Usuario del broker configurado."
