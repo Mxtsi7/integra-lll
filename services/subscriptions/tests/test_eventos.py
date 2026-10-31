@@ -17,7 +17,7 @@ from rest_framework.test import APIClient
 from app.models import OutboxEvento, ResumenOrganizacion, Subscription, TrabajoDerivado
 from app.management.commands.consumir_eventos import SobreInvalido, validar
 from events import publicador, topologia
-from events.outbox import registrar_creada
+from events.outbox import registrar_actualizada, registrar_creada, registrar_estado_cambiado
 from events.contrato import routing_key
 from events.trabajo import recalcular_resumen
 
@@ -332,14 +332,14 @@ class TestTopologia:
     baratas; esa es la que de verdad lo caza.
     """
 
-    def test_el_enlace_usa_la_clave_CON_VERSION_que_publica_el_publicador(self):
-        """La regresión del bug 1.
-
-        Si alguien vuelve a escribir el patrón a mano sin la versión, esto
-        falla, porque la clave se le pregunta al contrato.
-        """
-        esperada = routing_key(_EventoFalso("suscripcion.creada", 2))
-        assert esperada == "suscripcion.creada.v2"
+    @pytest.mark.parametrize(
+        "nombre",
+        ("suscripcion.creada", "suscripcion.actualizada", "suscripcion.estado_cambiado"),
+    )
+    def test_el_enlace_usa_la_clave_CON_VERSION_que_publica_el_publicador(self, nombre):
+        """D-02: ninguno de los tres eventos puede quedar sin cola."""
+        esperada = routing_key(_EventoFalso(nombre, 2))
+        assert esperada == f"{nombre}.v2"
         assert esperada in topologia.PATRONES_RESUMEN
 
     def test_los_patrones_se_derivan_del_contrato_no_de_literales(self):
@@ -364,7 +364,19 @@ class TestTopologia:
         tipos = [tipo for tipo, _ in canal.llamadas]
         assert tipos.count("exchange") == 2  # el de eventos y el de fallos
         assert tipos.count("cola") == 2      # resumen y fallidos
-        assert tipos.count("enlace") == 2
+        assert tipos.count("enlace") == 4  # fallidos + tres eventos v2
+        enlaces_resumen = {
+            kw["routing_key"]
+            for tipo, kw in canal.llamadas
+            if tipo == "enlace" and kw["queue"] == topologia.COLA_RESUMEN
+        }
+        # Contrastar con el contrato, NO con EVENTOS_DEL_RESUMEN (que
+        # también podría estar incompleto y dejar una falsa prueba verde).
+        assert enlaces_resumen == {
+            "suscripcion.creada.v2",
+            "suscripcion.actualizada.v2",
+            "suscripcion.estado_cambiado.v2",
+        }
 
     def test_la_cola_del_resumen_manda_sus_rechazos_a_la_cola_de_fallos(self):
         """La regresión del bug 2, en la declaración."""
@@ -449,6 +461,21 @@ class TestValidarSobre:
         from events.validacion import errores  # noqa: PLC0415
 
         assert errores(json.loads(self.sobre())) == []
+
+    def test_actualizada_y_estado_cambiado_son_aceptados_por_el_consumidor(self, org):
+        """D-02: no basta con enlazar: el consumidor debe aceptar los sobres."""
+        suscripcion = crear(org, "9990")
+        actualizada = registrar_actualizada(suscripcion, ["monto"])
+        suscripcion.estado = Subscription.Estado.CANCELADO
+        suscripcion.save(update_fields=["estado"])
+        estado_cambiado = registrar_estado_cambiado(
+            suscripcion,
+            estado_anterior=Subscription.Estado.ACTIVO,
+            evento_estado=Subscription.EventoEstado.CANCELACION_USUARIO,
+        )
+
+        assert validar(sobre_de(actualizada)) == str(org)
+        assert validar(sobre_de(estado_cambiado)) == str(org)
 
     @pytest.mark.parametrize(
         "campo",
