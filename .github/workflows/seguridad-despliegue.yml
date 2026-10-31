@@ -1,0 +1,57 @@
+name: Seguridad de despliegue
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  d11:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: pruebas-d11
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres:pruebas-d11@localhost:5432/postgres
+      POSTGRES_PASSWORD: pruebas-d11
+      RABBITMQ_PASSWORD: pruebas-d11
+      ELIMINACION_INTERNA_SECRET: eliminacion-solo-pruebas-d11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pytest PyYAML 'psycopg[binary]' pika
+      - run: python -m pytest scripts/tests/ -q
+      - name: Verificar sintaxis de cada script
+        run: |
+          bash -n k8s/desplegar.sh
+          bash -n k8s/configurar-usuarios-bd.sh
+          bash -n k8s/pruebas/comparar-cola.sh
+          bash -n k8s/pruebas/estresar.sh
+      - run: bash k8s/pruebas/probar-comparar-cola.sh
+      - name: Verificar Compose y credenciales reales de RabbitMQ
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+          # Publicar AMQP solo en loopback del runner para la integración.
+          printf 'services:\n  rabbitmq:\n    ports: ["127.0.0.1:5679:5672"]\n' > "$RUNNER_TEMP/rabbitmq-pruebas.yaml"
+          docker compose -f docker-compose.yml -f "$RUNNER_TEMP/rabbitmq-pruebas.yaml" up -d --wait rabbitmq
+          docker compose exec -T rabbitmq rabbitmqctl authenticate_user ojoalgasto pruebas-d11
+          if docker compose exec -T rabbitmq rabbitmqctl authenticate_user guest guest; then
+            echo 'guest sigue habilitado' >&2
+            exit 1
+          fi
+      - name: Verificar guard de migración con mensajes reales confirmados
+        run: |
+          export D11_RABBITMQ_CONTENEDOR="$(docker compose ps -q rabbitmq)"
+          export D11_RABBITMQ_URL=amqp://ojoalgasto:pruebas-d11@127.0.0.1:5679/
+          python -m pytest scripts/tests/test_migracion_rabbitmq.py -q
+      - name: Validar proxy de salud para carga externa
+        run: docker run --rm --add-host gateway:127.0.0.1 -v "$PWD/frontend/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
+      - if: always()
+        run: docker compose down

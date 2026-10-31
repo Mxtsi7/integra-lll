@@ -16,7 +16,6 @@ data:
   # se desincronizaran: al cambiar la clave, Postgres arrancaba con la nueva y
   # los servicios seguían conectándose con la vieja.
   CELERY_BROKER_URL: redis://redis:6379/0
-  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
   EXCHANGE_EVENTOS: suscripciones
 
   # El trabajo derivado de crear una suscripción (recalcular el resumen de
@@ -74,9 +73,8 @@ data:
   URL_NOTIFICATIONS: http://notifications:8005
 
   # Usuario de demostración (mismo del compose). Es de prueba, no es un secreto.
-  SEED_DEMO: "1"
+  SEED_DEMO: "0"
   SEED_CORREO: demo@ojoalgasto.cl
-  SEED_CLAVE: Demo-2026-ojo
   SEED_NOMBRE: Usuario Demo
 ---
 # El script que crea un esquema por servicio (ADR-002). Postgres ejecuta lo
