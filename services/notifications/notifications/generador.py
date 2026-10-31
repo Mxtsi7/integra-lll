@@ -55,6 +55,8 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from shared.borrado.bloqueo import bloquear_organizacion
+
 from .models import Alerta, PreferenciaNotificacion, SuscripcionVigilada
 
 #: Espacio de los ids determinísticos. Cambiarlo haría que todas las
@@ -73,19 +75,42 @@ def id_de_ventana(organizacion_id, suscripcion_id, tipo: str, fecha, ventana) ->
     )
 
 
+#: Los tres desenlaces de intentar crear una alerta.
+CREADA = "creada"
+REPETIDA = "repetida"      # esa ventana ya avisó: la segunda corrida del día
+OMITIDA = "omitida"        # la organización fue eliminada (MX-07)
+
+
 @dataclass
 class Resultado:
     """Qué hizo una corrida. `creadas` son alertas nuevas; `repetidas`, las
-    que ya existían para esa ventana (lo normal al correr dos veces)."""
+    que ya existían para esa ventana (lo normal al correr dos veces);
+    `omitidas`, las de una organización eliminada mientras corría."""
 
     creadas: list[Alerta] = field(default_factory=list)
     repetidas: int = 0
     revisadas: int = 0
+    omitidas: int = 0
+
+    def anotar(self, alerta: "Alerta | None", desenlace: str) -> None:
+        """Cuenta un intento. Acá y no en cada generador para que los dos
+        traten igual los tres desenlaces."""
+        if desenlace == CREADA:
+            self.creadas.append(alerta)
+        elif desenlace == REPETIDA:
+            self.repetidas += 1
+        elif desenlace == OMITIDA:
+            self.omitidas += 1
+        else:
+            # Explícito para que un cuarto desenlace no se cuente en silencio
+            # como omitido, que es lo que haría un `else` que suma.
+            raise ValueError(f"desenlace desconocido: {desenlace!r}")
 
     def __iadd__(self, otro: "Resultado") -> "Resultado":
         self.creadas.extend(otro.creadas)
         self.repetidas += otro.repetidas
         self.revisadas += otro.revisadas
+        self.omitidas += otro.omitidas
         return self
 
 
@@ -119,15 +144,33 @@ def alguien_quiere_fin_de_prueba(organizacion_id) -> bool:
     )
 
 
-def _crear_una_vez(**campos) -> tuple[Alerta | None, bool]:
-    """Crea la alerta si su ventana no tiene una. (alerta, era_nueva)."""
-    try:
-        with transaction.atomic():
-            return Alerta.objects.create(**campos), True
-    except IntegrityError:
-        # La restricción única (organización, evento_id): esta ventana ya
-        # avisó. Es el camino normal de la segunda corrida del día.
-        return None, False
+def _crear_una_vez(**campos) -> tuple[Alerta | None, str]:
+    """Crea la alerta si su ventana no tiene una. (alerta, desenlace).
+
+    ── Por qué la guarda de borrado va ACÁ ──────────────────────────────────
+    La proyección se lee sin bloqueo y la corrida puede durar. Si la limpieza
+    de la organización (MX-07) confirma su 204 entre esa lectura y este
+    INSERT, la alerta nacía en un tenant ya borrado y nadie la volvía a
+    borrar. Comprobar la organización arriba del bucle no alcanzaba: entre la
+    comprobación y el INSERT queda la misma ventana.
+
+    Con el estado bloqueado en ESTA transacción, la limpieza —que lo toma FOR
+    UPDATE— espera a que cierre y después borra también esta alerta; o ya
+    cerró, y entonces `eliminada` es True y no se crea nada.
+    """
+    with transaction.atomic():
+        if bloquear_organizacion(campos["organizacion_id"], compartido=True).eliminada:
+            return None, OMITIDA
+        # Punto de retorno aparte para la restricción única: un
+        # `IntegrityError` del `get_or_create` de `EstadoOrganizacion` no
+        # puede confundirse con "esta ventana ya avisó".
+        try:
+            with transaction.atomic():
+                return Alerta.objects.create(**campos), CREADA
+        except IntegrityError:
+            # La restricción única (organización, evento_id): esta ventana ya
+            # avisó. Es el camino normal de la segunda corrida del día.
+            return None, REPETIDA
 
 
 def _texto_monto(suscripcion: SuscripcionVigilada) -> str:
@@ -178,7 +221,7 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
         # corre todos los días, cada ventana avisa el suyo igual que antes.
         candidatas = [d for d in anticipaciones[org] if faltan <= d]
         for dias in sorted(candidatas)[:1]:
-            alerta, nueva = _crear_una_vez(
+            alerta, desenlace = _crear_una_vez(
                 organizacion_id=org,
                 tipo=Alerta.Tipo.PROXIMO_COBRO,
                 titulo=f"{suscripcion.nombre or 'Una suscripción'} se cobra "
@@ -202,10 +245,7 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
                     "moneda": suscripcion.moneda,
                 },
             )
-            if nueva:
-                resultado.creadas.append(alerta)
-            else:
-                resultado.repetidas += 1
+            resultado.anotar(alerta, desenlace)
     return resultado
 
 
@@ -240,7 +280,7 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
         # de 48 y la de 24, y se creaban las dos juntas.
         candidatas = [v for v in VENTANAS_FIN_PRUEBA if horas <= v]
         for ventana in sorted(candidatas)[:1]:
-            alerta, nueva = _crear_una_vez(
+            alerta, desenlace = _crear_una_vez(
                 organizacion_id=org,
                 tipo=Alerta.Tipo.FIN_PRUEBA,
                 titulo=f"La prueba de {suscripcion.nombre or 'una suscripción'} termina en menos de {ventana} h",
@@ -263,10 +303,7 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
                     "moneda": suscripcion.moneda,
                 },
             )
-            if nueva:
-                resultado.creadas.append(alerta)
-            else:
-                resultado.repetidas += 1
+            resultado.anotar(alerta, desenlace)
     return resultado
 
 

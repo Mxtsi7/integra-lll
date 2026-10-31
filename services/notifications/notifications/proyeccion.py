@@ -30,6 +30,8 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
+from shared.borrado.bloqueo import bloquear_organizacion
+
 from .models import SuscripcionVigilada
 
 log = logging.getLogger(__name__)
@@ -173,6 +175,29 @@ def aplicar(sobre: dict) -> bool:
     suscripcion_id = _uuid(datos.get("suscripcion_id"), "datos.suscripcion_id")
 
     with transaction.atomic():
+        # ── Una organización eliminada no recibe filas nuevas (MX-07) ───────
+        # RabbitMQ entrega AL MENOS una vez, así que un evento puede llegar
+        # después de que la limpieza confirmó el 204. Sin esta guarda,
+        # `get_or_create` lo volvía a escribir: nombre, monto y fecha de
+        # cobro reaparecían en un tenant borrado, y el generador creaba
+        # alertas desde esa fila resucitada. Lo encontró la revisión de la PR
+        # al integrar con #72.
+        #
+        # `compartido=True` toma FOR SHARE: dos eventos de la misma
+        # organización siguen entrando en paralelo, y la limpieza —que toma
+        # FOR UPDATE— espera a que esta transacción cierre. El orden de
+        # bloqueos es el mismo que usa la limpieza (estado y después los
+        # datos), así que no se cruzan.
+        if bloquear_organizacion(organizacion_id, compartido=True).eliminada:
+            # No es `SobreInvalido`: el evento está bien formado, lo que no
+            # existe es el destinatario. Mandarlo a la cola de fallidos lo
+            # dejaría ahí para siempre; descartarlo es lo correcto.
+            log.info(
+                "evento %s de %s descartado: la organización %s fue eliminada",
+                nombre, suscripcion_id, organizacion_id,
+            )
+            return False
+
         fila, creada = SuscripcionVigilada.objects.get_or_create(
             organizacion_id=organizacion_id,
             suscripcion_id=suscripcion_id,

@@ -81,19 +81,50 @@ es otra ventana y corresponde otro aviso.
 - **Dónde se programa el comando** (CronJob de Kubernetes, beat) es una
   decisión aparte; el comando es idempotente, así que correrlo de más no
   cuesta nada.
+- **Una organización eliminada no recibe filas nuevas.** La proyección es
+  dato personal —nombre del servicio, monto, fecha de cobro—, así que entra
+  en la limpieza de MX-07 junto con las alertas y las preferencias. Pero
+  borrarla no alcanzaba: RabbitMQ entrega al menos una vez, y un evento que
+  llega después del 204 volvía a escribir la fila; desde ahí el generador
+  creaba alertas en un tenant borrado. Las dos escrituras —la del adaptador
+  y la de cada alerta— toman ahora el estado de la organización con
+  `bloquear_organizacion(compartido=True)` en la MISMA transacción que
+  escriben: FOR SHARE, así que dos eventos de una organización viva siguen
+  entrando en paralelo, y la limpieza —que toma FOR UPDATE— espera a que
+  cierren y después borra también lo que escribieron.
+
+  La guarda va pegada al INSERT y no arriba del bucle a propósito: entre una
+  comprobación al empezar la corrida y el INSERT queda la misma ventana que
+  se quería cerrar.
+
+  Un evento para una organización eliminada **no** es un sobre roto: se
+  descarta y se confirma (`aplicar` devuelve `False`), no se manda a la cola
+  de fallidos, donde quedaría girando para siempre. El generador lo cuenta
+  aparte como `omitidas` y el comando lo informa cuando hay.
 
 ## Cómo probarlo
 
 ```bash
 cd services/notifications
-ESQUEMA_BD=notifications SECRET_KEY=x DEBUG=False CLAVES_CIFRADO=x pytest tests/test_generador.py tests/test_proyeccion.py -q
+ESQUEMA_BD=notifications SECRET_KEY=x DEBUG=False CLAVES_CIFRADO=x pytest tests/test_generador.py tests/test_proyeccion.py tests/test_eliminacion_proyeccion.py -q
 
 # un día cualquiera, a mano:
 python manage.py generar_alertas --ahora 2026-11-21T10:00:00-03:00
 ```
 
-51 pruebas: las ventanas de cobro y de prueba con reloj fijo, preferencias
+61 pruebas: las ventanas de cobro y de prueba con reloj fijo, preferencias
 encendidas y apagadas, sin preferencias, dos personas con anticipaciones
 distintas, dedup en la misma corrida y al día siguiente, aislamiento entre
 organizaciones, el comando con `--ahora`, y el adaptador con eventos fuera de
 orden y sobres rotos. Verificado que cada regla falla al romperla.
+
+Las 10 de `test_eliminacion_proyeccion.py` cubren el cruce con MX-07: la
+limpieza se lleva la proyección y deja intacta a la otra organización, el
+evento reentregado y la actualización tardía no resucitan la fila, el
+generador omite la organización eliminada y sigue avisando a la viva, y una
+prueba exige que la limpieza declare los CUATRO modelos de tenant del
+servicio —es la que faltaba cuando `SuscripcionVigilada` quedó fuera—.
+El bloqueo en sí se comprobó con dos conexiones PostgreSQL reales: con una
+escritura en vuelo, la limpieza esperó el `FOR UPDATE` y después borró la
+fila recién escrita, sin dejar huérfanas; dos escrituras de una organización
+viva entraron en paralelo.

@@ -40,11 +40,19 @@ class Command(BaseCommand):
                 ahora = timezone.make_aware(ahora, timezone.get_current_timezone())
 
         resultado = generar(ahora=ahora)
+        # Las omitidas se informan solo cuando hay: es el caso raro (una
+        # organización eliminada mientras corría la generación), y callarlo
+        # haría leer "0 alertas nuevas" como si no hubiera habido nada que
+        # avisar.
+        omitidas = (
+            f" {resultado.omitidas} omitida(s) por organización eliminada."
+            if resultado.omitidas else ""
+        )
         self.stdout.write(
             f"{timezone.localtime(ahora):%Y-%m-%d %H:%M %Z}: "
             f"{len(resultado.creadas)} alerta(s) nueva(s), "
             f"{resultado.repetidas} ya existían, "
-            f"{resultado.revisadas} suscripción(es) revisadas."
+            f"{resultado.revisadas} suscripción(es) revisadas.{omitidas}"
         )
         for alerta in resultado.creadas:
             self.stdout.write(f"  · [{alerta.get_tipo_display()}] {alerta.titulo}")
