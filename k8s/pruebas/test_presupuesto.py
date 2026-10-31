@@ -32,6 +32,18 @@ class PresupuestoConCarga(unittest.TestCase):
         self.assertIn("student-carga", resultado.stdout)
         self.assertIn("2688Mi", resultado.stdout)
 
+    def test_comparador_interno_no_cabe_con_hpa_maximo(self):
+        resultado = comprobar(RAIZ / "k8s/pruebas/carga-comparar.yaml", "student-forellana")
+        self.assertEqual(resultado.returncode, 1, resultado.stdout)
+        self.assertIn("2816Mi", resultado.stdout)
+        self.assertRegex(resultado.stdout, r"pods\s+13 / 12\s+\*\*\* NO CABE")
+
+    def test_comparador_externo_conserva_presupuesto_con_hpa_maximo(self):
+        resultado = comprobar(RAIZ / "k8s/pruebas/carga-comparar.yaml", "student-carga")
+        self.assertEqual(resultado.returncode, 0, resultado.stdout + resultado.stderr)
+        self.assertRegex(resultado.stdout, r"pods\s+12 / 12\s+cabe")
+        self.assertIn("2688Mi", resultado.stdout)
+
     def test_carga_local_detecta_cada_limite_de_recursos(self):
         for campo, recurso, valor in (
             ("requests", "cpu", "2000m"), ("limits", "cpu", "2000m"),

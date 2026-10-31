@@ -1,32 +1,11 @@
-# Prueba de carga DESDE EL NAMESPACE DE OTRA PERSONA.
+# Carga desde un namespace externo con cuota propia.
+# Ruta autorizada: Ingress -> web -> Gateway. No usa el Service interno,
+# que permanece bloqueado desde otros namespaces por NetworkPolicy.
+# No enviar Host: gateway: el Ingress necesita el host publico.
 #
-# Cada integrante lo aplica en SU propio namespace, con SU kubeconfig. No
-# necesita acceso al namespace del proyecto: los Services de Kubernetes se
-# alcanzan entre namespaces por su nombre completo.
-#
-#   kubectl apply -f carga-fortio-otro-namespace.yaml      # en tu namespace
-#   kubectl logs -f job/carga-desde-afuera
-#   kubectl delete -f carga-fortio-otro-namespace.yaml
-#
-# ⚠️ LAS DOS COSAS QUE HAY QUE RESPETAR, Y POR QUÉ
-#
-# 1. El nombre va completo: `gateway.student-forellana.svc.cluster.local`.
-#    El nombre corto `gateway` solo resuelve dentro del namespace del proyecto.
-#
-# 2. Hay que mandar `-H "Host: gateway"`.
-#    Los servicios corren con DEBUG=False, así que Django rechaza cualquier
-#    Host que no esté en ALLOWED_HOSTS, y ahí está `gateway` pero NO el nombre
-#    completo. Sin esta cabecera **todas las peticiones responden 400** y la
-#    prueba no mide nada.
-#
-#    Comprobado:
-#      gateway:8000                                      -> 200
-#      gateway.student-forellana.svc.cluster.local:8000  -> 400 Bad Request
-#      el mismo + Host: gateway                          -> 200
-#
-# Para apuntar a otro servicio, cambiar las dos cosas a la vez:
-#   auth           -> host completo `auth.student-forellana...`  + `Host: auth`
-#   subscriptions  -> `subscriptions.student-forellana...`       + `Host: subscriptions`
+# kubectl apply -f k8s/pruebas/carga-fortio-otro-namespace.yaml
+# kubectl logs -f job/carga-desde-afuera
+# kubectl delete -f k8s/pruebas/carga-fortio-otro-namespace.yaml
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -53,9 +32,8 @@ spec:
             - "25"              # peticiones por segundo que pide ESTE notebook
             - -t
             - 30s
-            - -H
-            - "Host: gateway"   # sin esto: 400 en todas
-            - http://gateway.student-forellana.svc.cluster.local:8000/health/
+            # Ingress → web → gateway; el Service interno sigue aislado.
+            - http://ojoalgasto-forellana.dev.censei.cl/health/
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: 150m, memory: 128Mi }

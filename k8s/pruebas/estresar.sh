@@ -12,17 +12,14 @@
 #
 # El script detecta solo en qué namespace estás:
 #   · exige un namespace distinto de student-forellana (NS_CARGA o contexto)
-#   · usa el nombre completo + `Host: gateway`,
-#                              porque el ALLOWED_HOSTS de Django no tiene el
-#                              nombre largo y responde 400 sin esa cabecera.
+#   · entra por la URL pública del Ingress, web y gateway; no atraviesa la
+#     política que bloquea al Service interno desde otros namespaces.
 #
 # Funciona en Git Bash, WSL y Linux.
 set -euo pipefail
 
 NS_DESTINO="student-forellana"
-SERVICIO="gateway"
-PUERTO=8000
-RUTA="/health/"
+URL_CARGA="${URL_CARGA:-http://ojoalgasto-forellana.dev.censei.cl/health/}"
 
 QPS="${1:-25}"
 DURACION="${2:-30s}"
@@ -52,8 +49,8 @@ if [ "$MI_NS" = "$NS_DESTINO" ]; then
   echo 'ERROR: el HPA máximo ocupa 12/12 pods. Usa NS_CARGA con otro namespace o el contexto de otro integrante.' >&2
   exit 1
 else
-  BLANCO="http://${SERVICIO}.${NS_DESTINO}.svc.cluster.local:${PUERTO}${RUTA}"
-  CABECERA="Host: ${SERVICIO}"
+  BLANCO="$URL_CARGA"
+  CABECERA=""
 fi
 
 # Todas las operaciones sobre el generador usan explícitamente su namespace.
