@@ -167,10 +167,19 @@ services:
 
   # Trabajador que ejecuta las sincronizaciones periódicas.
   # Mismo código que connectors, distinto punto de entrada.
+  # La app Celery está en connectors_config/celery.py (D-01). El archivo de
+  # estado de beat va fuera de /app para no aparecer en el repo.
   connectors-worker:
     networks: [connectors]
     build: ./services/connectors
-    command: celery -A config worker --beat --loglevel=info
+    command: celery -A connectors_config worker --beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    # El healthcheck del Dockerfile es HTTP; un worker no sirve HTTP.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "connectors_config", "inspect", "ping", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     env_file: .env
     environment:
       <<: *eventos

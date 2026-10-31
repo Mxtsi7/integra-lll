@@ -59,6 +59,9 @@ jobs:
       # El gateway valida tokens con esto; auth firmara con lo mismo.
       JWT_SECRET: secreto-solo-para-ci
       JWT_ALGORITMO: HS256
+      # connectors exige el broker de Celery al cargar sus settings (D-01).
+      # Las pruebas no se conectan a él: basta con que la variable exista.
+      CELERY_BROKER_URL: redis://localhost:6379/0
       # PYTHONPATH apunta a la raíz para que resuelva shared/, como en Docker.
       PYTHONPATH: ${{ github.workspace }}
       # Solo subscriptions tiene pruebas contra el broker; en los demás queda
