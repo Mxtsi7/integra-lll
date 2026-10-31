@@ -229,5 +229,12 @@ La purga corre donde corre `connectors`: en `docker-compose.yml` es el
 servicio `connectors-purga`, una vez por hora y después de que `connectors`
 migró. Cuando `connectors` se despliegue en este cluster, su purga tiene que
 llegar con él y entrar en el presupuesto: `presupuesto.py` cuenta cada
-`CronJob` en el peor caso y falla si no cabe, y una prueba exige que
-`desplegar.sh` aplique todos los manifiestos numerados de `k8s/`.
+`CronJob` en el peor caso y falla si no cabe, y una prueba exige que el
+despliegue aplique todos los manifiestos numerados de `k8s/`.
+
+Esa prueba mira las tres vías por las que `desplegar.sh` aplica un
+manifiesto: el ciclo con los reemplazos de imagen, los `kubectl apply -f`
+sueltos de antes de las migraciones, y los que aplica un guion que él invoca
+—`02-redis-rabbitmq.yaml` va por ahí desde D-11, porque el broker se drena
+antes de reemplazarlo—. Lo que exige no es que vaya por el ciclo, sino que
+alguna vía lo aplique.
