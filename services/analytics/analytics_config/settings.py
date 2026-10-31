@@ -13,10 +13,30 @@ env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(REPO_ROOT / ".env")
 
 SERVICE_NAME = "analytics"
-IA_TIMEOUT_SEGUNDOS = env.float("IA_TIMEOUT_SEGUNDOS", default=3.5)
-IA_MAX_LLAMADAS_MES = env.int("IA_MAX_LLAMADAS_MES", default=200)
-IA_MAX_INTENTOS_PDF_DIA = env.int("IA_MAX_INTENTOS_PDF_DIA", default=3)
-IA_MAX_LLAMADAS_SIMULTANEAS = env.int("IA_MAX_LLAMADAS_SIMULTANEAS", default=4)
+
+# VI-24: el timeout y las cuotas viven en shared/, no duplicados acá. El
+# servicio que llama al proveedor y el cliente que consume el endpoint
+# comparten exactamente los mismos máximos.
+from shared.ia.politica import (  # noqa: E402
+    MAX_INTENTOS_PDF_DIA,
+    MAX_LLAMADAS_MES,
+    MAX_LLAMADAS_SIMULTANEAS,
+    TIMEOUT_MAXIMO_SEGUNDOS,
+)
+
+IA_TIMEOUT_SEGUNDOS = env.float("IA_TIMEOUT_SEGUNDOS", default=TIMEOUT_MAXIMO_SEGUNDOS)
+IA_MAX_LLAMADAS_MES = env.int("IA_MAX_LLAMADAS_MES", default=MAX_LLAMADAS_MES)
+IA_MAX_INTENTOS_PDF_DIA = env.int("IA_MAX_INTENTOS_PDF_DIA", default=MAX_INTENTOS_PDF_DIA)
+IA_MAX_LLAMADAS_SIMULTANEAS = env.int("IA_MAX_LLAMADAS_SIMULTANEAS", default=MAX_LLAMADAS_SIMULTANEAS)
+
+# VI-22: proveedor externo. Sin clave el endpoint degrada con la respuesta
+# local; nunca se cae con 500. El modelo es configurable para poder bajarlo
+# de gama sin tocar el código.
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
+IA_MODELO = env("IA_MODELO", default="claude-3-5-haiku-latest")
+IA_MAX_TOKENS = env.int("IA_MAX_TOKENS", default=512)
+# URL pública del gateway para el cliente de VI-24 (CLI / jobs).
+ASISTENTE_URL = env("ASISTENTE_URL", default="http://localhost:8000/api")
 
 SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")

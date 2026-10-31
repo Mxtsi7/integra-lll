@@ -47,6 +47,9 @@ let storageHidratado = false;
 // Generación de sesión monótona para aislar operaciones concurrentes
 let generacionActual = 1;
 let sesionEnLimpieza = false;
+// P1 (VI-16): true cuando el último cierre no pudo confirmar el borrado en
+// hardware. La marca LIMPIEZA_PENDIENTE también queda persistida.
+let cierreSinConfirmar = false;
 
 // Cola / Mutex de serialización de operaciones en backendActual
 let colaPromesa: Promise<void> = Promise.resolve();
@@ -93,6 +96,8 @@ async function ejecutarDeleteConReintentos(key: string, maxReintentos = 2): Prom
   try {
     await backendActual.setItemAsync(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, '1');
   } catch {}
+
+  cierreSinConfirmar = true;
 
   throw ultimoError ?? new Error(`Fallo persistente al eliminar clave '${key}' en SecureStore`);
 }
@@ -235,6 +240,7 @@ export async function hidratarSesionSegura(): Promise<{
     if (limpiezaPendiente === '1') {
       // Hubo un cierre de sesión previo con fallo persistente: no recuperar esa sesión.
       // Borrar primero credenciales; solo si se eliminan efectivamente se borra la marca.
+      cierreSinConfirmar = true;
       let credencialesEliminadas = false;
       try {
         await Promise.all([
@@ -250,7 +256,10 @@ export async function hidratarSesionSegura(): Promise<{
       if (credencialesEliminadas) {
         try {
           await backendActual.deleteItemAsync(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE);
-        } catch {}
+          cierreSinConfirmar = false;
+        } catch {
+          // La marca sigue viva: el siguiente arranque volverá a intentarlo.
+        }
       }
 
       cacheMemoria = {};
@@ -317,9 +326,16 @@ export async function guardarTokensSeguros(tokens: {
 
   try {
     guardarTokens(tokens);
-    encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
     const promesas = promesasPorGeneracion.get(gen) ?? [];
     await Promise.all(promesas);
+
+    // La marca de un cierre anterior sólo se retira cuando las credenciales
+    // nuevas ya quedaron confirmadas en hardware. Si la escritura falla, la
+    // marca debe seguir protegiendo el almacenamiento (no se pierde junto con
+    // operaciones cuyo resultado todavía se desconoce).
+    if (gen === generacionActual) {
+      await encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
+    }
   } catch (err) {
     // Si otra operación posterior ya inició (gen < generacionActual),
     // este guardado obsoleto NO debe limpiar la RAM ni invalidar la nueva sesión.
@@ -373,12 +389,26 @@ export async function limpiarSesionSegura(): Promise<void> {
     cacheMemoria = {};
     logout();
 
-    // 2. Borrado explícito de marca de limpieza previa
-    encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
-
-    // 3. Esperar a que se completen todos los borrados de esta generación
+    // 2. Esperar a que se completen los borrados de credenciales de esta
+    // generación. La marca LIMPIEZA_PENDIENTE NO se encola aquí: si algún
+    // borrado falla, `ejecutarDeleteConReintentos` la escribe y debe
+    // sobrevivir al reinicio para impedir que se restaure la sesión.
     const promesas = promesasPorGeneracion.get(gen) ?? [];
-    await Promise.all(promesas);
+    const resultados = await Promise.allSettled(promesas);
+    const fallo = resultados.find(
+      (resultado): resultado is PromiseRejectedResult => resultado.status === 'rejected'
+    );
+    if (fallo) {
+      throw fallo.reason;
+    }
+
+    // 3. Sólo tras confirmar la eliminación de las credenciales se retira la
+    // marca. Si este borrado falla, la marca queda viva y el cierre no se
+    // declara confirmado: el siguiente reintento/arranque volverá a limpiar.
+    if (gen === generacionActual) {
+      await encolarDelete(CLAVES_SEGURAS.LIMPIEZA_PENDIENTE, gen);
+      cierreSinConfirmar = false;
+    }
   } catch (err) {
     // La memoria ya está limpia (la navegación pública queda protegida de inmediato),
     // pero no confirmamos el cierre como exitoso si la persistencia falló
@@ -482,6 +512,14 @@ export function esTokenValido(
 }
 
 /**
+ * true si el último cierre de sesión no pudo confirmar el borrado durable en
+ * SecureStore. AuthContext lo usa para bloquear el login y ofrecer reintento.
+ */
+export function hayLimpiezaPendienteSegura(): boolean {
+  return cierreSinConfirmar;
+}
+
+/**
  * Función exclusiva para reiniciar el estado interno en suites de pruebas.
  */
 export function __reiniciarEstadoParaPruebas(): void {
@@ -491,6 +529,7 @@ export function __reiniciarEstadoParaPruebas(): void {
   backendActual = backendNativoSecureStore;
   generacionActual = 1;
   sesionEnLimpieza = false;
+  cierreSinConfirmar = false;
   colaPromesa = Promise.resolve();
   promesasPorGeneracion.clear();
 }

@@ -3,7 +3,6 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import {
-  configurarTokenStorage,
   configureAuthApi,
   configurarApi,
   guardarTokens,
@@ -11,12 +10,12 @@ import {
   obtenerAccessToken,
   logout,
   getUsuarioActual,
+  obtenerRefreshToken,
   type Usuario,
 } from '@ojoalgasto/shared';
 import * as SecureStore from 'expo-secure-store';
 import {
   guardarTokensSeguros,
-  limpiarSesionSegura,
   inicializarStorageSeguro,
   adaptadorStorageSincrono,
   CLAVES_SEGURAS,
@@ -25,12 +24,42 @@ import {
 } from '../src/services/storageSeguro';
 import { configurarClienteHttp } from '../src/services/clienteHttp';
 import { AuthProvider, useAuth, type Tokens } from './AuthContext';
+import {
+  __fallarBorrados,
+  __limpiar as limpiarSecureStore,
+} from '../test/expo-secure-store-shim';
+
 function jwtValido(expSegundos: number = Math.floor(Date.now() / 1000) + 3600): string {
   const base64url = (texto: string) =>
     btoa(texto).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return [
     base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
     base64url(JSON.stringify({ exp: expSegundos, user_id: 'usr-1', rol: 'titular', iat: Math.floor(Date.now() / 1000) })),
+    'firma',
+  ].join('.');
+}
+
+/** JWT de una sesión concreta (mismo `sid` = misma sesión tras una rotación). */
+function jwtConSesion(
+  sid: string,
+  jti: string,
+  expSegundos: number = Math.floor(Date.now() / 1000) + 3600
+): string {
+  const base64url = (texto: string) =>
+    btoa(texto).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return [
+    base64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' })),
+    base64url(
+      JSON.stringify({
+        exp: expSegundos,
+        iat: Math.floor(Date.now() / 1000),
+        user_id: 'usr-1',
+        organizacion_id: 'org-1',
+        sid,
+        jti,
+        rol: 'titular',
+      })
+    ),
     'firma',
   ].join('.');
 }
@@ -49,7 +78,8 @@ describe('AuthContext móvil', () => {
   const URL_BASE = 'https://api.staging.ojoalgasto.cl/api';
 
   beforeEach(async () => {
-    await limpiarSesionSegura();
+    __reiniciarEstadoParaPruebas();
+    limpiarSecureStore();
     inicializarStorageSeguro();
 
     fetchMock.mockReset();
@@ -61,8 +91,10 @@ describe('AuthContext móvil', () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals();
-    await limpiarSesionSegura();
+    __fallarBorrados(false);
     logout();
+    __reiniciarEstadoParaPruebas();
+    limpiarSecureStore();
   });
 
   it('iniciarSesion con tokens válidos autentica y guarda en storage', async () => {
@@ -198,6 +230,61 @@ describe('AuthContext móvil', () => {
     expect(haySesionValida()).toBe(false);
     expect(await SecureStore.getItemAsync('access_token')).toBeNull();
     expect(obtenerAccessToken()).toBeNull();
+  });
+
+  it('un cierre con borrado seguro rechazado se vuelve observable y bloquea hasta reintentar [P1]', async () => {
+    await guardarTokensSeguros({
+      access_token: jwtValido(),
+      refresh_token: 'refresh-borrado',
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Sesión revocada' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <AuthProvider initialEstado="autenticado" initialUsuario={USUARIO_PRUEBA}>
+        {children}
+      </AuthProvider>
+    );
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    __fallarBorrados();
+    await act(async () => {
+      await result.current.cerrarSesion();
+    });
+
+    // La UI queda fuera de las rutas privadas y expone el fallo durable.
+    expect(result.current.haySesion).toBe(false);
+    expect(result.current.estado).toBe('anonimo');
+    expect(result.current.errorCierre).toMatch(/no se pudo confirmar/i);
+
+    // Un reintento con el keystore aún roto mantiene el aviso.
+    let confirmado = true;
+    await act(async () => {
+      confirmado = await result.current.reintentarCierre();
+    });
+    expect(confirmado).toBe(false);
+    expect(result.current.errorCierre).not.toBeNull();
+
+    // Recuperado el keystore, el reintento confirma y limpia el aviso.
+    __fallarBorrados(false);
+    await act(async () => {
+      confirmado = await result.current.reintentarCierre();
+    });
+    expect(confirmado).toBe(true);
+    expect(result.current.errorCierre).toBeNull();
+
+    // Un arranque posterior no recupera la sesión cerrada.
+    __reiniciarEstadoParaPruebas();
+    inicializarStorageSeguro();
+    await hidratarSesionSegura();
+    expect(obtenerAccessToken()).toBeNull();
+    expect(obtenerRefreshToken()).toBeNull();
   });
 
   it('bootstrap inicial: sin sesión válida queda en anónimo', async () => {
@@ -542,9 +629,16 @@ describe('AuthContext móvil', () => {
       const { result } = renderHook(() => useAuth(), { wrapper });
       expect(result.current.haySesion).toBe(true);
 
-      // Simular que una petición protegida cualquiera recibe 401
+      // Simular que una petición protegida cualquiera recibe 401 y que el
+      // refresh tampoco sirve: el cliente debe cerrar la sesión.
       fetchMock.mockResolvedValueOnce(
         new Response(JSON.stringify({ detail: 'Token inválido o expirado' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: 'Refresh inválido' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' },
         })
@@ -564,6 +658,143 @@ describe('AuthContext móvil', () => {
       expect(haySesionValida()).toBe(false);
       expect(obtenerAccessToken()).toBeNull();
       expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBeNull();
+    });
+  });
+
+  describe('Carga de perfil: refresh temporal y rotación de la misma sesión (Revisión 132)', () => {
+    it('un 503 temporal al renovar /me conserva los tokens y deja el perfil recuperable [P2]', async () => {
+      const tokens: Tokens = {
+        access_token: jwtConSesion('sesion-a', 'a-1'),
+        refresh_token: 'refresh-a-1',
+      };
+
+      fetchMock.mockImplementation(async (url: string) => {
+        if (url.endsWith('/usuarios/me/')) {
+          return new Response(JSON.stringify({ detail: 'Token vencido' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/auth/refresh/')) {
+          return new Response(JSON.stringify({ detail: 'Redis caído' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`URL inesperada en la prueba: ${url}`);
+      });
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await act(async () => {
+        await result.current.iniciarSesion(tokens);
+      });
+
+      // Dos intentos de refresh con 503 y su espera de 200 ms.
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 700));
+      });
+
+      // La sesión sigue viva y el perfil queda en error recuperable, no se borra.
+      expect(result.current.haySesion).toBe(true);
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.usuario).toBeNull();
+      expect(result.current.estadoPerfil).toBe('error');
+      expect(result.current.errorPerfil).toBe('Token vencido');
+      expect(obtenerAccessToken()).toBe(tokens.access_token);
+      expect(obtenerRefreshToken()).toBe(tokens.refresh_token);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(
+        tokens.access_token
+      );
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(
+        tokens.refresh_token
+      );
+
+      // Cuando vuelve el backend, el reintento del perfil no exige otro login.
+      fetchMock.mockReset();
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify(USUARIO_PRUEBA), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      await act(async () => {
+        await result.current.recargarPerfil();
+      });
+
+      expect(result.current.estadoPerfil).toBe('cargado');
+      expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
+      expect(obtenerAccessToken()).toBe(tokens.access_token);
+      expect(obtenerRefreshToken()).toBe(tokens.refresh_token);
+    });
+
+    it('un 401 tardío de A1 no borra A2 y recarga el perfil con la rotación vigente [P2]', async () => {
+      const A1 = jwtConSesion('sesion-a', 'a-1');
+      const A2 = jwtConSesion('sesion-a', 'a-2');
+      const tokensA1: Tokens = { access_token: A1, refresh_token: 'refresh-a-1' };
+      const tokensA2: Tokens = { access_token: A2, refresh_token: 'refresh-a-2' };
+
+      let resolverPerfilA1: (respuesta: Response) => void = () => {};
+      const perfilA1Pendiente = new Promise<Response>((resolver) => {
+        resolverPerfilA1 = resolver;
+      });
+      fetchMock.mockReturnValueOnce(perfilA1Pendiente);
+
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <AuthProvider initialEstado="anonimo">{children}</AuthProvider>
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper });
+
+      await act(async () => {
+        await result.current.iniciarSesion(tokensA1);
+      });
+      expect(result.current.estadoPerfil).toBe('cargando');
+
+      // Mientras el perfil de A1 viaja, una rotación válida guarda A2/R2.
+      await act(async () => {
+        await guardarTokensSeguros(tokensA2);
+      });
+      expect(obtenerAccessToken()).toBe(A2);
+      expect(obtenerRefreshToken()).toBe(tokensA2.refresh_token);
+
+      // El perfil viejo responde 401; el reintento con A2 sí trae el usuario.
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify(USUARIO_PRUEBA), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+      await act(async () => {
+        resolverPerfilA1(
+          new Response(JSON.stringify({ detail: 'Token vencido' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(result.current.haySesion).toBe(true);
+      expect(result.current.estado).toBe('autenticado');
+      expect(result.current.estadoPerfil).toBe('cargado');
+      expect(result.current.usuario).toEqual(USUARIO_PRUEBA);
+      expect(obtenerAccessToken()).toBe(A2);
+      expect(obtenerRefreshToken()).toBe(tokensA2.refresh_token);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN)).toBe(A2);
+      expect(await SecureStore.getItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN)).toBe(
+        tokensA2.refresh_token
+      );
+
+      const autorizaciones = fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith('/usuarios/me/'))
+        .map(([, opciones]) => opciones.headers.Authorization);
+      expect(autorizaciones).toEqual([`Bearer ${A1}`, `Bearer ${A2}`]);
     });
   });
 
@@ -653,7 +884,7 @@ describe('AuthContext móvil', () => {
       }
     });
 
-    it('fallo de borrado persistente en cerrarSesion propaga error pero garantiza navegación pública en RAM [P1]', async () => {
+    it('fallo de borrado persistente en cerrarSesion se expone como cierre pendiente sin lanzar [P1]', async () => {
       const deleteItemSpy = vi
         .spyOn(SecureStore, 'deleteItemAsync')
         .mockRejectedValue(new Error('Hardware delete error'));
@@ -683,7 +914,8 @@ describe('AuthContext móvil', () => {
           errorCerrar = e;
         }
         await act(async () => {});
-        expect(errorCerrar?.message).toMatch('Fallo al limpiar sesión en almacenamiento seguro');
+        expect(errorCerrar).toBeUndefined();
+        expect(result.current.errorCierre).toMatch(/no se pudo confirmar/i);
 
         // A pesar del fallo en hardware, la memoria síncrona se limpió inmediatamente (navegación pública)
         expect(result.current.haySesion).toBe(false);
@@ -970,5 +1202,3 @@ describe('AuthContext móvil', () => {
     });
   });
 });
-
-

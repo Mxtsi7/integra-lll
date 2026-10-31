@@ -240,12 +240,18 @@ CHECK (monto > 0)   -- subscription_monto_positivo
 
 Solo hacen falta dos cosas:
 
-- **Docker Desktop**, abierto. Todo corre adentro de contenedores; no hay que
-  instalar Python, Postgres ni ninguna dependencia en tu computador.
+- **Docker Desktop**, abierto y con el motor WSL2 corriendo. Todo el backend
+  corre adentro de contenedores; no hay que instalar Python, Postgres ni
+  ninguna dependencia en tu computador.
 - **Git**.
 
-Python solo se necesita si vas a trabajar en un servicio *fuera* de Docker, y
-entonces tiene que ser **3.12** (ver más abajo).
+La guía versionada para Windows (WSL2, volúmenes, line endings, `.env` y
+problemas frecuentes) está en
+[docs/Windows/Docker-Desktop-WSL2.md](docs/Windows/Docker-Desktop-WSL2.md).
+
+Python solo se necesita si vas a trabajar en un servicio *fuera* de Docker o
+para ejecutar los scripts de verificación, y entonces tiene que ser **3.12**
+(ver más abajo).
 
 ## Levantar el sistema
 
@@ -258,25 +264,61 @@ docker compose up -d --build
 
 La primera vez descarga las imágenes y tarda unos minutos. Después, segundos.
 
-Para comprobar que quedó bien, abre en el navegador:
+El orden de arranque no es casual: Postgres, RabbitMQ y Redis deben estar
+**sanos** antes de que arranquen los servicios de dominio, y estos antes del
+gateway. Cada servicio corre `migrate` en su `entrypoint.sh`, así que no hay
+pasos manuales de base de datos.
+
+Para comprobar que quedó bien:
+
+```bash
+python scripts/verificar_compose.py     # valida healthchecks y dependencias
+python scripts/verificar_servicios.py   # espera los 6 /health/ y prueba el gateway
+```
+
+`verificar_servicios.py` también comprueba que el gateway, sin token, responda
+**401** en una ruta privada: es la prueba de que enruta y valida el JWT. Para
+un arranque limpio y la verificación en un solo paso:
+
+```bash
+python scripts/verificar_servicios.py --compose-up --timeout 300
+```
 
 | Qué | Dónde | Tiene que responder |
 |---|---|---|
+| Gateway | http://localhost:8000/health/ | `{"servicio": "gateway", "estado": "ok"}` |
 | Servicio `auth` | http://localhost:8001/health/ | `{"servicio": "auth", "esquema": "auth", "estado": "ok"}` |
 | Servicio `subscriptions` | http://localhost:8002/health/ | lo mismo, con `subscriptions` |
-| Gateway | http://localhost:8000/health/ | `{"servicio": "gateway", "estado": "ok"}` |
+| Servicio `connectors` | http://localhost:8003/health/ | lo mismo, con `connectors` |
+| Servicio `analytics` | http://localhost:8004/health/ | lo mismo, con `analytics` |
+| Servicio `notifications` | http://localhost:8005/health/ | lo mismo, con `notifications` |
 | Web | http://localhost:5173 | la pantalla de login |
 | Panel de RabbitMQ | http://localhost:15672 | usuario y clave `guest` |
 
-Si `/health/` responde, el servicio leyó el `.env`, se conectó a PostgreSQL y
+Si `/health/` responde, el servicio leyó el `.env`, se conectó a su base y
 está parado en su propio esquema. Es la prueba completa.
 
-> **Estado actual.** Con ese comando arrancan `postgres`, `rabbitmq`, `redis`,
-> `auth`, `subscriptions` (con su worker y su beat de Celery), el gateway y la
-> web. `connectors`, `analytics` y `notifications` todavía son cascarones sin
-> `manage.py`: aparecen como `Exited (2)` en `docker compose ps` y se ignoran
-> hasta que tengan código. Que todo el sistema se levante con un solo comando
+> **Estado actual.** Con ese comando arrancan los **6 servicios HTTP**
+> (`gateway`, `auth`, `subscriptions`, `connectors`, `analytics`,
+> `notifications`), sus workers de Celery, `postgres`, `rabbitmq`, `redis` y la
+> web. `subscriptions-beat` queda `running` (no expone un canal de salud y no
+> finge estar `healthy`). Que todo el sistema se levante con un solo comando
 > **es innegociable**: con 6 personas, cualquier paso extra se olvida.
+
+Prueba de reinicio:
+
+```bash
+docker compose restart
+python scripts/verificar_servicios.py --timeout 180
+```
+
+Para empezar de cero, incluida la creación de esquemas (esto **borra la base**):
+
+```bash
+docker compose down -v
+docker compose up -d --build
+python scripts/verificar_servicios.py --timeout 300
+```
 
 ### Usuario de demostración
 
@@ -295,6 +337,30 @@ clave se guarda hasheada, como cualquier usuario real. Para correrlo a mano:
 
 ```bash
 docker compose run --rm auth python manage.py seed
+```
+
+### App móvil
+
+El backend se levanta con Docker, pero la app **no** va dentro de Docker:
+Metro/Expo corre en Windows y el teléfono consume el gateway por la red local.
+
+```powershell
+cd frontend\movil
+Copy-Item .env.example .env      # completar EXPO_PUBLIC_API_URL con la IP LAN
+cd ..
+npm install
+npm run start --workspace=movil
+```
+
+- Nunca uses `localhost` desde un teléfono: apunta al propio teléfono. Usa la
+  IP LAN del equipo o `http://10.0.2.2:8000/api` en el emulador Android.
+- `EXPO_PUBLIC_*` queda escrito en el bundle: no lleva secretos.
+- Guía completa: [Conectividad del móvil](docs/Movil/Conectividad-Backend.md).
+- Prueba real login → JWT → refresh → 401:
+  [E2E móvil ↔ backend](docs/Movil/E2E-Backend.md).
+
+```powershell
+python scripts\e2e_movil_backend.py --desde-movil --url http://192.168.1.20:8000/api
 ```
 
 Comandos del día a día:

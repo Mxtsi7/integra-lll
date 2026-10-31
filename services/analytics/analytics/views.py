@@ -1,9 +1,11 @@
 import datetime as dt
 import re
+import threading
 import uuid
 from datetime import timedelta
 from uuid import UUID
 
+from django.db import DatabaseError, connection
 from django.db.models import Q
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
@@ -24,23 +26,123 @@ from analytics.models import (
 )
 from analytics.reglas import normalizar_moneda, umbrales_activos
 from analytics.serializers import (
+    ConsultaAsistenteSerializer,
     ListaRecomendacionesSerializer,
     PuntajeUsoSerializer,
     RecomendacionDescartadaSerializer,
     SolicitarDescarteSerializer,
     UsoMensualSerializer,
 )
+from analytics.asistente import construir_contexto, consultar_proveedor, resumen_local
+from analytics.politica_ia import PoliticaIA
 from analytics.uso import puntuar_organizacion
 
 
-@extend_schema(responses={200: inline_serializer(name="SaludAnalytics", fields={"status": serializers.CharField(), "service": serializers.CharField()})})
+@extend_schema(responses={200: inline_serializer(name="SaludAnalytics", fields={"status": serializers.CharField(), "service": serializers.CharField(), "esquema": serializers.CharField()})})
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health_check(request):
-    return Response({
-        'status': 'ok',
-        'service': 'analytics'
-    }, status=status.HTTP_200_OK)
+    """Readiness real: responde 200 sólo si la base del servicio contesta.
+
+    El `HEALTHCHECK` del Dockerfile usa `curl -f`, así que un 503 acá deja el
+    contenedor como no sano y Compose no arranca a sus dependientes. Sin esta
+    comprobación un proceso vivo pero sin base se veía "healthy".
+    """
+    try:
+        with connection.cursor() as cursor:
+            if connection.vendor == "sqlite":
+                esquema = "public"
+            else:
+                cursor.execute("SELECT current_schema()")
+                esquema = cursor.fetchone()[0]
+            cursor.execute("SELECT 1")
+    except DatabaseError:
+        return Response(
+            {"status": "error", "service": "analytics"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return Response(
+        {"status": "ok", "service": "analytics", "esquema": esquema},
+        status=status.HTTP_200_OK,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# VI-22: asistente financiero (proxy de IA con autorización Premium)
+# ═══════════════════════════════════════════════════════════════════
+
+# La concurrencia es un límite operativo por proceso: el semáforo debe vivir
+# más que una petición. Crear `PoliticaIA()` por request le daba a cada llamada
+# un cupo nuevo y anulaba `IA_MAX_LLAMADAS_SIMULTANEAS`.
+_politica_ia_asistente: PoliticaIA | None = None
+_politica_ia_cerrojo = threading.Lock()
+
+
+def _politica_ia() -> PoliticaIA:
+    global _politica_ia_asistente
+    if _politica_ia_asistente is None:
+        # Dos primeros requests concurrentes no deben crear dos semáforos:
+        # eso duplicaría el cupo del proceso.
+        with _politica_ia_cerrojo:
+            if _politica_ia_asistente is None:
+                _politica_ia_asistente = PoliticaIA()
+    return _politica_ia_asistente
+
+
+@extend_schema(
+    request=ConsultaAsistenteSerializer,
+    responses={200: None},
+    description=(
+        "Asistente financiero Premium. El gateway valida el plan y propaga "
+        "X-Plan; Analytics revalida esa cabecera. Sólo se envían al proveedor "
+        "datos saneados de la organización autenticada. Si el proveedor falla "
+        "o se agota la cuota, responde 200 degradado con un resumen local."
+    ),
+)
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def asistente(request):
+    # Defensa en profundidad: el gateway ya exige Premium, pero un acceso
+    # directo al contenedor (red interna, un job mal configurado) no trae
+    # X-Plan y debe quedar fuera. Nunca se confía en el claim del JWT para
+    # esto: la cabecera la fija el gateway tras consultar a Auth.
+    if request.headers.get("X-Plan") != "premium":
+        return Response(
+            {"detail": "Esta función requiere Premium vigente"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    organizacion_id = _contexto_organizacion(request)
+    usuario_id = getattr(request, "usuario_id", None)
+    if usuario_id in (None, ""):
+        raise PermissionDenied("Falta el contexto de usuario")
+
+    entrada = ConsultaAsistenteSerializer(data=request.data or {})
+    entrada.is_valid(raise_exception=True)
+    mensaje = entrada.validated_data.get("mensaje", "")
+
+    contexto = construir_contexto(organizacion_id)
+
+    def proveedor(timeout):
+        return consultar_proveedor(contexto, timeout=timeout, mensaje=mensaje)
+
+    resultado = _politica_ia().ejecutar_sync(
+        proveedor,
+        contexto,
+        organizacion_id=organizacion_id,
+        usuario_id=usuario_id,
+    )
+
+    cuerpo = {
+        "estado": resultado["estado"],
+        "motivo": resultado["motivo"],
+        "datos": contexto,
+    }
+    if resultado["estado"] == "ok":
+        cuerpo["respuesta"] = resultado["datos"].get("respuesta", "")
+    else:
+        cuerpo["respuesta"] = resumen_local(contexto)
+    return Response(cuerpo, status=status.HTTP_200_OK)
 
 
 # ═══════════════════════════════════════════════════════════════════

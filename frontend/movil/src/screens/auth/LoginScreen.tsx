@@ -28,6 +28,10 @@ export interface LoginFormProps {
   loading?: boolean;
   /** Mensaje de error para renderizado accesible */
   error?: string | null;
+  /** Aviso de cierre durable no confirmado (P1 / VI-16) */
+  errorCierre?: string | null;
+  /** Reintenta la limpieza durable del cierre */
+  onReintentarCierre?: () => void;
   /** Callback al solicitar envío de credenciales válidas */
   onSubmit?: (credenciales: { correo: string; password: string }) => void | Promise<void>;
   /** Navegación a pantalla de registro */
@@ -53,6 +57,8 @@ export function LoginForm({
   onPasswordChange: propOnPasswordChange,
   loading = false,
   error,
+  errorCierre,
+  onReintentarCierre,
   onSubmit,
   onNavigateRegistro,
   onNavigateRecuperar,
@@ -132,6 +138,23 @@ export function LoginForm({
               </View>
             ) : null}
           </View>
+
+          {/*
+            P1 (VI-16): el cierre de sesión anterior no confirmó el borrado en
+            el keystore. Se muestra el aviso y el reintento antes de permitir
+            un nuevo login.
+          */}
+          {errorCierre ? (
+            <View style={styles.errorBox} testID="cierre-pendiente">
+              <Text style={styles.errorText}>{errorCierre}</Text>
+              <NavButton
+                testID="reintentar-cierre"
+                title="Reintentar limpieza"
+                variant="secondary"
+                onPress={() => onReintentarCierre?.()}
+              />
+            </View>
+          ) : null}
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>Correo electrónico</Text>
@@ -245,7 +268,7 @@ export function LoginForm({
  * Pantalla contenedora de Iniciar Sesión conectada a navegación y contexto de sesión.
  */
 export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
-  const { iniciarSesion } = useAuth();
+  const { iniciarSesion, errorCierre, reintentarCierre } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -282,6 +305,8 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
     <LoginForm
       loading={loading}
       error={error}
+      errorCierre={errorCierre}
+      onReintentarCierre={() => void reintentarCierre()}
       onCorreoChange={() => {
         if (error) setError(null);
       }}

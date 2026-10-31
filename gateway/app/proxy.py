@@ -54,12 +54,15 @@ def respuesta_de_error(estado: int, detalle: str, correlacion: str) -> JsonRespo
 
 
 def comprobar_feature(ruta, cabeceras):
+    """Devuelve el plan verificado, `False` si no hay acceso o `None` si la
+    ruta no exige plan. El plan se propaga a Analytics para que revalide la
+    autorización (defensa en profundidad, VI-22)."""
     feature = next((valor for prefijo, valor in {
         "/api/asistente/": "asistente_financiero",
         "/api/recomendaciones/": "recomendaciones_automaticas",
     }.items() if ruta.startswith(prefijo)), None)
     if not feature:
-        return True
+        return None
     permisos = requests.request("GET", settings.SERVICIOS["auth"] + "/api/usuarios/me/permisos/",
         headers=cabeceras, timeout=settings.TIEMPO_ESPERA_SEGUNDOS, allow_redirects=False)
     if permisos.status_code in (403, 404):
@@ -74,7 +77,9 @@ def comprobar_feature(ruta, cabeceras):
         return False
     if type(datos["features"][feature]) is not bool:
         raise ValueError("Contrato de permisos inválido")
-    return datos["plan"] == "premium" and datos["features"][feature]
+    if datos["plan"] == "premium" and datos["features"][feature]:
+        return datos["plan"]
+    return False
 
 
 @csrf_exempt
@@ -120,8 +125,13 @@ def reenviar(request):
     cabeceras["X-Correlation-ID"] = correlacion
 
     try:
-        if not comprobar_feature(request.path, cabeceras):
+        plan = comprobar_feature(request.path, cabeceras)
+        if plan is False:
             return respuesta_de_error(403, "Esta función requiere Premium vigente", correlacion)
+        if plan:
+            # El cliente no puede fabricar esta cabecera: se descartó arriba y
+            # sólo se agrega con el plan que Auth acaba de confirmar.
+            cabeceras["X-Plan"] = plan
     except (requests.RequestException, ValueError):
         return respuesta_de_error(503, "No se pudieron comprobar los permisos. Inténtalo nuevamente", correlacion)
 

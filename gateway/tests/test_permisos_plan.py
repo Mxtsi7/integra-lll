@@ -42,6 +42,21 @@ def test_premium_consulta_auth_y_luego_el_dominio(transporte):
     assert peticion.call_args.kwargs["data"] == b"{}"
 
 
+def test_premium_propaga_el_plan_verificado_a_analytics(transporte):
+    peticion, permiso = transporte
+    permiso._content = b'{"plan":"premium","features":{"asistente_financiero":true}}'
+    assert Client().post("/api/asistente/", data="{}", content_type="application/json", **con_token(token())).status_code == 200
+    assert peticion.call_args.kwargs["headers"]["X-Plan"] == "premium"
+
+
+def test_ruta_sin_feature_no_lleva_plan(transporte):
+    peticion, _ = transporte
+    assert Client().get(
+        "/api/suscripciones/", **con_token(token()), HTTP_X_PLAN="premium"
+    ).status_code == 200
+    assert "X-Plan" not in peticion.call_args.kwargs["headers"]
+
+
 def test_descarte_de_recomendacion_llega_a_analytics_sin_traducir_la_ruta(transporte):
     peticion, permiso = transporte
     permiso._content = b'{"plan":"premium","features":{"recomendaciones_automaticas":true}}'
