@@ -394,5 +394,8 @@ spec:
                 secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
             - { name: ESQUEMA_BD, value: subscriptions }
           resources:
-            requests: { cpu: 25m,  memory: 56Mi }
+            # 64Mi es el MINIMO que exige el LimitRange del namespace
+            # (student-provisioner-limits). Por debajo, el pod ni se crea:
+            #   is forbidden: minimum memory usage per Container is 64Mi
+            requests: { cpu: 25m,  memory: 64Mi }
             limits:   { cpu: 50m,  memory: 160Mi }
