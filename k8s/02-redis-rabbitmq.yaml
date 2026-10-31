@@ -33,7 +33,15 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:
-            requests: { cpu: 25m,  memory: 16Mi }
+            # 64Mi y no 16Mi: el LimitRange del namespace
+            # (student-provisioner-limits) exige un minimo de 25m de CPU y
+            # 64Mi de memoria POR CONTENEDOR, y rechaza el pod al crearlo:
+            #   pods "redis-..." is forbidden: minimum memory usage per
+            #   Container is 64Mi, but request is 16Mi
+            # Estuvo mal desde cd9daf7 sin que se notara, porque el pod que
+            # corria era de un ReplicaSet anterior y nadie lo recreo hasta
+            # que desplegar.sh reemplazo el broker.
+            requests: { cpu: 25m,  memory: 64Mi }
             limits:   { cpu: 50m,  memory: 64Mi }
 ---
 # RabbitMQ: el bus de eventos entre servicios del ADR-003.
@@ -80,6 +88,34 @@ spec:
             - name: RABBITMQ_DEFAULT_PASS
               valueFrom:
                 secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_PASSWORD }
+            # ── El nodo tiene nombre FIJO, no el del pod ──────────────────
+            # Los datos viven en el PVC, en una carpeta que lleva el nombre
+            # del nodo. Si el nombre sigue al pod, cada reemplazo arranca un
+            # nodo distinto y abandona la carpeta anterior. Este valor ya
+            # estaba en el cluster y tiene que quedar EN EL MANIFIESTO: si no,
+            # el proximo despliegue limpio se lo lleva sin que nadie lo note.
+            - name: RABBITMQ_NODENAME
+              value: rabbit@rabbitmq-6b6ccf87b9-zcfmp
+            # ── Erlang ve 8 CPU y la cuota da 0,1 ────────────────────────
+            # El contenedor ve los 8 nucleos del nodo, asi que la maquina
+            # virtual de Erlang arranca 8 planificadores que ademas hacen
+            # espera activa. Con un limite de 100m el cgroup la estrangula:
+            # medido en este pod, 119s de CPU usada contra 2396s
+            # ESTRANGULADA, 12.071 periodos frenados. El broker arranca, pero
+            # `rabbitmq-diagnostics ping` --que levanta OTRA maquina virtual--
+            # nunca alcanza turno: tarda mas de 150s y la probe da 25s. El pod
+            # jamas queda Listo, el Service se queda sin endpoints y el broker
+            # resulta inalcanzable aunque este corriendo.
+            #
+            # `+S 1:1 +A 1` ajusta los planificadores a la CPU que de verdad
+            # hay; `+sbwt none` apaga la espera activa, que es la que quema la
+            # cuota sin hacer nada.
+            - name: RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS
+              value: "+S 1:1 +A 1 +sbwt none +sbwtdcpu none +sbwtdio none"
+            # Lo mismo para la maquina virtual de la CLI, que es la que corre
+            # la probe. Tambien estaba en el cluster y faltaba en el manifiesto.
+            - name: RABBITMQ_CTL_ERL_ARGS
+              value: "+S 1:1 +A 1"
           ports:
             - { name: amqp, containerPort: 5672 }
             - { name: panel, containerPort: 15672 }
@@ -90,5 +126,12 @@ spec:
             timeoutSeconds: 25
             failureThreshold: 6
           resources:
+            # 300m y no 100m: con 100m el cgroup estrangula el arranque
+            # hasta hacerlo inviable --medido: 35s de CPU usada contra 332s
+            # estrangulada-- y la probe nunca pasa, asi que el Service se
+            # queda sin endpoints y el broker resulta inalcanzable aunque
+            # este corriendo. En reposo consume mucho menos; esto es para que
+            # pueda ARRANCAR. Sigue cabiendo en la cuota con los dos HPA al
+            # maximo (ver k8s/pruebas/presupuesto.py).
             requests: { cpu: 50m,  memory: 112Mi }
-            limits:   { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 300m, memory: 256Mi }
