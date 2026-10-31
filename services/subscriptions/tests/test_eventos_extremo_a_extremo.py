@@ -372,9 +372,11 @@ class TestRecorridoReal:
         assert estado_cambiado.publicado_en is not None
         call_command("consumir_eventos", uno=True)
 
-        resumen = ResumenOrganizacion.objects.get(organizacion_id=org, moneda="CLP")
-        assert resumen.total_mensual == Decimal("0.00")
-        assert resumen.cantidad_activas == 0
+        # Si no quedan activas, el cálculo elimina la fila de esa moneda:
+        # no fabrica un resumen CLP con ceros (contrato actual de trabajo.py).
+        assert not ResumenOrganizacion.objects.filter(
+            organizacion_id=org, moneda="CLP"
+        ).exists()
         assert TrabajoDerivado.objects.filter(evento_id=estado_cambiado.id).count() == 1
         assert esperar_mensaje(canal, topologia.COLA_RESUMEN, intentos=3) is None
         assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
