@@ -104,7 +104,7 @@ Se levanta un pod de prueba, se le pide que llame al gateway, y se borra:
 ```bash
 kubectl apply -f k8s/pruebas/diagnostico-busybox.yaml
 kubectl wait --for=condition=Ready pod/diagnostico --timeout=90s
-kubectl exec diagnostico -- wget -qO- -T 8 --header="Host: gateway" http://gateway.student-forellana.svc.cluster.local:8000/health/
+kubectl exec diagnostico -- wget -qO- -T 8 http://ojoalgasto-forellana.dev.censei.cl/health/
 kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
 ```
 
@@ -114,8 +114,8 @@ kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
 {"servicio": "gateway", "estado": "ok"}
 ```
 
-**Si se queda colgado o dice que no se puede conectar**, hay una regla de red
-entre namespaces y el profe tiene que abrirla. Avisen en el grupo apenas pase.
+**Si se queda colgado o dice que no se puede conectar**, comprobar DNS del host público, salida HTTP e Ingress. No abrir acceso
+al Service interno entre namespaces: ese bloqueo es parte del aislamiento.
 
 ## 5. Lanzar la prueba de carga (esto es lo de la clase)
 

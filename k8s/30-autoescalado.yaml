@@ -14,15 +14,16 @@
 # depende del request y se explica en una frase: "escala cuando el promedio
 # por pod pasa los 120m".
 #
-# ── Por qué maxReplicas 3 y 2 ──────────────────────────────────────────────
-# La cuota permite 12 pods y la base son 9. Quedan 3: dos para el gateway
+# ── Por qué maxReplicas 2 y 2 ──────────────────────────────────────────────
+# La cuota permite 12 pods y la base son 10, incluido auth-eliminaciones.
+# Quedan 2: uno para el gateway
 # (es el que recibe la prueba de estrés) y uno para subscriptions. Pedir más
 # no serviría: el ReplicaSet recibiría `exceeded quota` y el pod nunca
 # nacería. El presupuesto de memoria y CPU también está calculado para que
-# esas 3 réplicas extra quepan.
+# esas 2 réplicas extra quepan.
 #
 # ── Ojo con `replicas:` en los Deployments ─────────────────────────────────
-# Los Deployments declaran `replicas: 1`. Si el HPA escaló a 3 y alguien
+# Los Deployments declaran `replicas: 1`. Si el HPA escaló a 2 y alguien
 # corre `desplegar.sh`, el apply las baja a 1 y el HPA vuelve a subirlas.
 # No rompe nada, pero durante la demo conviene no re-aplicar.
 apiVersion: autoscaling/v2
@@ -33,7 +34,7 @@ metadata:
 spec:
   scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: gateway }
   minReplicas: 1
-  maxReplicas: 3
+  maxReplicas: 2
   metrics:
     - type: Resource
       resource:

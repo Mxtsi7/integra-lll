@@ -62,6 +62,10 @@ data:
   JWT_MINUTOS_ACCESO: "30"
   JWT_DIAS_REFRESCO: "7"
 
+  # La demo solo despliega subscriptions. Ampliar ANTES de habilitar otros servicios.
+  # No retirar destinos de operaciones ya creadas: sus ACK siguen siendo obligatorios.
+  ELIMINACION_DESTINOS: subscriptions
+
   URL_AUTH: http://auth:8001
   URL_SUBSCRIPTIONS: http://subscriptions:8002
   URL_CONNECTORS: http://connectors:8003

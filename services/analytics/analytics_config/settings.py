@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "analytics",
+    "shared.borrado.apps.BorradoConfig",
 ]
 
 MIDDLEWARE = [
@@ -42,6 +43,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "shared.borrado.middleware.EscrituraOrganizacionMiddleware",
     # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
     # el gateway (ADR-004). Es la misma pieza en todos los servicios.
     "shared.tenant.base.ContextoTenantMiddleware",
@@ -113,4 +115,3 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-

@@ -202,3 +202,42 @@ class IntentoGoogle(models.Model):
 
     class Meta:
         db_table = "intento_google"
+
+
+class EliminacionOrganizacion(models.Model):
+    """Outbox durable sin claves foráneas a usuarios eliminados ni secretos."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organizacion_id = models.UUIDField(unique=True)
+    pendientes = models.JSONField(default=list)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    completado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "eliminacion_organizacion"
+
+
+class EliminacionUsuario(models.Model):
+    """Limpieza personal durable, independiente de la vida del User."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organizacion_id = models.UUIDField()
+    usuario_id = models.PositiveBigIntegerField()
+    pendientes = models.JSONField(default=list)
+    creado_en = models.DateTimeField(auto_now_add=True)
+    completado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "eliminacion_usuario"
+
+
+class ConsentimientoDisociado(models.Model):
+    """Evidencia mínima de consentimiento, sin vínculo a una persona o tenant."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    consentimiento_en = models.DateTimeField()
+    eliminado_en = models.DateTimeField()
+    retener_hasta = models.DateTimeField(db_index=True)
+
+    class Meta:
+        db_table = "consentimiento_disociado"

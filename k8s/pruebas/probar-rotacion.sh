@@ -170,6 +170,8 @@ if grep -qF "$CLAVE_NUEVA" "$REGISTRO_PATCH"; then v=1; else v=0; fi
 juzgar "la clave nueva viaja en el ARCHIVO de patch" "$v"
 if grep -q -- "--patch-file" "$REGISTRO_ARGV"; then v=1; else v=0; fi
 juzgar "usa --patch-file" "$v"
+if grep -q "rollout restart deployment/auth-eliminaciones" "$REGISTRO_ARGV"; then v=1; else v=0; fi
+juzgar "reinicia el worker de eliminacion con las credenciales nuevas" "$v"
 if grep -q "ON_ERROR_STOP=1" "$REGISTRO_ARGV"; then v=1; else v=0; fi
 juzgar "pasa ON_ERROR_STOP=1 a psql" "$v"
 

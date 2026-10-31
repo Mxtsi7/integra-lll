@@ -3,7 +3,7 @@
 ## Si solo quieres correr la prueba: un archivo
 
 ```bash
-./k8s/pruebas/prueba-de-carga.sh        # menú; en Windows basta doble clic
+NS_CARGA=student-TUUSUARIO ./k8s/pruebas/prueba-de-carga.sh  # namespace externo autorizado
 ```
 
 Es el único punto de entrada que hay que conocer. Muestra el estado del
@@ -14,7 +14,7 @@ cluster, explica qué hace cada opción y llama a los demás scripts por ti:
 | 1 Panel en vivo | abre otra ventana que acumula durante 30 s (reinicio automático, o manual con `r`/Enter) las peticiones reales, la CPU frenada por el límite y si el pod sigue en el Service; la ventana anterior queda resumida | `ver-estres.sh` |
 | 2 Lanzar carga | levanta un pod de Fortio dentro del cluster a N peticiones/s | `estresar.sh N` |
 | 3 Demo completa | 1 + 2 seguidos; mientras tanto se navega la web | |
-| 4 Liberar CPU | apaga RabbitMQ y el worker (inertes) para que el generador quepa | `kubectl scale … --replicas=0` |
+| 4 Cuota | explica el uso de un namespace externo; conserva los workers activos | |
 | 5 Devolver | todo de vuelta a 1 réplica, gateway incluido | `kubectl scale … --replicas=1` |
 | 6 Comprobar | BusyBox llama al gateway por la red interna y se borra | `diagnostico-busybox.yaml` |
 | 7 Limpiar | borra Jobs de Fortio y el pod de diagnóstico | |
@@ -26,11 +26,24 @@ También acepta la acción directa: `prueba-de-carga.sh 100`, `… demo`,
 `… liberar`, `… devolver`, `… comprobar`, `… limpiar`, `… explicar`,
 `… companeros`, `… pods`.
 
-Si el generador queda `Pending` por la bolsa de CPU que comparte **todo el
-curso** (`students-host-envelope`, 20 CPU para todos los namespaces), el menú
-lo detecta, lo explica y ofrece liberar CPU y reintentar. Es para correrlo desde
-la cuenta del proyecto; los demás integrantes lanzan desde su propio namespace
-siguiendo [`GUIA-EQUIPO.md`](GUIA-EQUIPO.md).
+El generador corre en otro namespace, con cuota propia y acceso a la entrada
+pública (Ingress → web → Gateway). El HPA máximo ocupa **12/12 pods, 2688/2752 MiB y 1750/2000m CPU**;
+sumar `carga-fortio.yaml` localmente exige **13 pods y 2816 MiB** y falla.
+No se apagan consumidores ni el worker de eliminación para la demostración.
+`NS_CARGA` debe ser distinto de `student-forellana` y accesible con tu kubeconfig.
+Si tu cuenta solo accede al namespace de aplicación, otro integrante ejecuta
+[`GUIA-EQUIPO.md`](GUIA-EQUIPO.md) con su cuenta; aquí se observa el panel.
+El manifiesto externo usa la URL pública de `/health/`, sin alterar Host.
+Comprobar su cuota, DNS y salida HTTP antes de la demostración.
+
+El CI comprueba explícitamente aplicación y generador externo, y prueba que
+el escenario local excedido devuelve error:
+
+```bash
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
+# Debe fallar por pods y memoria:
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio.yaml --namespace-generador student-forellana
+```
 
 ---
 
@@ -80,8 +93,8 @@ El pod se apaga solo a la hora si alguien se olvida.
 ## Prueba de carga (Fortio)
 
 ```bash
-kubectl apply -f k8s/pruebas/carga-fortio.yaml
-kubectl logs -f job/carga-fortio
+kubectl -n student-TUUSUARIO apply -f k8s/pruebas/carga-fortio-otro-namespace.yaml
+kubectl -n student-TUUSUARIO logs -f job/carga-desde-afuera
 ```
 
 Fortio devuelve percentiles de latencia (p50, p75, p99), peticiones por segundo
@@ -91,12 +104,11 @@ El blanco y la intensidad se editan en `args` dentro del YAML:
 
 | Blanco | Qué atraviesa |
 |---|---|
-| `http://gateway:8000/health/` | solo el gateway, sin tocar la base |
-| `http://auth:8001/health/` | Django + una consulta a Postgres |
-| `http://subscriptions:8002/health/` | ídem, el otro servicio |
+| `http://ojoalgasto-forellana.dev.censei.cl/health/` | Ingress, web y salud de Gateway, sin base de datos |
 
-Correr los tres en ese orden cuenta una historia: cuánto cuesta el gateway,
-cuánto agrega la base, y si los dos servicios se comportan igual.
+Las APIs internas no son blancos autorizados para estos generadores.
+Para medir operaciones de suscripciones usar `comparar-cola.sh` con sesiones
+válidas; el Gateway debe validar la identidad.
 
 ## Que cada integrante pruebe desde su propio notebook
 
@@ -109,22 +121,10 @@ El paso a paso completo está en [`GUIA-EQUIPO.md`](GUIA-EQUIPO.md).
 Tiene ventaja sobre correrlo todo desde una sola máquina: cada uno gasta **su**
 cuota de CPU, así que el sistema recibe carga real de varios orígenes a la vez.
 
-**Las dos cosas que cambian respecto del uso interno:**
-
-| | Dentro del namespace | Desde otro namespace |
-|---|---|---|
-| URL | `http://gateway:8000` | `http://gateway.student-forellana.svc.cluster.local:8000` |
-| Cabecera | ninguna | `-H "Host: gateway"` |
-
-La cabecera **no es opcional**. Los servicios corren con `DEBUG=False` y Django
-solo acepta los hosts de `ALLOWED_HOSTS`, donde está `gateway` pero no el nombre
-largo. Medido:
-
-```
-gateway:8000                                      ->  200 OK
-gateway.student-forellana.svc.cluster.local:8000  ->  400 Bad Request
-el mismo + Host: gateway                          ->  200 OK
-```
+Desde otro namespace se usa `http://ojoalgasto-forellana.dev.censei.cl/health/`.
+El Ingress conserva el host público; web fija `Host: gateway` hacia el backend.
+Las políticas siguen bloqueando el acceso entre namespaces al Service interno.
+Esta prueba incluye los proxies y la red de entrada.
 
 ## Reglas del namespace que hay que respetar
 
@@ -134,16 +134,17 @@ se descubren chocando. Están documentadas en `k8s/README.md`:
 - **Mínimo 25m de CPU y 64Mi de memoria** por contenedor
 - **Techo de 2 CPU (2000m) en límites para todo el namespace**
 
-Los nueve pods del sistema ya consumen **1600m**:
+Los diez pods del sistema suman **1350m** en reposo
+(comprobados con `presupuesto.py` y el escenario externo indicado arriba):
 
 ```
-auth 250m · postgres 250m · subscriptions 250m · gateway 200m
-worker 200m · rabbitmq 150m · redis 100m · beat 100m · web 100m
+worker 300m · subscriptions 200m · gateway 200m · auth 150m · postgres 150m
+rabbitmq 100m · auth-eliminaciones 100m · redis 50m · beat 50m · web 50m
 ```
 
-Quedan **~400m**. Por eso el Job de carga pide 200m y el de diagnóstico 50m.
-Subir esos números puede dejar el pod en `Pending` o, peor, impedir que un
-despliegue levante los suyos.
+Con el HPA al máximo son **1750m** y quedan **250m**, pero no queda ningún pod
+libre. El generador debe correr en otro namespace aunque sobre CPU. El pod
+de diagnóstico también consume cuota: retirarlo antes de medir el HPA máximo.
 
 ## Antes de correr una prueba de carga
 
@@ -167,17 +168,17 @@ kubectl get hpa -w
 En la segunda, la carga:
 
 ```bash
-kubectl apply -f k8s/pruebas/carga-fortio.yaml
+kubectl -n student-TUUSUARIO apply -f k8s/pruebas/carga-fortio-otro-namespace.yaml
 ```
 
-En la primera terminal, `REPLICAS` debería pasar de 1 a 2 y a 3 en menos de
-un minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
+En la primera terminal, `REPLICAS` debería pasar de 1 a 2 en menos de un
+minuto. Al terminar la carga baja sola, pero con calma: hay dos minutos de
 ventana para que no entre en vaivén.
 
 Si la columna `TARGETS` dice `<unknown>` en vez de un número, el HPA no está
 recibiendo métricas y no va a escalar nunca. Eso es metrics-server, no el
 manifiesto.
 
-**El techo no es arbitrario.** `gateway` llega a 3 y `subscriptions` a 2
-porque la cuota permite 12 pods y la base son 9. Pedir más réplicas no daría
+**El techo no es arbitrario.** `gateway` y `subscriptions` llegan a 2
+porque la cuota permite 12 pods y la base son 10. Pedir más réplicas no daría
 más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.

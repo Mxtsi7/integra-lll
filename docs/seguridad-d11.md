@@ -9,6 +9,12 @@
   gateway → dominio, web/Ingress → gateway, Ingress → web y dominio/workers →
   infraestructura en sus puertos concretos. El panel RabbitMQ queda bloqueado.
   OAuth y SMTP conservan salida: no se restringe egress.
+- El worker confiable `auth-eliminaciones` conserva las redes de los cinco
+  dominios en Compose. En Kubernetes usa el rol limitado de auth, recibe
+  explícitamente `ELIMINACION_INTERNA_SECRET` y tiene acceso a PostgreSQL,
+  Redis y las APIs de limpieza de los cuatro destinos. Las solicitudes de
+  limpieza requieren la firma HMAC por destino, organización y operación;
+  los pods web, de carga y otros namespaces siguen bloqueados a esas APIs.
 - RabbitMQ usa un usuario dedicado y contraseña aleatoria en el Secret
   `ojoalgasto-rabbitmq`; su URL ya no está en ConfigMap. El despliegue actual
   no persiste su base interna: al recrear el pod nace el usuario nuevo.
@@ -34,6 +40,8 @@ Completar `.env` con claves aleatorias; por ejemplo:
 debe coincidir con `DATABASE_URL`. Compose construye la URL RabbitMQ para sus
 clientes desde las mismas variables del broker. Usar claves hexadecimales
 evita escapes URL. En ejecuciones fuera de Compose, completar `RABBITMQ_URL`.
+Definir también `ELIMINACION_INTERNA_SECRET` aleatorio e independiente de JWT;
+Compose lo exige y lo comparte con auth, su worker y los destinos de limpieza.
 
 La API sigue accesible por `http://localhost:8000/api/`. Para depurar servicios,
 usar herramientas dentro del contenedor o un override local que publique el
@@ -117,6 +125,13 @@ Un HTTP distinto de 201 invalida la medición y restaura la configuración.
 La latencia incluye Gateway, por lo que su límite de CPU puede dominar el resultado.
 Las pruebas de otro namespace contra el Service interno son negativas de aislamiento;
 no se habilita acceso entre namespaces para recuperar esa carga.
+Con el presupuesto de recursos actual, ejecutar el generador de demostración
+en otro namespace mediante `NS_CARGA`. `estresar.sh` y el manifiesto externo
+usan `http://ojoalgasto-forellana.dev.censei.cl/health/` (configurable con
+`URL_CARGA` en el script): Ingress → web → Gateway. El proxy web publica esa
+ruta exacta hacia la salud de Gateway, sin tocar las rutas internas de limpieza.
+Esta medición incluye los proxies y la red de entrada; el generador no ocupa
+la cuota de pods de la aplicación ni requiere abrir su Service a otros namespaces.
 
 ## Rotación de secretos expuestos
 

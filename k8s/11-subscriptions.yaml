@@ -41,6 +41,9 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
@@ -93,6 +96,9 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
@@ -146,8 +152,8 @@ spec:
             limits:   { cpu: 200m, memory: 288Mi }
 ---
 # El Temporizador del RF-13: beat programa, worker ejecuta. Misma imagen que
-# subscriptions, distinto comando. No corren migraciones: de eso ya se encargó
-# el initContainer de arriba.
+# subscriptions, distinto comando. No corren migraciones: de eso se encarga el
+# initContainer de arriba, y este pod espera a que estén aplicadas.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,6 +172,34 @@ spec:
       # Las imágenes viven en un registro privado (GHCR).
       imagePullSecrets:
         - name: ghcr
+      # `command:` reemplaza el entrypoint, así que estos contenedores no
+      # migran ni esperan nada. Sin esta espera, el consumidor puede leer un
+      # evento antes de que el pod de subscriptions aplique `borrado.0001` y
+      # mandarlo a la cola de fallos sin reintento.
+      initContainers:
+        - name: esperar-migraciones
+          image: IMAGEN_SUBSCRIPTIONS
+          imagePullPolicy: Always   # la etiqueta se reutiliza; sin esto el nodo sirve la imagen vieja
+          command: ["sh", "-c", "until python manage.py migrate --check; do sleep 3; done"]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-subscriptions, key: DATABASE_URL }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            - { name: ESQUEMA_BD, value: subscriptions }
+          resources:
+            requests: { cpu: 25m,  memory: 64Mi }
+            limits:   { cpu: 100m, memory: 256Mi }
       containers:
         - name: worker
           image: IMAGEN_SUBSCRIPTIONS
@@ -180,6 +214,9 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
@@ -224,8 +261,8 @@ spec:
 
         # El consumidor de eventos de RabbitMQ (ADR-003). Va como segundo
         # contenedor de ESTE pod y no como Deployment aparte a propósito: la
-        # cuota permite 12 pods, la base ya son 9 y el HPA necesita los 3 que
-        # quedan (gateway 1→3, subscriptions 1→2). Un pod más dejaría al
+        # cuota permite 12 pods, la base ya son 10 y el HPA necesita los 2 que
+        # quedan (gateway 1→2, subscriptions 1→2). Un pod más dejaría al
         # autoescalado sin dónde crecer, que es justo lo que #78 vino a dar.
         #
         # Comparte pod con el worker porque hacen lo mismo conceptualmente:
@@ -244,6 +281,9 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }
@@ -316,6 +356,9 @@ spec:
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }

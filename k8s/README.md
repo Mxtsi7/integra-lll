@@ -25,7 +25,8 @@ El sistema completo corriendo en el cluster del ramo:
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
 | `gateway` | Deployment | Único punto de entrada (ADR-004) |
 | `web` | Deployment | SPA compilada + nginx, que además hace de proxy hacia el gateway |
-| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→3 y 1→2 (ver `30-autoescalado.yaml`) |
+| `auth-eliminaciones` | Deployment | Reintenta la limpieza durable de organizaciones e integrantes |
+| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→2 y 1→2 (ver `30-autoescalado.yaml`) |
 
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
@@ -76,13 +77,13 @@ puede subir. Los límites de cada pod están calculados para que **el HPA tenga
 espacio donde escalar**: si la cuota está llena, el autoescalado no sirve de
 nada, porque el pod nuevo recibe `exceeded quota` y nunca nace.
 
-| Recurso | Tope | En reposo (9 pods) | Peor caso (HPA al máximo, 12 pods) |
+| Recurso | Tope | En reposo (10 pods) | Peor caso (HPA al máximo, 12 pods) |
 |---|---|---|---|
-| `limits.memory` | 2752Mi | 1760Mi | 2496Mi |
-| `requests.memory` | 1152Mi | 648Mi | 888Mi |
-| `limits.cpu` | 2000m | 1150m | 1750m |
-| `requests.cpu` | 1000m | 375m | 525m |
-| `pods` | 12 | 9 | 12 |
+| `limits.memory` | 2752Mi | 2176Mi | 2688Mi |
+| `requests.memory` | 1152Mi | 776Mi | 952Mi |
+| `limits.cpu` | 2000m | 1350m | 1750m |
+| `requests.cpu` | 1000m | 425m | 525m |
+| `pods` | 12 | 10 | 12 |
 
 **Una `ResourceQuota` no mata los pods que ya están corriendo**, solo bloquea
 los nuevos. Por eso un despliegue puede venir funcionando semanas y reventar
@@ -92,7 +93,7 @@ es esto.
 Para recalcular el presupuesto después de tocar un límite, sin aplicar nada:
 
 ```bash
-python k8s/pruebas/presupuesto.py k8s
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
 ```
 
 ### Los límites salen de medir
@@ -202,3 +203,15 @@ kubectl logs -f deployment/gateway        # seguir un log
 kubectl port-forward service/web 8090:80  # abrir la web sin pasar por internet
 kubectl exec -it postgres-0 -- psql -U postgres -d suscripciones
 ```
+
+
+## Limpieza de cuentas (MX-07)
+
+`10-auth.yaml` incluye `auth-eliminaciones`; espera que Auth migre antes de ejecutar
+el worker durable. `desplegar.sh` añade `ELIMINACION_INTERNA_SECRET` al Secret si
+falta, sin rotar las demás credenciales. Todos los consumidores usan ese secreto.
+La demo configura `ELIMINACION_DESTINOS=subscriptions` porque es su único consumidor
+desplegado. Agregar Connectors/Analytics/Notifications exige desplegarlos, migrarlos
+y agregarlos a la lista antes de que almacenen datos. No retirar destinos de un
+entorno que ya tiene datos: las operaciones existentes conservan sus ACK pendientes.
+Ver [flujo y límites](../docs/flujos/maximiliano-saez/07-eliminar-cuenta.md).

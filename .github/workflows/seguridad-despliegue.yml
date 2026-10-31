@@ -19,6 +19,7 @@ jobs:
       TEST_DATABASE_ADMIN_URL: postgresql://postgres:pruebas-d11@localhost:5432/postgres
       POSTGRES_PASSWORD: pruebas-d11
       RABBITMQ_PASSWORD: pruebas-d11
+      ELIMINACION_INTERNA_SECRET: eliminacion-solo-pruebas-d11
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,5 +51,7 @@ jobs:
           export D11_RABBITMQ_CONTENEDOR="$(docker compose ps -q rabbitmq)"
           export D11_RABBITMQ_URL=amqp://ojoalgasto:pruebas-d11@127.0.0.1:5679/
           python -m pytest scripts/tests/test_migracion_rabbitmq.py -q
+      - name: Validar proxy de salud para carga externa
+        run: docker run --rm --add-host gateway:127.0.0.1 -v "$PWD/frontend/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
       - if: always()
         run: docker compose down

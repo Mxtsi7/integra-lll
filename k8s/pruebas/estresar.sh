@@ -11,18 +11,15 @@
 # participa. Por eso el resultado es el mismo lo lance quien lo lance.
 #
 # El script detecta solo en qué namespace estás:
-#   · en student-forellana  -> le pega al Service por su nombre corto
-#   · en cualquier otro     -> usa el nombre completo + `Host: gateway`,
-#                              porque el ALLOWED_HOSTS de Django no tiene el
-#                              nombre largo y responde 400 sin esa cabecera.
+#   · exige un namespace distinto de student-forellana (NS_CARGA o contexto)
+#   · entra por la URL pública del Ingress, web y gateway; no atraviesa la
+#     política que bloquea al Service interno desde otros namespaces.
 #
 # Funciona en Git Bash, WSL y Linux.
 set -euo pipefail
 
 NS_DESTINO="student-forellana"
-SERVICIO="gateway"
-PUERTO=8000
-RUTA="/health/"
+URL_CARGA="${URL_CARGA:-http://ojoalgasto-forellana.dev.censei.cl/health/}"
 
 QPS="${1:-25}"
 DURACION="${2:-30s}"
@@ -46,15 +43,18 @@ else                          CPU_LIM=400m
 fi
 
 MI_NS="$(kubectl config view --minify --output 'jsonpath={..namespace}' 2>/dev/null || true)"
-MI_NS="${MI_NS:-default}"
+MI_NS="${NS_CARGA:-${MI_NS:-default}}"
 
 if [ "$MI_NS" = "$NS_DESTINO" ]; then
-  BLANCO="http://${SERVICIO}:${PUERTO}${RUTA}"
-  CABECERA=""
+  echo 'ERROR: el HPA máximo ocupa 12/12 pods. Usa NS_CARGA con otro namespace o el contexto de otro integrante.' >&2
+  exit 1
 else
-  BLANCO="http://${SERVICIO}.${NS_DESTINO}.svc.cluster.local:${PUERTO}${RUTA}"
-  CABECERA="Host: ${SERVICIO}"
+  BLANCO="$URL_CARGA"
+  CABECERA=""
 fi
+
+# Todas las operaciones sobre el generador usan explícitamente su namespace.
+kubectl() { command kubectl -n "$MI_NS" "$@"; }
 
 NOMBRE="carga-fortio-${QPS}qps"
 
@@ -148,14 +148,10 @@ if ! kubectl wait --for=condition=Ready pod -l "job-name=$NOMBRE" --timeout=90s 
           echo "    namespaces del ramo. Si está llena, no es algo que puedas arreglar"
           echo "    bajando el qps: hay que liberar CPU o esperar a que otro la suelte."
           echo
-          echo "    Lo que puedes liberar en tu propio namespace, sin romper la app:"
-          echo "      kubectl scale deployment/rabbitmq --replicas=0            # 150m, está inerte"
-          echo "      kubectl scale deployment/subscriptions-worker --replicas=0 # 200m, solo un latido"
-          echo "      kubectl scale deployment/subscriptions-beat --replicas=0   # 100m, solo un latido"
-          echo "    y para devolverlos: el mismo comando con --replicas=1"
+          echo "    Mantén los workers de la aplicación activos; espera cuota en el namespace externo."
           ;;
         *)
-          echo "    Si habla de la cuota de tu namespace, baja el qps o libera pods."
+          echo "    Si habla de la cuota de tu namespace, comprueba la cuota del namespace externo."
           ;;
       esac
     else
@@ -185,6 +181,6 @@ fi
 
 echo
 echo "─────────────────────────────────────────────────────────────"
-echo "  Para borrar el Job:  kubectl delete job $NOMBRE"
+echo "  Para borrar el Job:  kubectl -n $MI_NS delete job $NOMBRE"
 echo "  (si no, se borra solo 10 minutos después de terminar)"
 echo "─────────────────────────────────────────────────────────────"

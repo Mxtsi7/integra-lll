@@ -124,7 +124,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -177,5 +177,17 @@ jobs:
       - name: Arnés de la rotación (dobles con estado, sin cluster)
         run: bash k8s/pruebas/probar-rotacion.sh
 
+      - name: Presupuesto de recursos Kubernetes
+        run: |
+          pip install PyYAML==6.0.3
+          python -m unittest discover -s k8s/pruebas -p 'test_presupuesto.py'
+          python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-carga
+
       - name: Arnés de la comparación (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-comparar-cola.sh
+
+      - name: Generador externo (kubectl doble, sin cluster)
+        run: bash k8s/pruebas/probar-carga.sh
+
+      - name: Parches de secretos (kubectl doble, sin cluster)
+        run: bash k8s/pruebas/probar-parches-secretos.sh

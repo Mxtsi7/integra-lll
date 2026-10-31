@@ -6,9 +6,10 @@
 #     docker compose up postgres rabbitmq auth
 # ══════════════════════════════════════════════════════════════════
 
-# Una sola fuente para la clave del broker y sus clientes. Usar claves hex.
+# Credenciales compartidas explícitas para eventos y limpieza. Usar claves hex.
 x-eventos: &eventos
   RABBITMQ_URL: amqp://${RABBITMQ_USER:-ojoalgasto}:${RABBITMQ_PASSWORD:?Definir RABBITMQ_PASSWORD en .env}@rabbitmq:5672/
+  ELIMINACION_INTERNA_SECRET: ${ELIMINACION_INTERNA_SECRET:?Definir ELIMINACION_INTERNA_SECRET en .env}
 
 services:
 
@@ -76,6 +77,25 @@ services:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       redis: { condition: service_started }
+    volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
+
+  auth-eliminaciones:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
+    build: ./services/auth
+    entrypoint: ["python", "manage.py", "procesar_eliminaciones", "--continuo"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      <<: *eventos
+      ESQUEMA_BD: auth
+    depends_on:
+      auth: { condition: service_healthy }
+      subscriptions: { condition: service_healthy }
+      connectors: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+      notifications: { condition: service_healthy }
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   subscriptions:
@@ -155,7 +175,10 @@ services:
     environment:
       <<: *eventos
       ESQUEMA_BD: connectors
-    depends_on: [connectors, redis]
+      APLICAR_MIGRACIONES: "0"
+    depends_on:
+      connectors: { condition: service_healthy }
+      redis: { condition: service_started }
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   analytics:
@@ -171,6 +194,8 @@ services:
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # Mismo código e imagen que analytics; migra solo el servidor. Si los dos
+  # migraran el mismo esquema a la vez, uno muere con UniqueViolation.
   analytics-worker:
     networks: [analytics]
     build: ./services/analytics
@@ -182,7 +207,9 @@ services:
     environment:
       <<: *eventos
       ESQUEMA_BD: analytics
+      APLICAR_MIGRACIONES: "0"
     depends_on:
+      analytics: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 

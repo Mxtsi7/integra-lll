@@ -122,3 +122,27 @@ def test_dominio_no_recibe_la_credencial_administrativa():
                 env = {e["name"]: e for e in contenedor["env"]}
                 assert env["DATABASE_URL"]["valueFrom"]["secretKeyRef"]["name"] == f"ojoalgasto-bd-{servicio}"
                 assert "POSTGRES_PASSWORD" not in env
+
+
+def test_limpieza_conserva_redes_y_secreto_explicito():
+    servicios = documentos("docker-compose.yml")[0]["services"]
+    worker = servicios["auth-eliminaciones"]
+    assert set(worker["networks"]) == {"auth", "subscriptions", "connectors", "analytics", "notifications"}
+    assert "RABBITMQ_URL" in worker["environment"]
+    for nombre in ("auth", "auth-eliminaciones", "subscriptions", "connectors", "analytics", "notifications"):
+        assert ":?" in servicios[nombre]["environment"]["ELIMINACION_INTERNA_SECRET"]
+    for ruta in ("k8s/10-auth.yaml", "k8s/11-subscriptions.yaml"):
+        for doc in documentos(ruta):
+            if doc["kind"] != "Deployment":
+                continue
+            pod = doc["spec"]["template"]["spec"]
+            for contenedor in pod.get("initContainers", []) + pod["containers"]:
+                env = {e["name"]: e for e in contenedor["env"]}
+                assert env["ELIMINACION_INTERNA_SECRET"]["valueFrom"]["secretKeyRef"] == {
+                    "name": "ojoalgasto", "key": "ELIMINACION_INTERNA_SECRET"}
+    for destino, puerto in (("subscriptions", 8002), ("connectors", 8003), ("analytics", 8004), ("notifications", 8005)):
+        assert permitido("auth-eliminaciones", destino, puerto)
+        assert not permitido("auth-eliminaciones", destino, puerto, namespace="otro-grupo")
+    assert permitido("auth-eliminaciones", "postgres", 5432)
+    assert permitido("auth-eliminaciones", "redis", 6379)
+    assert not permitido("auth-eliminaciones", "auth", 8001)

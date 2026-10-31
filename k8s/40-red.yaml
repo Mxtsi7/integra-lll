@@ -1,4 +1,5 @@
-# ADR-004: solo gateway puede enviar identidad a las APIs internas.
+# ADR-004: gateway valida la identidad de usuario. auth-eliminaciones es un
+# worker confiable adicional; sus operaciones internas requieren firma HMAC.
 # Requiere un CNI que implemente NetworkPolicy. No restringe salidas OAuth/SMTP.
 # El aislamiento se limita a pods de Ojo al Gasto, sin afectar otros proyectos.
 apiVersion: networking.k8s.io/v1
@@ -39,7 +40,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [gateway] }
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
       ports:
         - { protocol: TCP, port: 8002 }
 ---
@@ -55,7 +56,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [gateway] }
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
       ports:
         - { protocol: TCP, port: 8003 }
 ---
@@ -71,7 +72,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [gateway] }
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
       ports:
         - { protocol: TCP, port: 8004 }
 ---
@@ -87,7 +88,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [gateway] }
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
       ports:
         - { protocol: TCP, port: 8005 }
 ---
@@ -159,7 +160,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [auth, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+              - { key: app, operator: In, values: [auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
       ports:
         - { protocol: TCP, port: 5432 }
 ---
@@ -175,7 +176,7 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [gateway, auth, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+              - { key: app, operator: In, values: [gateway, auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
       ports:
         - { protocol: TCP, port: 6379 }
 ---
@@ -191,6 +192,6 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [auth, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+              - { key: app, operator: In, values: [auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
       ports:
         - { protocol: TCP, port: 5672 }

@@ -10,6 +10,22 @@ export function equivalenteMensual(monto: number, frecuencia: Frecuencia): numbe
   return frecuencia === 'anual' ? monto / 12 : monto;
 }
 
+/** Unidad común exacta para importes del contrato de dos decimales. */
+function doceavosDeCentavo(s: Suscripcion): number {
+  return Math.round(s.monto * 100) * (s.frecuencia === 'anual' ? 1 : 12);
+}
+
+/**
+ * Suma una selección de la misma moneda, sin cambiar sus estados ni redondear.
+ * El único redondeo se hace al presentar con formatearMonto (CLP sin decimales).
+ */
+export function sumarEquivalentesMensuales(suscripciones: Suscripcion[]): number {
+  if (new Set(suscripciones.map((s) => s.moneda)).size > 1) {
+    throw new RangeError('El gasto debe calcularse por moneda.');
+  }
+  return suscripciones.reduce((suma, s) => suma + doceavosDeCentavo(s), 0) / 1200;
+}
+
 /**
  * La métrica que distingue al producto: cuánto cuesta cada hora efectivamente
  * usada. Un servicio de $9.900 usado dos horas al mes cuesta $4.950 la hora.
@@ -44,9 +60,21 @@ export function generaCobro(s: Suscripcion): boolean {
  * suscripciones que generan cobro (ver generaCobro).
  */
 export function gastoProyectado(suscripciones: Suscripcion[]): number {
-  return suscripciones
-    .filter(generaCobro)
-    .reduce((total, s) => total + equivalenteMensual(s.monto, s.frecuencia), 0);
+  if (new Set(suscripciones.filter(generaCobro).map((s) => s.moneda)).size > 1) {
+    throw new RangeError('El gasto debe calcularse por moneda.');
+  }
+  return gastosPorMoneda(suscripciones)[0]?.total ?? 0;
+}
+
+/** Proyección de toda la lista, sin convertir ni mezclar divisas. */
+export function gastosPorMoneda(suscripciones: Suscripcion[]): { moneda: Moneda; total: number }[] {
+  // Mismas unidades que sumarEquivalentesMensuales; se redondea solo al presentar.
+  const sumas = new Map<Moneda, number>();
+  for (const s of suscripciones.filter(generaCobro)) {
+    const unidades = doceavosDeCentavo(s);
+    sumas.set(s.moneda, (sumas.get(s.moneda) ?? 0) + unidades);
+  }
+  return [...sumas].map(([moneda, unidades]) => ({ moneda, total: unidades / 1200 }));
 }
 
 /** Cuántas suscripciones hay en cada estado. Alimenta el conteo del panel (RF-09). */

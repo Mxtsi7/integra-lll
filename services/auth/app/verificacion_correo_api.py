@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .contratos_auth import MensajeAuthSerializer
 from .verificacion_correo import ErrorVerificacionCorreo, confirmar_verificacion, solicitar_verificacion
 
 
@@ -38,7 +39,7 @@ class SolicitudVerificacionView(VerificacionCorreoView):
         tags=["Auth"], summary="Solicitar o reenviar verificación de correo",
         description="Requiere JWT validado por gateway. Email opcional; cambiarlo requiere password actual. Conserva el correo activo hasta confirmar. Máximo 5 envíos/hora y uno cada 60 segundos.",
         request=SolicitudVerificacionSerializer,
-        responses={200: OpenApiResponse(description="Enlace enviado."), 400: OpenApiResponse(description="Datos o identidad inválidos."), 403: OpenApiResponse(description="Falta identidad del gateway."), 404: OpenApiResponse(description="Usuario no activo o inexistente."), 429: OpenApiResponse(description="Límite de reenvío."), 503: OpenApiResponse(description="Fallo de correo; solicitud revertida.")},
+        responses={200: OpenApiResponse(response=MensajeAuthSerializer, description="Enlace enviado."), 400: OpenApiResponse(description="Datos o identidad inválidos."), 403: OpenApiResponse(description="Falta identidad del gateway."), 404: OpenApiResponse(description="Usuario no activo o inexistente."), 429: OpenApiResponse(description="Límite de reenvío."), 503: OpenApiResponse(description="Fallo de correo; solicitud revertida.")},
     )
     def post(self, request):
         serializer = SolicitudVerificacionSerializer(data=request.data)
@@ -53,7 +54,7 @@ class ConfirmacionVerificacionView(VerificacionCorreoView):
         tags=["Auth"], summary="Confirmar verificación de correo",
         description="Ruta pública. Token de un solo uso, válido 60 minutos. Activa exclusivamente el correo y usuario asociados al token y avisa al correo anterior si hubo cambio.",
         request=ConfirmacionVerificacionSerializer,
-        responses={200: OpenApiResponse(description="Correo verificado."), 400: OpenApiResponse(description="Token inválido, revocado o correo ocupado."), 410: OpenApiResponse(description="Token expirado o usado."), 503: OpenApiResponse(description="Fallo del aviso; cambio revertido y token reutilizable.")},
+        responses={200: OpenApiResponse(response=MensajeAuthSerializer, description="Correo verificado."), 400: OpenApiResponse(description="Token inválido, revocado o correo ocupado."), 410: OpenApiResponse(description="Token expirado o usado."), 503: OpenApiResponse(description="Fallo del aviso; cambio revertido y token reutilizable.")},
     )
     def post(self, request):
         serializer = ConfirmacionVerificacionSerializer(data=request.data)

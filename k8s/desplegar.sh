@@ -14,6 +14,17 @@ HOST_PUBLICO="${HOST_PUBLICO:-ojoalgasto-forellana.dev.censei.cl}"
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$RAIZ"
 
+# El contenido llega por stdin; ni las claves ni el JSON aparecen en argv.
+# El subshell limita umask y trampas a cada parche, también si kubectl falla.
+parchear_secreto() (
+  umask 077
+  PARCHE="$(mktemp)"
+  trap 'rm -f "$PARCHE"' EXIT
+  trap 'exit 1' HUP INT TERM
+  cat > "$PARCHE"
+  kubectl patch secret ojoalgasto --type=merge --patch-file "$PARCHE" >/dev/null
+)
+
 IMAGEN_AUTH="$REGISTRO/ojoalgasto-auth:$ETIQUETA"
 IMAGEN_SUBSCRIPTIONS="$REGISTRO/ojoalgasto-subscriptions:$ETIQUETA"
 IMAGEN_GATEWAY="$REGISTRO/ojoalgasto-gateway:$ETIQUETA"
@@ -64,8 +75,7 @@ elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -
   # NO se cambia (POSTGRES_PASSWORD solo se aplica en el primer arranque).
   # Solo se agrega la URL que faltaba.
   CLAVE_POSTGRES="$(kubectl get secret ojoalgasto -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
-  kubectl patch secret ojoalgasto --type=merge \
-    -p "{\"stringData\":{\"DATABASE_URL\":\"postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones\"}}" >/dev/null
+  printf '{"stringData":{"DATABASE_URL":"postgres://postgres:%s@postgres:5432/suscripciones"}}' "$CLAVE_POSTGRES" | parchear_secreto
   echo "   secret al día: DATABASE_URL agregada con la clave que ya usaba la base"
 else
   echo "   ya existía, se deja como está"
@@ -87,9 +97,15 @@ fi
 # Se agrega una sola vez; rotarla es un procedimiento aparte
 # (shared/cifrado/README.md), nunca se regenera sola o lo guardado queda ilegible.
 if ! kubectl get secret ojoalgasto -o jsonpath='{.data.CLAVES_CIFRADO}' | grep -q .; then
-  kubectl patch secret ojoalgasto --type=merge \
-    -p "{\"stringData\":{\"CLAVES_CIFRADO\":\"$(openssl rand -base64 32 | tr '+/' '-_')\"}}" >/dev/null
+  printf '{"stringData":{"CLAVES_CIFRADO":"%s"}}' "$(openssl rand -base64 32 | tr '+/' '-_')" | parchear_secreto
   echo "   CLAVES_CIFRADO agregada al secret"
+fi
+
+# Firma independiente de JWT, compartida por Auth y consumidores de limpieza.
+# Se añade también al Secret existente, sin rotar otras credenciales.
+if ! kubectl get secret ojoalgasto -o jsonpath='{.data.ELIMINACION_INTERNA_SECRET}' | grep -q .; then
+  CLAVE_ELIMINACION="$(openssl rand -hex 32)"
+  printf '{"stringData":{"ELIMINACION_INTERNA_SECRET":"%s"}}' "$CLAVE_ELIMINACION" | parchear_secreto
 fi
 
 echo "── aplicando manifiestos ──"
@@ -122,7 +138,7 @@ done
 
 echo "── esperando a que todo quede arriba ──"
 kubectl rollout status statefulset/postgres --timeout=300s
-for d in redis rabbitmq auth subscriptions subscriptions-worker subscriptions-beat gateway web; do
+for d in redis rabbitmq auth auth-eliminaciones subscriptions subscriptions-worker subscriptions-beat gateway web; do
   # Un deployment en 0 réplicas está así a propósito (RabbitMQ hasta el
   # Sprint 2). `rollout status` se quedaría esperando 300s y saldría con
   # error, tumbando el script entero por algo que no es una falla.

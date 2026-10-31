@@ -18,6 +18,11 @@ export function formatearMonto(monto: number, moneda: Moneda = 'CLP'): string {
   }).format(monto);
 }
 
+/** Una cifra identificada por divisa; no inventa una moneda para la lista vacía. */
+export function formatearTotales(totales: { moneda: Moneda; total: number }[]): string {
+  return totales.map(({ moneda, total }) => `${moneda} ${formatearMonto(total, moneda)}`).join(' · ') || 'Sin cobros';
+}
+
 /** "2026-10-05" → "05 oct 2026". Se parte la fecha a mano para no depender de la zona horaria. */
 export function formatearFecha(iso: string): string {
   const [anio, mes, dia] = iso.split('-').map(Number);
