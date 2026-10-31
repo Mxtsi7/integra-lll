@@ -44,9 +44,23 @@ class Cluster:
             self.suspendido = False
         if "close_connection" in args:
             assert self.suspendido
+            pid = args[args.index("close_connection") + 1]
+            # `close_connection` SOLO acepta `<nodo.A.B.C>`. El `#PID<...>` del
+            # formateador JSON lo rechaza con `invalid_pid_syntax`, y eso tumbo
+            # un despliegue: el doble anterior devolvia la forma BUENA para el
+            # JSON, asi que la prueba no podia verlo.
+            assert pid.startswith("<") and pid.endswith(">"), pid
+            assert not pid.startswith("#PID"), pid
             self.cerrado = True
         if "list_connections" in args:
-            return json.dumps([] if self.cerrado else [{"pid": "<rabbit@viejo.1.0>"}])
+            if "--formatter=json" in args:
+                # La forma REAL del formateador JSON: el `inspect` de Erlang,
+                # con el id NUMERICO del nodo. No sirve para close_connection.
+                return json.dumps([] if self.cerrado else [{"pid": "#PID<13244.726.0>"}])
+            # El formateador por omision: encabezado de columna y una linea por
+            # conexion, con el NOMBRE del nodo. `--quiet` saca el banner, no el
+            # encabezado.
+            return "pid\n" if self.cerrado else "pid\n<rabbit@viejo.1793400029.726.0>\n"
         if "list_vhosts" in args:
             return json.dumps([{"name": "/"}, {"name": "otro"}])
         if "list_queues" in args:

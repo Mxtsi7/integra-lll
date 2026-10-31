@@ -75,6 +75,35 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
         print(f"RabbitMQ: {total} mensajes pendientes en todos los vhosts", flush=True)
         return total == 0
 
+    def pids_de_conexiones():
+        """Los pid de conexión, en el formato que `close_connection` acepta.
+
+        Esta lista se lee en TEXTO y no en JSON a propósito. `--formatter=json`
+        entrega el `inspect` de Erlang —`#PID<13244.726.0>`, con el id numérico
+        del nodo— y `close_connection` lo rechaza con
+
+            {:invalid_pid_syntax, "#PID<13244.726.0>"}
+
+        porque espera la forma que imprime el formateador por omisión:
+        `<rabbit@rabbitmq-xxxxx.1793400029.726.0>`, con el NOMBRE del nodo.
+        Tumbó un despliegue entero: el drenaje confirmaba 0 mensajes, suspendía
+        los listeners y moría al cerrar la primera conexión.
+
+        La primera línea es el encabezado de la columna; `--quiet` saca el
+        banner, no el encabezado. Se exige para no confundir "sin conexiones"
+        con "no se pudo leer la salida".
+        """
+        lineas = [l.strip() for l in ctl("list_connections", "pid").splitlines() if l.strip()]
+        if not lineas or lineas[0] != "pid":
+            raise RuntimeError("No se pudo leer la lista de conexiones; no se reemplaza RabbitMQ")
+        pids = lineas[1:]
+        for pid in pids:
+            if not (pid.startswith("<") and pid.endswith(">")):
+                raise RuntimeError(
+                    f"Pid de conexión con formato inesperado ({pid!r}); no se reemplaza RabbitMQ"
+                )
+        return pids
+
     # Los consumidores siguen activos durante este drenaje acotado.
     for intento in range(intentos):
         if vacio():
@@ -87,9 +116,9 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
     rollout_verificado = False
     try:
         ctl("suspend_listeners")
-        for conexion in filas(ctl("list_connections", "pid", "--formatter=json")):
-            ctl("close_connection", conexion["pid"], "Migración D-11: reintentar desde outbox")
-        if filas(ctl("list_connections", "pid", "--formatter=json")):
+        for pid in pids_de_conexiones():
+            ctl("close_connection", pid, "Migración D-11: reintentar desde outbox")
+        if pids_de_conexiones():
             raise RuntimeError("Persisten conexiones; no se reemplaza RabbitMQ")
         if not vacio():
             raise RuntimeError("Llegaron mensajes durante el cierre; drenar y reintentar")
