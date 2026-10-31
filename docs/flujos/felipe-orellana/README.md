@@ -19,7 +19,8 @@ estado real contrastado con `main`.
 | Cómo se piden las consultas entre frontend y backend (pendiente del profe, 08-10-2026) | Explicado con un ejemplo de punta a punta | [06-consultas-frontend-backend.md](06-consultas-frontend-backend.md) |
 | **Sprint 2 · FE-06** Cifrar tokens de conectores y gestionar claves | Hecho, 32 pruebas, PR abierto | [07-cifrado-de-tokens-fe06.md](07-cifrado-de-tokens-fe06.md) |
 | **Sprint 2 · FE-12** Normalizar nombres de proveedores | Hecho, 80 pruebas | [08-normalizacion-de-proveedores-fe12.md](08-normalizacion-de-proveedores-fe12.md) |
-| **Sprint 2 · FE-07** Validar y recibir archivos CSV y cartolas | Hecho, 42 pruebas | [10-subida-de-archivos-fe07.md](10-subida-de-archivos-fe07.md) |
+| **Sprint 2 · FE-17 y FE-18** Alertas de próximos cobros y avisos de fin de prueba | Hecho, 97 pruebas; FE-18 espera que el contrato traiga `fin_prueba` | [09-alertas-generadas-fe17-fe18.md](09-alertas-generadas-fe17-fe18.md) |
+| **Sprint 2 · FE-07** Validar y recibir archivos CSV y cartolas | Hecho, 68 pruebas | [10-subida-de-archivos-fe07.md](10-subida-de-archivos-fe07.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su
