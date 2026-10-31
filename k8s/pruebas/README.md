@@ -41,6 +41,8 @@ el escenario local excedido devuelve error:
 
 ```bash
 python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
+# El comparador tiene su propio escenario: Job y Secret en student-carga.
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-comparar.yaml --namespace-generador student-carga
 # Debe fallar por pods y memoria:
 python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio.yaml --namespace-generador student-forellana
 ```
@@ -107,8 +109,14 @@ El blanco y la intensidad se editan en `args` dentro del YAML:
 | `http://ojoalgasto-forellana.dev.censei.cl/health/` | Ingress, web y salud de Gateway, sin base de datos |
 
 Las APIs internas no son blancos autorizados para estos generadores.
-Para medir operaciones de suscripciones usar `comparar-cola.sh` con sesiones
-válidas; el Gateway debe validar la identidad.
+Para medir operaciones de suscripciones usar
+`NS_CARGA=student-carga ./k8s/pruebas/comparar-cola.sh` con `TOKEN_SIN` y
+`TOKEN_CON` de dos organizaciones de prueba distintas y vacías. Mantener el
+contexto de kubectl en la aplicación; solo el Job y su Secret temporal van al
+namespace externo. `40-red.yaml` permite a ese comparador contactar únicamente
+al Gateway por su DNS completo, con `Host: gateway`; este valida la identidad.
+El namespace externo debe existir y tener cuota y permisos para Job/Secret.
+No ejecutar el comparador local: con el HPA máximo excede pods y memoria.
 
 ## Que cada integrante pruebe desde su propio notebook
 

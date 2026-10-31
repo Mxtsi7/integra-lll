@@ -3,6 +3,8 @@
 #
 # Usa un token de sesión válido desde un Secret temporal. Gateway verifica
 # la sesión e inyecta la identidad; este pod no tiene acceso directo al dominio.
+# Se crea junto con su Secret en student-carga; no cabe en la cuota de la
+# aplicación con HPA máximo. La política solo permite este Job hacia Gateway.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -34,10 +36,12 @@ spec:
             - -H
             - "Authorization: Bearer $(TOKEN_CARGA)"
             - -H
+            - "Host: gateway"
+            - -H
             - "Content-Type: application/json"
             - -payload
             - '{"nombre":"Carga","monto":"9990","moneda":"CLP","frecuencia":"mensual","fecha_proximo_cobro":"2026-11-01","categoria":"streaming","estado":"activo"}'
-            - http://gateway:8000/api/suscripciones/
+            - http://gateway.student-forellana.svc.cluster.local:8000/api/suscripciones/
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits:   { cpu: 200m, memory: 128Mi }

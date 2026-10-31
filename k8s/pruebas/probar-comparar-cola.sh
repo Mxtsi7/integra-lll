@@ -37,6 +37,7 @@ export REGISTRO="$BASE/argv.txt"
 cat > "$DOBLES/kubectl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$REGISTRO"
+if [ "$1" = "-n" ]; then shift 2; fi
 todo="$*"
 
 # Los contenedores de cada deployment, como en k8s/11-subscriptions.yaml
@@ -50,6 +51,7 @@ contenedores_de() {
 }
 
 case "$1" in
+  config) printf student-forellana; exit 0 ;;
   get)
       # get deployment/<d> -o jsonpath=...containers[?(@.name=="X")]...
       d="${2#deployment/}"
@@ -126,6 +128,7 @@ export PATH="$DOBLES:$PATH"
 
 # Sin esperas reales: el arnes no tiene por que dormir.
 export DRENAR_INTENTOS=2 DRENAR_PAUSA=0 DURACION=1s
+export NS_CARGA=student-carga
 export TOKEN_SIN=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.firma_sin
 export TOKEN_CON=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIyIn0.firma_con
 
@@ -180,6 +183,12 @@ juzgar "todos los set env llevan --containers=subscriptions" "$(si "$(set_env_si
 juzgar "rollouts solo de la API: 3 (corrida 0, corrida 1, restauracion)" "$(si "$(rollouts)" = "3")"
 if dice "rollout comprobado"; then v=1; else v=0; fi
 juzgar "lo dice en la salida" "$v"
+if grep -q '^-n student-carga create -f -' "$REGISTRO"; then v=1; else v=0; fi
+juzgar "crea el Secret en el namespace externo" "$v"
+if grep -q '^-n student-carga apply -f -' "$REGISTRO"; then v=1; else v=0; fi
+juzgar "crea el Job en el namespace externo" "$v"
+if grep -Eq '^(apply|create|wait|delete (job|secret)|logs job)' "$REGISTRO"; then v=0; else v=1; fi
+juzgar "ninguna operacion del generador cae en el namespace de la aplicacion" "$v"
 
 echo
 echo "=== 2. la inversa: API sin la variable, worker en 0, consumidor en 1 ==="
@@ -286,8 +295,17 @@ juzgar "HTTP 401 impide éxito aunque Fortio termine" "$(si "$codigo" != "0")"
 if dice "CON cola"; then v=0; else v=1; fi
 juzgar "no inicia la segunda corrida" "$v"
 juzgar "restaura la API" "$(si "$(api)" = "0")"
-if grep -q '^delete secret carga-comparar-token' "$REGISTRO"; then v=1; else v=0; fi
+if grep -q '^\-n student-carga delete secret carga-comparar-token' "$REGISTRO"; then v=1; else v=0; fi
 juzgar "elimina el Secret temporal" "$v"
+
+echo "=== 12. rechaza el generador local antes de modificar la aplicacion ==="
+reiniciar_estado 0 1 ausente
+export NS_CARGA=student-forellana
+codigo="$(correr)"
+juzgar "el namespace de la aplicacion no sirve para el generador" "$(si "$codigo" != "0")"
+if grep -Eq 'set env|rollout|apply|create|delete' "$REGISTRO"; then v=0; else v=1; fi
+juzgar "no cambia la bandera ni crea recursos cuando falta cuota" "$v"
+export NS_CARGA=student-carga
 
 echo "--------------------------------"
 echo "  $ok bien, $mal mal"

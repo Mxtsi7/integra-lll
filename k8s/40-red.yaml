@@ -104,7 +104,26 @@ spec:
     - from:
         - podSelector:
             matchExpressions:
-              - { key: app, operator: In, values: [web, carga-fortio, carga-comparar, diagnostico] }
+              - { key: app, operator: In, values: [web, carga-fortio, diagnostico] }
+      ports:
+        - { protocol: TCP, port: 8000 }
+---
+# Comparador con cuota propia: ambos selectores pertenecen al mismo peer.
+# No autoriza otros pods ni namespaces, ni acceso a las APIs de dominio.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: comparador-externo-a-gateway
+spec:
+  podSelector:
+    matchLabels: { app: gateway }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-carga }
+          podSelector:
+            matchLabels: { app: carga-comparar }
       ports:
         - { protocol: TCP, port: 8000 }
 ---

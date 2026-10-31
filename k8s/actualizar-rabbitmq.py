@@ -106,8 +106,11 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
         # También sirve en reintentos sin cambio de plantilla: el pod original
         # sigue vivo y debe volver a aceptar conexiones. Nunca tocar un pod nuevo.
         actual = ejecutar("get", f"pod/{nombre}", "--ignore-not-found", "-o", "json")
-        if actual.strip() and json.loads(actual)["metadata"]["uid"] == uid:
-            if not aplicacion_iniciada or rollout_verificado:
+        actual = json.loads(actual) if actual.strip() else None
+        if actual and actual["metadata"]["uid"] == uid:
+            if actual["metadata"].get("deletionTimestamp"):
+                print(f"ATENCIÓN: {nombre} está terminando; no se reabren sus listeners.", file=sys.stderr)
+            elif not aplicacion_iniciada or rollout_verificado:
                 ctl("resume_listeners")
             else:
                 print(f"ATENCIÓN: {nombre} permanece suspendido: actualización incierta. "

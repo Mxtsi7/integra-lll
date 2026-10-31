@@ -104,27 +104,50 @@ irrecuperable o falla la aplicación/rollout después de solicitar el reemplazo,
 el broker original permanece suspendido: no reabrirlo mientras el controlador
 pueda eliminarlo. Verificar o cancelar primero el reemplazo pendiente y solo
 entonces ejecutar allí `rabbitmqctl resume_listeners`. La restauración automática
-solo actúa sobre el UID original, nunca sobre un reemplazo.
+solo actúa sobre el UID original, nunca sobre un reemplazo. Antes de reabrir
+también vuelve a comprobar que el pod no tenga `deletionTimestamp`: si está
+terminando, conserva los listeners suspendidos incluso en un reintento sin
+cambio de plantilla o un aborto anterior a la aplicación del manifiesto.
 
 ### Pruebas de carga con políticas activas
 
-Aplicar `40-red.yaml` antes de las pruebas. `carga-fortio`, `carga-comparar` y el
-pod `diagnostico` pueden entrar al gateway en su namespace, en TCP 8000.
-Conservan el bloqueo de acceso directo a auth/subscriptions y desde otro namespace;
-no se debe etiquetar un generador como gateway para eludirlo.
+Aplicar `40-red.yaml` antes de las pruebas. `carga-fortio` y el pod `diagnostico`
+pueden entrar al gateway en su namespace, en TCP 8000. Conservan el bloqueo de
+acceso directo a auth/subscriptions y desde otros namespaces; no se debe
+etiquetar un generador como gateway para eludirlo.
 
 Para comparar cola, registrar dos cuentas de prueba en organizaciones distintas
 y vacías e iniciar sesión normalmente por `/api/auth/login/`. Exportar sus
 `access_token` como `TOKEN_SIN` y `TOKEN_CON` y ejecutar
-`bash k8s/pruebas/comparar-cola.sh`. Las sesiones deben durar ambas corridas
+`NS_CARGA=student-carga bash k8s/pruebas/comparar-cola.sh`, manteniendo el contexto
+de kubectl en el namespace de la aplicación. Las sesiones deben durar ambas corridas
 (reducir `DURACION` si es necesario). El script valida cada sesión con la lógica
 de Gateway, toma su organización, rechaza organizaciones iguales y usa un Secret
-temporal para la cabecera Bearer. Borra ese Secret al salir. No imprime tokens.
+temporal para la cabecera Bearer. El Job y ese Secret se crean, consultan y
+eliminan explícitamente en `NS_CARGA`, también al abortar; los Deployments,
+logs del dominio y outbox se consultan en la aplicación. No imprime tokens ni
+copia al namespace externo sus credenciales de base de datos o firma JWT.
 Gateway determina la identidad; no se permite enviar `X-Organizacion-Id` a mano.
 Un HTTP distinto de 201 invalida la medición y restaura la configuración.
 La latencia incluye Gateway, por lo que su límite de CPU puede dominar el resultado.
-Las pruebas de otro namespace contra el Service interno son negativas de aislamiento;
-no se habilita acceso entre namespaces para recuperar esa carga.
+La política `comparador-externo-a-gateway` autoriza únicamente pods con
+`app: carga-comparar` del namespace `student-carga` hacia Gateway en TCP 8000.
+Ambos selectores están en el mismo peer. La carga usa el DNS completo del
+Gateway y `Host: gateway`; este valida JWT y sesión. No se autoriza acceso a
+APIs de dominio, PostgreSQL o RabbitMQ, ni a otros pods o namespaces. Si se
+usa otro namespace de carga, adaptar ese selector antes de ejecutarlo.
+
+El script exige un namespace de carga explícito y distinto al de la aplicación;
+aborta antes de cambiar banderas o crear recursos si son iguales. Debe existir
+y permitir gestionar Jobs y Secrets con la cuenta que ejecuta la comparación.
+Con el HPA máximo, el comparador local requiere 13/12 pods y 2816/2752 MiB;
+separado deja la aplicación en 12/12 pods y 2688/2752 MiB. El generador consume
+en su propia cuota 1 pod, requests de 100m/64 MiB y límites de 200m/128 MiB.
+Comprobar esa cuota externa antes del ensayo. CI incluye ambos escenarios del
+comparador, además del generador externo de salud; no basta validar solo este último.
+
+Las demás pruebas de otro namespace contra el Service interno siguen siendo
+negativas de aislamiento.
 Con el presupuesto de recursos actual, ejecutar el generador de demostración
 en otro namespace mediante `NS_CARGA`. `estresar.sh` y el manifiesto externo
 usan `http://ojoalgasto-forellana.dev.censei.cl/health/` (configurable con

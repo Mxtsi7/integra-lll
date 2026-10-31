@@ -95,8 +95,8 @@ def test_rabbitmq_usa_secret_y_despliegue_incluye_politicas():
     assert "gh auth token" not in script
 
 
-def test_jobs_de_carga_entran_por_gateway_sin_poder_suplantarlo():
-    for ruta in ("k8s/pruebas/carga-fortio.yaml", "k8s/pruebas/carga-comparar.yaml"):
+def test_carga_local_entra_por_gateway_sin_poder_suplantarlo():
+    for ruta in ("k8s/pruebas/carga-fortio.yaml",):
         pod = documentos(ruta)[0]["spec"]["template"]
         etiquetas = pod["metadata"]["labels"]
         app = etiquetas["app"]
@@ -107,8 +107,6 @@ def test_jobs_de_carga_entran_por_gateway_sin_poder_suplantarlo():
         args = pod["spec"]["containers"][0]["args"]
         assert args[-1].startswith("http://gateway:8000/")
         assert not any("X-Organizacion-Id" in arg for arg in args)
-        if app == "carga-comparar":
-            assert "Authorization: Bearer $(TOKEN_CARGA)" in args
 
 
 def test_dominio_no_recibe_la_credencial_administrativa():
@@ -146,3 +144,18 @@ def test_limpieza_conserva_redes_y_secreto_explicito():
     assert permitido("auth-eliminaciones", "postgres", 5432)
     assert permitido("auth-eliminaciones", "redis", 6379)
     assert not permitido("auth-eliminaciones", "auth", 8001)
+
+
+def test_comparador_externo_tiene_acceso_solo_al_gateway_autorizado():
+    pod = documentos("k8s/pruebas/carga-comparar.yaml")[0]["spec"]["template"]
+    etiquetas = pod["metadata"]["labels"]
+    assert permitido("carga-comparar", "gateway", 8000, namespace="student-carga", etiquetas_origen=etiquetas)
+    assert not permitido("carga-comparar", "gateway", 8000, namespace="otro-grupo", etiquetas_origen=etiquetas)
+    assert not permitido("otro", "gateway", 8000, namespace="student-carga")
+    assert not permitido("carga-comparar", "gateway", 8000)
+    for servicio, puerto in (("auth", 8001), ("subscriptions", 8002), ("postgres", 5432), ("rabbitmq", 5672)):
+        assert not permitido("carga-comparar", servicio, puerto, namespace="student-carga", etiquetas_origen=etiquetas)
+    args = pod["spec"]["containers"][0]["args"]
+    assert args[-1] == "http://gateway.student-forellana.svc.cluster.local:8000/api/suscripciones/"
+    assert "Host: gateway" in args
+    assert "Authorization: Bearer $(TOKEN_CARGA)" in args

@@ -152,6 +152,30 @@ def test_pod_original_que_sigue_vivo_reanuda_en_reintento_sin_cambios(guard):
     assert not cluster.suspendido
 
 
+@pytest.mark.parametrize("momento", ["antes_apply", "despues_rollout"])
+def test_finally_no_reabre_original_con_marca_de_eliminacion(guard, momento):
+    cluster = Cluster()
+
+    def ejecutar(*args):
+        salida = cluster(*args)
+        if args[:2] == ("get", "pod/rabbit-viejo"):
+            metadata = {"uid": "original"}
+            if momento == "antes_apply" or cluster.aplicado:
+                metadata["deletionTimestamp"] = "2026-10-31T00:00:00Z"
+            return json.dumps({"metadata": metadata})
+        return salida
+
+    if momento == "antes_apply":
+        with pytest.raises(RuntimeError, match="El pod cambió"):
+            guard.actualizar(ejecutar, intentos=1, pausa=0)
+        assert not cluster.aplicado
+    else:
+        guard.actualizar(ejecutar, intentos=1, pausa=0)
+        assert cluster.aplicado
+    assert cluster.suspendido
+    assert not any("resume_listeners" in args for args in cluster.acciones)
+
+
 @pytest.mark.skipif(not os.getenv("D11_RABBITMQ_CONTENEDOR"), reason="Requiere RabbitMQ real en Docker (CI)")
 def test_guard_preserva_mensaje_confirmado_con_rabbitmq_real(guard):
     """kubectl exec se traduce a docker exec; el CLI y las colas son reales."""
