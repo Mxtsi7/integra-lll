@@ -175,7 +175,7 @@ python scripts\verificar_servicios.py        # espera los 6 /health/ y prueba el
 - `http://localhost:8000-8005/health/` con HTTP 200 real;
 - que el gateway, sin token, responda **401** en `/api/usuarios/me/` (prueba de
   que enruta y valida el JWT, no que deja pasar);
-- que los 14 contenedores esperados estén presentes y en el estado esperado.
+- que los 15 contenedores esperados estén presentes y en el estado esperado.
 
 Para un arranque limpio y la verificación en un solo paso:
 

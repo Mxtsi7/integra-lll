@@ -47,8 +47,10 @@ SERVICIOS = {
     "notifications": 8005,
 }
 
-# Servicios que Compose debe mostrar "running" o "healthy". Beat no tiene
-# healthcheck a propósito, por eso sólo se exige que esté corriendo.
+# Servicios que Compose debe mostrar "running" o "healthy". Se enumeran todos
+# los de docker-compose.yml: si falta uno, el stack está incompleto aunque los
+# healthchecks HTTP respondan. `test_verificar_servicios.py` compara este
+# inventario con Compose para que una omisión no vuelva a pasar inadvertida.
 CONTENEDORES_ESPERADOS = set(SERVICIOS) | {
     "postgres",
     "rabbitmq",
@@ -57,10 +59,20 @@ CONTENEDORES_ESPERADOS = set(SERVICIOS) | {
     "subscriptions-beat",
     "connectors-worker",
     "analytics-worker",
+    # Procesa las eliminaciones durables (main). Compose le desactiva el
+    # healthcheck porque no expone un canal de consulta; igualmente debe
+    # existir y estar corriendo.
+    "auth-eliminaciones",
     # La web no tiene healthcheck (no expone /health/): sólo se exige que
     # esté corriendo. Se cuenta igual para detectar un stack incompleto.
     "frontend",
 }
+
+# Servicios sin healthcheck a propósito: se exige presencia y ejecución, pero
+# no `healthy`. Cualquier otro servicio que no reporte salud se considera
+# incompleto. `redis` no declara healthcheck en Compose; su disponibilidad se
+# comprueba indirectamente con el `/health/` de los servicios que lo usan.
+SIN_HEALTHCHECK = {"subscriptions-beat", "auth-eliminaciones", "frontend", "redis"}
 
 
 @dataclass
@@ -184,10 +196,13 @@ def estado_compose(timeout: float = 60.0) -> list[str]:
             problemas.append(f"{nombre}: no está creado (¿stack incompleto?)")
             continue
         estado = str(datos.get("State", "")).lower()
-        salud = str(datos.get("Health", "") or "").lower()
         if estado not in {"running", "up"}:
             problemas.append(f"{nombre}: estado {estado or '?'}")
-        elif salud and salud not in {"healthy"}:
+            continue
+        if nombre in SIN_HEALTHCHECK:
+            continue
+        salud = str(datos.get("Health", "") or "").lower()
+        if salud and salud not in {"healthy"}:
             problemas.append(f"{nombre}: health={salud}")
     return problemas
 
