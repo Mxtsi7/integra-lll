@@ -60,6 +60,11 @@ function responder(cuerpo: unknown) {
 }
 
 describe("getSuscripciones", () => {
+  it('rechaza una lista truncada en vez de entregar totales incompletos', async () => {
+    responder({ ...RESPUESTA_REAL, next: 'hay-otra-pagina' });
+    await expect(getSuscripciones()).rejects.toThrow('calcular los totales');
+    expect(fetch).toHaveBeenCalledTimes(20);
+  });
   it("convierte el monto de texto a numero", async () => {
     responder(RESPUESTA_REAL);
 

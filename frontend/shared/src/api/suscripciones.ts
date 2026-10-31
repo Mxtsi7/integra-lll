@@ -122,6 +122,7 @@ export async function getSuscripciones(consulta: ConsultaSuscripciones = {}): Pr
     );
     todas.push(...respuesta.results);
     if (!respuesta.next) break;
+    if (pagina === MAX_PAGINAS) throw new RangeError('No pudimos cargar todas las suscripciones para calcular los totales.');
   }
 
   return todas.map(desdeLaApi);

@@ -847,7 +847,7 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
             # promete 403.
             if not getattr(request, "organizacion_id", None):
                 raise PermissionDenied("La cabecera X-Organizacion-Id es obligatoria.")
-            serializer = PresupuestoSerializer(data=request.data)
+            serializer = PresupuestoSerializer(data=request.data, context={"organizacion_id": request.organizacion_id})
             serializer.is_valid(raise_exception=True)
             mes = serializer.validated_data["mes"]
             moneda = serializer.validated_data.get("moneda", "CLP")
@@ -864,8 +864,8 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         # GET: Comparar presupuesto vs proyección
         mes_param = request.query_params.get("mes")
         moneda = (request.query_params.get("moneda") or "CLP").upper()
-        if moneda not in {"CLP", "USD"}:
-            raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
+        if not Moneda.objects.filter(codigo=moneda).exists():
+            raise ValidationError({"moneda": "Selecciona una moneda del catálogo."})
 
         inicio, fin, mes = _resolver_rango_mes(mes_param)
 
@@ -986,8 +986,8 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         """GET /api/suscripciones/resumen/ (VI-06 / RF-11 / RF-09)."""
         mes_param = request.query_params.get("mes")
         moneda = (request.query_params.get("moneda") or "CLP").upper()
-        if moneda not in {"CLP", "USD"}:
-            raise ValidationError({"moneda": f"Moneda no válida: '{moneda}'. Opciones: CLP, USD."})
+        if not Moneda.objects.filter(codigo=moneda).exists():
+            raise ValidationError({"moneda": "Selecciona una moneda del catálogo."})
 
         inicio, fin, periodo = _resolver_rango_mes(mes_param)
 
