@@ -6,17 +6,22 @@
 #     docker compose up postgres rabbitmq auth
 # ══════════════════════════════════════════════════════════════════
 
+# Credenciales compartidas explícitas para eventos y limpieza. Usar claves hex.
+x-eventos: &eventos
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-ojoalgasto}:${RABBITMQ_PASSWORD:?Definir RABBITMQ_PASSWORD en .env}@rabbitmq:5672/
+  ELIMINACION_INTERNA_SECRET: ${ELIMINACION_INTERNA_SECRET:?Definir ELIMINACION_INTERNA_SECRET en .env}
+
 services:
 
   # ─── Infraestructura ────────────────────────────────────────────
 
   postgres:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: suscripciones
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports: ["5432:5432"]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
     volumes:
       - datos_postgres:/var/lib/postgresql/data
       # Crea un esquema por servicio en el primer arranque
@@ -27,22 +32,24 @@ services:
       retries: 10
 
   rabbitmq:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: rabbitmq:3.13-management-alpine
-    ports:
-      - "5672:5672"      # protocolo
-      - "15672:15672"    # panel web
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ojoalgasto}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Definir RABBITMQ_PASSWORD en .env}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       retries: 10
 
   redis:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: redis:7-alpine
-    ports: ["6379:6379"]
 
   # ─── Gateway ────────────────────────────────────────────────────
 
   gateway:
+    networks: [web, auth, subscriptions, connectors, analytics, notifications]
     build: ./gateway
     ports: ["8000:8000"]
     env_file: .env
@@ -59,12 +66,13 @@ services:
   # Todos comparten la misma forma: build, env, depends_on, volumes.
 
   auth:
+    networks: [auth]
     build: ./services/auth
-    ports: ["8001:8001"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: auth
-      SEED_DEMO: "1"   # usuario de demostracion al arrancar (solo desarrollo)
+      SEED_DEMO: ${SEED_DEMO:-0}
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
@@ -72,6 +80,7 @@ services:
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   auth-eliminaciones:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     build: ./services/auth
     entrypoint: ["python", "manage.py", "procesar_eliminaciones", "--continuo"]
     restart: unless-stopped
@@ -79,6 +88,7 @@ services:
       disable: true
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: auth
     depends_on:
       auth: { condition: service_healthy }
@@ -89,10 +99,11 @@ services:
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   subscriptions:
+    networks: [subscriptions]
     build: ./services/subscriptions
-    ports: ["8002:8002"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       postgres: { condition: service_healthy }
@@ -104,6 +115,7 @@ services:
   # punto de entrada; no corren migrate (lo hace subscriptions) y arrancan
   # cuando ese ya está sano, así la base está migrada.
   subscriptions-worker:
+    networks: [subscriptions]
     build: ./services/subscriptions
     entrypoint: ["celery", "-A", "config"]
     command: ["worker", "--loglevel=info"]
@@ -116,6 +128,7 @@ services:
       retries: 3
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
@@ -123,6 +136,7 @@ services:
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   subscriptions-beat:
+    networks: [subscriptions]
     build: ./services/subscriptions
     entrypoint: ["celery", "-A", "config"]
     # El archivo de estado de beat va fuera de /app para no aparecer en el repo
@@ -131,6 +145,7 @@ services:
       disable: true
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
@@ -138,10 +153,11 @@ services:
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   connectors:
+    networks: [connectors]
     build: ./services/connectors
-    ports: ["8003:8003"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: connectors
     command: ["python", "manage.py", "runserver", "0.0.0.0:8003"]
     depends_on:
@@ -151,11 +167,22 @@ services:
 
   # Trabajador que ejecuta las sincronizaciones periódicas.
   # Mismo código que connectors, distinto punto de entrada.
+  # La app Celery está en connectors_config/celery.py (D-01). El archivo de
+  # estado de beat va fuera de /app para no aparecer en el repo.
   connectors-worker:
+    networks: [connectors]
     build: ./services/connectors
-    command: celery -A config worker --beat --loglevel=info
+    command: celery -A connectors_config worker --beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    # El healthcheck del Dockerfile es HTTP; un worker no sirve HTTP.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "connectors_config", "inspect", "ping", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: connectors
       APLICAR_MIGRACIONES: "0"
     depends_on:
@@ -164,10 +191,11 @@ services:
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   analytics:
+    networks: [analytics]
     build: ./services/analytics
-    ports: ["8004:8004"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: analytics
     command: ["python", "manage.py", "runserver", "0.0.0.0:8004"]
     depends_on:
@@ -178,6 +206,7 @@ services:
   # Mismo código e imagen que analytics; migra solo el servidor. Si los dos
   # migraran el mismo esquema a la vez, uno muere con UniqueViolation.
   analytics-worker:
+    networks: [analytics]
     build: ./services/analytics
     command: ["python", "manage.py", "consumir_solapamientos"]
     healthcheck:
@@ -185,6 +214,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: analytics
       APLICAR_MIGRACIONES: "0"
     depends_on:
@@ -193,10 +223,11 @@ services:
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
   notifications:
+    networks: [notifications]
     build: ./services/notifications
-    ports: ["8005:8005"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: notifications
     command: ["python", "manage.py", "runserver", "0.0.0.0:8005"]
     depends_on:
@@ -207,6 +238,7 @@ services:
   # ─── Frontend ───────────────────────────────────────────────────
 
   frontend:
+    networks: [web]
     # El contexto es frontend/ entero porque web/ importa shared/.
     # No depende del gateway al arrancar: la web lo llama desde el navegador,
     # no desde el contenedor.
@@ -225,3 +257,13 @@ services:
 
 volumes:
   datos_postgres:
+
+
+# Cada dominio solo comparte red con gateway y sus dependencias.
+networks:
+  web: {}
+  auth: {}
+  subscriptions: {}
+  connectors: {}
+  analytics: {}
+  notifications: {}
