@@ -11,6 +11,8 @@ cat > "$TMP/bin/kubectl" <<'DOBLE'
 set -eu
 printf '%s\n' "$*" >> "$ARGUMENTOS_PRUEBA"
 case "$*" in
+  'get deployment/rabbitmq --ignore-not-found -o json') : ;;
+  'get secret ojoalgasto-bd-'*'jsonpath={.data.DB_PASSWORD}') printf '%064d' 0 | base64 ;;
   'get secret ojoalgasto -o jsonpath={.data.POSTGRES_PASSWORD}') printf cHJ1ZWJhLXBvc3RncmVz ;;
   'get secret ojoalgasto'*) : ;;
   'patch secret ojoalgasto'*)
@@ -29,9 +31,17 @@ case "$*" in
     cat "$archivo" >> "$PARCHES_PRUEBA.json"
     [ "${FALLAR_PARCHE:-0}" != 1 ] ;;
   *'apply -f -') cat >/dev/null ;;
+  'exec -i postgres-0 -- psql'*) cat >/dev/null ;;
 esac
 DOBLE
 chmod +x "$TMP/bin/kubectl"
+# Este arnés solo verifica parches de secretos; el guard del broker se prueba
+# aparte en scripts/tests/test_migracion_rabbitmq.py, también con broker real.
+cat > "$TMP/bin/python3" <<'DOBLE'
+#!/usr/bin/env bash
+[ "$#" = 1 ] && [ "$1" = k8s/actualizar-rabbitmq.py ]
+DOBLE
+chmod +x "$TMP/bin/python3"
 export PATH="$TMP/bin:$PATH"
 export SOLO_APLICAR=1 ETIQUETA=prueba GHCR_TOKEN=registro-ficticio
 if ! bash "$RAIZ/k8s/desplegar.sh" > "$TMP/salida" 2>&1; then

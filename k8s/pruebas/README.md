@@ -26,21 +26,23 @@ También acepta la acción directa: `prueba-de-carga.sh 100`, `… demo`,
 `… liberar`, `… devolver`, `… comprobar`, `… limpiar`, `… explicar`,
 `… companeros`, `… pods`.
 
-El generador corre en otro namespace, con cuota propia y acceso de red al
-Service. El HPA máximo ocupa **12/12 pods, 2688/2752 MiB y 1750/2000m CPU**;
+El generador corre en otro namespace, con cuota propia y acceso a la entrada
+pública (Ingress → web → Gateway). El HPA máximo ocupa **12/12 pods, 2688/2752 MiB y 1750/2000m CPU**;
 sumar `carga-fortio.yaml` localmente exige **13 pods y 2816 MiB** y falla.
 No se apagan consumidores ni el worker de eliminación para la demostración.
 `NS_CARGA` debe ser distinto de `student-forellana` y accesible con tu kubeconfig.
 Si tu cuenta solo accede al namespace de aplicación, otro integrante ejecuta
 [`GUIA-EQUIPO.md`](GUIA-EQUIPO.md) con su cuenta; aquí se observa el panel.
-El manifiesto externo usa el DNS completo y `Host: gateway`. Su cuota y la
-conectividad entre namespaces deben comprobarse antes de la demostración.
+El manifiesto externo usa la URL pública de `/health/`, sin alterar Host.
+Comprobar su cuota, DNS y salida HTTP antes de la demostración.
 
 El CI comprueba explícitamente aplicación y generador externo, y prueba que
 el escenario local excedido devuelve error:
 
 ```bash
 python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
+# El comparador tiene su propio escenario: Job y Secret en student-carga.
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-comparar.yaml --namespace-generador student-carga
 # Debe fallar por pods y memoria:
 python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio.yaml --namespace-generador student-forellana
 ```
@@ -104,12 +106,17 @@ El blanco y la intensidad se editan en `args` dentro del YAML:
 
 | Blanco | Qué atraviesa |
 |---|---|
-| `http://gateway:8000/health/` | solo el gateway, sin tocar la base |
-| `http://auth:8001/health/` | Django + una consulta a Postgres |
-| `http://subscriptions:8002/health/` | ídem, el otro servicio |
+| `http://ojoalgasto-forellana.dev.censei.cl/health/` | Ingress, web y salud de Gateway, sin base de datos |
 
-Correr los tres en ese orden cuenta una historia: cuánto cuesta el gateway,
-cuánto agrega la base, y si los dos servicios se comportan igual.
+Las APIs internas no son blancos autorizados para estos generadores.
+Para medir operaciones de suscripciones usar
+`NS_CARGA=student-carga ./k8s/pruebas/comparar-cola.sh` con `TOKEN_SIN` y
+`TOKEN_CON` de dos organizaciones de prueba distintas y vacías. Mantener el
+contexto de kubectl en la aplicación; solo el Job y su Secret temporal van al
+namespace externo. `40-red.yaml` permite a ese comparador contactar únicamente
+al Gateway por su DNS completo, con `Host: gateway`; este valida la identidad.
+El namespace externo debe existir y tener cuota y permisos para Job/Secret.
+No ejecutar el comparador local: con el HPA máximo excede pods y memoria.
 
 ## Que cada integrante pruebe desde su propio notebook
 
@@ -122,22 +129,10 @@ El paso a paso completo está en [`GUIA-EQUIPO.md`](GUIA-EQUIPO.md).
 Tiene ventaja sobre correrlo todo desde una sola máquina: cada uno gasta **su**
 cuota de CPU, así que el sistema recibe carga real de varios orígenes a la vez.
 
-**Las dos cosas que cambian respecto del uso interno:**
-
-| | Dentro del namespace | Desde otro namespace |
-|---|---|---|
-| URL | `http://gateway:8000` | `http://gateway.student-forellana.svc.cluster.local:8000` |
-| Cabecera | ninguna | `-H "Host: gateway"` |
-
-La cabecera **no es opcional**. Los servicios corren con `DEBUG=False` y Django
-solo acepta los hosts de `ALLOWED_HOSTS`, donde está `gateway` pero no el nombre
-largo. Medido:
-
-```
-gateway:8000                                      ->  200 OK
-gateway.student-forellana.svc.cluster.local:8000  ->  400 Bad Request
-el mismo + Host: gateway                          ->  200 OK
-```
+Desde otro namespace se usa `http://ojoalgasto-forellana.dev.censei.cl/health/`.
+El Ingress conserva el host público; web fija `Host: gateway` hacia el backend.
+Las políticas siguen bloqueando el acceso entre namespaces al Service interno.
+Esta prueba incluye los proxies y la red de entrada.
 
 ## Reglas del namespace que hay que respetar
 

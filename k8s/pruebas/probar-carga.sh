@@ -25,6 +25,6 @@ NS_CARGA=student-carga bash "$RAIZ/k8s/pruebas/estresar.sh" 100 > "$TMP/externa.
 grep -q -- '-n student-carga apply' "$REGISTRO_CARGA"
 if grep -q 'scale' "$REGISTRO_CARGA"; then exit 1; fi
 if grep -v 'config view\|^\-n student-carga ' "$REGISTRO_CARGA" | grep -q .; then exit 1; fi
-grep -q 'gateway.student-forellana.svc.cluster.local:8000/health/' "$MANIFIESTO_CARGA"
-grep -q 'Host: gateway' "$MANIFIESTO_CARGA"
-echo 'Carga externa: namespace, destino, Host y workers correctos'
+grep -q 'http://ojoalgasto-forellana.dev.censei.cl/health/' "$MANIFIESTO_CARGA"
+if grep -q 'Host: gateway\|svc.cluster.local' "$MANIFIESTO_CARGA"; then exit 1; fi
+echo 'Carga externa: namespace, entrada pública y workers correctos'

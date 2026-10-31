@@ -130,3 +130,29 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# ── Celery: el trabajador de connectors (D-01) ──────────────────────
+# `connectors-worker` arranca con `celery -A connectors_config worker --beat`;
+# la app (connectors_config/celery.py) lee de aquí todo lo que empieza con
+# CELERY_.
+#
+# Broker: el Redis de .env. Sin valor por omisión, igual que DATABASE_URL:
+# si falta, el servicio no arranca en vez de buscar un broker inventado. Los
+# resultados van al mismo Redis salvo que CELERY_RESULT_BACKEND diga otro.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_TIMEZONE = TIME_ZONE
+# subscriptions usa el mismo Redis con la cola y el canal de control por
+# omisión ("celery"). Con nombres propios, este worker no le quita las tareas
+# del Temporizador (las descartaría por no conocerlas) y a `inspect ping`
+# solo contestan los workers de connectors.
+CELERY_TASK_DEFAULT_QUEUE = SERVICE_NAME
+CELERY_CONTROL_EXCHANGE = SERVICE_NAME
+# Beat corre dentro del worker (--beat). Por ahora solo el latido; las tareas
+# reales (lectura de correo, FE-13) se programan aquí.
+CELERY_BEAT_SCHEDULE = {
+    "latido-de-connectors": {
+        "task": "connectors.tasks.latido",
+        "schedule": env.float("CONECTORES_LATIDO_SEGUNDOS", default=60.0),
+    },
+}
