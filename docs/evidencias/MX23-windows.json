@@ -1,0 +1,11 @@
+{
+  "plataforma": "Win32",
+  "renderer": true,
+  "nodeAislado": true,
+  "apiUrl": "http://127.0.0.1:8015/api",
+  "estadoApi": 200,
+  "api": {
+    "servicio": "gateway",
+    "estado": "ok"
+  }
+}

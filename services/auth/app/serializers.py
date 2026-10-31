@@ -153,7 +153,7 @@ class UsuarioActualSerializer(serializers.ModelSerializer):
     correo = serializers.EmailField(source="email", read_only=True)
     # Declarado a mano para que salga como texto y no como objeto UUID:
     # si se deja que lo deduzca ModelSerializer queda un ReadOnlyField crudo.
-    organizacion_id = serializers.UUIDField(read_only=True)
+    organizacion_id = serializers.UUIDField(read_only=True, allow_null=True)
     plan = serializers.SerializerMethodField()
 
     @extend_schema_field(serializers.ChoiceField(choices=["free", "premium"]))

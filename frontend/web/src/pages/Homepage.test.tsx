@@ -129,6 +129,33 @@ afterEach(() => {
   cleanup();
 });
 
+it('muestra el total completo y el gasto sin uso separados por moneda', async () => {
+  vi.mocked(getSuscripciones).mockResolvedValue([
+    SPOTIFY,
+    { ...SPOTIFY, id: 'usd', nombre: 'USD', moneda: 'USD', monto: 4.99, estado: 'fantasma' },
+    { ...SPOTIFY, id: 'eur', nombre: 'EUR', moneda: 'EUR', monto: 12.34 },
+  ]);
+  await montar();
+  const resumen = screen.getByRole('region', { name: 'Resumen' });
+  expect(resumen).toHaveTextContent('CLP $5.990 · USD US$4,99 · EUR');
+  expect(resumen).toHaveTextContent('12,34');
+  expect(within(resumen).getByText('Pagas sin usar').parentElement).toHaveTextContent('USD US$4,99');
+  expect(resumen).not.toHaveTextContent('$6.007');
+});
+
+it.each([
+  ['EUR', 5.03, 6, '2,52'],
+  ['CLP', 5.94, 1, '$0'],
+] as const)('Inicio redondea una sola vez las proyecciones anuales en %s', async (moneda, monto, cantidad, esperado) => {
+  vi.mocked(getSuscripciones).mockResolvedValue(Array.from({ length: cantidad }, (_, i) => ({
+    ...SPOTIFY, id: String(i), monto, moneda, frecuencia: 'anual', estado: 'fantasma',
+  })));
+  await montar();
+  const resumen = screen.getByRole('region', { name: 'Resumen' });
+  expect(within(resumen).getByText('Al mes').parentElement).toHaveTextContent(esperado);
+  expect(within(resumen).getByText('Pagas sin usar').parentElement).toHaveTextContent(esperado);
+});
+
 describe("Cambios sin guardar al crear (CH-16)", () => {
   it("un formulario limpio se cierra sin aviso", async () => {
     await montar();
@@ -710,7 +737,8 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
       name: nombre,
       hidden: true,
     });
-  const alMes = () => within(screen.getByRole("region", { name: "Resumen", hidden: true })).getAllByText(/^\$/)[0];
+  const alMes = () =>
+    within(screen.getByRole("region", { name: "Resumen", hidden: true })).getByText("Al mes").nextElementSibling;
   const clic = (elemento: HTMLElement) => act(async () => fireEvent.click(elemento));
   // La confirmación de cancelar es una alerta (role="alertdialog").
   const alerta = () => screen.queryByRole("alertdialog");
@@ -743,7 +771,7 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
     const pendiente = diferida<Suscripcion>();
     vi.mocked(cancelarSuscripcion).mockReturnValueOnce(pendiente.promesa);
     await montar();
-    expect(alMes()).toHaveTextContent("$5.990");
+    expect(alMes()).toHaveTextContent("CLP $5.990");
     await clic(interruptor("Spotify"));
 
     // Los dos clics en el mismo instante, antes de que React vuelva a dibujar:
@@ -772,7 +800,7 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
     // Conteos y gasto salen de la respuesta: ya no hay activas ni gasto al mes.
     expect(chip(/^Activas/)).toBeNull();
     expect(chip(/^Canceladas/)).toHaveTextContent("2");
-    expect(alMes()).toHaveTextContent("$0");
+    expect(alMes()).toHaveTextContent("Sin cobros");
     // Se volvió a pedir la lista y sigue cancelada.
     expect(vi.mocked(getSuscripciones).mock.calls.length).toBeGreaterThan(lecturasAntes);
     expect(interruptor("Spotify")).toHaveAttribute("aria-checked", "false");
@@ -1015,11 +1043,11 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
       fireEvent.click(screen.getByRole("button", { name: "Editar Spotify" }));
       fireEvent.change(enDialogo().getByLabelText("Monto"), { target: { value: "7990" } });
       await act(async () => fireEvent.click(enDialogo().getByRole("button", { name: "Guardar cambios" })));
-      expect(alMes()).toHaveTextContent("$7.990");
+      expect(alMes()).toHaveTextContent("CLP $7.990");
 
       leerAlDia();
       await act(async () => vieja.resolver([{ ...SPOTIFY }, { ...NETFLIX }]));
-      expect(alMes()).toHaveTextContent("$7.990");
+      expect(alMes()).toHaveTextContent("CLP $7.990");
       expect(verSpotify()).toHaveTextContent("$7.990");
     });
 
@@ -1066,7 +1094,7 @@ describe("Interruptor de seguimiento en las tarjetas", () => {
 
       expect(verSpotify()).not.toBeInTheDocument();
       expect(totalSuscripciones()).toHaveTextContent("1");
-      expect(alMes()).toHaveTextContent("$0");
+      expect(alMes()).toHaveTextContent("Sin cobros");
       expect(screen.queryByText(/No pudimos cargar tus suscripciones con estos filtros/)).not.toBeInTheDocument();
       expect(screen.queryByText(MENSAJE_RECARGA)).not.toBeInTheDocument();
     });

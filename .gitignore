@@ -38,6 +38,10 @@ celerybeat-schedule*
 
 # ─── Node / React ─────────────────────────────────────────────
 node_modules/
+frontend/desktop/renderer/
+frontend/desktop/release/
+smoke-desktop.json
+smoke-desktop.png
 dist/
 dist-ssr/
 .vite/

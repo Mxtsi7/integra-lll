@@ -777,7 +777,7 @@ class OutboxEvento(ModeloTenant):
         ]
         verbose_name = "Evento pendiente"
         verbose_name_plural = "Eventos pendientes"
-class Presupuesto(ModeloTenant):
+class Presupuesto(ReferenciasCatalogo, ModeloTenant):
     """Presupuesto mensual definido por una organización para un periodo y moneda (RF-13 / RF-19)."""
 
     mes = models.CharField(
@@ -787,9 +787,6 @@ class Presupuesto(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        # Usar literales en vez de Subscription.Moneda para no romperse
-        # cuando PR #77 elimine ese enum del modelo Subscription.
-        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
         default="CLP",
         verbose_name="Moneda",
     )
@@ -820,6 +817,9 @@ class Presupuesto(ModeloTenant):
     def __str__(self) -> str:
         return f"Presupuesto {self.mes} ({self.moneda}): {self.monto}"
 
+    def catalogos(self):
+        return {"moneda": Moneda}
+
 
 class ResumenOrganizacion(ModeloTenant):
     """Agregado del gasto mensual de una organización, una fila por moneda.
@@ -836,9 +836,6 @@ class ResumenOrganizacion(ModeloTenant):
 
     moneda = models.CharField(
         max_length=3,
-        # Literales igual que en Presupuesto: Subscription.Moneda ya no existe
-        # como enum, la moneda se valida contra el catálogo compartido.
-        choices=[("CLP", "Peso chileno"), ("USD", "Dólar estadounidense")],
         verbose_name="Moneda",
         help_text=(
             "Hay una fila por moneda, no una sola con el total. Sumar CLP y "
