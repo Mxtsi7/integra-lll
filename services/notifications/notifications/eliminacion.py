@@ -5,12 +5,24 @@ from rest_framework.views import APIView
 
 from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView, validar_solicitud_eliminacion
-from .models import Alerta, PreferenciaNotificacion, UsuarioEliminado
+from .models import (
+    Alerta,
+    PreferenciaNotificacion,
+    SuscripcionVigilada,
+    UsuarioEliminado,
+)
 
 
 class LimpiezaNotificationsView(LimpiezaOrganizacionView):
     servicio = "notifications"
-    modelos = (Alerta, PreferenciaNotificacion, UsuarioEliminado)
+    # TODOS los modelos de tenant del servicio, incluida la proyección de
+    # FE-17/18: `SuscripcionVigilada` guarda nombre del servicio, monto y
+    # fecha de cobro, así que dejarla fuera era conservar datos personales
+    # después de confirmar el borrado. Los cuatro son `ModeloTenant` con UUID
+    # suelto y sin FK entre ellos, así que el orden hijo/padre no aplica acá;
+    # `test_eliminacion_proyeccion` exige que la lista cubra los cuatro para
+    # que el próximo modelo no se olvide igual.
+    modelos = (Alerta, PreferenciaNotificacion, SuscripcionVigilada, UsuarioEliminado)
 
 
 class LimpiezaUsuarioNotificationsView(APIView):
