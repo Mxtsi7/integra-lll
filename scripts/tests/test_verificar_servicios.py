@@ -210,3 +210,43 @@ def test_sin_compose_espera_los_puertos_publicados(modulo, monkeypatch):
         f"http://localhost:{puerto}/health/" for puerto in modulo.SERVICIOS.values()
     }
 
+
+def test_gateway_enruta_usa_el_puerto_publicado(modulo, monkeypatch):
+    """El gateway vive en 8000; sin el puerto la prueba pegaba al puerto 80."""
+    capturadas = []
+
+    def urlopen(peticion, timeout):
+        capturadas.append(peticion.full_url)
+        raise modulo.error.HTTPError(
+            peticion.full_url, 401, "Unauthorized", {}, None
+        )
+
+    monkeypatch.setattr(modulo.request, "urlopen", urlopen)
+
+    ok, detalle = modulo._comprobar_gateway_enruta("http://localhost", 1)
+
+    assert ok, detalle
+    assert "401" in detalle
+    assert capturadas == ["http://localhost:8000/api/usuarios/me/"]
+
+
+# ── Estado de Compose tras un reinicio ────────────────────────────────────
+
+
+def test_espera_a_que_compose_salga_de_starting(modulo, monkeypatch):
+    """Tras reiniciar, Docker marca "starting" aunque /health/ ya responda."""
+    salidas = iter([["auth: health=starting"], []])
+    monkeypatch.setattr(modulo, "estado_compose", lambda: next(salidas))
+    monkeypatch.setattr(modulo.time, "sleep", lambda _: None)
+
+    assert modulo.esperar_compose_sano(10, intervalo=0) == []
+
+
+def test_un_problema_distinto_de_starting_no_se_espera(modulo, monkeypatch):
+    dormidas = []
+    monkeypatch.setattr(modulo, "estado_compose", lambda: ["auth: estado exited"])
+    monkeypatch.setattr(modulo.time, "sleep", lambda s: dormidas.append(s))
+
+    assert modulo.esperar_compose_sano(10) == ["auth: estado exited"]
+    assert dormidas == []
+

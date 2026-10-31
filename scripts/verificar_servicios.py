@@ -133,7 +133,7 @@ def _comprobar_gateway_enruta(base: str, timeout: float) -> tuple[bool, str]:
     Un 200 sería peor que un fallo: significaría que el gateway dejó pasar una
     ruta privada sin sesión. Un 404/500 indicaría que el proxy no enruta.
     """
-    url = f"{base}/api/usuarios/me/"
+    url = f"{base}:{SERVICIOS['gateway']}/api/usuarios/me/"
     peticion = request.Request(url, headers={"Accept": "application/json"})
     try:
         with request.urlopen(peticion, timeout=timeout) as respuesta:
@@ -276,6 +276,27 @@ def estado_compose(timeout: float = 60.0) -> list[str]:
     return problemas
 
 
+def esperar_compose_sano(timeout_total: float = 120.0, intervalo: float = 2.0) -> list[str]:
+    """Espera a que `docker compose ps` deje de reportar `health=starting`.
+
+    Tras `docker compose restart` Docker reinicia el estado de salud a
+    "starting" aunque `/health/` ya responda. Sólo se reintenta ese estado
+    transitorio; cualquier otro problema (detenido, ausente, unhealthy) se
+    reporta de inmediato. Si sigue en "starting" al agotarse el plazo, se
+    devuelve como problema.
+    """
+    limite = time.monotonic() + timeout_total
+    problemas = estado_compose()
+    while (
+        problemas
+        and all("health=starting" in problema for problema in problemas)
+        and time.monotonic() < limite
+    ):
+        time.sleep(intervalo)
+        problemas = estado_compose()
+    return problemas
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -334,13 +355,13 @@ def main() -> int:
         return 1
 
     ruta_ok, ruta_detalle = _comprobar_gateway_enruta(base, timeout=10)
-    print(f"  [{'OK  ' if ruta_ok else 'FALLO'}] gateway→auth     {ruta_detalle}")
+    print(f"  [{'OK  ' if ruta_ok else 'FALLO'}] gateway->auth    {ruta_detalle}")
     if not ruta_ok:
         print("\nFALLO: el gateway no está enrutando/validando como se espera.")
         return 1
 
     if not opciones.sin_compose:
-        problemas = estado_compose()
+        problemas = esperar_compose_sano(min(opciones.timeout, 120.0))
         if problemas:
             print("\nFALLO: contenedores fuera de estado esperado:")
             for problema in problemas:
