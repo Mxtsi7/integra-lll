@@ -17,11 +17,14 @@
 # existe. Conserva credenciales: no rota nada, solo deja el broker de acuerdo
 # con el Secret.
 #
-# ── La trampa de la entrada estandar ───────────────────────────────────────
-# El guion remoto se arma en una VARIABLE y se pasa con `sh -c`, no con un
-# heredoc. Un heredoc redirige la entrada de `kubectl exec` y se come la
-# tuberia que trae la clave: `read` llega a fin de archivo y el guion muere
-# con salida 1 sin imprimir nada. Ya paso.
+# ── Dos trampas de la entrada estandar, las dos costaron un intento ────────
+# 1. El guion remoto se arma en una VARIABLE y se pasa con `sh -c`, no con un
+#    heredoc. Un heredoc redirige la entrada de `kubectl exec` y se come la
+#    tuberia que trae la clave.
+# 2. No se mira lo que devuelve `read`, sino si la variable quedo con algo:
+#    `read` falla cuando el dato no termina en salto de linea, y `base64 -d`
+#    nunca lo pone. Mirar su codigo de salida descarta una clave que SI
+#    llego completa.
 set -euo pipefail
 
 SECRETO="ojoalgasto-rabbitmq"
@@ -44,8 +47,15 @@ set -eu
 USUARIO="$1"
 VHOST="$2"
 
-read -r CLAVE || { echo "No llego la clave por la entrada estandar." >&2; exit 1; }
-[ -n "$CLAVE" ] || { echo "La clave del Secret vino vacia." >&2; exit 1; }
+# `read` devuelve FALLO cuando el dato no termina en salto de linea, aunque
+# lo haya leido completo. Y `base64 -d` entrega la clave SIN salto final, asi
+# que su salida siempre cae en ese caso. Por eso no se mira lo que devuelve
+# `read` sino si la variable quedo con algo.
+# Inicializada antes: con `set -u`, si `read` no alcanzara a asignarla, la
+# comprobacion de abajo moriria con "unbound variable" en vez del mensaje.
+CLAVE=""
+IFS= read -r CLAVE || true
+[ -n "$CLAVE" ] || { echo "No llego la clave por la entrada estandar." >&2; exit 1; }
 
 # `list_users` sale separado por tabulacion: usuario y etiquetas.
 if rabbitmqctl --quiet list_users | cut -f1 | grep -qx "$USUARIO"; then
