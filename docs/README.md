@@ -7,6 +7,7 @@ propio módulo** — nadie documenta bien código que no escribió.
 
 ## Qué va en cada carpeta
 
+- [MX-23: cliente Windows, decisión y evidencia](arquitectura/ADR-008-cliente-windows.md).
 - [MX-24: timeout y cuotas IA](flujos/maximiliano-saez/24-limites-ia.md).
 
 ### `flujos/`

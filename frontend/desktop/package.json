@@ -1,0 +1,19 @@
+{
+  "name": "desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cliente Windows MX-23 que reutiliza la web de Ojo al Gasto",
+  "main": "main.cjs",
+  "scripts": {
+    "build": "npm run build --workspace=web && node preparar.cjs",
+    "start": "electron .",
+    "smoke": "electron . --smoke-test",
+    "package:win": "npm run build && node empaquetar.cjs",
+    "typecheck": "node --check main.cjs && node --check preload.cjs && node --check seguridad.cjs",
+    "test": "node --test test/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "@electron/packager": "20.3.0"
+  }
+}

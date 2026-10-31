@@ -21,6 +21,7 @@ export function DashboardPage() {
   const { datos: catalogos } = useCatalogos();
   const { usuario } = useAuth();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
+  const [monedaElegida, setMonedaElegida] = useState('');
 
   useEffect(() => {
     let cancelado = false;
@@ -44,6 +45,12 @@ export function DashboardPage() {
   }, []);
 
   const nombreHogar = usuario ? `Hogar de ${usuario.nombre}` : 'Tu hogar';
+  // Las monedas presentes incluyen históricos inactivos, aun si falla el catálogo.
+  const todas = estado.tipo === 'listo' ? estado.suscripciones : [];
+  const monedas = [...new Set(todas.map((s) => s.moneda))].sort();
+  const moneda = monedas.includes(monedaElegida) ? monedaElegida
+    : monedas.includes('CLP') ? 'CLP' : monedas[0] ?? catalogos?.predeterminados.moneda ?? 'CLP';
+  const delPanel = todas.filter((s) => s.moneda === moneda);
 
   return (
     <AppLayout
@@ -53,25 +60,37 @@ export function DashboardPage() {
       {estado.tipo === 'cargando' && <EsqueletoPanel />}
       {estado.tipo === 'error' && <p className={styles.mensaje}>{estado.mensaje}</p>}
       {estado.tipo === 'listo' && (
-        <div className={styles.grilla}>
+        <>
+        <div className={styles.moneda}>
+          <label htmlFor="moneda-panel">Moneda del panel</label>
+          <select id="moneda-panel" value={moneda} disabled={monedas.length === 0}
+            onChange={(e) => setMonedaElegida(e.target.value)}>
+            {(monedas.length ? monedas : [moneda]).map((codigo) => (
+              <option key={codigo} value={codigo}>{codigo} — {catalogos?.monedas.find((m) => m.codigo === codigo)?.nombre ?? codigo}</option>
+            ))}
+          </select>
+          <span>Cifras, gráficos y exportación en {moneda}.</span>
+        </div>
+        <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
-            <TileResumen suscripciones={estado.suscripciones} nombreHogar={nombreHogar} />
-            <TileSalud suscripciones={estado.suscripciones} />
-            <TileProximo suscripciones={estado.suscripciones} />
+            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} />
+            <TileSalud suscripciones={delPanel} moneda={moneda} />
+            <TileProximo suscripciones={delPanel} />
           </div>
 
           <div className={styles.columnaDerecha}>
             <TileHub
-              suscripciones={estado.suscripciones}
-              alExportar={() => descargarSuscripcionesCsv(estado.suscripciones, 'suscripciones.csv', catalogos ?? undefined)}
+              suscripciones={delPanel} moneda={moneda}
+              alExportar={() => descargarSuscripcionesCsv(delPanel, `suscripciones-${moneda}.csv`, catalogos ?? undefined)}
             />
             <div className={styles.filaInferior}>
-              <TileFantasmas suscripciones={estado.suscripciones} />
-              <TilePruebas suscripciones={estado.suscripciones} />
-              <TileCategorias suscripciones={estado.suscripciones} />
+              <TileFantasmas suscripciones={delPanel} />
+              <TilePruebas suscripciones={delPanel} />
+              <TileCategorias suscripciones={delPanel} moneda={moneda} />
             </div>
           </div>
         </div>
+        </>
       )}
     </AppLayout>
   );

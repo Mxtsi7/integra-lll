@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { Ghost, Leaf, Timer } from 'lucide-react';
 import { useConteo } from '../../hooks/useConteo';
 import { Anillo } from './Medidores';
@@ -6,6 +6,7 @@ import styles from './Tiles.module.css';
 
 interface TileSaludProps {
   suscripciones: Suscripcion[];
+  moneda: string;
 }
 
 /**
@@ -14,21 +15,12 @@ interface TileSaludProps {
  * frase. El anillo es verde cuando casi todo se usa y coral cuando la
  * fuga pesa (más del 10 % del gasto en fantasmas, RN-REC-002).
  */
-export function TileSalud({ suscripciones }: TileSaludProps) {
-  let total = 0;
-  let sinUso = 0;
-  let fantasmas = 0;
-  let pruebas = 0;
-  for (const s of suscripciones) {
-    const mensual = equivalenteMensual(s.monto, s.frecuencia);
-    if (s.estado === 'activo') total += mensual;
-    if (s.estado === 'fantasma') {
-      total += mensual;
-      sinUso += mensual;
-      fantasmas += 1;
-    }
-    if (s.estado === 'prueba') pruebas += 1;
-  }
+export function TileSalud({ suscripciones, moneda }: TileSaludProps) {
+  const sinUsoLista = suscripciones.filter((s) => s.estado === 'fantasma');
+  const total = sumarEquivalentesMensuales(suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma'));
+  const sinUso = sumarEquivalentesMensuales(sinUsoLista);
+  const fantasmas = sinUsoLista.length;
+  const pruebas = suscripciones.filter((s) => s.estado === 'prueba').length;
   const enUso = total > 0 ? Math.round(((total - sinUso) / total) * 100) : 100;
   const fuga = total > 0 ? sinUso / total : 0;
   const sano = fuga <= 0.1;
@@ -71,7 +63,7 @@ export function TileSalud({ suscripciones }: TileSaludProps) {
             <span className={styles.saludDatoTexto}>
               <span className={styles.saludDatoEtiqueta}>Sin uso</span>
               <span className={styles.saludDatoValor}>
-                {formatearMonto(sinUso)} {fantasmas > 0 && `(${fantasmas})`}
+                {formatearMonto(sinUso, moneda)} {fantasmas > 0 && `(${fantasmas})`}
               </span>
             </span>
           </div>

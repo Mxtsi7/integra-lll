@@ -23,6 +23,7 @@
 }
 
 .datoValor {
+  overflow-wrap: anywhere;
   margin-top: 3px;
   font-size: 26px;
   font-weight: 800;
