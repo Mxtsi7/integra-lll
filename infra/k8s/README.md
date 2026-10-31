@@ -1,5 +1,10 @@
 # Despliegue en Kubernetes
 
+Esta carpeta es el borrador de arquitectura. El despliegue activo está en
+[`k8s/`](../../k8s/README.md), con políticas y usuarios por esquema. Ver
+[D-11](../../docs/seguridad-d11.md). `base/config.yaml` contiene solo configuración
+pública; los Secrets reales se crean aparte y no se aplican desde plantillas.
+
 Manifiestos para desplegar el sistema en el clúster que entregue el curso.
 
 > **Docker Compose no se reemplaza.** Compose es para desarrollar en tu

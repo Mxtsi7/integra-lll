@@ -59,6 +59,9 @@ jobs:
       # El gateway valida tokens con esto; auth firmara con lo mismo.
       JWT_SECRET: secreto-solo-para-ci
       JWT_ALGORITMO: HS256
+      # connectors exige el broker de Celery al cargar sus settings (D-01).
+      # Las pruebas no se conectan a él: basta con que la variable exista.
+      CELERY_BROKER_URL: redis://localhost:6379/0
       # PYTHONPATH apunta a la raíz para que resuelva shared/, como en Docker.
       PYTHONPATH: ${{ github.workspace }}
       # Solo subscriptions tiene pruebas contra el broker; en los demás queda
@@ -182,6 +185,7 @@ jobs:
           pip install PyYAML==6.0.3
           python -m unittest discover -s k8s/pruebas -p 'test_presupuesto.py'
           python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-carga
+          python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-comparar.yaml --namespace-generador student-carga
 
       - name: Arnés de la comparación (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-comparar-cola.sh

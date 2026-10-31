@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compara el mismo trabajo hecho con cola y sin cola.
 #
-#     ./k8s/pruebas/comparar-cola.sh
+#     NS_CARGA=student-carga TOKEN_SIN=<access_token> TOKEN_CON=<access_token> ./k8s/pruebas/comparar-cola.sh
 #
 # Qué compara exactamente
 #   Crear una suscripción dispara trabajo derivado: recalcular el resumen de
@@ -16,8 +16,8 @@
 #   Cada POST agrega una suscripción, y el recálculo cuesta más mientras más
 #   suscripciones tiene la organización. Si las dos corridas compartieran
 #   organización, la segunda partiría con todo lo que creó la primera y los
-#   números no se podrían comparar. Por eso cada modo usa un UUID nuevo y se
-#   siembra la misma cantidad de filas en los dos.
+#   números no se podrían comparar. Usar dos cuentas de prueba de organizaciones
+#   distintas y vacías, con sesiones vigentes durante ambas corridas.
 #
 # Qué esperar
 #   Con cola, la latencia del POST baja y se mantiene plana, porque el POST
@@ -26,16 +26,38 @@
 #   punto: la ráfaga deja de ser latencia del usuario y pasa a ser
 #   profundidad de cola.
 #
-# Ojo: NO mide el gateway. Le pega directo al Service de subscriptions, porque
-# el gateway es un proxy síncrono y una cola no puede amortiguarlo (ADR-003).
+# Incluye el coste del gateway: es la entrada confiable (ADR-004).
+# Una cola no amortigua ese proxy síncrono; considerar su techo al elegir QPS.
 set -euo pipefail
 
 DURACION="${DURACION:-30s}"
 CONEXIONES="${CONEXIONES:-8}"
 QPS="${QPS:-60}"
 SEMILLA="${SEMILLA:-500}"   # suscripciones precargadas por organización
+: "${TOKEN_SIN:?Iniciar sesión con la primera cuenta de prueba y definir TOKEN_SIN}"
+: "${TOKEN_CON:?Iniciar sesión con otra organización y definir TOKEN_CON}"
+for token in "$TOKEN_SIN" "$TOKEN_CON"; do
+  [[ "$token" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] || {
+    echo "Token de acceso inválido" >&2; exit 1;
+  }
+done
 
 RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
+: "${NS_CARGA:?Definir NS_CARGA=student-carga (namespace externo autorizado en 40-red.yaml)}"
+NS_APP="$(kubectl config view --minify --output 'jsonpath={..namespace}')"
+NS_APP="${NS_APP:-default}"
+for ns in "$NS_APP" "$NS_CARGA"; do
+  [[ ${#ns} -le 63 && "$ns" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || {
+    echo "Namespace inválido" >&2; exit 1;
+  }
+done
+[ "$NS_CARGA" != "$NS_APP" ] || {
+  echo "El comparador requiere un namespace de carga distinto al de la aplicación (presupuesto HPA)." >&2
+  exit 1
+}
+# Solo el generador y su Secret viven fuera. API, logs y outbox siguen en el
+# namespace del contexto actual. Nunca copiar los Secrets de la aplicación.
+kubectl_carga() { command kubectl -n "$NS_CARGA" "$@"; }
 
 # Cuánto se espera a que se drene el trabajo entre corridas. Configurable para
 # que el arnés (probar-comparar-cola.sh) no tenga que esperar de verdad.
@@ -95,7 +117,8 @@ restaurar() {
     echo "   AVISO: el rollout de $DEPLOYMENT_API tras restaurar no terminó"
     fallas=$((fallas + 1))
   fi
-  kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
+  kubectl_carga delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || fallas=$((fallas + 1))
+  kubectl_carga delete secret carga-comparar-token --ignore-not-found >/dev/null 2>&1 || fallas=$((fallas + 1))
   if [ "$fallas" -gt 0 ]; then
     echo "   LA RESTAURACIÓN NO SE PUDO VERIFICAR ($fallas problema(s)). Revísala a mano:"
     echo "   kubectl get deployment $DEPLOYMENT_API -o yaml | grep -B1 -A1 EVENTOS_ASINCRONOS"
@@ -105,6 +128,8 @@ restaurar() {
   exit "$codigo"
 }
 trap restaurar EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 sembrar() {
   local org="$1"
@@ -112,6 +137,7 @@ sembrar() {
 from datetime import date
 from decimal import Decimal
 from app.models import Subscription
+assert not Subscription.objects.filter(organizacion_id='$org').exists(), 'Usar una organización de prueba vacía'
 Subscription.objects.bulk_create([
     Subscription(organizacion_id='$org', nombre=f'Semilla {i}', monto=Decimal('1000'),
                  moneda='CLP', frecuencia='mensual', fecha_proximo_cobro=date(2026,11,1),
@@ -165,7 +191,7 @@ contar_recalculos() {
 }
 
 correr() {
-  local modo="$1" etiqueta="$2" org="$3"
+  local modo="$1" etiqueta="$2" org="$3" token="$4" salida
 
   echo
   echo "═══ $etiqueta (EVENTOS_ASINCRONOS=$modo) ═══"
@@ -183,15 +209,27 @@ correr() {
   echo "── sembrando $SEMILLA suscripciones ──"
   sembrar "$org"
 
-  kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
-  sed -e "s|ORGANIZACION|$org|g" -e "s|DURACION|$DURACION|g" \
+  kubectl_carga delete job carga-comparar --ignore-not-found >/dev/null
+  # No guardar tokens en manifiestos, argumentos de kubectl ni logs.
+  kubectl_carga delete secret carga-comparar-token --ignore-not-found >/dev/null
+  printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"carga-comparar-token"},"type":"Opaque","stringData":{"token":"%s"}}' \
+    "$token" | kubectl_carga create -f - >/dev/null
+  sed -e "s|DURACION|$DURACION|g" \
       -e "s|CONEXIONES|$CONEXIONES|g" -e "s|CANTIDAD_QPS|$QPS|g" \
-      "$RAIZ/k8s/pruebas/carga-comparar.yaml" | kubectl apply -f - >/dev/null
+      -e "s|gateway.student-forellana.svc.cluster.local|gateway.$NS_APP.svc.cluster.local|g" \
+      "$RAIZ/k8s/pruebas/carga-comparar.yaml" | kubectl_carga apply -f - >/dev/null
 
   echo "── cargando $DURACION ──"
-  kubectl wait --for=condition=complete job/carga-comparar --timeout=300s >/dev/null
-  kubectl logs job/carga-comparar | grep -E "^(Code |All errors|Sockets used)|target .* avg|percentile|Aggregated" || true
-  kubectl delete job carga-comparar --ignore-not-found >/dev/null 2>&1 || true
+  kubectl_carga wait --for=condition=complete job/carga-comparar --timeout=300s >/dev/null
+  salida="$(kubectl_carga logs job/carga-comparar)"
+  # Fortio puede terminar con éxito aun si todas las respuestas son 401/403.
+  if ! printf '%s\n' "$salida" | grep -Eq '^Code 201 : [1-9][0-9]*' \
+     || printf '%s\n' "$salida" | grep -E '^Code ' | grep -Evq '^Code 201 :'; then
+    echo "COMPARACION INVALIDA: se esperaban solo creaciones HTTP 201 (revisar sesión, cuota y permisos)." >&2
+    exit 1
+  fi
+  printf '%s\n' "$salida" | grep -E "^(Code |All errors|Sockets used)|target .* avg|percentile|Aggregated" || true
+  kubectl_carga delete job carga-comparar --ignore-not-found >/dev/null
 
   # El trabajo derivado del modo asincrono ocurre DESPUES de que la carga
   # termino, asi que hay que esperarlo antes de contar y antes de la corrida
@@ -215,41 +253,25 @@ correr() {
 
 echo "Comparación con y sin cola · $DURACION · $CONEXIONES conexiones · $QPS qps"
 echo "Semilla por organización: $SEMILLA suscripciones"
+echo "Aplicación: $NS_APP; generador y Secret temporal: $NS_CARGA (cuota independiente)"
 
-# Git Bash en Windows no tiene /proc ni uuidgen; openssl si (lo usa
-# desplegar.sh). Arma un UUID v4 valido a partir de 16 bytes al azar.
-uuid() {
-  if [ -r /proc/sys/kernel/random/uuid ]; then
-    cat /proc/sys/kernel/random/uuid
-    return
-  fi
-  # Git Bash en Windows no tiene /proc ni uuidgen; openssl si (lo usa
-  # desplegar.sh). Se arma el UUID v4 con expansion de parametros y printf,
-  # NO con sed: la version anterior llevaba bytes de control 0x01..0x05
-  # incrustados donde debian ir las referencias .., y devolvia basura
-  # que no era un UUID. `bash -n` no lo detecta: la sintaxis era valida.
-  local h
-  h=$(openssl rand -hex 16) || return 1
-  local salida
-  salida=$(printf '%s-%s-4%s-a%s-%s' \
-    "${h:0:8}" "${h:8:4}" "${h:13:3}" "${h:17:3}" "${h:20:12}")
-  # Se comprueba antes de devolverlo: sembrar la base con un id invalido
-  # rompe la comparacion mucho mas lejos y cuesta encontrar por que.
-  case "$salida" in
-    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-a[0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
-      printf '%s
-' "$salida" ;;
-    *)
-      echo "uuid(): no se pudo generar un UUID valido ('$salida')" >&2
-      return 1 ;;
-  esac
+organizacion_del_token() {
+  local org
+  # Validar firma y sesión con la misma lógica del gateway.
+  org="$(printf '%s' "$1" | kubectl exec -i deployment/gateway -c gateway -- \
+    python manage.py shell -c 'import sys; from app.identidad import validar; print(validar(sys.stdin.read().strip())["organizacion_id"])' | tail -1 | tr -d '\r')"
+  [[ "$org" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || {
+    echo "La sesión no identifica una organización válida" >&2; return 1;
+  }
+  printf '%s' "$org"
 }
 
-ORG_SIN="$(uuid)"
-ORG_CON="$(uuid)"
+ORG_SIN="$(organizacion_del_token "$TOKEN_SIN")"
+ORG_CON="$(organizacion_del_token "$TOKEN_CON")"
+[ "$ORG_SIN" != "$ORG_CON" ] || { echo "Usar dos organizaciones distintas" >&2; exit 1; }
 
-correr 0 "SIN cola: el POST hace el trabajo" "$ORG_SIN"
-correr 1 "CON cola: el POST solo publica"    "$ORG_CON"
+correr 0 "SIN cola: el POST hace el trabajo" "$ORG_SIN" "$TOKEN_SIN"
+correr 1 "CON cola: el POST solo publica"    "$ORG_CON" "$TOKEN_CON"
 
 echo
 echo "═══ la cola después de la corrida asíncrona ═══"
