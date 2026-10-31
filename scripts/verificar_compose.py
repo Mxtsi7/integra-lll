@@ -5,11 +5,14 @@ No necesita el daemon de Docker: `docker compose config` sólo valida y
 normaliza el YAML. Si el CLI no está instalado, cae a leer `docker-compose.yml`
 con PyYAML. Comprueba lo que un `up` saludable exige:
 
-  · están los 6 servicios HTTP, los 3 workers y la infraestructura;
+  · están los 6 servicios HTTP, los workers y la infraestructura;
   · cada servicio HTTP tiene un healthcheck que pega a /health/;
   · ningún `depends_on: service_healthy` apunta a algo sin healthcheck;
   · el gateway espera a los 6 servicios de dominio;
   · los workers esperan al servicio que aplica las migraciones.
+
+D-11 publica sólo gateway y web: los dominios no exponen puertos al host y su
+`/health/` se comprueba dentro del contenedor (`verificar_servicios.py`).
 
 Uso:
     python scripts/verificar_compose.py
@@ -41,9 +44,16 @@ TRABAJADORES = {
     "subscriptions-beat": "subscriptions",
     "connectors-worker": "connectors",
     "analytics-worker": "analytics",
+    "auth-eliminaciones": "auth",
 }
 INFRAESTRUCTURA = {"postgres", "rabbitmq", "redis"}
-SIN_HEALTHCHECK_PERMITIDO = {"subscriptions-beat"}  # beat no expone canal de consulta
+# Beat y auth-eliminaciones no exponen un canal de consulta. Se exige que
+# declaren `disable: true` y que estén presentes y corriendo (ver
+# scripts/verificar_servicios.py), no que finjan salud.
+SIN_HEALTHCHECK_PERMITIDO = {"subscriptions-beat", "auth-eliminaciones"}
+# D-11: sólo gateway y web publican puerto. Los dominios se alcanzan por la
+# red interna; publicarlos otra vez rompería el aislamiento.
+SERVICIOS_PUBLICOS = {"gateway": 8000}
 
 
 class Fallo(Exception):
@@ -102,9 +112,12 @@ def verificar(datos: dict[str, Any]) -> list[str]:
             continue
         if not healthcheck_http(servicio):
             errores.append(f"{nombre}: sin healthcheck HTTP real hacia /health/")
-        puertos = [str(p) for p in servicio.get("ports") or []]
-        if not any(str(puerto) in p for p in puertos):
-            errores.append(f"{nombre}: no publica el puerto {puerto} ({puertos})")
+        if nombre in SERVICIOS_PUBLICOS:
+            puertos = [str(p) for p in servicio.get("ports") or []]
+            if not any(str(SERVICIOS_PUBLICOS[nombre]) in p for p in puertos):
+                errores.append(
+                    f"{nombre}: no publica el puerto {SERVICIOS_PUBLICOS[nombre]} ({puertos})"
+                )
 
     for nombre in TRABAJADORES:
         servicio = servicios.get(nombre)
@@ -179,7 +192,10 @@ def main() -> int:
     total = len(datos.get("services") or {})
     print(f"OK: {total} servicios, healthchecks y dependencias coherentes.")
     for nombre, puerto in SERVICIOS_HTTP.items():
-        print(f"  · {nombre:15} http://localhost:{puerto}/health/")
+        if nombre in SERVICIOS_PUBLICOS:
+            print(f"  · {nombre:15} http://localhost:{puerto}/health/")
+        else:
+            print(f"  · {nombre:15} http://{nombre}:{puerto}/health/ (red interna, D-11)")
     return 0
 
 

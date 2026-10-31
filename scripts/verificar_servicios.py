@@ -6,6 +6,11 @@ responder su `/health/` (que toca base/Redis) y el gateway tiene que enrutar
 hacia los servicios de dominio. Este script espera a que todo esté sano,
 opcionalmente levanta o reinicia el stack, y falla con un mensaje concreto.
 
+Con Compose (D-11) sólo gateway y web publican puerto: los dominios se
+consultan con `docker compose exec` dentro de su contenedor. El modo
+`--sin-compose` mantiene las comprobaciones HTTP contra puertos publicados,
+por ejemplo con un override local que los exponga en 127.0.0.1.
+
 Uso típico:
 
     # con el stack ya levantado
@@ -99,6 +104,29 @@ def _leer(url: str, timeout: float) -> tuple[bool, str]:
         return False, f"sin respuesta ({motivo})"
 
 
+def _leer_en_contenedor(nombre: str, timeout: float) -> tuple[bool, str]:
+    """GET /health/ dentro del contenedor, sin publicar su puerto (D-11)."""
+    comando = [
+        "docker", "compose", "exec", "-T", nombre,
+        "curl", "-fsS", f"http://localhost:{SERVICIOS[nombre]}/health/",
+    ]
+    try:
+        resultado = subprocess.run(
+            comando,
+            cwd=RAIZ,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"sin respuesta ({exc})"
+    if resultado.returncode != 0:
+        detalle = (resultado.stderr or resultado.stdout).strip()
+        return False, f"curl falló ({detalle[:120] or resultado.returncode})"
+    cuerpo = (resultado.stdout or "").strip()
+    return True, cuerpo[:120] or "200"
+
+
 def _comprobar_gateway_enruta(base: str, timeout: float) -> tuple[bool, str]:
     """Sin token, /api/usuarios/me/ debe dar 401 a través del gateway.
 
@@ -118,15 +146,25 @@ def _comprobar_gateway_enruta(base: str, timeout: float) -> tuple[bool, str]:
         return False, f"sin respuesta ({getattr(exc, 'reason', exc)})"
 
 
-def esperar(base: str, timeout_total: float, intervalo: float = 2.0) -> list[Resultado]:
+def _esperar(
+    timeout_total: float,
+    comprobar,
+    describir,
+    intervalo: float = 2.0,
+) -> list[Resultado]:
+    """Reintenta `comprobar(nombre, timeout)` hasta que todos respondan.
+
+    `comprobar` devuelve `(url, ok, detalle)`; `describir(nombre)` da la URL
+    que se muestra si un servicio nunca llegó a comprobarse.
+    """
     limite = time.monotonic() + timeout_total
     pendientes = set(SERVICIOS)
     ultimo: dict[str, Resultado] = {}
 
     while pendientes and time.monotonic() < limite:
         for nombre in list(pendientes):
-            url = f"{base}:{SERVICIOS[nombre]}/health/"
-            ok, detalle = _leer(url, timeout=min(5.0, max(1.0, limite - time.monotonic())))
+            timeout = min(5.0, max(1.0, limite - time.monotonic()))
+            url, ok, detalle = comprobar(nombre, timeout)
             ultimo[nombre] = Resultado(nombre, url, ok, detalle)
             if ok:
                 pendientes.discard(nombre)
@@ -138,11 +176,42 @@ def esperar(base: str, timeout_total: float, intervalo: float = 2.0) -> list[Res
         resultados.append(
             ultimo.get(
                 nombre,
-                Resultado(nombre, f"{base}:{SERVICIOS[nombre]}/health/", False,
+                Resultado(nombre, describir(nombre), False,
                           "no se alcanzó a comprobar"),
             )
         )
     return resultados
+
+
+def esperar(base: str, timeout_total: float, intervalo: float = 2.0) -> list[Resultado]:
+    """Comprueba los puertos publicados en el host (`--sin-compose`)."""
+
+    def describir(nombre: str) -> str:
+        return f"{base}:{SERVICIOS[nombre]}/health/"
+
+    def comprobar(nombre: str, timeout: float) -> tuple[str, bool, str]:
+        url = describir(nombre)
+        ok, detalle = _leer(url, timeout)
+        return url, ok, detalle
+
+    return _esperar(timeout_total, comprobar, describir, intervalo)
+
+
+def esperar_en_contenedores(timeout_total: float, intervalo: float = 2.0) -> list[Resultado]:
+    """Comprueba `/health/` dentro de cada contenedor (D-11).
+
+    Con Compose sólo gateway y web publican puerto. Los dominios se alcanzan
+    por su red interna, así que se consulta el mismo endpoint desde dentro.
+    """
+
+    def describir(nombre: str) -> str:
+        return f"docker compose exec {nombre} http://localhost:{SERVICIOS[nombre]}/health/"
+
+    def comprobar(nombre: str, timeout: float) -> tuple[str, bool, str]:
+        ok, detalle = _leer_en_contenedor(nombre, timeout)
+        return describir(nombre), ok, detalle
+
+    return _esperar(timeout_total, comprobar, describir, intervalo)
 
 
 def ejecutar_compose(argumentos: list[str], timeout: float = 900.0) -> None:
@@ -211,7 +280,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base", default="http://localhost",
-        help="Host base de los puertos publicados (default: http://localhost)",
+        help="Host base de los puertos publicados en modo --sin-compose "
+             "(default: http://localhost)",
     )
     parser.add_argument(
         "--timeout", type=float, default=180.0,
@@ -234,13 +304,25 @@ def main() -> int:
     base = opciones.base.rstrip("/")
 
     if not opciones.sin_compose:
+        if not shutil.which("docker"):
+            raise SystemExit("FALLO: docker no está en el PATH (usar --sin-compose).")
         if opciones.compose_up:
             ejecutar_compose(["up", "-d", "--build"])
         if opciones.compose_restart:
             ejecutar_compose(["restart"])
 
-    print(f">> esperando /health/ en {base}:8000-8005 (máx. {opciones.timeout:.0f}s)")
-    resultados = esperar(base, opciones.timeout)
+    if opciones.sin_compose:
+        print(
+            f">> esperando /health/ en {base}:8000-8005 "
+            f"(puertos publicados; máx. {opciones.timeout:.0f}s)"
+        )
+        resultados = esperar(base, opciones.timeout)
+    else:
+        print(
+            ">> esperando /health/ dentro de los contenedores "
+            f"(D-11; máx. {opciones.timeout:.0f}s)"
+        )
+        resultados = esperar_en_contenedores(opciones.timeout)
 
     for resultado in resultados:
         marca = "OK  " if resultado.ok else "FALLO"

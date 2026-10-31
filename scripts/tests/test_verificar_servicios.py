@@ -171,3 +171,42 @@ def test_stack_completo_sano_no_reporta_nada(modulo, monkeypatch):
     simular_ps(monkeypatch, modulo, stack_sano())
 
     assert modulo.estado_compose() == []
+
+
+# ── Comprobación de /health/ según el modo ────────────────────────────────
+
+
+def test_esperar_en_contenedores_consulta_dentro_sin_publicar_puertos(modulo, monkeypatch):
+    monkeypatch.setattr(
+        modulo, "_leer_en_contenedor", lambda nombre, timeout: (True, "200")
+    )
+
+    resultados = modulo.esperar_en_contenedores(1, intervalo=0)
+
+    assert all(r.ok for r in resultados)
+    assert all("docker compose exec" in r.url for r in resultados)
+    assert any("auth" in r.url and ":8001/health/" in r.url for r in resultados)
+
+
+def test_esperar_en_contenedores_reporta_el_servicio_caido(modulo, monkeypatch):
+    def leer(nombre, timeout):
+        return (nombre != "auth", "200" if nombre != "auth" else "curl falló")
+
+    monkeypatch.setattr(modulo, "_leer_en_contenedor", leer)
+
+    resultados = modulo.esperar_en_contenedores(0.05, intervalo=0)
+
+    caidos = [r.servicio for r in resultados if not r.ok]
+    assert caidos == ["auth"]
+
+
+def test_sin_compose_espera_los_puertos_publicados(modulo, monkeypatch):
+    monkeypatch.setattr(modulo, "_leer", lambda url, timeout: (True, "200"))
+
+    resultados = modulo.esperar("http://localhost", 1, intervalo=0)
+
+    assert all(r.ok for r in resultados)
+    assert {r.url for r in resultados} == {
+        f"http://localhost:{puerto}/health/" for puerto in modulo.SERVICIOS.values()
+    }
+
