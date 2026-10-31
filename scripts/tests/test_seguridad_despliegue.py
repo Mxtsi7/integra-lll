@@ -87,9 +87,24 @@ def test_red_permite_rutas_necesarias_y_bloquea_suplantacion():
 def test_rabbitmq_usa_secret_y_despliegue_incluye_politicas():
     broker = next(d for d in documentos("k8s/02-redis-rabbitmq.yaml")
                   if d["kind"] == "Deployment" and d["metadata"]["name"] == "rabbitmq")
-    env = broker["spec"]["template"]["spec"]["containers"][0]["env"]
-    assert {e["name"] for e in env} >= {"RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS"}
-    assert all("secretKeyRef" in e["valueFrom"] for e in env)
+    env = {e["name"]: e for e in broker["spec"]["template"]["spec"]["containers"][0]["env"]}
+    credenciales = {"RABBITMQ_DEFAULT_USER", "RABBITMQ_DEFAULT_PASS"}
+    assert credenciales <= set(env)
+    # Las credenciales salen de un Secret, nunca del manifiesto.
+    for nombre in credenciales:
+        assert "secretKeyRef" in env[nombre].get("valueFrom", {}), nombre
+        assert "value" not in env[nombre], nombre
+
+    # La regla era "TODA variable usa secretKeyRef", y eso prohibia tambien
+    # las de ajuste que no son credenciales --RABBITMQ_NODENAME y los
+    # argumentos de la maquina virtual de Erlang, que el broker necesita para
+    # arrancar con la CPU que da la cuota--. Se cambia por lo que de verdad
+    # importa: que ninguna variable con pinta de credencial traiga su valor
+    # escrito en el manifiesto.
+    SOSPECHOSAS = ("PASS", "SECRET", "TOKEN", "KEY", "CLAVE")
+    for nombre, entrada in env.items():
+        if any(palabra in nombre.upper() for palabra in SOSPECHOSAS):
+            assert "value" not in entrada, f"{nombre} trae su valor en el manifiesto"
     script = (RAIZ / "k8s/desplegar.sh").read_text(encoding="utf-8")
     assert "k8s/40-red.yaml" in script
     assert "gh auth token" not in script
