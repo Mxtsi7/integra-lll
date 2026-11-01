@@ -30,6 +30,18 @@
 # Una cola no amortigua ese proxy síncrono; considerar su techo al elegir QPS.
 set -euo pipefail
 
+# Comparación de tiempos desde el computador, sin Job ni namespace adicional.
+if [ "${1:-}" = "--tiempos" ]; then
+  AQUI="$(cd "$(dirname "$0")" && pwd)"
+  for PYTHON_COMPARADOR in python3 python; do
+    if command -v "$PYTHON_COMPARADOR" >/dev/null 2>&1; then
+      exec "$PYTHON_COMPARADOR" "$AQUI/comparar_tiempos.py"
+    fi
+  done
+  echo "El comparador local requiere Python 3.9 o posterior." >&2
+  exit 1
+fi
+
 DURACION="${DURACION:-30s}"
 CONEXIONES="${CONEXIONES:-8}"
 QPS="${QPS:-60}"

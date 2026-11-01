@@ -20,11 +20,12 @@ cluster, explica qué hace cada opción y llama a los demás scripts por ti:
 | 7 Limpiar | borra Jobs de Fortio y el pod de diagnóstico | |
 | 8 Explicar | qué es esto, qué se va a ver y los números de referencia | |
 | 9 Compañeros | los demás lanzan su Fortio (25 qps) desde su namespace; aquí se abre el panel, se muestra el comando que ellos pegan, cuenta regresiva y conteo final | `carga-fortio-otro-namespace.yaml` por URL |
+| 11 Comparar tiempos RabbitMQ | tabla HTTP p50/p95 y finalización del trabajo; generador en el computador, sin pods adicionales | `comparar-cola.sh --tiempos` |
 | 10 Pods y services | todos los pods con READY, estado, reinicios y nodo, más services y deployments, con conteo | `kubectl get pods/svc/deploy` |
 
 También acepta la acción directa: `prueba-de-carga.sh 100`, `… demo`,
 `… liberar`, `… devolver`, `… comprobar`, `… limpiar`, `… explicar`,
-`… companeros`, `… pods`.
+`… companeros`, `… pods`, `… comparar`.
 
 El generador corre en otro namespace, con cuota propia y acceso a la entrada
 pública (Ingress → web → Gateway). El HPA máximo ocupa **12/12 pods, 2688/2752 MiB y 1750/2000m CPU**;
@@ -116,7 +117,7 @@ contexto de kubectl en la aplicación; solo el Job y su Secret temporal van al
 namespace externo. `40-red.yaml` permite a ese comparador contactar únicamente
 al Gateway por su DNS completo, con `Host: gateway`; este valida la identidad.
 El namespace externo debe existir y tener cuota y permisos para Job/Secret.
-No ejecutar el comparador local: con el HPA máximo excede pods y memoria.
+No ejecutar el Job Fortio del comparador dentro del namespace de aplicación: con el HPA máximo excede pods y memoria. La alternativa `--tiempos` siguiente no crea ese Job.
 
 ## Que cada integrante pruebe desde su propio notebook
 
@@ -190,3 +191,62 @@ manifiesto.
 **El techo no es arbitrario.** `gateway` y `subscriptions` llegan a 2
 porque la cuota permite 12 pods y la base son 10. Pedir más réplicas no daría
 más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.
+
+
+## Comparar tiempos con y sin RabbitMQ en la terminal
+
+Para la defensa, usar la opción **11** del menú o la acción `comparar`.
+No modifica la página ni necesita Fortio, otro namespace o nuevos permisos:
+usa el computador actual (Python 3.9+) y los accesos kubectl existentes.
+
+```bash
+export URL_COMPARACION=https://ojoalgasto-forellana.dev.censei.cl
+read -rsp 'Token de la organización SIN: ' TOKEN_SIN; echo
+read -rsp 'Token de la organización CON: ' TOKEN_CON; echo
+export TOKEN_SIN TOKEN_CON
+bash k8s/pruebas/prueba-de-carga.sh comparar
+# Equivalente: bash k8s/pruebas/comparar-cola.sh --tiempos
+unset TOKEN_SIN TOKEN_CON
+```
+
+Preparar dos organizaciones sintéticas distintas **vacías**, sesiones con
+permiso para crear suscripciones y catálogos migrados. La prueba agrega datos;
+no borra suscripciones ni mensajes. Usar cuentas descartables y después seguir
+el flujo normal de eliminación de cuentas. Reservar una ventana sin tráfico,
+despliegues ni otras tandas; Beat, worker y consumidor deben estar activos.
+El outbox y `subscriptions.resumen` deben estar drenados al empezar.
+
+Cada modo hace el mismo recálculo: directo dentro del POST (SIN RabbitMQ para
+ese trabajo) o en el consumidor (CON RabbitMQ). El outbox y el broker siguen
+activos para los otros eventos del contrato: **no es una app con RabbitMQ
+retirado ni una prueba de caída del broker**.
+
+Por defecto: `OPERACIONES=20` por modo/ronda, `REPETICIONES=3`, `CONEXIONES=2`,
+`SEMILLA=100`, `ESPERA=120` segundos por comprobación final. Se alterna el orden;
+ambas organizaciones crecen igual entre rondas. La carga es de concurrencia
+acotada, no de QPS fijo. Se fijan temporalmente ambos HPA a sus réplicas actuales
+y se restauran sus límites y el override exacto de la API al terminar o fallar.
+No cerrar a la fuerza la terminal: usar Ctrl+C y verificar la restauración.
+
+La tabla muestra p50/p95 HTTP (milisegundos), mediana del tiempo observado hasta
+completar el resumen por ronda (segundos), operaciones, errores y variación
+`(CON - SIN) / SIN × 100`. Un valor positivo indica que CON tardó más: no se
+fabrica una mejora. Los percentiles HTTP agrupan todas las peticiones; la
+mediana total usa una duración por ronda. El total empieza antes de los POST
+y termina cuando la BD acredita los eventos, su autor y el resumen correcto;
+incluye la consulta y el sondeo de **1 s**, no seeding/rollouts/restauración.
+Puede sobreestimar el final real por el sondeo y la conexión kubectl. La
+publicación pendiente se espera aparte antes del siguiente modo. Un 201 o una
+cola vacía solos no prueban finalización; fallos invalidan la comparación.
+
+**Memoria:** no se agregan pods, requests/limits ni procesos permanentes. El
+generador consume RAM en el computador; las creaciones y eventos agregan carga
+transitoria a API, BD, consumidor y RabbitMQ. Las comprobaciones abren Django
+shell temporalmente dentro del contenedor API y comparten su límite de RAM;
+no son consumo gratuito. El broker conserva su memoria
+base en ambos modos; esta tabla **no demuestra ahorro de RAM** al retirarlo.
+Las organizaciones conservan datos de prueba hasta su eliminación normal.
+
+El modo Fortio anterior sigue disponible sin `--tiempos`; mide otra ruta
+(Gateway interno) y conserva su requisito de namespace externo autorizado.
+No mezclar sus tiempos con los de esta prueba pública, que incluye los proxies.
