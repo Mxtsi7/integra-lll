@@ -63,6 +63,24 @@ spec:
     - { name: amqp, port: 5672, targetPort: 5672 }
     - { name: panel, port: 15672, targetPort: 15672 }
 ---
+# ── El almacenamiento del broker, que faltaba en el repo ──────────────────
+# Este PVC EXISTE en el cluster desde hace semanas, montado en
+# /var/lib/rabbitmq, pero nadie lo habia declarado: lo agregaron a mano y
+# `kubectl apply` lo conservaba porque no estaba en la ultima configuracion
+# aplicada. Un despliegue limpio desde este repo levantaba un broker EFIMERO
+# sin que nadie se enterara. Lo encontro la revision de la PR.
+#
+# Sin el, fijar RABBITMQ_NODENAME no sirve de nada: no hay datos que
+# conservar entre un pod y el siguiente.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-data
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 1Gi } }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -78,9 +96,28 @@ spec:
     metadata:
       labels: { app: rabbitmq, app.kubernetes.io/part-of: ojoalgasto }
     spec:
+      # ── El hostname TIENE que declararse junto al nodename ───────────────
+      # Erlang necesita resolver la parte de host de `rabbit@<host>`.
+      # Kubernetes escribe `<ip-del-pod> <hostname>` en /etc/hosts, asi que
+      # fijar el hostname es lo que hace resoluble el nodename en CADA pod
+      # nuevo. En el cluster estaba puesto a mano y el manifiesto no lo traia:
+      # un despliegue limpio habria dejado el nodename apuntando a un nombre
+      # que no resuelve, la sonda `ping` habria fallado y el rollout no habria
+      # terminado nunca. Lo encontro la revision de la PR.
+      #
+      # El nombre es feo porque es historico --sale de un pod de hace
+      # semanas-- y la carpeta de datos del PVC lleva ese nombre. Cambiarlo
+      # abandona esa carpeta y arranca un broker vacio, asi que se conserva.
+      # Renombrarlo es un cambio aparte, con su migracion.
+      hostname: rabbitmq-6b6ccf87b9-zcfmp
+      volumes:
+        - name: rabbitmq-data
+          persistentVolumeClaim: { claimName: rabbitmq-data }
       containers:
         - name: rabbitmq
           image: rabbitmq:3.13-management-alpine
+          volumeMounts:
+            - { name: rabbitmq-data, mountPath: /var/lib/rabbitmq }
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
