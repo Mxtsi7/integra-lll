@@ -30,12 +30,31 @@
 # Una cola no amortigua ese proxy síncrono; considerar su techo al elegir QPS.
 set -euo pipefail
 
-# Comparación de tiempos desde el computador, sin Job ni namespace adicional.
-if [ "${1:-}" = "--tiempos" ]; then
+# Comparación y recuperación locales, sin Job ni namespace adicional.
+if [ "$#" -gt 0 ]; then
+  uso_local() {
+    echo "Uso: $0 [--tiempos [--si]|--restaurar]" >&2
+    exit 2
+  }
+  case "$1" in
+    --tiempos)
+      shift
+      if [ "$#" -gt 0 ]; then
+        [ "$#" -eq 1 ] && [ "$1" = "--si" ] || uso_local
+      fi
+      ;;
+    --restaurar) [ "$#" -eq 1 ] || uso_local ;;
+    *) uso_local ;;
+  esac
   AQUI="$(cd "$(dirname "$0")" && pwd)"
+  # El menú exporta MSYS_NO_PATHCONV=1. Python de Windows no entiende /c/...:
+  # heredar el directorio y usar un nombre relativo evita depender de esa conversión.
+  cd "$AQUI"
   for PYTHON_COMPARADOR in python3 python; do
-    if command -v "$PYTHON_COMPARADOR" >/dev/null 2>&1; then
-      exec "$PYTHON_COMPARADOR" "$AQUI/comparar_tiempos.py"
+    # Un alias de Microsoft Store puede existir en PATH sin ejecutar Python.
+    if command -v "$PYTHON_COMPARADOR" >/dev/null 2>&1 \
+       && "$PYTHON_COMPARADOR" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+      exec "$PYTHON_COMPARADOR" -u comparar_tiempos.py "$@"
     fi
   done
   echo "El comparador local requiere Python 3.9 o posterior." >&2

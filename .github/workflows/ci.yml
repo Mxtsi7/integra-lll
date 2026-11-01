@@ -198,7 +198,11 @@ jobs:
         run: bash k8s/pruebas/probar-comparar-cola.sh
 
       - name: Comparador local de tiempos (HTTP real local, sin cluster)
-        run: python -m unittest discover -s scripts/tests -p 'test_comparar_tiempos.py' -v
+        run: |
+          python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_estado_comparador.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_lanzador_comparador.py' -v
 
       - name: Generador externo (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-carga.sh

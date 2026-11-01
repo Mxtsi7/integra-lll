@@ -46,3 +46,19 @@ y no se acredita éxito fuera de ESPERA (RED→GREEN).
 
 Decisión: el total es observado desde el computador e incluye consulta/sondeo;
 no es una medición de CPU ni ahorro de RAM. No se ejecutó contra el clúster.
+
+
+## Correcciones de revisión #141
+
+- [x] Lanzador: probar intérprete real, fallback, ruta relativa, -u; arnés Git Bash.
+- [x] Recuperación: original durable en metadata con resourceVersion, bloqueo de
+      corrida pendiente, --restaurar sin sesiones y verificación de API/HPA/UID.
+- [x] Métricas: marcas por evento, etapas Beat/publicación/evidencia, mínimo/p50/máximo.
+- [x] Menores: aviso/confirmación de Recreate, calentamiento fuera de muestras,
+      exp al inicio y cada fase, grupos aislados durante restauración, reintentos
+      de drenaje y aclaración env_file. Las cuentas con datos parciales siguen
+      requiriendo eliminación normal o cuentas nuevas; no se limpia información.
+
+Decisión técnica: publicado_en se registra después de confirm/close AMQP y puede
+ser posterior al recálculo. Conservar y explicar el signo del desfase, sin
+inventar latencia pura ni truncar negativos. El sondeo no mide duración.

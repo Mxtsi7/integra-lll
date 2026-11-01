@@ -196,8 +196,10 @@ más capacidad: el ReplicaSet recibiría `exceeded quota` y el pod no nacería.
 ## Comparar tiempos con y sin RabbitMQ en la terminal
 
 Para la defensa, usar la opción **11** del menú o la acción `comparar`.
-No modifica la página ni necesita Fortio, otro namespace o nuevos permisos:
-usa el computador actual (Python 3.9+) y los accesos kubectl existentes.
+Genera desde el computador actual (Python 3.9+) contra la URL pública; no
+requiere Fortio, otro namespace ni reservas adicionales de pods/CPU/RAM.
+El lanzador verifica que Python realmente ejecuta (evita el alias de Microsoft
+Store), usa una ruta relativa compatible con Git Bash y salida sin búfer.
 
 ```bash
 export URL_COMPARACION=https://ojoalgasto-forellana.dev.censei.cl
@@ -209,44 +211,99 @@ bash k8s/pruebas/prueba-de-carga.sh comparar
 unset TOKEN_SIN TOKEN_CON
 ```
 
+**La prueba reinicia la API pública al cambiar de modo.** `Recreate` reemplaza
+su pod y provoca interrupciones temporales, también al restaurar el modo.
+No aumenta el número de pods concurrentes, pero sí crea pods de reemplazo.
+La terminal avisa y exige escribir `SI` antes de acceder al clúster. Para una
+ventana controlada ya autorizada y no interactiva:
+`bash k8s/pruebas/comparar-cola.sh --tiempos --si`.
+
 Preparar dos organizaciones sintéticas distintas **vacías**, sesiones con
-permiso para crear suscripciones y catálogos migrados. La prueba agrega datos;
-no borra suscripciones ni mensajes. Usar cuentas descartables y después seguir
-el flujo normal de eliminación de cuentas. Reservar una ventana sin tráfico,
-despliegues ni otras tandas; Beat, worker y consumidor deben estar activos.
-El outbox y `subscriptions.resumen` deben estar drenados al empezar.
+permiso para crear suscripciones y catálogos migrados. Se revisa `exp` al
+empezar y antes de cada fase: deben quedar al menos dos minutos; esto no
+sustituye la validación de firma/revocación del Gateway. Un fallo puede dejar
+datos parciales; no se reutilizan organizaciones no vacías ni se borran datos
+sin permiso. Renovar sesiones y usar cuentas nuevas, o eliminar las anteriores
+por el flujo normal. No se borra outbox ni se purgan colas para aparentar éxito.
+
+Reservar una ventana sin tráfico, despliegues ni otras tandas. Beat, worker y
+consumidor deben estar activos. Se espera el drenaje del outbox y de
+`subscriptions.resumen` con reintentos acotados, no una única lectura.
 
 Cada modo hace el mismo recálculo: directo dentro del POST (SIN RabbitMQ para
 ese trabajo) o en el consumidor (CON RabbitMQ). El outbox y el broker siguen
-activos para los otros eventos del contrato: **no es una app con RabbitMQ
-retirado ni una prueba de caída del broker**.
+activos para los otros eventos del contrato: **no es una app con el broker
+retirado ni una prueba de caída de RabbitMQ**.
 
-Por defecto: `OPERACIONES=20` por modo/ronda, `REPETICIONES=3`, `CONEXIONES=2`,
-`SEMILLA=100`, `ESPERA=120` segundos por comprobación final. Se alterna el orden;
-ambas organizaciones crecen igual entre rondas. La carga es de concurrencia
-acotada, no de QPS fijo. Se fijan temporalmente ambos HPA a sus réplicas actuales
-y se restauran sus límites y el override exacto de la API al terminar o fallar.
-No cerrar a la fuerza la terminal: usar Ctrl+C y verificar la restauración.
+Por defecto: `OPERACIONES=20` medidas por modo/ronda, `REPETICIONES=3`,
+`CONEXIONES=2`, `SEMILLA=100`, `CALENTAMIENTO=2`, `ESPERA=120` segundos por
+comprobación final. Los POST de calentamiento usan otra correlación, se espera
+su resultado y drenaje y se excluyen de las muestras. Ambas organizaciones
+crecen igual, incluido el calentamiento; el orden de los modos alterna.
+La carga tiene concurrencia acotada, no QPS fijo.
 
-La tabla muestra p50/p95 HTTP (milisegundos), mediana del tiempo observado hasta
-completar el resumen por ronda (segundos), operaciones, errores y variación
-`(CON - SIN) / SIN × 100`. Un valor positivo indica que CON tardó más: no se
-fabrica una mejora. Los percentiles HTTP agrupan todas las peticiones; la
-mediana total usa una duración por ronda. El total empieza antes de los POST
-y termina cuando la BD acredita los eventos, su autor y el resumen correcto;
-incluye la consulta y el sondeo de **1 s**, no seeding/rollouts/restauración.
-Puede sobreestimar el final real por el sondeo y la conexión kubectl. La
-publicación pendiente se espera aparte antes del siguiente modo. Un 201 o una
-cola vacía solos no prueban finalización; fallos invalidan la comparación.
+### Qué significan los tiempos
 
-**Memoria:** no se agregan pods, requests/limits ni procesos permanentes. El
-generador consume RAM en el computador; las creaciones y eventos agregan carga
-transitoria a API, BD, consumidor y RabbitMQ. Las comprobaciones abren Django
-shell temporalmente dentro del contenedor API y comparten su límite de RAM;
-no son consumo gratuito. El broker conserva su memoria
-base en ambos modos; esta tabla **no demuestra ahorro de RAM** al retirarlo.
-Las organizaciones conservan datos de prueba hasta su eliminación normal.
+| Fila | Medición y límite |
+|---|---|
+| HTTP p50/p95 (ms) | Reloj monotónico del computador, petición completa. Incluye proxies/red y trabajo síncrono. |
+| Lote eventos→resumen BD (s), mínimo/p50/máximo | `max(TrabajoDerivado.hecho_en) - min(OutboxEvento.ocurrido_en)` por correlación. Excluye el sondeo, calentamiento, seeding y rollouts; empieza al registrar el primer evento, no al entrar el primer HTTP. |
+| Outbox/Beat→marca publicación (ms), mínimo/p50/máximo | `publicado_en - ocurrido_en` por evento CON. Incluye el ciclo de Beat **cada 10 s**, despacho y confirmación; no es tiempo puro del broker. |
+| Marca publicación→evidencia (ms), mínimo/p50/máximo | `hecho_en - publicado_en` por evento CON: desfase firmado entre marcas persistidas, no latencia AMQP aislada. |
 
-El modo Fortio anterior sigue disponible sin `--tiempos`; mide otra ruta
-(Gateway interno) y conserva su requisito de namespace externo autorizado.
-No mezclar sus tiempos con los de esta prueba pública, que incluye los proxies.
+**La espera de Beat no se atribuye al costo de RabbitMQ.** Las tres rondas
+pueden caer en diferentes fases de su ciclo de diez segundos; se exponen
+mínimo y máximo junto con la mediana. Los percentiles HTTP agrupan peticiones;
+las estadísticas del lote usan una duración por ronda; las etapas CON usan
+una duración por evento. No se suman medianas de etapas para construir un total.
+
+`despacho.py` guarda `publicado_en` después de recibir el confirm y cerrar la
+conexión AMQP. El consumidor puede acreditar antes: el último desfase puede
+ser negativo por **solapamiento**, que se cuenta y muestra sin truncarlo a
+cero. No implica viaje hacia atrás ni una mejora de RabbitMQ. Las marcas las
+generan procesos de aplicación y requieren relojes sincronizados; no son
+marcas del commit de PostgreSQL ni un perfil interno del broker.
+
+El sondeo sirve solo para acreditar cantidades, autores y resumen final; no
+se suma a los tiempos BD aunque arranque Django o tarde varios segundos.
+Se espera además la publicación antes de seguir. Cualquier error, falta de
+evidencia o vencimiento invalida la comparación. La variación usa
+`(CON - SIN) / SIN × 100`: positivo significa que CON tardó más.
+
+### Recuperación después de cerrar la ventana
+
+Antes de cambiar HPA o modo se guarda el original en la anotación
+`ojoalgasto.cl/comparador-original` de la **metadata del Deployment**, sin
+provocar rollout. Contiene HPA, UID de objetos y forma exacta del override de
+API (ausente/literal/valueFrom), **sin tokens**. La creación usa la versión
+del objeto para impedir que dos procesos adquieran el respaldo a la vez.
+
+Una ejecución nueva rechaza una marca pendiente. Incluso si el proceso murió
+por SIGKILL o se cerró el computador, recuperar desde el mismo contexto y
+namespace, sin URL ni sesiones:
+
+```bash
+bash k8s/pruebas/comparar-cola.sh --restaurar
+```
+
+Se restauran y comprueban API y HPA antes de retirar la marca. Si algo falla,
+se conserva y se imprimen los valores originales y comandos Bash exactos para
+repararlos; reintentar `--restaurar` para verificar y limpiar. No quitar la
+anotación a mano ni iniciar una comparación sobre el estado dañado.
+Se rechaza también un HPA previamente fijado o un literal de API ajeno al
+manifiesto; estados heredados sin respaldo deben conciliarse con la
+configuración aprobada antes de medir, sin adivinar sus valores anteriores.
+
+Ctrl+C, SIGTERM y SIGHUP intentan recuperación automática. Durante esa limpieza
+se difieren las señales y los kubectl corren en un grupo independiente para
+que Ctrl+C de la terminal no mate al comando que está restaurando. SIGKILL
+no admite limpieza automática: para eso existe el respaldo durable.
+
+**Memoria:** no se agregan reservas ni procesos permanentes. El generador usa
+RAM del computador; las operaciones y las verificaciones Django temporales
+consumen dentro de los límites existentes de API/BD/consumidor/RabbitMQ. El
+broker conserva su memoria base en ambos modos: **la tabla no demuestra ahorro
+de RAM al retirarlo**. Los datos sintéticos permanecen hasta eliminarlos.
+
+El modo Fortio anterior sigue sin `--tiempos` y conserva su namespace externo.
+Mide Gateway interno; no mezclar esos tiempos con esta prueba pública.

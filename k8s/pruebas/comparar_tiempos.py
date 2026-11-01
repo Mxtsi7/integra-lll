@@ -1,4 +1,6 @@
 """Comparación local y acotada del recálculo directo frente al consumidor AMQP."""
+import argparse
+import base64
 import json
 import math
 import os
@@ -15,6 +17,9 @@ from decimal import Decimal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from estado_comparador import EstadoComparador, bandera
+from metricas_comparador import metricas_eventos
 
 
 class SinRedireccion(HTTPRedirectHandler):
@@ -34,6 +39,18 @@ def diferencia(sin, con):
     return f'{(con - sin) / sin * 100:+.1f}%' if sin else 'N/D'
 
 
+def validar_vigencia(tokens, margen=120):
+    # Solo evita empezar con una sesión a punto de expirar; Gateway verifica firma y revocación.
+    for token in tokens:
+        try:
+            payload = token.split('.')[1]
+            exp = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))['exp']
+            if type(exp) not in (int, float) or not math.isfinite(exp) or exp < time.time() + margen:
+                raise ValueError()
+        except (ValueError, KeyError, IndexError, TypeError) as error:
+            raise ValueError('Sesión expirada, inválida o con menos de 2 minutos de vigencia; renovar ambos tokens.') from error
+
+
 def configuracion():
     base = os.environ.get('URL_COMPARACION', '')
     url = urlsplit(base)
@@ -49,11 +66,13 @@ def configuracion():
     for nombre, defecto, minimo, maximo in (
         ('OPERACIONES', 20, 1, 1000), ('REPETICIONES', 3, 1, 10),
         ('CONEXIONES', 2, 1, 8), ('SEMILLA', 100, 0, 10000), ('ESPERA', 120, 1, 600),
+        ('CALENTAMIENTO', 2, 0, 20),
     ):
         valor = int(os.environ.get(nombre, str(defecto)))
         if not minimo <= valor <= maximo:
             raise ValueError(f'{nombre} debe estar entre {minimo} y {maximo}.')
         cfg[nombre.lower()] = valor
+    validar_vigencia(cfg['tokens'])
     return cfg
 
 
@@ -82,10 +101,16 @@ def carga(url, token, correlacion, cantidad, conexiones):
         return list(pool.map(peticion, range(cantidad)))
 
 
-def comando(argumentos, entrada=None, timeout=190):
+def comando(argumentos, entrada=None, timeout=190, aislar=False):
+    opciones = {}
+    if aislar:
+        if os.name == 'nt':
+            opciones['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            opciones['start_new_session'] = True
     try:
         return subprocess.run(argumentos, input=entrada, text=True, capture_output=True,
-                              check=True, timeout=timeout).stdout
+                              check=True, timeout=timeout, **opciones).stdout
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
         # stderr puede incluir datos de sesión. No imprimirlo ni mostrar stdin.
         raise RuntimeError('Falló kubectl: comprobar conexión, permisos y estado del clúster.') from error
@@ -97,11 +122,12 @@ class Cluster:
         ns = comando(['kubectl', '--context', contexto, 'config', 'view', '--minify',
                       '-o', 'jsonpath={..namespace}']).strip() or 'default'
         self.prefijo = ['kubectl', '--context', contexto, '-n', ns]
-        self.hpas, self.cambio_api, self.original = [], False, None
+        self.estado = EstadoComparador(self.k)
+        self.limpiando = False
         self.recursos = {}
 
     def k(self, *argumentos, entrada=None, timeout=190):
-        return comando(self.prefijo + list(argumentos), entrada, timeout)
+        return comando(self.prefijo + list(argumentos), entrada, timeout, aislar=self.limpiando)
 
     def db(self, codigo, timeout=190):
         salida = self.k('exec', '-i', 'deployment/subscriptions', '-c', 'subscriptions', '--',
@@ -137,32 +163,48 @@ class Cluster:
             if replicas < 1 or any(d['status'].get(c, 0) != replicas for c in
                                     ('readyReplicas', 'updatedReplicas', 'availableReplicas')):
                 raise RuntimeError(f'{nombre} debe estar estable y activo, incluido Beat.')
-        api = por_nombre['subscriptions']['spec']['template']['spec']['containers']
-        self.original = next((e for c in api if c['name'] == 'subscriptions'
-                              for e in c.get('env', []) if e['name'] == 'EVENTOS_ASINCRONOS'), None)
+        api = por_nombre['subscriptions']
+        self.estado.comprobar_limpio(api)
+        original = bandera(api)
+        if original and 'value' in original:
+            manifiesto = json.loads(api['metadata'].get('annotations', {}).get(
+                'kubectl.kubernetes.io/last-applied-configuration', '{}'))
+            declarado = bandera(manifiesto) if manifiesto.get('spec') else None
+            if original != declarado:
+                raise RuntimeError('EVENTOS_ASINCRONOS literal no declarado: revisar configuración o recuperar con --restaurar.')
         for nombre in ('gateway', 'subscriptions'):
             self.recursos[nombre] = por_nombre[nombre]['spec']
-        # Guardar antes de cada escritura permite restaurar incluso una respuesta ambigua.
-        for hpa in json.loads(self.k('get', 'hpa', '-o', 'json'))['items']:
-            objetivo = hpa['spec']['scaleTargetRef']['name']
-            if objetivo in self.recursos:
-                nombre = hpa['metadata']['name']
-                original = {k: hpa['spec'].get(k) for k in ('minReplicas', 'maxReplicas')}
-                self.hpas.append((nombre, original))
-                n = self.recursos[objetivo]['replicas']
-                self.k('patch', 'hpa', nombre, '--type=merge', '-p',
-                       json.dumps({'spec': dict(minReplicas=n, maxReplicas=n)}))
+        hpas = [h for h in json.loads(self.k('get', 'hpa', '-o', 'json'))['items']
+                if h['spec']['scaleTargetRef']['name'] in self.recursos]
+        for h in hpas:
+            if h['spec'].get('minReplicas', 1) >= h['spec']['maxReplicas']:
+                raise RuntimeError('HPA ya fijado: recuperar --restaurar o conciliarlo con el manifiesto antes de medir.')
+        # Toda la configuración queda durable ANTES de congelar HPA o cambiar el modo.
+        self.estado.guardar(api, hpas)
+        for h in hpas:
+            n = self.recursos[h['spec']['scaleTargetRef']['name']]['replicas']
+            self.k('patch', 'hpa', h['metadata']['name'], '--type=merge', '-p',
+                   json.dumps({'spec': dict(minReplicas=n, maxReplicas=n)}))
         self.drenar()
 
-    def drenar(self):
-        pendientes = self.db('print("COMPARADOR=" + json.dumps('
-                            'OutboxEvento.objects.filter(publicado_en__isnull=True).count()))')
-        colas = self.k('exec', 'deployment/rabbitmq', '--', 'rabbitmqctl',
-                       'list_queues', 'name', 'messages', '--quiet')
-        resumen = [l.split()[1] for l in colas.splitlines()
-                   if len(l.split()) == 2 and l.split()[0] == 'subscriptions.resumen']
-        if pendientes != 0 or resumen != ['0']:
-            raise RuntimeError('Esperar al drenaje de outbox y subscriptions.resumen antes de comparar.')
+    def drenar(self, espera=120):
+        limite = time.monotonic() + espera
+        while True:
+            restante = limite - time.monotonic()
+            if restante <= 0:
+                raise RuntimeError('No se drenaron outbox y subscriptions.resumen dentro del plazo.')
+            pendientes = self.db('print("COMPARADOR=" + json.dumps('
+                                'OutboxEvento.objects.filter(publicado_en__isnull=True).count()))', timeout=restante)
+            restante = limite - time.monotonic()
+            if restante <= 0:
+                raise RuntimeError('No se drenó el outbox dentro del plazo.')
+            colas = self.k('exec', 'deployment/rabbitmq', '--', 'rabbitmqctl',
+                           'list_queues', 'name', 'messages', '--quiet', timeout=restante)
+            resumen = [l.split()[1] for l in colas.splitlines()
+                       if len(l.split()) == 2 and l.split()[0] == 'subscriptions.resumen']
+            if time.monotonic() < limite and pendientes == 0 and resumen == ['0']:
+                return
+            time.sleep(min(1, max(0, limite - time.monotonic())))
 
     def sembrar(self, organizacion, cantidad):
         self.db('from datetime import date\nfrom decimal import Decimal\n'
@@ -172,7 +214,6 @@ class Cluster:
                 f'for i in range({cantidad})], batch_size=100)\nprint("COMPARADOR=null")')
 
     def modo(self, modo):
-        self.cambio_api = True
         self.k('set', 'env', 'deployment/subscriptions', '--containers=subscriptions',
                f'EVENTOS_ASINCRONOS={modo}')
         self.k('rollout', 'status', 'deployment/subscriptions', '--timeout=180s')
@@ -188,7 +229,7 @@ class Cluster:
                 raise RuntimeError('Cambiaron réplicas, recursos o imágenes: comparación inválida.')
 
     def esperar(self, org, correlacion, cantidad, total, operaciones, modo, espera):
-        limite, fin = time.monotonic() + espera, None
+        limite = time.monotonic() + espera
         autor = 'consumidor' if modo else 'api'
         while True:
             restante = limite - time.monotonic()
@@ -197,12 +238,14 @@ class Cluster:
             estado = self.db(
                 f'e = OutboxEvento.objects.filter(organizacion_id={org!r}, correlation_id={correlacion!r}, evento="suscripcion.creada")\n'
                 't = TrabajoDerivado.objects.filter(evento_id__in=e.values("id"), trabajo="resumen_organizacion")\n'
+                'trabajos = {str(x.evento_id): x.hecho_en for x in t}\n'
+                'filas = [dict(evento_id=str(x.id), ocurrido_en=x.ocurrido_en, publicado_en=x.publicado_en, hecho_en=trabajos.get(str(x.id))) for x in e]\n'
                 f'r = ResumenOrganizacion.objects.filter(organizacion_id={org!r})\n'
                 'print("COMPARADOR=" + json.dumps(dict(eventos=e.count(), hechos=t.count(), '
                 f'incorrectos=t.exclude(hecho_por={autor!r}).count(), '
-                'pendientes=e.filter(publicado_en__isnull=True).count(), '
+                'pendientes=sum(x.publicado_en is None for x in e), '
                 f'cantidad=Subscription.objects.filter(organizacion_id={org!r}).count(), '
-                'resumen=list(r.values("moneda", "cantidad_activas", "total_mensual"))), default=str))', timeout=restante)
+                'filas=filas, resumen=list(r.values("moneda", "cantidad_activas", "total_mensual"))), default=str))', timeout=restante)
             observado = time.monotonic()
             if observado >= limite:
                 raise RuntimeError('No se pudo acreditar todo el trabajo dentro del plazo.')
@@ -213,10 +256,8 @@ class Cluster:
                         and estado['cantidad'] == cantidad and len(resumen) == 1
                         and resumen[0]['moneda'] == 'CLP' and resumen[0]['cantidad_activas'] == cantidad
                         and Decimal(resumen[0]['total_mensual']) == Decimal(total))
-            if completo and fin is None:
-                fin = observado
-            if fin is not None and estado['pendientes'] == 0:
-                return fin
+            if completo and estado['pendientes'] == 0:
+                return metricas_eventos(estado['filas'], modo)
             time.sleep(min(1, limite - observado))
 
     def restaurar(self):
@@ -225,66 +266,65 @@ class Cluster:
         def diferir(*_):
             recibidas.append(True)
         try:
-            for senal in (signal.SIGINT, signal.SIGTERM):
+            senales = [signal.SIGINT, signal.SIGTERM]
+            if hasattr(signal, 'SIGHUP'):
+                senales.append(signal.SIGHUP)
+            for senal in senales:
                 anteriores[senal] = signal.signal(senal, diferir)
-            self._restaurar()
+            self.limpiando = True
+            self.estado.restaurar()
+        except RuntimeError:
+            print('Recuperación pendiente. Original y comandos exactos (sin tokens):', file=sys.stderr)
+            for c in self.estado.comandos(self.prefijo):
+                print(c, file=sys.stderr)
+            raise
         finally:
+            self.limpiando = False
             for senal, manejador in anteriores.items():
                 signal.signal(senal, manejador)
         if recibidas:
             raise KeyboardInterrupt()
 
-    def _restaurar(self):
-        fallos = []
-        if self.cambio_api:
-            try:
-                if self.original is None:
-                    self.k('set', 'env', 'deployment/subscriptions', '--containers=subscriptions', 'EVENTOS_ASINCRONOS-')
-                else:
-                    entrada = dict(name='EVENTOS_ASINCRONOS', value=None, valueFrom=None)
-                    entrada.update(self.original)
-                    parche = {'spec': {'template': {'spec': {'containers': [
-                        {'name': 'subscriptions', 'env': [entrada]}]}}}}
-                    self.k('patch', 'deployment/subscriptions', '--type=strategic', '-p', json.dumps(parche))
-                self.k('rollout', 'status', 'deployment/subscriptions', '--timeout=180s')
-            except RuntimeError:
-                fallos.append('deployment/subscriptions (EVENTOS_ASINCRONOS)')
-        for nombre, spec in reversed(self.hpas):
-            try:
-                self.k('patch', 'hpa', nombre, '--type=merge', '-p', json.dumps({'spec': spec}))
-            except RuntimeError:
-                fallos.append('hpa/' + nombre)
-        if fallos:
-            raise RuntimeError('No se pudo restaurar: ' + ', '.join(fallos) + '. Revisar antes de volver a ejecutar.')
-
 
 def comparar(cfg, cluster, generador=carga):
-    resultados = [dict(latencias=[], totales=[]), dict(latencias=[], totales=[])]
+    resultados = [dict(latencias=[], totales=[], outbox=[], posterior=[], solapados=0) for _ in range(2)]
+    calentamiento = cfg.get('calentamiento', 0)
     try:
+        validar_vigencia(cfg['tokens'])
         organizaciones = cluster.organizaciones(cfg['tokens'])
         cluster.preparar()
         for org in organizaciones:
             cluster.sembrar(org, cfg['semilla'])
         for ronda in range(cfg['repeticiones']):
             for modo in ((0, 1) if ronda % 2 == 0 else (1, 0)):
+                validar_vigencia(cfg['tokens'])
                 cluster.modo(modo)
                 cluster.verificar()
-                correlacion = str(uuid.uuid4())
                 print(f'Ronda {ronda + 1}/{cfg["repeticiones"]}: ' +
                       ('CON RabbitMQ' if modo else 'SIN RabbitMQ en el recálculo'), flush=True)
-                inicio = time.monotonic()
-                respuestas = generador(cfg['url'], cfg['tokens'][modo], correlacion,
-                                        cfg['operaciones'], cfg['conexiones'])
-                codigos = Counter(r[0] for r in respuestas)
-                if codigos != {201: cfg['operaciones']}:
-                    raise RuntimeError(f'Comparación inválida: respuestas HTTP {dict(codigos)}; no se sigue.')
-                cantidad = cfg['semilla'] + (ronda + 1) * cfg['operaciones']
-                total = cfg['semilla'] * 1000 + (ronda + 1) * cfg['operaciones'] * 9990
-                fin = cluster.esperar(organizaciones[modo], correlacion, cantidad, total,
-                                      cfg['operaciones'], modo, cfg['espera'])
-                cluster.verificar()
-                resultados[modo]['latencias'].extend(r[1] for r in respuestas)
-                resultados[modo]['totales'].append(fin - inicio)
+                previas = ronda * (cfg['operaciones'] + calentamiento)
+                fases = [(calentamiento, False), (cfg['operaciones'], True)] if calentamiento else [(cfg['operaciones'], True)]
+                for n, medido in fases:
+                    validar_vigencia(cfg['tokens'])
+                    correlacion = str(uuid.uuid4())
+                    respuestas = generador(cfg['url'], cfg['tokens'][modo], correlacion, n, cfg['conexiones'])
+                    codigos = Counter(r[0] for r in respuestas)
+                    if codigos != {201: n}:
+                        raise RuntimeError(f'Comparación inválida: respuestas HTTP {dict(codigos)}; no se sigue.')
+                    previas += n
+                    cantidad = cfg['semilla'] + previas
+                    total = cfg['semilla'] * 1000 + previas * 9990
+                    tiempos = cluster.esperar(organizaciones[modo], correlacion, cantidad, total, n, modo, cfg['espera'])
+                    cluster.verificar()
+                    if not medido:
+                        cluster.drenar()
+                        continue
+                    r = resultados[modo]
+                    r['latencias'].extend(r[1] for r in respuestas)
+                    r['totales'].append(tiempos['lote_s'])
+                    r['outbox'].extend(tiempos['outbox_ms'])
+                    r['posterior'].extend(tiempos['posterior_ms'])
+                    r['solapados'] += tiempos['solapados']
     finally:
         cluster.restaurar()
     return resultados
@@ -296,31 +336,57 @@ def mostrar(resultados):
     for etiqueta, a, b in (
         ('Respuesta HTTP p50 (ms)', percentil(sin['latencias'], 50), percentil(con['latencias'], 50)),
         ('Respuesta HTTP p95 (ms)', percentil(sin['latencias'], 95), percentil(con['latencias'], 95)),
-        ('Trabajo completo p50 por ronda (s)', percentil(sin['totales'], 50), percentil(con['totales'], 50)),
+        ('Lote eventos→resumen BD p50 (s)', percentil(sin['totales'], 50), percentil(con['totales'], 50)),
+        ('Lote eventos→resumen BD mínimo (s)', min(sin['totales']), min(con['totales'])),
+        ('Lote eventos→resumen BD máximo (s)', max(sin['totales']), max(con['totales'])),
     ):
         print(f'{etiqueta:<37}{a:>11.2f}{b:>15.2f}{diferencia(a, b):>13}')
-    print(f'Operaciones completadas              {len(sin["latencias"]):>11}{len(con["latencias"]):>15}')
+    print(f'Operaciones medidas/completadas       {len(sin["latencias"]):>11}{len(con["latencias"]):>15}')
     print('Errores                                        0              0')
+    print('\nEtapas por evento CON RabbitMQ (ms)           mínimo          p50       máximo')
+    for nombre, valores in (('Outbox/Beat→marca publicación', con['outbox']),
+                             ('Marca publicación→evidencia*', con['posterior'])):
+        print(f'{nombre:<40}{min(valores):>10.2f}{percentil(valores, 50):>13.2f}{max(valores):>13.2f}')
     print('Diferencia = (CON - SIN) / SIN; negativo significa menor tiempo.')
-    print('Total observado hasta acreditar el resumen; incluye comprobación/sondeo de 1 s.')
+    print('BD: max(hecho_en) - min(ocurrido_en) por ronda; el sondeo NO suma tiempo.')
+    print('Outbox incluye el ciclo de Beat (cada 10 s), publicación y confirmación.')
+    print(f'* Desfase firmado, no latencia AMQP pura: {con["solapados"]} eventos con evidencia anterior a la marca de publicación.')
+    print('El publicador guarda publicado_en después del confirm; puede solaparse con el consumidor.')
+    print('Las marcas se generan en procesos de app: requieren relojes sincronizados y no son marcas de commit.')
     print('El broker sigue activo para otros eventos. Esta prueba no mide ahorro de RAM.')
 
 
-def main():
+def main(argumentos=None):
+    parser = argparse.ArgumentParser(description='Comparar tiempos o recuperar configuración pendiente.')
+    parser.add_argument('--restaurar', action='store_true')
+    parser.add_argument('--si', action='store_true', help='Aceptar los reinicios de API en una ventana controlada.')
+    args = parser.parse_args(argumentos)
     try:
+        if args.restaurar:
+            cluster = Cluster()
+            if cluster.estado.cargar():
+                cluster.restaurar()
+                print('Configuración original restaurada y respaldo retirado.')
+            else:
+                print('No hay un respaldo pendiente en este contexto y namespace.')
+            return 0
         cfg = configuracion()
-        print('Comparador local: no crea pods. Mantener una ventana sin tráfico ni despliegues ajenos.')
-        print('Se conservan los datos sintéticos; usar organizaciones descartables.')
+        print('AVISO: cambiar de modo reinicia la API pública (Recreate), con interrupciones temporales.')
+        print('No aumenta pods concurrentes, pero reemplaza el pod. Reservar una ventana sin tráfico ni despliegues.')
+        if not args.si:
+            if not sys.stdin.isatty() or input('Escribe SI para iniciar la prueba y sus reinicios: ').strip().upper() not in ('SI', 'SÍ'):
+                raise ValueError('Prueba cancelada; para ejecución no interactiva autorizada usar --si.')
+        print('Los datos sintéticos se conservan; ante un fallo usar cuentas nuevas o el flujo normal de eliminación.')
         print(f'{cfg["operaciones"]} operaciones × {cfg["repeticiones"]} rondas por modo; '
-              f'{cfg["conexiones"]} conexiones, {cfg["semilla"]} suscripciones iniciales.')
+              f'{cfg["conexiones"]} conexiones, {cfg["semilla"]} iniciales, {cfg["calentamiento"]} POST de calentamiento por fase.')
         resultados = comparar(cfg, Cluster())
-        mostrar(resultados)  # Solo después de restaurar correctamente.
+        mostrar(resultados)
         return 0
     except (ValueError, RuntimeError, KeyError, StopIteration) as error:
         print('ERROR: ' + str(error), file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print('Comparación interrumpida; se intentó restaurar API y HPA.', file=sys.stderr)
+        print('Interrumpido; comprobar recuperación. Si quedó pendiente: comparar-cola.sh --restaurar.', file=sys.stderr)
         return 130
 
 
@@ -330,4 +396,6 @@ def interrumpir(*_):
 
 if __name__ == '__main__':
     signal.signal(signal.SIGTERM, interrumpir)
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, interrumpir)
     sys.exit(main())

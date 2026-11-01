@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import signal
+import sys
 from pathlib import Path
 import threading
 import unittest
@@ -14,7 +15,8 @@ RUTA = Path(__file__).resolve().parents[2] / 'k8s/pruebas/comparar_tiempos.py'
 def cargar():
     spec = importlib.util.spec_from_file_location('comparar_tiempos', RUTA)
     modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
+    with patch.object(sys, 'path', [str(RUTA.parent), *sys.path]):
+        spec.loader.exec_module(modulo)
     return modulo
 
 
@@ -22,6 +24,11 @@ class ComparadorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.m = cargar()
+
+    def setUp(self):
+        control = patch.object(self.m, 'validar_vigencia')
+        control.start()
+        self.addCleanup(control.stop)
 
     def test_percentiles_y_diferencia_no_prometen_mejora(self):
         self.assertEqual(self.m.percentil([4, 1, 2, 3], 50), 2.5)
@@ -72,7 +79,7 @@ class ComparadorTests(unittest.TestCase):
     def test_repite_misma_carga_alterna_orden_y_restaura(self):
         cluster = Mock()
         cluster.organizaciones.return_value = ['org-sin', 'org-con']
-        cluster.esperar.side_effect = lambda *_: self.m.time.monotonic()
+        cluster.esperar.return_value = dict(lote_s=3, outbox_ms=[], posterior_ms=[], solapados=0)
         generador = Mock(return_value=[(201, 1.0), (201, 3.0)])
         cfg = dict(url='https://ejemplo.cl/api/suscripciones/', tokens=['sin', 'con'],
                    operaciones=2, repeticiones=3, conexiones=2, semilla=10, espera=10)
@@ -136,9 +143,10 @@ class ComparadorTests(unittest.TestCase):
         cluster = self.m.Cluster.__new__(self.m.Cluster)
         estado = dict(eventos=2, hechos=2, incorrectos=0, pendientes=0, cantidad=2,
                       resumen=[dict(moneda='CLP', cantidad_activas=2, total_mensual='19980.00')])
+        estado['filas'] = [dict(evento_id=f'{i:08d}-1111-4111-a111-111111111111', ocurrido_en='2026-11-01T12:00:00Z', publicado_en='2026-11-01T12:00:01Z', hecho_en='2026-11-01T12:00:03Z') for i in (1, 2)]
         cluster.db = Mock(side_effect=[{**estado, 'pendientes': 1}, estado])
         with patch.object(self.m.time, 'monotonic', side_effect=[0, 0, 5, 5, 6]), patch.object(self.m.time, 'sleep'):
-            self.assertEqual(cluster.esperar('org', 'corr', 2, 19980, 2, 1, 10), 5)
+            self.assertEqual(cluster.esperar('org', 'corr', 2, 19980, 2, 1, 10)['lote_s'], 3)
         codigo = cluster.db.call_args.args[0]
         compile(codigo, '<consulta de evidencia>', 'exec')
         self.assertIn('correlation_id=', codigo)
@@ -147,16 +155,16 @@ class ComparadorTests(unittest.TestCase):
     def test_fija_hpa_a_replicas_actuales_y_exige_beat(self):
         nombres = ('gateway', 'subscriptions', 'subscriptions-beat', 'subscriptions-worker', 'rabbitmq')
         despliegues = [dict(metadata={'name': n}, spec=dict(replicas=1, template={'spec': {'containers': [
-            {'name': n, 'env': [{'name': 'EVENTOS_ASINCRONOS', 'value': '0'}]}]}}),
+            {'name': n, 'env': []}]}}),
             status=dict(readyReplicas=1, updatedReplicas=1, availableReplicas=1)) for n in nombres]
         hpa = dict(metadata={'name': 'gateway'}, spec=dict(scaleTargetRef={'name': 'gateway'},
                                                         minReplicas=1, maxReplicas=2))
         cluster = self.m.Cluster.__new__(self.m.Cluster)
-        cluster.hpas, cluster.recursos, cluster.cambio_api, cluster.original = [], {}, False, None
+        cluster.recursos, cluster.estado = {}, Mock()
         cluster.drenar = Mock()
         cluster.k = Mock(side_effect=[json.dumps({'items': despliegues}), json.dumps({'items': [hpa]}), ''])
         cluster.preparar()
-        self.assertEqual(cluster.hpas, [('gateway', {'minReplicas': 1, 'maxReplicas': 2})])
+        self.assertEqual(cluster.estado.guardar.call_args.args[1], [hpa])
         parche = json.loads(cluster.k.call_args.args[-1])
         self.assertEqual(parche, {'spec': {'minReplicas': 1, 'maxReplicas': 1}})
         cluster.k.side_effect = None
@@ -169,41 +177,18 @@ class ComparadorTests(unittest.TestCase):
 
     def test_ctrl_c_durante_restauracion_no_abandona_hpa(self):
         cluster = self.m.Cluster.__new__(self.m.Cluster)
-        cluster.original, cluster.cambio_api = None, True
-        cluster.hpas = [('gateway', {'minReplicas': 1, 'maxReplicas': 2})]
+        cluster.estado = Mock()
         anterior = signal.getsignal(signal.SIGINT)
-        def interrumpir_una_vez(*_args, **_kwargs):
-            if cluster.k.call_count == 1:
-                signal.raise_signal(signal.SIGINT)
-            return ''
-        cluster.k = Mock(side_effect=interrumpir_una_vez)
+        def interrumpir_una_vez():
+            signal.raise_signal(signal.SIGINT)
+            cluster.estado.completo = True
+        cluster.estado.restaurar.side_effect = interrumpir_una_vez
         with self.assertRaises(KeyboardInterrupt):
             cluster.restaurar()
-        self.assertIn('hpa', cluster.k.call_args.args)
-        self.assertEqual(cluster.k.call_count, 3)
+        cluster.estado.restaurar.assert_called_once()
+        self.assertTrue(cluster.estado.completo)
         self.assertEqual(signal.getsignal(signal.SIGINT), anterior)
 
-    def test_restaura_env_ausente_valuefrom_y_todos_los_hpa_aunque_uno_falle(self):
-        for original in (None, {'name': 'EVENTOS_ASINCRONOS', 'value': '0'},
-                         {'name': 'EVENTOS_ASINCRONOS', 'valueFrom': {'configMapKeyRef': {'name': 'x', 'key': 'y'}}}):
-            cluster = self.m.Cluster.__new__(self.m.Cluster)
-            cluster.original = original
-            cluster.cambio_api = True
-            cluster.hpas = [('gateway', {'minReplicas': 1, 'maxReplicas': 2})]
-            cluster.k = Mock()
-            cluster.restaurar()
-            llamadas = ' '.join(str(c) for c in cluster.k.call_args_list)
-            self.assertIn('gateway', llamadas)
-            if original is None:
-                self.assertIn('EVENTOS_ASINCRONOS-', llamadas)
-            else:
-                self.assertIn(json.dumps({**{'name': 'EVENTOS_ASINCRONOS', 'value': None, 'valueFrom': None}, **original}), llamadas)
-        cluster.k = Mock(side_effect=[RuntimeError('fallo'), '', ''])
-        cluster.cambio_api = True
-        cluster.hpas = [('gateway', {'minReplicas': 1, 'maxReplicas': 2})]
-        with self.assertRaisesRegex(RuntimeError, 'restaurar'):
-            cluster.restaurar()
-        self.assertGreaterEqual(cluster.k.call_count, 2)
 
 
 if __name__ == '__main__':
