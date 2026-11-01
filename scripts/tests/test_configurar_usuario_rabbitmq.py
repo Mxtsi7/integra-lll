@@ -1,0 +1,260 @@
+"""Ejecuta el guion remoto de `k8s/configurar-usuario-rabbitmq.sh`.
+
+Sustituye solo el limite externo: `rabbitmqctl`. El guion que se prueba se
+EXTRAE del archivo real, no se copia aca, para que no pueda quedar desfasado.
+
+Lo que estas pruebas existen para impedir, porque ya paso en el despliegue del
+31-10 y costo dos intentos:
+
+  · la clave llega SIN salto de linea final --`base64 -d` nunca lo pone-- y
+    `read` devuelve FALLO en ese caso aunque la haya leido completa. Mirar su
+    codigo de salida descartaba una clave valida;
+  · la primera version pasaba el guion remoto con un heredoc, que le robaba la
+    entrada estandar a `kubectl exec` y se comia la tuberia con la clave.
+
+La primera version de esta prueba alimentaba el guion con `printf "...\\n"`,
+CON salto, asi que pasaba y el guion fallaba igual contra el cluster. Por eso
+el caso sin salto va primero.
+"""
+import os
+import re
+import stat
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+RAIZ = Path(__file__).resolve().parents[2]
+GUION = RAIZ / "k8s/configurar-usuario-rabbitmq.sh"
+
+CLAVE = "0123456789abcdef" * 4          # 64 caracteres, como la que genera openssl
+
+RABBITMQCTL_FALSO = """#!/bin/sh
+# Registra lo que le piden. De la clave informa el LARGO, nunca el valor:
+# una prueba de credenciales no puede imprimirlas.
+[ "$1" = "--quiet" ] && shift
+case "$1" in
+  list_users)
+      # Cuenta sus llamadas para poder fallar en una concreta. La revision
+      # reprodujo el caso con la ULTIMA fallando: la que decide sobre guest.
+      N=0
+      [ -n "${CONTADOR:-}" ] && [ -f "$CONTADOR" ] && N="$(cat "$CONTADOR")"
+      N=$((N + 1))
+      [ -n "${CONTADOR:-}" ] && echo "$N" > "$CONTADOR"
+      if [ "${FALLAR_LIST_USERS_EN:-0}" = "$N" ]; then
+        echo "Error: no se pudo consultar el broker" >&2
+        exit 70
+      fi
+      printf 'user\\ttags\\nguest\\t[administrator]\\n'
+      # `if` y no `&&`: con `&&` la rama TERMINA en un comando falso cuando
+      # EXISTE=0, asi que el doble devolvia 1 y simulaba una consulta
+      # fallida. El `rabbitmqctl` real devuelve 0 al listar bien.
+      if [ "${EXISTE:-0}" = "1" ]; then
+        printf 'ojoalgasto\\t[management]\\n'
+      fi
+      ;;
+  add_user|change_password)
+      echo "$1 usuario=$2 largo_clave=${#3}" >&2 ;;
+  *)  echo "$*" >&2 ;;
+esac
+"""
+
+
+def guion_remoto():
+    """El bloque que corre DENTRO del pod, sacado del archivo real."""
+    texto = GUION.read_text(encoding="utf-8")
+    bloque = re.search(r"<<'EOS'\n(.*?)\nEOS\n", texto, re.S)
+    assert bloque, "no encontre el guion remoto en " + str(GUION)
+    return bloque.group(1)
+
+
+@pytest.fixture
+def correr(tmp_path):
+    binarios = tmp_path / "bin"
+    binarios.mkdir()
+    falso = binarios / "rabbitmqctl"
+    falso.write_text(RABBITMQCTL_FALSO, encoding="utf-8")
+    falso.chmod(falso.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    def ejecutar(entrada, *, existe=False, usuario="ojoalgasto", fallar_consulta=0):
+        entorno = dict(os.environ)
+        entorno["PATH"] = f"{binarios}{os.pathsep}{entorno['PATH']}"
+        entorno["EXISTE"] = "1" if existe else "0"
+        entorno["CONTADOR"] = str(tmp_path / "llamadas-list-users")
+        entorno["FALLAR_LIST_USERS_EN"] = str(fallar_consulta)
+        # La entrada va en BYTES a proposito. En modo texto, Python sobre
+        # Windows traduce el salto de linea a retorno-de-carro-mas-salto al
+        # escribirla (\n -> \r\n), asi que la clave llegaba con un retorno
+        # de carro pegado: la prueba medía 65 caracteres donde el cluster
+        # habria visto 64. El arnes no puede alterar justo lo que se esta
+        # comprobando.
+        crudo = subprocess.run(
+            ["sh", "-c", guion_remoto(), "sh", usuario, "/"],
+            input=entrada.encode("utf-8"), capture_output=True,
+            env=entorno, timeout=60,
+        )
+        return SimpleNamespace(
+            returncode=crudo.returncode,
+            stdout=crudo.stdout.decode("utf-8", "replace"),
+            stderr=crudo.stderr.decode("utf-8", "replace"),
+        )
+
+    return ejecutar
+
+
+def test_clave_sin_salto_de_linea_final_se_usa_entera(correr):
+    """EL caso real: `base64 -d` no pone salto final."""
+    r = correr(CLAVE)
+    assert r.returncode == 0, r.stderr
+    assert f"add_user usuario=ojoalgasto largo_clave={len(CLAVE)}" in r.stderr
+    assert CLAVE not in r.stdout + r.stderr, "la clave no puede aparecer en la salida"
+
+
+def test_clave_con_salto_de_linea_tambien_sirve(correr):
+    r = correr(CLAVE + "\n")
+    assert r.returncode == 0, r.stderr
+    assert f"largo_clave={len(CLAVE)}" in r.stderr
+
+
+def test_sin_clave_falla_diciendo_por_que(correr):
+    """Un guion que maneja una credencial no puede morir en silencio: la
+    primera version salia 1 sin imprimir nada y no habia como saber donde."""
+    r = correr("")
+    assert r.returncode != 0
+    assert "entrada estandar" in r.stderr
+
+
+def test_usuario_existente_alinea_la_clave_en_vez_de_fallar(correr):
+    """Idempotente: se puede volver a correr despues de rotar el Secret."""
+    r = correr(CLAVE, existe=True)
+    assert r.returncode == 0, r.stderr
+    assert "change_password usuario=ojoalgasto" in r.stderr
+    assert "add_user" not in r.stderr
+
+
+def test_siempre_deja_permisos_y_etiqueta(correr):
+    for existe in (False, True):
+        r = correr(CLAVE, existe=existe)
+        assert r.returncode == 0, r.stderr
+        assert "set_permissions -p / ojoalgasto .* .* .*" in r.stderr
+        assert "set_user_tags ojoalgasto management" in r.stderr
+
+
+def test_la_llamada_a_kubectl_esta_protegida_de_la_traduccion_de_rutas():
+    """En Git Bash sobre Windows, MSYS traduce los argumentos que parecen
+    rutas POSIX antes de pasarlos a un ejecutable nativo. El vhost "/" llegaba
+    al broker como "C:/Program Files/Git/" y `set_permissions` respondia
+    `Virtual host ... does not exist`. Esto no se puede ejercitar corriendo el
+    guion remoto --la traduccion ocurre en la frontera con kubectl.exe-- asi
+    que se comprueba que la proteccion este puesta."""
+    lineas = [l for l in GUION.read_text(encoding="utf-8").splitlines()
+              if not l.lstrip().startswith("#")]
+    proteccion = next((i for i, l in enumerate(lineas) if "MSYS_NO_PATHCONV=1" in l), None)
+    assert proteccion is not None, "falta MSYS_NO_PATHCONV"
+    assert any("MSYS2_ARG_CONV_EXCL" in l for l in lineas), "falta MSYS2_ARG_CONV_EXCL"
+    kubectl = [i for i, l in enumerate(lineas) if "kubectl " in l]
+    assert kubectl, "no encontre ninguna llamada a kubectl"
+    assert proteccion < min(kubectl), "la proteccion tiene que ir ANTES de todo kubectl"
+
+
+@pytest.mark.parametrize("consulta", [1, 2])
+def test_si_falla_la_consulta_de_usuarios_no_se_decide_nada(correr, consulta):
+    """Un `list_users` que FALLA no puede leerse como "la cuenta no esta".
+
+    Con `if rabbitmqctl list_users | grep -qx guest`, una consulta fallida
+    hacia que el grep no encontrara nada y el guion se fuera por el else:
+    salia con EXITO, decia "usuario guest: no estaba" y dejaba `guest/guest`
+    vivo. Es el peor desenlace posible, porque esconde justo el agujero que
+    este guion viene a cerrar.
+
+    Dentro de un `if`, ni `set -e` ni `pipefail` lo distinguen: el codigo de
+    salida de la condicion es el del `grep`. Hay que capturar y comprobar.
+    """
+    r = correr(CLAVE, fallar_consulta=consulta)
+    assert r.returncode != 0, r.stdout
+    assert "no estaba" not in r.stdout, r.stdout
+    assert "No se pudo listar" in r.stderr, r.stderr
+
+
+# ── Integración contra un broker HEREDADO de verdad ─────────────────────────
+# Los dobles de arriba comprueban la lógica; esto comprueba el contrato con
+# RabbitMQ. Hace falta porque el caso que importa --un broker cuyo directorio
+# de datos ya existía-- es justo el que NO pasa por
+# `RABBITMQ_DEFAULT_USER`, que es lo único que borra `guest` por su cuenta.
+# La comprobación que ya existía en la CI usa un broker NUEVO de Compose, y
+# ahí `guest` nunca llega a existir.
+#
+# Se activa con D11_BROKER_HEREDADO=<contenedor>. Sin esa variable se salta:
+# no se levanta un broker por sorpresa en la máquina de nadie.
+
+CONTENEDOR = os.environ.get("D11_BROKER_HEREDADO", "")
+
+
+def ctl(*args, entrada=None):
+    return subprocess.run(
+        ["docker", "exec", "-i", CONTENEDOR, "rabbitmqctl", "--quiet", *args],
+        input=entrada, capture_output=True, timeout=120,
+    )
+
+
+def usuarios():
+    salida = ctl("list_users").stdout.decode("utf-8", "replace")
+    return {l.split("	")[0].strip() for l in salida.splitlines()[1:] if l.strip()}
+
+
+@pytest.fixture
+def broker_heredado():
+    """Deja el broker como uno que viene de antes: con `guest` y sin el
+    usuario dedicado. Así la prueba se puede repetir."""
+    if "guest" not in usuarios():
+        assert ctl("add_user", "guest", "guest").returncode == 0
+        ctl("set_user_tags", "guest", "administrator")
+        ctl("set_permissions", "-p", "/", "guest", ".*", ".*", ".*")
+    if "ojoalgasto" in usuarios():
+        ctl("delete_user", "ojoalgasto")
+    assert "guest" in usuarios() and "ojoalgasto" not in usuarios()
+    return CONTENEDOR
+
+
+def correr_remoto(clave):
+    return subprocess.run(
+        ["docker", "exec", "-i", CONTENEDOR, "sh", "-c", guion_remoto(), "sh", "ojoalgasto", "/"],
+        input=clave.encode("utf-8"), capture_output=True, timeout=180,
+    )
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_en_broker_heredado_el_dedicado_entra_y_guest_queda_fuera(broker_heredado):
+    r = correr_remoto(CLAVE)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+
+    # El usuario dedicado autentica de verdad, no solo "existe".
+    assert ctl("authenticate_user", "ojoalgasto", CLAVE).returncode == 0
+
+    # Y la credencial publica dejo de servir. Es el P1 de la revision.
+    assert ctl("authenticate_user", "guest", "guest").returncode != 0
+    assert "guest" not in usuarios()
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_correrlo_dos_veces_no_falla_ni_deshace_nada(broker_heredado):
+    assert correr_remoto(CLAVE).returncode == 0
+    segunda = correr_remoto(CLAVE)
+    assert segunda.returncode == 0, segunda.stderr.decode("utf-8", "replace")
+    assert b"no estaba" in segunda.stdout, segunda.stdout
+    assert ctl("authenticate_user", "ojoalgasto", CLAVE).returncode == 0
+    assert "guest" not in usuarios()
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_no_toca_otras_cuentas(broker_heredado):
+    """Retirar `guest` no puede llevarse por delante una cuenta que alguien
+    haya creado a mano."""
+    ctl("add_user", "operador-de-prueba", "clave-de-prueba-larga")
+    try:
+        assert correr_remoto(CLAVE).returncode == 0
+        assert "operador-de-prueba" in usuarios()
+        assert ctl("authenticate_user", "operador-de-prueba", "clave-de-prueba-larga").returncode == 0
+    finally:
+        ctl("delete_user", "operador-de-prueba")

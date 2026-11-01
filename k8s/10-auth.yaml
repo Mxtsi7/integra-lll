@@ -137,6 +137,26 @@ spec:
             - { name: ESQUEMA_BD, value: auth }
             # El initContainer ya sembró: que el contenedor principal no repita.
             - { name: SEED_DEMO, value: "0" }
+          # ── Las sondas y el segundo que no alcanza ───────────────────
+          # `timeoutSeconds` NO estaba declarado, y por omision vale 1s.
+          # `/health/` abre una conexion nueva a Postgres --Django cierra la
+          # suya al terminar cada peticion-- y resolver el Service headless
+          # mas conectar toma ~3,9s medidos desde este pod, con 150m de CPU
+          # de por medio. La sonda nunca alcanzaba a recibir la respuesta: la
+          # readiness fallaba, la liveness mataba el contenedor a los 60s y
+          # el pod entraba en bucle. Se veia como codigo 137, que es la senal
+          # con que kubelet lo mata, no un OOM: la memoria nunca paso de 22Mi.
+          #
+          # `startupProbe` ademas aparta la liveness mientras arranca: hasta
+          # 5 minutos (30 intentos cada 10s) sin que nadie lo mate por tardar.
+          startupProbe:
+            httpGet:
+              path: /health/
+              port: 8001
+              httpHeaders: [{ name: Host, value: auth }]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /health/
@@ -144,17 +164,24 @@ spec:
               # Con DEBUG=False Django rechaza Hosts desconocidos, y la sonda
               # llega con la IP del pod. Se le manda el Host a mano.
               httpHeaders: [{ name: Host, value: auth }]
-            initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health/
               port: 8001
               httpHeaders: [{ name: Host, value: auth }]
-            initialDelaySeconds: 30
-            periodSeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           resources:
             requests: { cpu: 50m,  memory: 96Mi }
+            # Se queda en 256Mi. Llegue a subirlo a 320 creyendo que el
+            # codigo 137 era un OOM; no lo era --`reason` decia `Error`, no
+            # `OOMKilled`-- sino kubelet matando el contenedor por la
+            # liveness. Medido ya arrancado: 132Mi en uso, 136Mi de pico y
+            # `oom_kill 0`. 256Mi sobra, y esos 64Mi hacen falta en la cuota.
             limits:   { cpu: 150m, memory: 256Mi }
 
 ---

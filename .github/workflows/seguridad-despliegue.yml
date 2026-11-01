@@ -51,6 +51,29 @@ jobs:
           export D11_RABBITMQ_CONTENEDOR="$(docker compose ps -q rabbitmq)"
           export D11_RABBITMQ_URL=amqp://ojoalgasto:pruebas-d11@127.0.0.1:5679/
           python -m pytest scripts/tests/test_migracion_rabbitmq.py -q
+      - name: "Broker HEREDADO: el usuario dedicado entra y guest queda fuera"
+        run: |
+          # Se reutiliza el broker de Compose, que este job ya levanta y espera.
+          # Levantar otro suelto con `docker run` no es fiable en el runner: el
+          # contenedor moria a los cinco segundos con "Failed to connect and
+          # authenticate to rabbit@<id>".
+          #
+          # A ese broker se le vuelve a poner `guest` para representar uno que
+          # VENIA DE ANTES. Es el caso que RABBITMQ_DEFAULT_USER no cubre: solo
+          # borra `guest` en el primer arranque con el directorio vacio, asi que
+          # un broker con datos lo conserva. El paso de mas arriba comprueba el
+          # camino del broker nuevo; este comprueba el heredado.
+          #
+          # Va DESPUES del guard de migracion a proposito: las pruebas dejan a
+          # `ojoalgasto` con la clave de prueba, y la clave del job se restaura
+          # al final para no sorprender a nadie que agregue pasos despues.
+          C="$(docker compose ps -q rabbitmq)"
+          docker exec "$C" rabbitmqctl --quiet add_user guest guest
+          docker exec "$C" rabbitmqctl --quiet set_user_tags guest administrator
+          docker exec "$C" rabbitmqctl --quiet set_permissions -p / guest ".*" ".*" ".*"
+          D11_BROKER_HEREDADO="$C" python -m pytest             scripts/tests/test_configurar_usuario_rabbitmq.py -q
+          docker exec "$C" rabbitmqctl --quiet change_password ojoalgasto "$RABBITMQ_PASSWORD"
+          docker exec "$C" rabbitmqctl --quiet authenticate_user ojoalgasto "$RABBITMQ_PASSWORD"
       - name: Validar proxy de salud para carga externa
         run: docker run --rm --add-host gateway:127.0.0.1 -v "$PWD/frontend/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
       - if: always()
