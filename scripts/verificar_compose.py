@@ -45,12 +45,16 @@ TRABAJADORES = {
     "connectors-worker": "connectors",
     "analytics-worker": "analytics",
     "auth-eliminaciones": "auth",
+    # Purga de archivos de importación (FE-07): un bucle que duerme entre
+    # corridas, sin canal de consulta.
+    "connectors-purga": "connectors",
 }
 INFRAESTRUCTURA = {"postgres", "rabbitmq", "redis"}
-# Beat y auth-eliminaciones no exponen un canal de consulta. Se exige que
-# declaren `disable: true` y que estén presentes y corriendo (ver
+# Los que no exponen un canal de consulta. Se exige que declaren
+# `disable: true` y que estén presentes y corriendo (ver
 # scripts/verificar_servicios.py), no que finjan salud.
-SIN_HEALTHCHECK_PERMITIDO = {"subscriptions-beat", "auth-eliminaciones"}
+SIN_HEALTHCHECK_PERMITIDO = {"subscriptions-beat", "auth-eliminaciones",
+                             "connectors-purga"}
 # D-11: sólo gateway y web publican puerto. Los dominios se alcanzan por la
 # red interna; publicarlos otra vez rompería el aislamiento.
 SERVICIOS_PUBLICOS = {"gateway": 8000}
