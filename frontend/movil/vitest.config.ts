@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // En pruebas la URL es obligatoria igual que en la app. Se usa una IP LAN
+    // ficticia (no localhost) porque Platform.OS se simula como "ios".
+    env: {
+      EXPO_PUBLIC_API_URL: 'http://192.168.1.10:8000/api',
+    },
     server: {
       deps: {
         inline: [/@react-navigation/],

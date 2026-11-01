@@ -171,3 +171,15 @@ class RecomendacionDescartadaSerializer(serializers.ModelSerializer):
 
     def get_descartado(self, obj) -> bool:
         return True
+
+
+class ConsultaAsistenteSerializer(serializers.Serializer):
+    """Mensaje opcional del usuario para el asistente (VI-22)."""
+
+    mensaje = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Pregunta libre sobre los datos de la organización",
+    )
