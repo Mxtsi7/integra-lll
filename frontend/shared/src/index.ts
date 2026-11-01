@@ -2,7 +2,15 @@ export type * from './tipos';
 export * from './calculos';
 export * from './formato';
 export * from './validacionesSuscripcion';
-export { configurarApi, configurarManejador401, ErrorDeApi, pedir, type Paginado } from './api/cliente';
+export {
+  configurarApi,
+  configurarManejador401,
+  ErrorDeApi,
+  pedir,
+  type Paginado,
+  type MotivoSesionError,
+  type ContextoSesionError,
+} from './api/cliente';
 export {
   getSuscripciones,
   esOrdenSuscripciones,

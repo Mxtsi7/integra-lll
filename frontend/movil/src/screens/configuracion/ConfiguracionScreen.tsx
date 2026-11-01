@@ -8,7 +8,7 @@ import { SECCIONES_CONFIGURACION, type DestinoConfiguracion } from './secciones'
 export default function ConfiguracionScreen({
   navigation,
 }: ConfiguracionScreenProps<'ConfiguracionScreen'>) {
-  const { cerrarSesion } = useAuth();
+  const { cerrarSesion, errorCierre, reintentarCierre } = useAuth();
 
   const ir: Record<DestinoConfiguracion, () => void> = {
     Perfil: () => navigation.navigate('Perfil'),
@@ -47,6 +47,19 @@ export default function ConfiguracionScreen({
 
       <View style={styles.seccion}>
         <Text style={styles.tituloSeccion}>Sesión</Text>
+        {errorCierre ? (
+          <View style={styles.errorCierre}>
+            <Text testID="cierre-pendiente" style={styles.textoError}>
+              {errorCierre}
+            </Text>
+            <NavButton
+              testID="reintentar-cierre"
+              title="Reintentar limpieza"
+              variant="secondary"
+              onPress={() => void reintentarCierre()}
+            />
+          </View>
+        ) : null}
         <NavButton
           testID="logout"
           title="Cerrar Sesión"
@@ -77,5 +90,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#64748b',
     textTransform: 'uppercase',
+  },
+  errorCierre: {
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  textoError: {
+    color: '#991b1b',
+    fontSize: 14,
   },
 });
