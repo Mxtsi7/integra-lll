@@ -7,6 +7,7 @@ from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView, validar_solicitud_eliminacion
 from .models import (
     Alerta,
+    EventoRecibido,
     PreferenciaNotificacion,
     SuscripcionVigilada,
     UsuarioEliminado,
@@ -22,7 +23,7 @@ class LimpiezaNotificationsView(LimpiezaOrganizacionView):
     # suelto y sin FK entre ellos, así que el orden hijo/padre no aplica acá;
     # `test_eliminacion_proyeccion` exige que la lista cubra los cuatro para
     # que el próximo modelo no se olvide igual.
-    modelos = (Alerta, PreferenciaNotificacion, SuscripcionVigilada, UsuarioEliminado)
+    modelos = (Alerta, PreferenciaNotificacion, SuscripcionVigilada, UsuarioEliminado, EventoRecibido)
 
 
 class LimpiezaUsuarioNotificationsView(APIView):

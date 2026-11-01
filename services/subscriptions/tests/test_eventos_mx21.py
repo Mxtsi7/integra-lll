@@ -341,3 +341,41 @@ def test_reactivacion_usuario_cumple_contrato_mx21_completo(api_client, organiza
         "Se esperan exactamente 2 eventos estado_cambiado (cancelar + reactivar); "
         f"se encontraron {total_estado_cambiado}."
     )
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('fecha', ['2026-12-20', None])
+def test_patch_solo_fin_prueba_emite_snapshot_valido(api_client, organizacion, fecha):
+    suscripcion = crear_suscripcion(organizacion)
+    suscripcion.estado = 'prueba'
+    suscripcion.fin_prueba = date(2026, 12, 1)
+    suscripcion.save()
+    correlacion = uuid.uuid4()
+    respuesta = api_client.patch(
+        f'/api/suscripciones/{suscripcion.id}/', {'fin_prueba': fecha}, format='json',
+        headers={'X-Organizacion-Id': str(organizacion), 'X-Usuario-Id': '42',
+                 'X-Rol': 'titular', 'X-Correlation-ID': str(correlacion)},
+    )
+    assert respuesta.status_code == 200
+    suscripcion.refresh_from_db()
+    assert suscripcion.fin_prueba == (date.fromisoformat(fecha) if fecha else None)
+    evento = OutboxEvento.objects.get()
+    assert evento.evento == 'suscripcion.actualizada'
+    assert evento.correlation_id == correlacion
+    assert evento.organizacion_id == organizacion
+    assert evento.datos['campos_modificados'] == ['fin_prueba']
+    assert _validar_contrato(evento)['datos']['fin_prueba'] == fecha
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('fecha', ['2026-12-01', None])
+def test_patch_fin_prueba_sin_cambio_no_emite(api_client, organizacion, fecha):
+    suscripcion = crear_suscripcion(organizacion)
+    suscripcion.fin_prueba = date.fromisoformat(fecha) if fecha else None
+    suscripcion.save()
+    respuesta = api_client.patch(
+        f'/api/suscripciones/{suscripcion.id}/', {'fin_prueba': fecha}, format='json',
+        headers={'X-Organizacion-Id': str(organizacion), 'X-Usuario-Id': '42', 'X-Rol': 'titular'},
+    )
+    assert respuesta.status_code == 200
+    assert not OutboxEvento.objects.exists()

@@ -110,3 +110,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Solo el consumidor lo exige; la API y el generador no abren AMQP.
+RABBITMQ_URL = env("RABBITMQ_URL", default="")
