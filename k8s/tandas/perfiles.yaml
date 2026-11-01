@@ -24,11 +24,10 @@ tandas:
     pausar: [subscriptions-beat]
     # Los manifiestos se nombran uno a uno: un comodin se tragaba
     # este mismo archivo y la herramienta se negaba, con razon.
-    extra: ["k8s/tandas/alertas-notifications.yaml"]
-    faltan:
-      - "Deployment de notifications con API y consumidor (FE-24 sin fusionar)"
-      - "Service de notifications y su ruta en el Gateway"
-      - "imagen ojoalgasto-notifications: desplegar.sh no la construye"
+    extra: ["k8s/tandas/notifications.yaml", "k8s/tandas/alertas-notifications.yaml"]
+    faltan: []
+    # Sin faltantes de código no implica despliegue ni medición real.
+    validacion_cluster: pendiente
 
   connectors:
     descripcion: >-

@@ -452,3 +452,14 @@ class SuscripcionVigilada(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.nombre or self.suscripcion_id} ({self.estado}, cobra {self.proximo_cobro})"
+
+
+class EventoRecibido(ModeloTenant):
+    """Inbox del único consumidor FE-24; se borra con la organización."""
+    evento_id = models.UUIDField()
+
+    class Meta(ModeloTenant.Meta):
+        db_table = 'evento_recibido'
+        constraints = [models.UniqueConstraint(
+            fields=['organizacion_id', 'evento_id'], name='notifications_evento_unico',
+        )]

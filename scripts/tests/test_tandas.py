@@ -50,6 +50,8 @@ def documentos(rutas):
 
 def plantilla(doc):
     """El pod spec, venga de un Deployment, un StatefulSet o un CronJob."""
+    if doc["kind"] == "Service":
+        return {}
     if doc["kind"] == "CronJob":
         return doc["spec"]["jobTemplate"]["spec"]["template"]["spec"]
     return doc["spec"]["template"]["spec"]
@@ -278,3 +280,48 @@ def test_los_perfiles_pausan_y_referencian_cosas_que_existen():
             assert carga in nombres, f"{nombre}: pausa {carga!r}, que no existe"
         for patron in perfil.get("extra") or []:
             assert glob.glob(str(RAIZ / patron)), f"{nombre}: {patron} no encuentra nada"
+
+
+def test_notifications_incluye_api_consumidor_y_generador_en_el_presupuesto():
+    perfil = perfiles()['notifications']
+    assert perfil['faltan'] == []
+    docs = [d for _, d in documentos([str(RAIZ / p) for p in perfil['extra']])]
+    servicio = next(d for d in docs if d['kind'] == 'Service')
+    deployment = next(d for d in docs if d['kind'] == 'Deployment')
+    pod = plantilla(deployment)
+    assert servicio['metadata']['name'] == 'notifications'
+    assert servicio['spec']['ports'][0]['port'] == 8005
+    assert deployment['spec']['strategy']['type'] == 'Recreate'
+    assert pod['containers'][0]['command'][1] == 'notifications_config.wsgi:application'
+    assert pod['containers'][1]['command'] == ['python', '-u', 'manage.py', 'consumir_eventos']
+    assert any(d['kind'] == 'CronJob' for d in docs)
+    resultado = presupuesto(perfil)
+    assert resultado.returncode == 0, resultado.stdout + resultado.stderr
+    assert '2592Mi' in resultado.stdout
+    assert '1900m' in resultado.stdout
+
+
+def test_render_notifications_resuelve_imagen_y_no_toca_cluster():
+    import os
+    entorno = dict(os.environ, IMAGEN_NOTIFICATIONS='ghcr.io/pruebas/notifications:sha-validado')
+    # El script necesita PyYAML: el intérprete del test también lo tiene.
+    entorno['PATH'] = str(Path(sys.executable).parent) + os.pathsep + entorno['PATH']
+    r = subprocess.run(['bash', str(RAIZ / 'k8s/tandas/preparar-notifications.sh'), 'render'],
+                       env=entorno, capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    assert 'IMAGEN_NOTIFICATIONS' not in r.stdout
+    docs = [d for d in yaml.safe_load_all(r.stdout) if d]
+    assert {d['kind'] for d in docs} == {'Deployment', 'Service', 'CronJob'}
+    for d in docs:
+        for c in plantilla(d).get('containers', []) + plantilla(d).get('initContainers', []):
+            assert c['image'] == entorno['IMAGEN_NOTIFICATIONS']
+
+
+def test_service_notifications_no_selecciona_pods_del_generador():
+    docs = [d for _, d in documentos([str(RAIZ / p) for p in perfiles()['notifications']['extra']])]
+    selector = next(d for d in docs if d['kind'] == 'Service')['spec']['selector']
+    api = next(d for d in docs if d['kind'] == 'Deployment')['spec']['template']['metadata']['labels']
+    job = next(d for d in docs if d['kind'] == 'CronJob')['spec']['jobTemplate']['spec']['template']['metadata']['labels']
+    selecciona = lambda etiquetas: all(etiquetas.get(k) == v for k, v in selector.items())
+    assert selecciona(api)
+    assert not selecciona(job), 'el Job sin HTTP no puede ser endpoint de la API'
