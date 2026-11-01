@@ -57,6 +57,24 @@ class ContratoTests(unittest.TestCase):
         del evento['datos']['evento_estado']
         VALIDADOR.validate(evento)
 
+    def test_fin_prueba_opcional_fecha_o_null_en_los_tres_snapshots(self):
+        for original in self.mensajes[:3]:
+            for valor in ('2026-11-23', None):
+                evento = copy.deepcopy(original)
+                evento['datos']['fin_prueba'] = valor
+                VALIDADOR.validate(evento)
+            evento['datos'].pop('fin_prueba')
+            VALIDADOR.validate(evento)
+
+    def test_fin_prueba_invalida_se_rechaza(self):
+        for original in self.mensajes[:3]:
+            for valor in ('2026-02-30', 'mañana', '', 123, True):
+                with self.subTest(evento=original['evento'], valor=valor):
+                    evento = copy.deepcopy(original)
+                    evento['datos']['fin_prueba'] = valor
+                    with self.assertRaises(ValidationError):
+                        VALIDADOR.validate(evento)
+
     def test_causa_invalida_no_produce_efecto(self):
         with tempfile.TemporaryDirectory() as temporal:
             db = str(Path(temporal) / 'efectos.sqlite3')

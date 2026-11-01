@@ -10,7 +10,7 @@
 #   python k8s/pruebas/presupuesto.py k8s \
 #     --generador k8s/pruebas/carga-fortio-otro-namespace.yaml \
 #     --namespace-generador student-carga \
-#     --sin-autoescalado --pausar subscriptions-beat \
+#     --sin-autoescalado --extra k8s/tandas/notifications.yaml \
 #     --extra k8s/tandas/alertas-notifications.yaml
 
 tandas:
@@ -18,17 +18,16 @@ tandas:
     descripcion: >-
       FE-17/18. API y consumidor en un pod, generador como CronJob. Es la
       prioridad: RF-09 es Must.
-    # Beat no hace falta en modo síncrono --los eventos se publican dentro de
-    # la petición-- pero su pausa SÍ quita el reintento periódico del outbox.
-    # No es inocua: hay que vigilar publicaciones fallidas durante la ventana.
-    pausar: [subscriptions-beat]
+    # La bandera síncrona solo recalcula el resumen dentro del POST.
+    # RabbitMQ recibe el outbox por la tarea que agenda Beat, en ambos modos.
+    # Perfil de demostración completo: Beat activo, sin rollouts simultáneos.
+    pausar: []
     # Los manifiestos se nombran uno a uno: un comodin se tragaba
     # este mismo archivo y la herramienta se negaba, con razon.
-    extra: ["k8s/tandas/alertas-notifications.yaml"]
-    faltan:
-      - "Deployment de notifications con API y consumidor (FE-24 sin fusionar)"
-      - "Service de notifications y su ruta en el Gateway"
-      - "imagen ojoalgasto-notifications: desplegar.sh no la construye"
+    extra: ["k8s/tandas/notifications.yaml", "k8s/tandas/alertas-notifications.yaml"]
+    faltan: []
+    # Sin faltantes de código no implica despliegue ni medición real.
+    validacion_cluster: pendiente
 
   connectors:
     descripcion: >-

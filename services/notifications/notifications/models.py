@@ -384,10 +384,9 @@ class SuscripcionVigilada(ModeloTenant):
     coincidir con la fuente y las alertas avisarían fechas inventadas.
 
     ── Qué pasa con la fecha de fin de prueba ──────────────────────────────
-    El contrato MX-21 v2 NO la trae: `$defs/suscripcion` tiene
-    `proximo_cobro` pero no `fin_prueba`, aunque `Subscription` sí la tiene.
-    Se guarda si el sobre la trae (`datos.fin_prueba`, una extensión que hay
-    que acordar con VI-26) y queda en NULL si no. Sin fecha no hay aviso de
+    El contrato MX-21 v2 admite `datos.fin_prueba` como fecha opcional o null.
+    Subscriptions la copia de `Subscription`; se guarda cuando el sobre la
+    trae y queda en NULL si no. Sin fecha no hay aviso de
     fin de prueba: es el criterio de FE-18, "prueba sin fecha válida no
     genera envío", y es mejor que adivinarla desde `proximo_cobro`.
     """
@@ -452,3 +451,15 @@ class SuscripcionVigilada(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.nombre or self.suscripcion_id} ({self.estado}, cobra {self.proximo_cobro})"
+
+
+class EventoRecibido(ModeloTenant):
+    """Inbox por consumidor FE-24; se borra con la organización."""
+    consumidor = models.CharField(max_length=64, default='suscripciones.v2')
+    evento_id = models.UUIDField()
+
+    class Meta(ModeloTenant.Meta):
+        db_table = 'evento_recibido'
+        constraints = [models.UniqueConstraint(
+            fields=['consumidor', 'organizacion_id', 'evento_id'], name='notifications_evento_unico',
+        )]
