@@ -60,6 +60,24 @@ Al vivir en un subdirectorio quedan fuera de ese glob, y
 mínimo de 64 Mi y 25m por contenedor, y que los CronJob no se acumulen ni se
 cuelguen ocupando un pod.
 
+## Lo que un pod de tanda tiene que traer
+
+Dos cosas que no se heredan y que, si faltan, fallan tarde:
+
+- **Etiquetas en `spec.template.metadata.labels`.** Las de `metadata` describen
+  el objeto, no el pod. Sin ellas el pod nace pelado y `k8s/40-red.yaml` no lo
+  deja llegar a PostgreSQL: `dominio-a-postgres` solo admite los `app` de una
+  lista. El síntoma aparece recién cuando las políticas se apliquen con un CNI
+  que las haga cumplir.
+- **La credencial restringida de su esquema**, `ojoalgasto-bd-<servicio>`. El
+  Secret global `ojoalgasto` trae la URL del usuario `postgres`, que es
+  superusuario. `ESQUEMA_BD` fija el `search_path` pero **no** limita
+  privilegios.
+
+`scripts/tests/test_tandas.py` comprueba las dos sobre todos los manifiestos de
+esta carpeta, cruzando las etiquetas contra los selectores reales de
+`40-red.yaml`.
+
 ## Cómo se aplica
 
 ```bash

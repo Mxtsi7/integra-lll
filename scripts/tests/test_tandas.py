@@ -121,3 +121,72 @@ def test_la_tanda_de_alertas_cabe_sobre_el_nucleo_en_reposo():
         pods = nucleo_pods + 1
         assert mem <= TOPE_MEMORIA, f"{ruta}: {mem} Mi sobre {TOPE_MEMORIA}"
         assert pods <= TOPE_PODS, f"{ruta}: {pods} pods sobre {TOPE_PODS}"
+
+
+# ── Lo que un pod de tanda tiene que traer para poder trabajar ──────────────
+# Las dos pruebas siguientes son de una CLASE de error, no de un manifiesto:
+# cualquier tanda futura cae en lo mismo si se escribe de memoria.
+
+RED = RAIZ / "k8s/40-red.yaml"
+
+
+def politicas():
+    return [d for _, d in documentos([str(RED)]) if d["kind"] == "NetworkPolicy"]
+
+
+def origenes_permitidos(destino, puerto):
+    """Los valores de `app` que `40-red.yaml` deja llegar a ese destino."""
+    permitidos = set()
+    for pol in politicas():
+        if pol["spec"].get("podSelector", {}).get("matchLabels", {}).get("app") != destino:
+            continue
+        for regla in pol["spec"].get("ingress") or []:
+            if puerto not in [p.get("port") for p in regla.get("ports") or []]:
+                continue
+            for origen in regla.get("from") or []:
+                sel = origen.get("podSelector") or {}
+                for exp in sel.get("matchExpressions") or []:
+                    if exp.get("key") == "app" and exp.get("operator") == "In":
+                        permitidos |= set(exp.get("values") or [])
+                app = (sel.get("matchLabels") or {}).get("app")
+                if app:
+                    permitidos.add(app)
+    return permitidos
+
+
+def test_los_pods_de_tanda_pueden_llegar_a_postgres():
+    """Las etiquetas del objeto NO son las del pod: hay que declararlas en
+    `spec.template.metadata.labels`. Sin ellas el pod nace pelado y
+    `dominio-a-postgres` no lo deja entrar al 5432, porque solo admite los
+    `app` de una lista. Pasa recién cuando las políticas se aplican con un
+    CNI que las haga cumplir, o sea tarde."""
+    permitidos = origenes_permitidos("postgres", 5432)
+    assert permitidos, "no pude leer quién puede entrar a postgres en 40-red.yaml"
+    for ruta, doc in documentos(TANDAS):
+        spec = plantilla(doc)
+        if not any("DATABASE_URL" in str(c.get("env")) + str(c.get("envFrom"))
+                   for c in spec.get("containers") or []):
+            continue
+        plantilla_meta = (doc["spec"]["jobTemplate"]["spec"]["template"]
+                          if doc["kind"] == "CronJob" else doc["spec"]["template"])
+        etiquetas = plantilla_meta.get("metadata", {}).get("labels", {})
+        assert etiquetas.get("app") in permitidos, (
+            f"{ruta}: el pod tiene app={etiquetas.get('app')!r} y "
+            f"40-red.yaml solo deja entrar a {sorted(permitidos)}")
+        assert etiquetas.get("app.kubernetes.io/part-of") == "ojoalgasto", ruta
+
+
+def test_no_usan_la_credencial_administradora_de_postgres():
+    """El Secret global `ojoalgasto` trae la URL del usuario `postgres`, que
+    es superusuario. `configurar-usuarios-bd.sh` crea una cuenta por esquema
+    --NOSUPERUSER, NOBYPASSRLS-- y es la que corresponde. `ESQUEMA_BD` fija
+    el search_path pero no limita privilegios."""
+    for ruta, doc in documentos(TANDAS):
+        for c in plantilla(doc).get("containers") or []:
+            for e in c.get("env") or []:
+                if e["name"] != "DATABASE_URL":
+                    continue
+                nombre = (e.get("valueFrom") or {}).get("secretKeyRef", {}).get("name", "")
+                assert nombre.startswith("ojoalgasto-bd-"), (
+                    f"{ruta} {c['name']}: DATABASE_URL sale de {nombre!r}, "
+                    "que es la cuenta administradora")

@@ -51,6 +51,21 @@ spec:
       # Techo de tiempo: si se cuelga, no se queda ocupando un pod de la cuota.
       activeDeadlineSeconds: 600
       template:
+        metadata:
+          # ── Las etiquetas del CronJob NO son las del pod ─────────────
+          # `metadata.labels` de arriba describe el objeto CronJob; el pod
+          # nace con las que se declaren ACA, y sin ellas nace pelado.
+          # `k8s/40-red.yaml` deja entrar a PostgreSQL por el 5432 solo a los
+          # pods cuyo `app` esta en una lista, asi que un pod sin etiquetas
+          # no puede conectarse en cuanto las politicas se apliquen con un
+          # CNI que las haga cumplir. Lo encontro la revision de la PR.
+          #
+          # `app: notifications` encaja con el permiso que ya existe --no se
+          # abre PostgreSQL a nadie nuevo-- y `part-of` lo mantiene dentro
+          # de la denegacion general de entrada del proyecto.
+          labels:
+            app: notifications
+            app.kubernetes.io/part-of: ojoalgasto
         spec:
           restartPolicy: Never
           containers:
@@ -67,9 +82,19 @@ spec:
                 - name: SECRET_KEY
                   valueFrom:
                     secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+                # ── La credencial RESTRINGIDA, no la administradora ───────
+                # El Secret global `ojoalgasto` trae la URL del usuario
+                # `postgres`, que es superusuario y se salta las
+                # comprobaciones de permisos. `configurar-usuarios-bd.sh` ya
+                # crea `ojoalgasto-bd-notifications` con `svc_notifications`,
+                # declarado NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS.
+                #
+                # `ESQUEMA_BD` fija el search_path, pero eso NO limita
+                # privilegios: con la cuenta administradora el generador podia
+                # operar fuera de su esquema. Lo encontro la revision de la PR.
                 - name: DATABASE_URL
                   valueFrom:
-                    secretKeyRef: { name: ojoalgasto, key: DATABASE_URL }
+                    secretKeyRef: { name: ojoalgasto-bd-notifications, key: DATABASE_URL }
                 - name: ESQUEMA_BD
                   value: notifications
               resources:
