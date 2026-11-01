@@ -276,7 +276,7 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (credenciales: { correo: string; password: string }) => {
-    if (loading || errorCierre || disabled) {
+    if (loading || errorCierre) {
       return; // Evita cualquier llamada HTTP si hay limpieza pendiente o está cargando
     }
 
