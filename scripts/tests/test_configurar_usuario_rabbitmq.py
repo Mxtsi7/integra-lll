@@ -36,8 +36,23 @@ RABBITMQCTL_FALSO = """#!/bin/sh
 [ "$1" = "--quiet" ] && shift
 case "$1" in
   list_users)
+      # Cuenta sus llamadas para poder fallar en una concreta. La revision
+      # reprodujo el caso con la ULTIMA fallando: la que decide sobre guest.
+      N=0
+      [ -n "${CONTADOR:-}" ] && [ -f "$CONTADOR" ] && N="$(cat "$CONTADOR")"
+      N=$((N + 1))
+      [ -n "${CONTADOR:-}" ] && echo "$N" > "$CONTADOR"
+      if [ "${FALLAR_LIST_USERS_EN:-0}" = "$N" ]; then
+        echo "Error: no se pudo consultar el broker" >&2
+        exit 70
+      fi
       printf 'user\\ttags\\nguest\\t[administrator]\\n'
-      [ "${EXISTE:-0}" = "1" ] && printf 'ojoalgasto\\t[management]\\n'
+      # `if` y no `&&`: con `&&` la rama TERMINA en un comando falso cuando
+      # EXISTE=0, asi que el doble devolvia 1 y simulaba una consulta
+      # fallida. El `rabbitmqctl` real devuelve 0 al listar bien.
+      if [ "${EXISTE:-0}" = "1" ]; then
+        printf 'ojoalgasto\\t[management]\\n'
+      fi
       ;;
   add_user|change_password)
       echo "$1 usuario=$2 largo_clave=${#3}" >&2 ;;
@@ -62,10 +77,12 @@ def correr(tmp_path):
     falso.write_text(RABBITMQCTL_FALSO, encoding="utf-8")
     falso.chmod(falso.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
-    def ejecutar(entrada, *, existe=False, usuario="ojoalgasto"):
+    def ejecutar(entrada, *, existe=False, usuario="ojoalgasto", fallar_consulta=0):
         entorno = dict(os.environ)
         entorno["PATH"] = f"{binarios}{os.pathsep}{entorno['PATH']}"
         entorno["EXISTE"] = "1" if existe else "0"
+        entorno["CONTADOR"] = str(tmp_path / "llamadas-list-users")
+        entorno["FALLAR_LIST_USERS_EN"] = str(fallar_consulta)
         # La entrada va en BYTES a proposito. En modo texto, Python sobre
         # Windows traduce el salto de linea a retorno-de-carro-mas-salto al
         # escribirla (\n -> \r\n), asi que la clave llegaba con un retorno
@@ -139,6 +156,25 @@ def test_la_llamada_a_kubectl_esta_protegida_de_la_traduccion_de_rutas():
     kubectl = [i for i, l in enumerate(lineas) if "kubectl " in l]
     assert kubectl, "no encontre ninguna llamada a kubectl"
     assert proteccion < min(kubectl), "la proteccion tiene que ir ANTES de todo kubectl"
+
+
+@pytest.mark.parametrize("consulta", [1, 2])
+def test_si_falla_la_consulta_de_usuarios_no_se_decide_nada(correr, consulta):
+    """Un `list_users` que FALLA no puede leerse como "la cuenta no esta".
+
+    Con `if rabbitmqctl list_users | grep -qx guest`, una consulta fallida
+    hacia que el grep no encontrara nada y el guion se fuera por el else:
+    salia con EXITO, decia "usuario guest: no estaba" y dejaba `guest/guest`
+    vivo. Es el peor desenlace posible, porque esconde justo el agujero que
+    este guion viene a cerrar.
+
+    Dentro de un `if`, ni `set -e` ni `pipefail` lo distinguen: el codigo de
+    salida de la condicion es el del `grep`. Hay que capturar y comprobar.
+    """
+    r = correr(CLAVE, fallar_consulta=consulta)
+    assert r.returncode != 0, r.stdout
+    assert "no estaba" not in r.stdout, r.stdout
+    assert "No se pudo listar" in r.stderr, r.stderr
 
 
 # ── Integración contra un broker HEREDADO de verdad ─────────────────────────

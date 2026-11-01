@@ -62,12 +62,29 @@ VHOST="$2"
 # `read` sino si la variable quedo con algo.
 # Inicializada antes: con `set -u`, si `read` no alcanzara a asignarla, la
 # comprobacion de abajo moriria con "unbound variable" en vez del mensaje.
+# ── Listar usuarios sin confundir "fallo" con "no esta" ─────────────────
+# `if rabbitmqctl list_users | grep -qx X` tiene un falso negativo serio: si
+# la consulta FALLA, el grep no encuentra nada y el `if` se va por el else, o
+# sea "la cuenta no esta". Aplicado a `guest`, el guion salia con EXITO, decia
+# "no estaba" y dejaba la cuenta viva. Lo encontro la revision de la PR.
+#
+# Dentro de un `if`, ni `set -e` ni `pipefail` distinguen esos dos casos: el
+# codigo de salida de la condicion es el del `grep`. Por eso se captura la
+# salida y se comprueba el codigo a mano antes de decidir nada.
+listar_usuarios() {
+  CRUDO="$(rabbitmqctl --quiet list_users)" || return 1
+  printf '%s\n' "$CRUDO" | cut -f1
+}
+
 CLAVE=""
 IFS= read -r CLAVE || true
 [ -n "$CLAVE" ] || { echo "No llego la clave por la entrada estandar." >&2; exit 1; }
 
-# `list_users` sale separado por tabulacion: usuario y etiquetas.
-if rabbitmqctl --quiet list_users | cut -f1 | grep -qx "$USUARIO"; then
+USUARIOS="$(listar_usuarios)" || {
+  echo "No se pudo listar los usuarios del broker; no se decide nada." >&2
+  exit 1
+}
+if printf '%s\n' "$USUARIOS" | grep -qx "$USUARIO"; then
   # Ya existe: se alinea la clave con la del Secret en vez de fallar, para que
   # el guion se pueda volver a correr despues de rotar el Secret.
   rabbitmqctl --quiet change_password "$USUARIO" "$CLAVE"
@@ -100,7 +117,11 @@ unset CLAVE
 
 # Idempotente, y solo `guest`: cualquier otra cuenta que alguien haya creado
 # a mano se conserva. Borrar de mas seria peor que no borrar.
-if rabbitmqctl --quiet list_users | cut -f1 | grep -qx guest; then
+USUARIOS="$(listar_usuarios)" || {
+  echo "No se pudo listar los usuarios del broker; no se decide sobre guest." >&2
+  exit 1
+}
+if printf '%s\n' "$USUARIOS" | grep -qx guest; then
   rabbitmqctl --quiet delete_user guest
   echo "usuario guest: retirado"
 else
