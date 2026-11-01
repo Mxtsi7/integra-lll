@@ -196,6 +196,72 @@ describe('Pantalla Iniciar Sesión Móvil (SE-09)', () => {
     });
   });
 
+  describe('Cierre pendiente (P1 / VI-16)', () => {
+    it('errorCierre deshabilita inputs, botón de envío y oculta envío por submit', () => {
+      const onSubmit = vi.fn();
+      render(
+        <LoginForm
+          correo="usuario@ojoalgasto.cl"
+          password="password123"
+          errorCierre="Hay un cierre de sesión pendiente; reintenta la limpieza antes de volver a entrar."
+          onSubmit={onSubmit}
+        />
+      );
+
+      expect(screen.getByTestId('cierre-pendiente')).toBeTruthy();
+      expect(screen.getByTestId('reintentar-cierre')).toBeTruthy();
+
+      const submitBtn = screen.getByTestId('login-submit');
+      expect(submitBtn.getAttribute('aria-disabled')).toBe('true');
+
+      fireEvent.click(submitBtn);
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('permite pulsar «Reintentar limpieza» aunque haya errorCierre activo', () => {
+      const onReintentarCierre = vi.fn();
+      render(
+        <LoginForm
+          correo="usuario@ojoalgasto.cl"
+          password="password123"
+          errorCierre="Hay un cierre de sesión pendiente; reintenta la limpieza antes de volver a entrar."
+          onReintentarCierre={onReintentarCierre}
+        />
+      );
+
+      const reintentarBtn = screen.getByTestId('reintentar-cierre');
+      expect(reintentarBtn.getAttribute('aria-disabled')).not.toBe('true');
+      fireEvent.click(reintentarBtn);
+      expect(onReintentarCierre).toHaveBeenCalledTimes(1);
+    });
+
+    it('con errorCierre activo no se envían peticiones HTTP al intentar submit', () => {
+      const onSubmit = vi.fn();
+      const fetchSpy = vi.fn();
+      vi.stubGlobal('fetch', fetchSpy);
+
+      try {
+        render(
+          <LoginForm
+            correo="usuario@ojoalgasto.cl"
+            password="password123"
+            errorCierre="Hay un cierre de sesión pendiente; reintenta la limpieza antes de volver a entrar."
+            onSubmit={onSubmit}
+          />
+        );
+
+        const submitBtn = screen.getByTestId('login-submit');
+        fireEvent.click(submitBtn);
+        fireEvent.submit(submitBtn);
+
+        expect(onSubmit).not.toHaveBeenCalled();
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+  });
+
   describe('Contrato de props y desacople para SE-10 (Criterio 3)', () => {
     it('dispara callbacks de navegación secundaria al pulsar enlaces', () => {
       const onNavigateRegistro = vi.fn();

@@ -76,7 +76,7 @@ export function LoginForm({
   const correoValue = propCorreo !== undefined ? propCorreo : internalCorreo;
   const passwordValue = propPassword !== undefined ? propPassword : internalPassword;
   const activeError = error || internalError;
-  const isBloqueado = Boolean(disabled || loading);
+  const isBloqueado = Boolean(disabled || loading || errorCierre);
 
   const handleCorreoChange = (texto: string) => {
     setInternalCorreo(texto);
@@ -91,6 +91,9 @@ export function LoginForm({
   };
 
   const handleFormSubmit = () => {
+    if (loading || errorCierre || disabled) {
+      return;
+    }
     if (isBloqueado) return;
 
     if (!correoValue.trim()) {
@@ -273,7 +276,9 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async (credenciales: { correo: string; password: string }) => {
-    if (loading) return;
+    if (loading || errorCierre || disabled) {
+      return; // Evita cualquier llamada HTTP si hay limpieza pendiente o está cargando
+    }
 
     setLoading(true);
     setError(null);
