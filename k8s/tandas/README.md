@@ -86,6 +86,40 @@ Dos cosas que no se heredan y que, si faltan, fallan tarde:
 esta carpeta, cruzando las etiquetas contra los selectores reales de
 `40-red.yaml`.
 
+## Cómo se aprueba el presupuesto de una tanda
+
+`presupuesto.py k8s` a secas **no sirve** para esto: su glob no mira
+`k8s/tandas/`. La herramienta acepta ahora el perfil de la tanda:
+
+```bash
+python k8s/pruebas/presupuesto.py k8s   --generador k8s/pruebas/carga-fortio-otro-namespace.yaml   --namespace-generador student-carga   --sin-autoescalado   --pausar subscriptions-beat   --extra k8s/tandas/alertas-notifications.yaml
+```
+
+- `--sin-autoescalado` fija los HPA en una réplica, como en una tanda. Sin él
+  la herramienta exige espacio para un autoescalado que no va a ocurrir y una
+  tanda que entra sale rechazada. El peor caso pasa a ser el CronJob corriendo.
+- `--pausar` saca una carga del presupuesto.
+- `--extra` suma manifiestos de fuera del directorio, nombrados uno a uno.
+
+Tres cosas que la herramienta ahora **se niega** a hacer, porque las tres
+daban un presupuesto optimista en silencio:
+
+| | |
+|---|---|
+| Un objeto que no sabe cobrar | antes lo ignoraba; ahora se detiene |
+| `--pausar` de algo que no existe | no pausaba nada y el número salía igual |
+| `--extra` que no encuentra manifiestos | sumaba cero sin avisar |
+
+También cuenta los **Services**, que son otra cuota (10) y nadie miraba: van
+7 de 10, así que tres servicios nuevos la dejan al tope.
+
+Los perfiles están declarados en [`perfiles.yaml`](perfiles.yaml) y
+`scripts/tests/test_tandas.py` corre los tres contra la herramienta.
+
+**Un «TODO ENTRA» no aprueba la tanda.** Cada perfil declara qué le falta —
+manifiestos que todavía no existen y por eso no suman. Mientras esa lista
+tenga algo, la tanda no es demostrable.
+
 ## Cómo se aplica
 
 ```bash

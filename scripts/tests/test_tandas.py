@@ -9,12 +9,18 @@ Estas pruebas comprueban lo que el presupuesto del repo no mira, porque
 `k8s/pruebas/presupuesto.py` solo recorre `k8s/*.yaml`.
 """
 import glob
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 RAIZ = Path(__file__).resolve().parents[2]
-TANDAS = sorted(glob.glob(str(RAIZ / "k8s/tandas/*.yaml")))
+PERFILES = RAIZ / "k8s/tandas/perfiles.yaml"
+# `perfiles.yaml` declara qué se levanta en cada tanda; no es un manifiesto.
+TANDAS = [r for r in sorted(glob.glob(str(RAIZ / "k8s/tandas/*.yaml")))
+          if Path(r).name != "perfiles.yaml"]
 
 # Cuota y mínimos del namespace, los mismos que usa k8s/pruebas/presupuesto.py.
 TOPE_MEMORIA, TOPE_PODS = 2752, 12
@@ -216,3 +222,59 @@ def test_los_cronjob_llegan_suspendidos():
             continue
         assert doc["spec"].get("suspend") is True, (
             f"{ruta}: tiene que llegar con suspend: true")
+
+
+# ── Los perfiles de tanda, contra la herramienta de verdad ─────────────────
+
+def perfiles():
+    return yaml.safe_load(PERFILES.read_text(encoding="utf-8"))["tandas"]
+
+
+def presupuesto(perfil):
+    """Corre `presupuesto.py` con los argumentos del perfil."""
+    orden = [
+        sys.executable, str(RAIZ / "k8s/pruebas/presupuesto.py"), str(RAIZ / "k8s"),
+        "--generador", str(RAIZ / "k8s/pruebas/carga-fortio-otro-namespace.yaml"),
+        "--namespace-generador", "student-carga",
+        "--sin-autoescalado",
+    ]
+    for carga in perfil.get("pausar") or []:
+        orden += ["--pausar", carga]
+    for patron in perfil.get("extra") or []:
+        orden += ["--extra", str(RAIZ / patron)]
+    return subprocess.run(orden, capture_output=True, text=True,
+                          encoding="utf-8", timeout=180)
+
+
+@pytest.mark.parametrize("nombre", sorted(perfiles()))
+def test_cada_tanda_declarada_entra_en_la_cuota(nombre):
+    """Lo que el perfil levanta hoy tiene que caber. No aprueba la tanda
+    --para eso están los `faltan`-- pero descarta que lo ya escrito no entre."""
+    r = presupuesto(perfiles()[nombre])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "TODO ENTRA" in r.stdout
+
+
+@pytest.mark.parametrize("nombre", sorted(perfiles()))
+def test_cada_tanda_declara_lo_que_le_falta(nombre):
+    """El número verde de arriba NO es una aprobación: los manifiestos que
+    faltan no suman porque no existen. Mientras `faltan` tenga algo, la tanda
+    no es demostrable, y eso tiene que estar escrito al lado del perfil para
+    que nadie lea el "TODO ENTRA" como un permiso."""
+    perfil = perfiles()[nombre]
+    assert "faltan" in perfil, f"{nombre}: declarar `faltan`, aunque sea vacío"
+    assert perfil.get("descripcion"), nombre
+
+
+def test_los_perfiles_pausan_y_referencian_cosas_que_existen():
+    """Un `pausar` mal escrito no pausa nada y el presupuesto sale optimista;
+    un `extra` que no encuentra nada, igual. La herramienta ya se niega en los
+    dos casos: esto comprueba que los perfiles del repo no los tengan."""
+    nombres = {d["metadata"]["name"] for _, d in documentos(
+        sorted(glob.glob(str(RAIZ / "k8s/*.yaml"))))
+        if d["kind"] in ("Deployment", "StatefulSet")}
+    for nombre, perfil in perfiles().items():
+        for carga in perfil.get("pausar") or []:
+            assert carga in nombres, f"{nombre}: pausa {carga!r}, que no existe"
+        for patron in perfil.get("extra") or []:
+            assert glob.glob(str(RAIZ / patron)), f"{nombre}: {patron} no encuentra nada"
