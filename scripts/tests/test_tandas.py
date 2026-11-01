@@ -325,3 +325,13 @@ def test_service_notifications_no_selecciona_pods_del_generador():
     selecciona = lambda etiquetas: all(etiquetas.get(k) == v for k, v in selector.items())
     assert selecciona(api)
     assert not selecciona(job), 'el Job sin HTTP no puede ser endpoint de la API'
+
+
+def test_restaurar_beat_cabe_con_el_consumidor_antes_de_retirar_la_tanda():
+    # No retirar el consumidor antes de recuperar el outbox. El generador ya
+    # terminó; el cálculo debe conservar Beat y el pod completo de la API.
+    perfil = {'pausar': [], 'extra': ['k8s/tandas/notifications.yaml']}
+    resultado = presupuesto(perfil)
+    assert resultado.returncode == 0, resultado.stdout + resultado.stderr
+    assert '2592Mi' in resultado.stdout
+    assert '1800m' in resultado.stdout

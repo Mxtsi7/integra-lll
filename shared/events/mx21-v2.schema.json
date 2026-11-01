@@ -36,6 +36,7 @@
         "moneda": {"type": "string", "pattern": "^[A-Z]{3}$", "maxLength": 3},
         "ciclo": {"enum": ["mensual", "anual"]},
         "proximo_cobro": {"type": "string", "format": "date"},
+        "fin_prueba": {"type": ["string", "null"], "format": "date"},
         "estado": {"$ref": "#/$defs/estado"},
         "estado_anterior": {"$ref": "#/$defs/estado"},
         "evento_estado": {"enum": ["fin_prueba", "fallo_cobro_inicial", "cancelacion_usuario", "fallo_cobro", "cobro_regularizado", "confirmacion_usuario", "sin_cobros_60_dias", "sin_respuesta_30_dias", "sin_uso_45_dias", "uso_registrado", "cobro_nuevo_detectado", "reactivacion_usuario"]},
