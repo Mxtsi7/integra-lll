@@ -1,0 +1,121 @@
+# Generador de alertas de FE-17 y FE-18.
+#
+# ── Por que vive en k8s/tandas/ y no en k8s/ ─────────────────────────────────
+# `notifications` NO esta desplegado en el cluster y su esquema no se migra,
+# asi que este CronJob fallaria en cada corrida. Es el mismo motivo por el que
+# la purga de FE-07 no tiene CronJob (ver k8s/README.md): un trabajo
+# programado contra un servicio ausente es ruido que nadie mira.
+#
+# Tampoco va en el ciclo de `desplegar.sh`: la prueba
+# `test_el_despliegue_aplica_todos_los_manifiestos_numerados` exige que TODO
+# manifiesto numerado de `k8s/` se aplique, y este no debe aplicarse siempre.
+# Por eso `k8s/tandas/` queda fuera de ese glob a proposito.
+#
+# Se aplica a mano cuando se arma la tanda de notifications, junto con su
+# Deployment y su consumidor. Ver k8s/tandas/README.md.
+#
+# ── Por que hace falta ──────────────────────────────────────────────────────
+# `generar_alertas` no lo programa NADIE hoy: ni cron, ni CronJob, ni una
+# entrada de beat. Sin esto, desplegar notifications deja la proyeccion viva
+# pero no se genera una sola alerta, y la demostracion no tiene que mostrar.
+#
+# El comando es idempotente: el `evento_id` de cada alerta es un UUID v5
+# deterministico y la restriccion unica hace el resto. Correrlo de mas no
+# duplica nada, por eso la frecuencia se puede subir sin miedo.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: generar-alertas
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # Cada hora. Las ventanas de FE-17 son de dias y las de FE-18 de 48h y 24h,
+  # asi que con una corrida diaria alcanzaria; cada hora da mejor precision en
+  # el aviso de fin de prueba y no cuesta nada porque es idempotente.
+  #
+  # Para la demostracion no hay que esperar la hora:
+  #   kubectl create job --from=cronjob/generar-alertas alertas-ahora
+  schedule: "0 * * * *"
+  # ── Llega SUSPENDIDO ────────────────────────────────────────────────────
+  # Aplicar el manifiesto no debe arrancar corridas: `notifications` no esta
+  # desplegado todavia, y en la tanda se quiere decidir cuando empieza. Se
+  # habilita a mano al entrar:
+  #   kubectl patch cronjob generar-alertas -p '{"spec":{"suspend":false}}'
+  #
+  # Ojo: `suspend` frena las corridas NUEVAS, no las que ya estan andando, y
+  # `concurrencyPolicy` no gobierna un Job creado a mano desde la plantilla.
+  # Antes de disparar uno manual hay que mirar que no haya otro activo.
+  suspend: true
+  # Forbid y no Allow: con la cuota al tope, dos corridas encimadas serian dos
+  # pods. Ademas no aporta nada, porque el trabajo es el mismo.
+  concurrencyPolicy: Forbid
+  # Si el cluster estaba sin cupo a la hora en punto, se intenta hasta 5
+  # minutos y despues se descarta esa corrida en vez de acumularlas.
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      # Sin reintentos automaticos: un fallo tiene que verse, no repetirse en
+      # silencio. La proxima hora vuelve a intentar de todas formas.
+      backoffLimit: 0
+      # Techo de tiempo: si se cuelga, no se queda ocupando un pod de la cuota.
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          # ── Las etiquetas del CronJob NO son las del pod ─────────────
+          # `metadata.labels` de arriba describe el objeto CronJob; el pod
+          # nace con las que se declaren ACA, y sin ellas nace pelado.
+          # `k8s/40-red.yaml` deja entrar a PostgreSQL por el 5432 solo a los
+          # pods cuyo `app` esta en una lista, asi que un pod sin etiquetas
+          # no puede conectarse en cuanto las politicas se apliquen con un
+          # CNI que las haga cumplir. Lo encontro la revision de la PR.
+          #
+          # `app: notifications` encaja con el permiso que ya existe --no se
+          # abre PostgreSQL a nadie nuevo-- y `part-of` lo mantiene dentro
+          # de la denegacion general de entrada del proyecto.
+          labels:
+            app: notifications
+            app.kubernetes.io/part-of: ojoalgasto
+        spec:
+          restartPolicy: Never
+          # Los paquetes del registro son PRIVADOS. Todos los demas pods del
+          # proyecto declaran este secreto; este era el unico que no, asi que
+          # habria muerto en ImagePullBackOff en su primera corrida.
+          imagePullSecrets:
+            - name: ghcr
+          containers:
+            - name: generar-alertas
+              image: IMAGEN_NOTIFICATIONS
+              command: ["python", "manage.py", "generar_alertas"]
+              # Mismo patron que el resto: lo no secreto del ConfigMap y lo
+              # secreto por referencia. `generar_alertas` solo necesita
+              # SECRET_KEY, DEBUG y DATABASE_URL, pero DEBUG viene del
+              # ConfigMap y el esquema se fija aca.
+              envFrom:
+                - configMapRef: { name: ojoalgasto }
+              env:
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+                # ── La credencial RESTRINGIDA, no la administradora ───────
+                # El Secret global `ojoalgasto` trae la URL del usuario
+                # `postgres`, que es superusuario y se salta las
+                # comprobaciones de permisos. `configurar-usuarios-bd.sh` ya
+                # crea `ojoalgasto-bd-notifications` con `svc_notifications`,
+                # declarado NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS.
+                #
+                # `ESQUEMA_BD` fija el search_path, pero eso NO limita
+                # privilegios: con la cuenta administradora el generador podia
+                # operar fuera de su esquema. Lo encontro la revision de la PR.
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-bd-notifications, key: DATABASE_URL }
+                - name: ESQUEMA_BD
+                  value: notifications
+              resources:
+                # 64Mi es el MINIMO del LimitRange del namespace; por debajo el
+                # pod ni se crea. El limite se queda en 160Mi como el de
+                # subscriptions-beat, que es el trabajo mas parecido: un
+                # proceso Django corto y sin servidor web.
+                requests: { cpu: 25m,  memory: 64Mi }
+                limits:   { cpu: 150m, memory: 160Mi }

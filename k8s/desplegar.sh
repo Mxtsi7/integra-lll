@@ -118,6 +118,10 @@ fi
 # Verificar/drenar el broker ANTES de reemplazarlo o reiniciar sus consumidores.
 # Si falla, no se aplica el manifiesto ni se prosigue con la migración.
 python3 k8s/actualizar-rabbitmq.py
+# El usuario del broker NO lo crean RABBITMQ_DEFAULT_USER/PASS cuando ya hay
+# datos en el PVC: solo actuan en el primer arranque. Sin esto los clientes
+# quedan sin poder autenticarse. Ver el encabezado del guion.
+bash k8s/configurar-usuario-rabbitmq.sh
 
 # Preparar Postgres antes de las migraciones de dominio.
 kubectl apply -f k8s/00-configuracion.yaml
