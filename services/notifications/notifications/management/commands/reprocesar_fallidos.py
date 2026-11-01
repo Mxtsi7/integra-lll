@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from events.topologia import COLA_DOMINIO, COLA_FALLIDOS
 
 
-def reenviar(canal, limite):
+def reenviar(canal, limite, al_confirmar=None):
     # No crear colas ni bindings: solo se recupera dentro de una tanda activa.
     canal.queue_declare(queue=COLA_DOMINIO, passive=True)
     cantidad = canal.queue_declare(queue=COLA_FALLIDOS, passive=True).method.message_count
@@ -32,6 +32,8 @@ def reenviar(canal, limite):
             raise
         canal.basic_ack(delivery_tag=metodo.delivery_tag)
         reenviados += 1
+        if al_confirmar is not None:
+            al_confirmar(reenviados)
     return reenviados
 
 
@@ -47,14 +49,19 @@ class Command(BaseCommand):
         if not settings.RABBITMQ_URL:
             raise CommandError('Falta configurar RABBITMQ_URL desde el Secret del broker')
         conexion = None
+        confirmados = 0
+        def registrar(cantidad):
+            nonlocal confirmados
+            confirmados = cantidad
         try:
             parametros = pika.URLParameters(settings.RABBITMQ_URL)
             parametros.blocked_connection_timeout = 30
             conexion = pika.BlockingConnection(parametros)
-            cantidad = reenviar(conexion.channel(), opciones['limite'])
-        except (pika.exceptions.AMQPError, OSError):
+            cantidad = reenviar(conexion.channel(), opciones['limite'], al_confirmar=registrar)
+        except (pika.exceptions.AMQPError, OSError) as error:
             # No incluir excepciones del cliente: pueden contener la URL.
-            raise CommandError('Replay interrumpido; comprobar broker y conservar la DLQ') from None
+            raise CommandError(f'Replay interrumpido: confirmados={confirmados} '
+                               f'error={type(error).__name__}; comprobar efectos y conservar la DLQ') from None
         finally:
             if conexion is not None and conexion.is_open:
                 conexion.close()

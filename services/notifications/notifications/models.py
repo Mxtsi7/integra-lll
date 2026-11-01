@@ -454,11 +454,12 @@ class SuscripcionVigilada(ModeloTenant):
 
 
 class EventoRecibido(ModeloTenant):
-    """Inbox del único consumidor FE-24; se borra con la organización."""
+    """Inbox por consumidor FE-24; se borra con la organización."""
+    consumidor = models.CharField(max_length=64, default='suscripciones.v2')
     evento_id = models.UUIDField()
 
     class Meta(ModeloTenant.Meta):
         db_table = 'evento_recibido'
         constraints = [models.UniqueConstraint(
-            fields=['organizacion_id', 'evento_id'], name='notifications_evento_unico',
+            fields=['consumidor', 'organizacion_id', 'evento_id'], name='notifications_evento_unico',
         )]

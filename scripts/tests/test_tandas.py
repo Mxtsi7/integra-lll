@@ -297,8 +297,8 @@ def test_notifications_incluye_api_consumidor_y_generador_en_el_presupuesto():
     assert any(d['kind'] == 'CronJob' for d in docs)
     resultado = presupuesto(perfil)
     assert resultado.returncode == 0, resultado.stdout + resultado.stderr
-    assert '2592Mi' in resultado.stdout
-    assert '1900m' in resultado.stdout
+    assert '2752Mi' in resultado.stdout
+    assert '1950m' in resultado.stdout
 
 
 def test_render_notifications_resuelve_imagen_y_no_toca_cluster():
@@ -335,3 +335,35 @@ def test_restaurar_beat_cabe_con_el_consumidor_antes_de_retirar_la_tanda():
     assert resultado.returncode == 0, resultado.stdout + resultado.stderr
     assert '2592Mi' in resultado.stdout
     assert '1800m' in resultado.stdout
+
+
+def test_retiro_no_borra_manifiestos_si_no_se_elimina_cola(tmp_path):
+    import json
+    import os
+    doble = tmp_path / 'kubectl'
+    doble.write_text('''#!/usr/bin/env python3
+import json, os, sys
+with open(os.environ['REGISTRO'], 'a') as f:
+    f.write(json.dumps([sys.argv[1:], os.getenv('MSYS_NO_PATHCONV')]) + '\\n')
+if 'delete_queue' in sys.argv and os.getenv('FALLAR_COLA') == '1':
+    sys.exit(7)
+''')
+    doble.chmod(0o755)
+    manifiesto = tmp_path / 'notifications-tanda.yaml'
+    manifiesto.write_text('apiVersion: v1\n')
+    registro = tmp_path / 'llamadas.jsonl'
+    entorno = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ['PATH'],
+                   REGISTRO=str(registro), VHOST='/', FALLAR_COLA='1')
+    script = RAIZ / 'k8s/tandas/retirar-notifications.sh'
+    fallo = subprocess.run(['bash', str(script), str(manifiesto)], env=entorno, capture_output=True, text=True)
+    assert fallo.returncode != 0
+    llamadas = [json.loads(l) for l in registro.read_text().splitlines()]
+    assert len(llamadas) == 1
+    assert llamadas[0][1] == '1'
+    assert llamadas[0][0][-4:] == ['/', 'notifications.dominio.v2', '--if-empty', '--if-unused']
+    entorno['FALLAR_COLA'] = '0'
+    exito = subprocess.run(['bash', str(script), str(manifiesto)], env=entorno, capture_output=True, text=True)
+    assert exito.returncode == 0, exito.stderr
+    llamadas = [json.loads(l) for l in registro.read_text().splitlines()]
+    assert llamadas[-1][0] == ['delete', '-f', str(manifiesto)]
+    assert llamadas[-1][1] == os.environ.get('MSYS_NO_PATHCONV')

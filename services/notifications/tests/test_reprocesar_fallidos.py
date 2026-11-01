@@ -58,3 +58,21 @@ def test_replay_respeta_limite_y_no_recorre_mensajes_nuevos():
 def test_limite_invalido_falla_antes_de_conectar(limite):
     with pytest.raises(CommandError, match='positivo'):
         call_command('reprocesar_fallidos', limite=limite)
+
+
+@pytest.mark.parametrize('error', [pika.exceptions.NackError([]), pika.exceptions.UnroutableError([])])
+def test_interrupcion_informa_conteo_parcial_sin_datos(error, monkeypatch, settings):
+    import notifications.management.commands.reprocesar_fallidos as comando
+    canal, _ = canal_con_mensaje()
+    canal.queue_declare.return_value.method.message_count = 2
+    canal.basic_publish.side_effect = [None, error]
+    conexion = Mock()
+    conexion.channel.return_value = canal
+    monkeypatch.setattr(comando.pika, 'BlockingConnection', lambda _: conexion)
+    settings.RABBITMQ_URL = 'amqp://guest:guest@localhost/'
+    with pytest.raises(CommandError) as resultado:
+        call_command('reprocesar_fallidos', limite=2)
+    assert 'confirmados=1' in str(resultado.value)
+    assert type(error).__name__ in str(resultado.value)
+    assert 'guest' not in str(resultado.value)
+    assert canal.basic_ack.call_count == 1

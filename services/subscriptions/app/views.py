@@ -1075,6 +1075,7 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
                 "moneda": suscripcion.moneda,
                 "frecuencia": suscripcion.frecuencia,
                 "fecha_proximo_cobro": suscripcion.fecha_proximo_cobro,
+                "fin_prueba": suscripcion.fin_prueba,
             }
 
             if (
@@ -1118,6 +1119,7 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
                 "moneda": "moneda",
                 "frecuencia": "ciclo",
                 "fecha_proximo_cobro": "proximo_cobro",
+                "fin_prueba": "fin_prueba",
             }
             campos_modificados = [
                 nombres_evento[campo]

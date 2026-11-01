@@ -19,7 +19,7 @@ case "$MODO" in
     python3 k8s/pruebas/presupuesto.py k8s \
       --generador k8s/pruebas/carga-fortio-otro-namespace.yaml \
       --namespace-generador student-carga --sin-autoescalado \
-      --pausar subscriptions-beat --extra k8s/tandas/notifications.yaml \
+      --extra k8s/tandas/notifications.yaml \
       --extra k8s/tandas/alertas-notifications.yaml >&2
     # El generador anterior solo se usa para calcular; no se crea ningún Job.
     python3 - <<'PY'

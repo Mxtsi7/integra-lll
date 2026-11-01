@@ -62,6 +62,8 @@ Notifications no genera aviso de fin de prueba; no se infiere de `proximo_cobro`
 Subscriptions la publica cuando está disponible. Es una ampliación compatible:
 los receptores previos siguen aceptando campos adicionales; la aceptación humana
 de Victor/Felipe y de otros receptores sigue pendiente en la revisión de #140.
+`campos_modificados` admite `fin_prueba`: editar solo fecha o null genera un
+snapshot actualizado; un PATCH sin cambio efectivo no emite.
 Las regresiones del esquema verifican created/updated/state_changed con fecha,
 null, ausencia y rechazo de fechas/tipos inválidos.
 Una cancelación en VI-26 publica solo `suscripcion.estado_cambiado.v2` por defecto;

@@ -11,18 +11,22 @@ de imagen y generador. `faltan: []` significa código disponible, **no despliegu
 ni consumo bajo carga comprobados**. Connectors y Analytics siguen pendientes
 según `perfiles.yaml`; sus manifiestos no se inventan en el presupuesto.
 
-| Notificaciones, HPA fijos en uno y Beat pausado | Reposo | Generador corriendo | Cuota |
+| Notificaciones, HPA fijos en uno y Beat activo | Reposo | Generador corriendo | Cuota |
 |---|---:|---:|---:|
-| Pods | 10 | 11 | 12 |
-| Límites memoria | 2432 Mi | 2592 Mi | 2752 Mi |
-| Solicitudes memoria | 976 Mi | 1040 Mi | 1152 Mi |
-| Límites CPU | 1750m | 1900m | 2000m |
-| Solicitudes CPU | 475m | 500m | 1000m |
+| Pods | 11 | 12 | 12 |
+| Límites memoria | 2592 Mi | 2752 Mi | 2752 Mi |
+| Solicitudes memoria | 1040 Mi | 1104 Mi | 1152 Mi |
+| Límites CPU | 1800m | 1950m | 2000m |
+| Solicitudes CPU | 500m | 525m | 1000m |
 | Services | 8 | 8 | 10 |
 
 API (256 Mi) y consumidor (160 Mi) comparten un pod; migrar usa un init de
 256 Mi. El generador ocupa otro pod hasta terminar (160 Mi). Los límites son
 presupuesto, no mediciones de suficiencia. Si hay OOM, se detiene la tanda.
+Con el generador no sobra memoria ni un lugar de pod: **ningún rollout, pod de
+prueba ni réplica extra** en esa ventana. `EVENTOS_ASINCRONOS=0` ejecuta el
+resumen dentro del POST, pero la publicación AMQP sigue dependiendo de Beat.
+No se confunde respuesta 201 con publicación ni con proyección aplicada.
 
 Los manifiestos están fuera del glob permanente de `desplegar.sh`: no se
 activan sin la ventana ni cambian el núcleo en cada despliegue. La herramienta
@@ -35,7 +39,7 @@ Desde la raíz y con Python/PyYAML, Docker y sesión de escritura en tu registro
 ```bash
 export IMAGEN_NOTIFICATIONS="ghcr.io/TU_USUARIO/ojoalgasto-notifications:SHA_VALIDADO"
 bash k8s/tandas/preparar-notifications.sh construir
-bash k8s/tandas/preparar-notifications.sh render > /tmp/notifications-tanda.yaml
+bash k8s/tandas/preparar-notifications.sh render > notifications-tanda.yaml
 ```
 
 El render verifica presupuesto, sustituye la imagen de los dos manifiestos y no
@@ -73,7 +77,7 @@ Subscriptions y su worker. Conservarlos para una restauración exacta.
 ```bash
 # Confirmar el vhost usado por RABBITMQ_URL, sin imprimir la credencial.
 VHOST=/  # ajustar al vhost real antes de continuar
-kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
+MSYS_NO_PATHCONV=1 kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
   name arguments messages_ready messages_unacknowledged consumers
 ```
 
@@ -85,11 +89,12 @@ consumidores, eliminarla con las dos guardas del cierre y aplicar esta versión
 para recrearla. Si hay pendientes, conservar la versión anterior y abortar
 la actualización; nunca purgar mensajes para cambiar argumentos.
 
-5. Pausar Beat y aplicar solo la tanda:
+5. Pausar Beat **solo durante instalación y rollouts**, aplicar la tanda y
+   registrar que el outbox puede acumular temporalmente en ese intervalo:
 
 ```bash
 kubectl scale deployment/subscriptions-beat --replicas=0
-kubectl apply -f /tmp/notifications-tanda.yaml
+kubectl apply -f notifications-tanda.yaml
 kubectl rollout status deployment/notifications --timeout=300s
 kubectl logs deployment/notifications -c consumidor
 ```
@@ -108,10 +113,17 @@ mientras corre un Job del generador: en reposo cabe un pod adicional de
 No lanzar Jobs hasta terminar ambos rollouts. Usar una organización sintética
 nueva para esta prueba.
 
-La pausa de Beat quita el reintento periódico del outbox, aunque el modo
-síncrono publique dentro de la petición. Sin tráfico ajeno a la demostración,
-comprobar publicaciones pendientes/errores tras cada operación. Ante fallo,
-invalidar la tanda y recuperar; nunca ignorar un pendiente.
+Terminado el último rollout de Auth, levantar Beat **antes de crear datos**:
+
+```bash
+kubectl scale deployment/subscriptions-beat --replicas=1 &&
+kubectl rollout status deployment/subscriptions-beat --timeout=300s &&
+kubectl wait --for=condition=Ready pod -l app=subscriptions-beat --timeout=300s
+```
+
+Confirmar una réplica disponible. En ambos modos el POST persiste outbox;
+**no abre RabbitMQ**. Solo la tarea agendada por Beat lo despacha. Si Beat cae,
+detener operaciones y no generar alertas hasta recuperar la publicación.
 
 ## 3. Verificar alertas, lectura y borrado
 
@@ -120,6 +132,23 @@ válido) por el Gateway, con el usuario autenticado de esa organización.
 Comprobar proyección/evento por identificador y acceso aislado de otro tenant.
 El inbox y el efecto comparten transacción; ACK sucede después del commit y
 los rechazos van a `notifications.fallidos`, no al DLX de Subscriptions.
+
+Antes de **cada** Job, exigir outbox global pendiente a cero y proyección de
+la suscripción creada/actualizada con la fecha real (no solo inbox ni salud).
+Usar el UUID sintético de esa operación, sin publicar datos ni credenciales:
+
+```bash
+kubectl exec deployment/subscriptions -- python manage.py shell -c \
+  'from app.models import OutboxEvento; n=OutboxEvento.objects.filter(publicado_en__isnull=True).count(); print("outbox_pendiente=", n); raise SystemExit(1 if n else 0)'
+kubectl exec deployment/notifications -c api -- python manage.py shell -c \
+  'from notifications.models import SuscripcionVigilada; s=SuscripcionVigilada.objects.get(suscripcion_id="REEMPLAZAR_UUID_SINTETICO"); print(s.suscripcion_id, s.estado, s.fin_prueba, s.proximo_cobro)'
+```
+
+Comparar las fechas con la operación aceptada. Si no existe fila, hay pendiente
+o la fecha no coincide, **no** ejecutar el Job. No hacer DELETE de suscripciones
+en esta demo: su borrado lógico aún no emite un hecho MX-21 y puede dejar avisos
+vigentes (brecha RN-03 registrada en doc 11). Para limpiar los datos usar el
+flujo real de eliminación de la **organización**, que sí tiene ACK por destino.
 
 El CronJob llega suspendido. Verificar que no exista otro Job activo y crear
 uno manual con nombre único. `Forbid` no protege Jobs manuales.
@@ -160,7 +189,11 @@ No retirar destinos con datos o ACK pendientes.
 
 ### 4.1 Detener carga y recuperar con el consumidor todavía activo
 
-Congelar nuevas escrituras/importaciones de la demostración y tráfico ajeno;
+Definir `VHOST=/` (o el vhost real) al entrar a esta fase. No aplicar
+`MSYS_NO_PATHCONV` globalmente: rompería la traducción de rutas para kubectl.exe.
+
+Congelar todas las escrituras, incluidas bajas de organización/integrantes,
+importaciones y tráfico ajeno;
 no cerrar la cola con productores generando hechos nuevos. Suspender el
 CronJob (no detiene Jobs ya creados), esperar todos los Jobs manuales/automáticos,
 guardar sus logs y retirar **solo** los terminados. Conservar la API y el
@@ -182,14 +215,15 @@ kubectl wait --for=condition=Ready pod -l app=subscriptions-beat --timeout=300s
 
 Confirmar **1 réplica disponible**, no solo rollout exitoso. Beat + API/consumidor
 sin generador usan 11 pods, 2592 Mi de límites, 1040 Mi solicitados y 1800m de
-CPU límite: caben con HPA en uno. Nunca levantar Beat con el Job aún activo.
+CPU límite: caben con HPA en uno. Beat se mantiene activo durante la demo;
+si hay que recuperarlo o cambiar réplicas, esperar primero que termine el Job.
 Esperar outbox a cero incluso si `siguiente_intento` aplazó el reintento; no
 contar solo los eventos vencidos. Consultar sin cuerpos ni secretos:
 
 ```bash
 kubectl exec deployment/subscriptions -- python manage.py shell -c \
   'from app.models import OutboxEvento; print("outbox_pendiente=", OutboxEvento.objects.filter(publicado_en__isnull=True).count())'
-kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
+MSYS_NO_PATHCONV=1 kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
   name messages_ready messages_unacknowledged consumers
 ```
 
@@ -214,23 +248,62 @@ destinos hasta resolver todos sus ACK y la limpieza de la organización sintéti
 
 ### 4.2 Retirar la cola de la tanda y restaurar el núcleo
 
-Con tráfico congelado, outbox cero, efectos/limpieza verificados y **ambas colas
-de Notificaciones con ready=0 y unacknowledged=0**, parar el Deployment y esperar
-que desaparezca su pod. Verificar de nuevo los contadores y consumers=0 antes
-de eliminar la cola de dominio con guardas. Si una guarda falla, no forzar ni
-purgar: reactivar la misma imagen, recuperar y repetir la comprobación.
+Definir de nuevo el vhost y mantener el tráfico congelado hasta finalizar.
+Primero recuperar con Beat activo como en 4.1. Después, sin Jobs, pausar Beat
+**temporalmente para los rollouts de destinos**: con Beat activo el pod extra
+de Auth excedería la memoria (2592 + 256 > 2752 Mi). Con Beat en cero cada
+rollout secuencial cabe (2432 + 256 = 2688 Mi).
 
 ```bash
-kubectl scale deployment/notifications --replicas=0
-# Solo pods API/consumidor, no confundirlos con Jobs terminados:
-kubectl wait --for=delete pod -l app=notifications,componente=api --timeout=300s
-kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
+VHOST=/  # confirmar el vhost real; no reutilizar una variable de otra terminal
+kubectl scale deployment/subscriptions-beat --replicas=0
+```
+
+Con API/consumidor de Notificaciones todavía activos, restaurar el valor exacto
+(o ausencia del override) registrado de `ELIMINACION_DESTINOS` **primero en Auth**,
+esperar su rollout, **después en auth-eliminaciones**, y esperar también. No
+usar una lista nueva inventada ni quitar destinos que aún tengan datos. Las
+operaciones ya creadas conservan su lista de pendientes; cambiar la variable
+no las resuelve. Eliminar integrantes requiere Notificaciones incluso si el
+override excluye ese destino: mantener congeladas también las bajas personales.
+
+Ejecutar el reintento y exigir cero operaciones almacenadas que aún esperen el
+ACK de Notificaciones, tanto organizaciones como usuarios. Si el comando o la
+consulta falla, **no** continuar con el retiro:
+
+```bash
+kubectl exec deployment/auth-eliminaciones -- python manage.py procesar_eliminaciones &&
+kubectl exec deployment/auth -- python manage.py shell -c \
+  'from app.models import EliminacionOrganizacion, EliminacionUsuario; n=sum(m.objects.filter(completado_en__isnull=True, pendientes__contains=["notifications"]).count() for m in (EliminacionOrganizacion, EliminacionUsuario)); print("borrados_esperando_notifications=", n); raise SystemExit(1 if n else 0)'
+```
+
+Solo con ese resultado cero, outbox cero, efectos/limpieza verificados y ambas
+colas ready=0/unacknowledged=0, parar el Deployment y esperar que desaparezca
+su pod. Volver a comprobar los contadores y consumers=0. En Git Bash se
+suprime conversión MSYS **solo en rabbitmqctl**; el manifiesto usa una ruta
+relativa al repo. El script impide borrar los objetos si falla `delete_queue`.
+
+```bash
+VHOST=/  # ajustar de nuevo al vhost real
+kubectl scale deployment/notifications --replicas=0 &&
+kubectl wait --for=delete pod -l app=notifications,componente=api --timeout=300s &&
+MSYS_NO_PATHCONV=1 kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" \
   name messages_ready messages_unacknowledged consumers
-kubectl exec deployment/rabbitmq -- rabbitmqctl delete_queue -p "$VHOST" \
-  notifications.dominio.v2 --if-empty --if-unused
-# Verificar ausencia de la cola; ya no recibe durante Connectors/Analytics.
-kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" name
-kubectl delete -f /tmp/notifications-tanda.yaml
+# Revisar los contadores anteriores; recién entonces ejecutar:
+VHOST="$VHOST" bash k8s/tandas/retirar-notifications.sh notifications-tanda.yaml
+```
+
+El script ejecuta `delete_queue --if-empty --if-unused` y solo ante éxito hace
+`kubectl delete -f`. Si falla, conservar/reanudar la misma imagen, recuperar y
+repetir el drenaje; nunca forzar el retiro ni pegar el resto del bloque. Tras
+retirar, comprobar ausencia de la cola y recuperar Beat, todo encadenado:
+
+```bash
+VHOST=/  # vhost real
+MSYS_NO_PATHCONV=1 kubectl exec deployment/rabbitmq -- rabbitmqctl list_queues -p "$VHOST" name &&
+kubectl scale deployment/subscriptions-beat --replicas=1 &&
+kubectl rollout status deployment/subscriptions-beat --timeout=300s &&
+kubectl wait --for=condition=Ready pod -l app=subscriptions-beat --timeout=300s
 ```
 
 La eliminación es **solo de la cola de dominio vacía** de esta tanda; no del
@@ -239,7 +312,7 @@ la DLQ para diagnóstico (ya comprobada vacía). La siguiente tanda recrea los
 bindings al iniciar el consumidor; no reconstruye hechos emitidos durante su
 ausencia. Nunca borrar colas con mensajes para aparentar drenaje.
 
-Restaurar las banderas/destinos/réplicas/HPA registrados, incluida ausencia de
+Restaurar las demás banderas/réplicas/HPA registrados, incluida ausencia de
 overrides, solo tras retirar Notificaciones y confirmar que no tiene datos o
 ACK pendientes. Mantener Beat en su réplica original activa; comprobar salud
 del núcleo, outbox y cinco dimensiones de cuota antes de reabrir tráfico o
@@ -265,3 +338,13 @@ a la tarjeta**: `alert.due` / `alerta.activada.v2` y la cola de entregas no se
 emiten aquí. Su integración con FE-23 requiere una entrega posterior con outbox
 y pruebas de canal; no se declara FE-24 completa ni se promete email o push.
 Ver [seguimiento de FE-24](../../docs/flujos/felipe-orellana/11-alcance-fe24-tanda.md).
+
+Limitaciones operativas explícitas: API y consumidor comparten pod. Un corte de
+AMQP termina el consumidor; sin reconexión interna, Kubernetes aplica backoff y
+el pod puede quedar NotReady aunque Gunicorn siga sano, retirando la API del
+Service. Detener la demo, recuperar el broker, esperar consumidor y pod Ready,
+y repetir drenaje/proyección antes del generador; registrar duración y alcance
+de la caída. No afirmar disponibilidad independiente de la API. El publicador
+de Subscriptions aún no fija `blocked_connection_timeout`: ante alarma del broker
+puede atascarse el despacho. Se registra como deuda previa, sin prometer un plazo
+de recuperación que esta PR no implementa.

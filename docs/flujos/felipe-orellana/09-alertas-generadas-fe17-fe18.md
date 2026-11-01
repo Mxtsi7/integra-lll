@@ -10,7 +10,7 @@ preferencias de FE-21 y nunca genera dos alertas para la misma ventana.
 
 | Pieza | Archivo |
 |---|---|
-| La proyección de suscripciones (lo que notifications sabe de cada una) | `notifications/models.py` → `SuscripcionVigilada`, migración `0004` |
+| La proyección de suscripciones (lo que notifications sabe de cada una) | `notifications/models.py` → `SuscripcionVigilada`, migración `0005` |
 | El adaptador de eventos a la proyección | `notifications/proyeccion.py` → `aplicar(sobre)` |
 | El generador (reloj controlable, dedup por ventana) | `notifications/generador.py` |
 | El comando para correrlo | `manage.py generar_alertas [--ahora ISO]` |
@@ -20,7 +20,7 @@ preferencias de FE-21 y nunca genera dos alertas para la misma ventana.
 ```
 subscriptions ─ suscripcion.creada / actualizada / estado_cambiado (MX-21 v2) ─▶ RabbitMQ
         │                                                                          │
-        │   FE-24 (pendiente): el consumidor llama a proyeccion.aplicar(sobre) ◀───┘
+        │   FE-24 ingesta: consumo.recibir(sobre) aplica proyección con inbox ◀───┘
         ▼
 SuscripcionVigilada  ──▶  generador.generar(ahora)  ──▶  Alerta (pendiente)  ──▶  FE-19 lista, FE-20 cuenta
         ▲                        │
@@ -28,9 +28,11 @@ PreferenciaNotificacion ─────────┘  (FE-21: tipo encendido, 
 ```
 
 Notifications no consulta el esquema de subscriptions (ADR-002): sabe de las
-suscripciones por los eventos, igual que analytics con el uso. Mientras FE-24
-no conecte el consumidor, la proyección se llena solo con `aplicar()` en
-pruebas; el comando corre igual y no inventa nada.
+suscripciones por los eventos, igual que analytics con el uso. La ingesta FE-24
+está implementada en #140 con inbox por consumidor y ACK tras commit. Beat
+publica el outbox en ambos modos; el modo síncrono solo recalcula el resumen.
+La demostración universitaria y la emisión de alert.due siguen pendientes:
+ver [alcance y diferencias](11-alcance-fe24-tanda.md).
 
 ## Las reglas
 
@@ -67,11 +69,10 @@ es otra ventana y corresponde otro aviso.
 
 ## Decisiones
 
-- **El contrato MX-21 v2 no trae `fin_prueba`.** `Subscription` la tiene, pero
-  `$defs/suscripcion` no. El adaptador la guarda si el sobre la trae
-  (`datos.fin_prueba`) y la deja en NULL si no; sin ella no se avisa. Hay que
-  acordar la extensión con VI-26 antes de que FE-18 avise de verdad. Es una
-  diferencia con el texto de la tarjeta y queda registrada acá.
+- **MX-21 v2 incluye `fin_prueba` opcional**, fecha o null. Editarla genera un
+  snapshot `actualizada` con `campos_modificados=["fin_prueba"]`; sin cambio
+  efectivo no hay evento. Ausencia/null no habilita aviso. La aceptación de
+  receptores sigue pendiente; no se atribuye un acuerdo aún no recibido.
 - **Un evento viejo no pisa uno nuevo.** La proyección guarda el `ocurrido_en`
   del último evento aplicado y la condición va en el WHERE, no en memoria.
   Una `actualizada` de ayer que llega después de la cancelación de hoy no

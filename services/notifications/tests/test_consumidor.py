@@ -134,3 +134,43 @@ def test_fin_prueba_llega_del_evento_y_genera_aviso():
     fecha = (timezone.localdate() + dt.timedelta(days=1)).isoformat()
     recibir(cuerpo(estado='prueba', fin_prueba=fecha))
     assert len([a for a in generar().creadas if a.tipo == 'fin_prueba']) == 1
+
+
+@pytest.mark.parametrize('anterior,nueva,avisar', [
+    ('2026-11-22', '2026-11-30', False),
+    ('2026-11-22', None, False),
+    ('2026-11-30', '2026-11-22', True),
+])
+def test_editar_solo_fin_prueba_actualiza_generacion(anterior, nueva, avisar):
+    recibir(json.dumps(sobre(estado='prueba', fin_prueba=anterior)).encode())
+    actualizado = sobre('suscripcion.actualizada', ocurrido='2026-11-02T12:00:00Z',
+                        estado='prueba', fin_prueba=nueva, campos_modificados=['fin_prueba'])
+    assert recibir(json.dumps(actualizado).encode())
+    vigilada = SuscripcionVigilada.objects.get()
+    assert vigilada.fin_prueba == (dt.date.fromisoformat(nueva) if nueva else None)
+    ahora = dt.datetime.fromisoformat('2026-11-21T10:00:00-03:00')
+    alertas = [a for a in generar(ahora=ahora).creadas if a.tipo == 'fin_prueba']
+    assert bool(alertas) is avisar
+
+
+def test_inbox_de_otro_consumidor_no_suprime_ingesta():
+    mensaje = sobre()
+    EventoRecibido.objects.create(consumidor='otro', organizacion_id=mensaje['organizacion_id'],
+                                 evento_id=mensaje['id'])
+    assert recibir(json.dumps(mensaje).encode())
+    assert EventoRecibido.objects.count() == 2
+    assert SuscripcionVigilada.objects.count() == 1
+
+
+def test_rechazo_registra_ids_y_regla_sin_valores():
+    from io import StringIO
+    import pika
+    salida = StringIO()
+    message_id, correlacion = str(uuid.uuid4()), str(uuid.uuid4())
+    propiedades = pika.BasicProperties(message_id=message_id, correlation_id=correlacion)
+    Command(stderr=salida).atender(Mock(), SimpleNamespace(delivery_tag=9),
+                                 cuerpo(fin_prueba='secreto-no-loguear'), propiedades)
+    log = salida.getvalue()
+    assert message_id in log and correlacion in log
+    assert 'format' in log
+    assert 'secreto-no-loguear' not in log
