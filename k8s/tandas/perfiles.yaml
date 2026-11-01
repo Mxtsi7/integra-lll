@@ -10,7 +10,7 @@
 #   python k8s/pruebas/presupuesto.py k8s \
 #     --generador k8s/pruebas/carga-fortio-otro-namespace.yaml \
 #     --namespace-generador student-carga \
-#     --sin-autoescalado --pausar subscriptions-beat \
+#     --sin-autoescalado --extra k8s/tandas/notifications.yaml \
 #     --extra k8s/tandas/alertas-notifications.yaml
 
 tandas:
