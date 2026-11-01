@@ -26,11 +26,19 @@ en estudio darían del orden de 192 Mi, un quinto de lo que falta.
 Soltando `subscriptions-beat` —que en modo síncrono no hace falta, porque los
 eventos se publican dentro de la petición— entra **uno** de los tres, completo:
 
-| Tanda | Pods | Límites de memoria | Holgura |
-|---|---:|---:|---:|
-| Núcleo sin beat + `notifications` (API + consumidor + generador) | 10 / 12 | 2592 Mi | 160 Mi |
-| Núcleo sin beat + `connectors` (API + worker) | 10 / 12 | 2528 Mi | 224 Mi |
-| Núcleo sin beat + `analytics` (API + worker) | 10 / 12 | 2528 Mi | 224 Mi |
+| Tanda | Pods en reposo | Con el Job corriendo | Memoria | Holgura |
+|---|---:|---:|---:|---:|
+| Núcleo sin beat + `notifications` (API + consumidor en un pod, generador como Job) | 10 / 12 | **11 / 12** | 2592 Mi | 160 Mi |
+| Núcleo sin beat + `connectors` (API + worker, dos pods) | 11 / 12 | 11 / 12 | 2528 Mi | 224 Mi |
+| Núcleo sin beat + `analytics` (API + worker, dos pods) | 11 / 12 | 11 / 12 | 2528 Mi | 224 Mi |
+
+La memoria ya cuenta el generador; **el conteo de pods de una versión anterior
+de esta tabla no lo hacía**. El Job ocupa un pod mientras corre, así que la
+cifra que manda es la de la columna del medio.
+
+Y la topología importa para el conteo: con API, consumidor y generador en
+**tres** pods separados, notifications llegaría a **12 / 12**, sin margen para
+nada más. Por eso API y consumidor van juntos.
 
 `auth-eliminaciones` se queda arriba en las tres: el borrado de cuentas no se
 sacrifica.

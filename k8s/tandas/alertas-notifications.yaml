@@ -35,6 +35,16 @@ spec:
   # Para la demostracion no hay que esperar la hora:
   #   kubectl create job --from=cronjob/generar-alertas alertas-ahora
   schedule: "0 * * * *"
+  # ── Llega SUSPENDIDO ────────────────────────────────────────────────────
+  # Aplicar el manifiesto no debe arrancar corridas: `notifications` no esta
+  # desplegado todavia, y en la tanda se quiere decidir cuando empieza. Se
+  # habilita a mano al entrar:
+  #   kubectl patch cronjob generar-alertas -p '{"spec":{"suspend":false}}'
+  #
+  # Ojo: `suspend` frena las corridas NUEVAS, no las que ya estan andando, y
+  # `concurrencyPolicy` no gobierna un Job creado a mano desde la plantilla.
+  # Antes de disparar uno manual hay que mirar que no haya otro activo.
+  suspend: true
   # Forbid y no Allow: con la cuota al tope, dos corridas encimadas serian dos
   # pods. Ademas no aporta nada, porque el trabajo es el mismo.
   concurrencyPolicy: Forbid
@@ -68,6 +78,11 @@ spec:
             app.kubernetes.io/part-of: ojoalgasto
         spec:
           restartPolicy: Never
+          # Los paquetes del registro son PRIVADOS. Todos los demas pods del
+          # proyecto declaran este secreto; este era el unico que no, asi que
+          # habria muerto en ImagePullBackOff en su primera corrida.
+          imagePullSecrets:
+            - name: ghcr
           containers:
             - name: generar-alertas
               image: IMAGEN_NOTIFICATIONS

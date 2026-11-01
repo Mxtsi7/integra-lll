@@ -190,3 +190,29 @@ def test_no_usan_la_credencial_administradora_de_postgres():
                 assert nombre.startswith("ojoalgasto-bd-"), (
                     f"{ruta} {c['name']}: DATABASE_URL sale de {nombre!r}, "
                     "que es la cuenta administradora")
+
+
+def test_pueden_bajar_su_imagen_del_registro_privado():
+    """Los paquetes del registro son privados. Sin `imagePullSecrets` el pod
+    muere en ImagePullBackOff en su primera corrida, y en un CronJob eso se ve
+    recién a la hora en punto. Todos los pods del proyecto lo declaran; el
+    primer manifiesto de tanda fue el único que no."""
+    for ruta, doc in documentos(TANDAS):
+        spec = plantilla(doc)
+        del_registro = [c for c in spec.get("containers") or []
+                        if "ghcr" in str(c.get("image")) or "IMAGEN_" in str(c.get("image"))]
+        if not del_registro:
+            continue
+        secretos = [s.get("name") for s in spec.get("imagePullSecrets") or []]
+        assert "ghcr" in secretos, f"{ruta}: falta imagePullSecrets ghcr"
+
+
+def test_los_cronjob_llegan_suspendidos():
+    """Aplicar un manifiesto de tanda no debe arrancar corridas: el servicio
+    al que apuntan no está desplegado, y la ventana la decide quien opera.
+    Se habilita a mano al entrar a la tanda."""
+    for ruta, doc in documentos(TANDAS):
+        if doc["kind"] != "CronJob":
+            continue
+        assert doc["spec"].get("suspend") is True, (
+            f"{ruta}: tiene que llegar con suspend: true")
