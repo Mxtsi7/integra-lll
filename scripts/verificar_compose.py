@@ -9,7 +9,9 @@ con PyYAML. Comprueba lo que un `up` saludable exige:
   · cada servicio HTTP tiene un healthcheck que pega a /health/;
   · ningún `depends_on: service_healthy` apunta a algo sin healthcheck;
   · el gateway espera a los 6 servicios de dominio;
-  · los workers esperan al servicio que aplica las migraciones.
+  · los workers esperan al servicio que aplica las migraciones;
+  · todo servicio que usa la base (declara ESQUEMA_BD) comparte una red
+    con postgres. `depends_on` espera, pero no conecta redes.
 
 D-11 publica sólo gateway y web: los dominios no exponen puertos al host y su
 `/health/` se comprueba dentro del contenedor (`verificar_servicios.py`).
@@ -102,6 +104,26 @@ def healthcheck_http(servicio: dict[str, Any]) -> bool:
     )
 
 
+def redes_efectivas(servicio: dict[str, Any]) -> set[str]:
+    """Las redes a las que Compose conecta el servicio.
+
+    Si no declara ninguna, Compose lo pone en `default`. Contarlo como "sin
+    redes" escondería justo el caso de #120: un servicio en `default` y
+    postgres solo en las redes de dominio.
+    """
+    redes = servicio.get("networks")
+    if not redes:
+        return {"default"}
+    return set(redes)
+
+
+def variables(servicio: dict[str, Any]) -> dict[str, Any]:
+    entorno = servicio.get("environment") or {}
+    if isinstance(entorno, dict):
+        return entorno
+    return dict(item.split("=", 1) if "=" in item else (item, None) for item in entorno)
+
+
 def verificar(datos: dict[str, Any]) -> list[str]:
     servicios = datos.get("services") or {}
     errores: list[str] = []
@@ -168,6 +190,22 @@ def verificar(datos: dict[str, Any]) -> list[str]:
             errores.append(
                 f"{worker}: no espera a {servicio_que_migra} (podría correr sin migrar)"
             )
+
+    # Un servicio que usa la base y no comparte red con postgres no la
+    # alcanza: `wait_for_db` reintenta y el contenedor muere antes de hacer
+    # nada. Pasó con connectors-purga en #120.
+    postgres = servicios.get("postgres")
+    if postgres:
+        redes_postgres = redes_efectivas(postgres)
+        for nombre, servicio in servicios.items():
+            if nombre == "postgres" or "ESQUEMA_BD" not in variables(servicio):
+                continue
+            if not redes_efectivas(servicio) & redes_postgres:
+                errores.append(
+                    f"{nombre}: usa la base pero no comparte red con postgres "
+                    f"(redes {sorted(redes_efectivas(servicio))}, "
+                    f"postgres en {sorted(redes_postgres)})"
+                )
 
     return errores
 

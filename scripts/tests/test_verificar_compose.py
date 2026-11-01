@@ -82,3 +82,41 @@ def test_las_excepciones_de_healthcheck_coinciden_con_compose(modulo):
         if (servicio.get("healthcheck") or {}).get("disable")
     }
     assert modulo.SIN_HEALTHCHECK_PERMITIDO == sin_healthcheck
+
+
+# ── FE-07 / #120: la purga tiene que alcanzar la base ─────────────────────
+
+
+def test_las_redes_omitidas_cuentan_como_default(modulo):
+    assert modulo.redes_efectivas({}) == {"default"}
+    assert modulo.redes_efectivas({"networks": ["connectors"]}) == {"connectors"}
+    assert modulo.redes_efectivas({"networks": {"connectors": None}}) == {"connectors"}
+
+
+def test_la_purga_comparte_red_con_postgres():
+    servicios = compose()["services"]
+    modulo = cargar_modulo()
+    comunes = (modulo.redes_efectivas(servicios["connectors-purga"])
+               & modulo.redes_efectivas(servicios["postgres"]))
+    assert "connectors" in comunes
+
+
+def test_un_servicio_con_base_fuera_de_la_red_de_postgres_se_reporta(modulo):
+    datos = compose()
+    datos["services"]["connectors-purga"].pop("networks", None)
+
+    errores = modulo.verificar(datos)
+
+    assert any("connectors-purga" in e and "postgres" in e for e in errores), errores
+
+
+def test_si_postgres_tambien_esta_en_default_no_se_reporta(modulo):
+    """La regla es la red COMÚN, no una red fija: `default` vale si postgres está ahí."""
+    datos = compose()
+    datos["services"]["connectors-purga"].pop("networks", None)
+    datos["services"]["postgres"]["networks"] = (
+        list(datos["services"]["postgres"]["networks"]) + ["default"]
+    )
+
+    assert modulo.verificar(datos) == []
+

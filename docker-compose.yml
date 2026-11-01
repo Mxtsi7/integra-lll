@@ -244,6 +244,10 @@ services:
   # `connectors` quede sano, y ese es quien aplica las migraciones. Si una
   # pasada falla, la siguiente vuelve a tomar los mismos archivos.
   connectors-purga:
+    # La red de connectors es la que comparte con postgres. Sin esto Compose
+    # la deja en `default`, donde postgres no está, y la purga nunca llega a
+    # la base: lo encontró la revisión de #120.
+    networks: [connectors]
     build: ./services/connectors
     command:
       - sh
