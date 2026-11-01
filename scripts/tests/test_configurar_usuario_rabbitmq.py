@@ -139,3 +139,86 @@ def test_la_llamada_a_kubectl_esta_protegida_de_la_traduccion_de_rutas():
     kubectl = [i for i, l in enumerate(lineas) if "kubectl " in l]
     assert kubectl, "no encontre ninguna llamada a kubectl"
     assert proteccion < min(kubectl), "la proteccion tiene que ir ANTES de todo kubectl"
+
+
+# ── Integración contra un broker HEREDADO de verdad ─────────────────────────
+# Los dobles de arriba comprueban la lógica; esto comprueba el contrato con
+# RabbitMQ. Hace falta porque el caso que importa --un broker cuyo directorio
+# de datos ya existía-- es justo el que NO pasa por
+# `RABBITMQ_DEFAULT_USER`, que es lo único que borra `guest` por su cuenta.
+# La comprobación que ya existía en la CI usa un broker NUEVO de Compose, y
+# ahí `guest` nunca llega a existir.
+#
+# Se activa con D11_BROKER_HEREDADO=<contenedor>. Sin esa variable se salta:
+# no se levanta un broker por sorpresa en la máquina de nadie.
+
+CONTENEDOR = os.environ.get("D11_BROKER_HEREDADO", "")
+
+
+def ctl(*args, entrada=None):
+    return subprocess.run(
+        ["docker", "exec", "-i", CONTENEDOR, "rabbitmqctl", "--quiet", *args],
+        input=entrada, capture_output=True, timeout=120,
+    )
+
+
+def usuarios():
+    salida = ctl("list_users").stdout.decode("utf-8", "replace")
+    return {l.split("	")[0].strip() for l in salida.splitlines()[1:] if l.strip()}
+
+
+@pytest.fixture
+def broker_heredado():
+    """Deja el broker como uno que viene de antes: con `guest` y sin el
+    usuario dedicado. Así la prueba se puede repetir."""
+    if "guest" not in usuarios():
+        assert ctl("add_user", "guest", "guest").returncode == 0
+        ctl("set_user_tags", "guest", "administrator")
+        ctl("set_permissions", "-p", "/", "guest", ".*", ".*", ".*")
+    if "ojoalgasto" in usuarios():
+        ctl("delete_user", "ojoalgasto")
+    assert "guest" in usuarios() and "ojoalgasto" not in usuarios()
+    return CONTENEDOR
+
+
+def correr_remoto(clave):
+    return subprocess.run(
+        ["docker", "exec", "-i", CONTENEDOR, "sh", "-c", guion_remoto(), "sh", "ojoalgasto", "/"],
+        input=clave.encode("utf-8"), capture_output=True, timeout=180,
+    )
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_en_broker_heredado_el_dedicado_entra_y_guest_queda_fuera(broker_heredado):
+    r = correr_remoto(CLAVE)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+
+    # El usuario dedicado autentica de verdad, no solo "existe".
+    assert ctl("authenticate_user", "ojoalgasto", CLAVE).returncode == 0
+
+    # Y la credencial publica dejo de servir. Es el P1 de la revision.
+    assert ctl("authenticate_user", "guest", "guest").returncode != 0
+    assert "guest" not in usuarios()
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_correrlo_dos_veces_no_falla_ni_deshace_nada(broker_heredado):
+    assert correr_remoto(CLAVE).returncode == 0
+    segunda = correr_remoto(CLAVE)
+    assert segunda.returncode == 0, segunda.stderr.decode("utf-8", "replace")
+    assert b"no estaba" in segunda.stdout, segunda.stdout
+    assert ctl("authenticate_user", "ojoalgasto", CLAVE).returncode == 0
+    assert "guest" not in usuarios()
+
+
+@pytest.mark.skipif(not CONTENEDOR, reason="define D11_BROKER_HEREDADO con un contenedor RabbitMQ")
+def test_no_toca_otras_cuentas(broker_heredado):
+    """Retirar `guest` no puede llevarse por delante una cuenta que alguien
+    haya creado a mano."""
+    ctl("add_user", "operador-de-prueba", "clave-de-prueba-larga")
+    try:
+        assert correr_remoto(CLAVE).returncode == 0
+        assert "operador-de-prueba" in usuarios()
+        assert ctl("authenticate_user", "operador-de-prueba", "clave-de-prueba-larga").returncode == 0
+    finally:
+        ctl("delete_user", "operador-de-prueba")

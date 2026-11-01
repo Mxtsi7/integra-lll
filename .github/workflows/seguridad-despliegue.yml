@@ -46,6 +46,21 @@ jobs:
             echo 'guest sigue habilitado' >&2
             exit 1
           fi
+      - name: "Broker HEREDADO: el usuario dedicado entra y guest queda fuera"
+        run: |
+          # Un broker que YA tenia datos no pasa por RABBITMQ_DEFAULT_USER, que
+          # es lo unico que borra `guest` por su cuenta. El paso anterior usa el
+          # broker NUEVO de Compose, donde `guest` nunca llega a existir: por eso
+          # hace falta uno levantado SIN esas variables, con `guest` vivo.
+          docker run -d --name rabbit-heredado rabbitmq:3.13-management-alpine
+          for i in $(seq 1 60); do
+            docker exec rabbit-heredado rabbitmq-diagnostics -q ping && break
+            sleep 2
+          done
+          docker exec rabbit-heredado rabbitmqctl --quiet authenticate_user guest guest
+          D11_BROKER_HEREDADO=rabbit-heredado python -m pytest             scripts/tests/test_configurar_usuario_rabbitmq.py -q
+      - if: always()
+        run: docker rm -f rabbit-heredado || true
       - name: Verificar guard de migración con mensajes reales confirmados
         run: |
           export D11_RABBITMQ_CONTENEDOR="$(docker compose ps -q rabbitmq)"

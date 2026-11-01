@@ -76,11 +76,36 @@ else
   rabbitmqctl --quiet add_user "$USUARIO" "$CLAVE"
   echo "usuario $USUARIO: creado"
 fi
-unset CLAVE
-
 rabbitmqctl --quiet set_permissions -p "$VHOST" "$USUARIO" ".*" ".*" ".*"
 rabbitmqctl --quiet set_user_tags "$USUARIO" management
 echo "usuario $USUARIO: permisos sobre '$VHOST' y etiqueta management"
+
+# ── Retirar `guest`, que en un broker heredado sobrevive ──────────────────
+# Un broker NUEVO borra `guest` solo: cuando RABBITMQ_DEFAULT_USER trae otro
+# nombre, la imagen lo elimina en el primer arranque. Uno que YA tenia datos
+# no pasa por ahi --esas variables no hacen nada con el directorio poblado--
+# asi que `guest` se queda con su clave por omision.
+#
+# Y no es inofensivo: la imagen 3.13 trae `loopback_users.guest = false`, o
+# sea que `guest/guest` sirve DESDE LA RED, no solo desde localhost.
+#
+# Se comprueba ANTES que el usuario dedicado autentica de verdad. Si no lo
+# hace y borraramos `guest` igual, el broker quedaria sin una sola credencial
+# utilizable y habria que entrar al pod a repararlo.
+if ! rabbitmqctl --quiet authenticate_user "$USUARIO" "$CLAVE" >/dev/null 2>&1; then
+  echo "El usuario $USUARIO no autentica con la clave del Secret; no se retira guest." >&2
+  exit 1
+fi
+unset CLAVE
+
+# Idempotente, y solo `guest`: cualquier otra cuenta que alguien haya creado
+# a mano se conserva. Borrar de mas seria peor que no borrar.
+if rabbitmqctl --quiet list_users | cut -f1 | grep -qx guest; then
+  rabbitmqctl --quiet delete_user guest
+  echo "usuario guest: retirado"
+else
+  echo "usuario guest: no estaba"
+fi
 EOS
 )"
 
