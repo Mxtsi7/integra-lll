@@ -71,13 +71,18 @@ CONTENEDORES_ESPERADOS = set(SERVICIOS) | {
     # La web no tiene healthcheck (no expone /health/): sólo se exige que
     # esté corriendo. Se cuenta igual para detectar un stack incompleto.
     "frontend",
+    # La purga de archivos de importación (FE-07). Es un bucle que duerme
+    # entre corridas, sin canal de consulta, así que Compose le desactiva el
+    # healthcheck; igualmente debe existir y estar corriendo.
+    "connectors-purga",
 }
 
 # Servicios sin healthcheck a propósito: se exige presencia y ejecución, pero
 # no `healthy`. Cualquier otro servicio que no reporte salud se considera
 # incompleto. `redis` no declara healthcheck en Compose; su disponibilidad se
 # comprueba indirectamente con el `/health/` de los servicios que lo usan.
-SIN_HEALTHCHECK = {"subscriptions-beat", "auth-eliminaciones", "frontend", "redis"}
+SIN_HEALTHCHECK = {"subscriptions-beat", "auth-eliminaciones", "frontend", "redis",
+                   "connectors-purga"}
 
 
 @dataclass
