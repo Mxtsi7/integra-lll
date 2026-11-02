@@ -19,20 +19,13 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from estado_comparador import EstadoComparador, bandera
-from metricas_comparador import metricas_eventos
+from metricas_comparador import metricas_eventos, percentil
+from snapshot_comparador import Registro, RegistroNulo, leer_hpa
 
 
 class SinRedireccion(HTTPRedirectHandler):
     def redirect_request(self, *_):
         return None  # No reenviar Authorization ni convertir POST en GET.
-
-
-def percentil(valores, porcentaje):
-    ordenados = sorted(valores)
-    posicion = (len(ordenados) - 1) * porcentaje / 100
-    inferior = math.floor(posicion)
-    superior = math.ceil(posicion)
-    return ordenados[inferior] + (ordenados[superior] - ordenados[inferior]) * (posicion - inferior)
 
 
 def diferencia(sin, con):
@@ -72,6 +65,11 @@ def configuracion():
         if not minimo <= valor <= maximo:
             raise ValueError(f'{nombre} debe estar entre {minimo} y {maximo}.')
         cfg[nombre.lower()] = valor
+    # fijo: mismas réplicas en los dos modos. activo: el HPA puede escalar durante la prueba.
+    cfg['autoescalado'] = os.environ.get('AUTOESCALADO', 'fijo').strip().lower()
+    if cfg['autoescalado'] not in ('fijo', 'activo'):
+        raise ValueError('AUTOESCALADO debe ser fijo o activo.')
+    cfg['abrir'] = os.environ.get('ABRIR_SNAPSHOT', '1') != '0'
     validar_vigencia(cfg['tokens'])
     return cfg
 
@@ -117,6 +115,9 @@ def comando(argumentos, entrada=None, timeout=190, aislar=False):
 
 
 class Cluster:
+    hpa_fijo = True
+    hpas_originales = None
+
     def __init__(self):
         contexto = comando(['kubectl', 'config', 'current-context']).strip()
         ns = comando(['kubectl', '--context', contexto, 'config', 'view', '--minify',
@@ -154,7 +155,8 @@ class Cluster:
             raise ValueError('Ambas organizaciones deben estar vacías; no se borran datos automáticamente.')
         return organizaciones
 
-    def preparar(self):
+    def preparar(self, fijar_hpa=True):
+        self.hpa_fijo = fijar_hpa
         despliegues = json.loads(self.k('get', 'deployments', '-o', 'json'))['items']
         por_nombre = {d['metadata']['name']: d for d in despliegues}
         for nombre in ('gateway', 'subscriptions', 'subscriptions-beat', 'subscriptions-worker', 'rabbitmq'):
@@ -179,9 +181,11 @@ class Cluster:
         for h in hpas:
             if h['spec'].get('minReplicas', 1) >= h['spec']['maxReplicas']:
                 raise RuntimeError('HPA ya fijado: recuperar --restaurar o conciliarlo con el manifiesto antes de medir.')
+        self.hpas_originales = {h['spec']['scaleTargetRef']['name']: leer_hpa(h) for h in hpas}
         # Toda la configuración queda durable ANTES de congelar HPA o cambiar el modo.
+        # Con el HPA activo se respalda igual: la restauración solo reaplica lo mismo.
         self.estado.guardar(api, hpas)
-        for h in hpas:
+        for h in hpas if fijar_hpa else ():
             n = self.recursos[h['spec']['scaleTargetRef']['name']]['replicas']
             self.k('patch', 'hpa', h['metadata']['name'], '--type=merge', '-p',
                    json.dumps({'spec': dict(minReplicas=n, maxReplicas=n)}))
@@ -220,13 +224,22 @@ class Cluster:
         self.drenar()
 
     def verificar(self):
+        replicas = {}
         for nombre, original in self.recursos.items():
             actual = json.loads(self.k('get', 'deployment/' + nombre, '-o', 'json'))
-            if (actual['spec']['replicas'] != original['replicas'] or
-                    actual['status'].get('availableReplicas') != original['replicas'] or
+            replicas[nombre] = actual['spec']['replicas']
+            if self.hpa_fijo:
+                # Los dos modos tienen que medir con las mismas réplicas.
+                distinto = (replicas[nombre] != original['replicas'] or
+                            actual['status'].get('availableReplicas') != original['replicas'])
+            else:
+                # El HPA puede cambiar réplicas; basta con que alguna esté atendiendo.
+                distinto = not actual['status'].get('availableReplicas')
+            if (distinto or
                     [(c['name'], c.get('resources'), c['image']) for c in actual['spec']['template']['spec']['containers']]
                     != [(c['name'], c.get('resources'), c['image']) for c in original['template']['spec']['containers']]):
                 raise RuntimeError('Cambiaron réplicas, recursos o imágenes: comparación inválida.')
+        return replicas
 
     def esperar(self, org, correlacion, cantidad, total, operaciones, modo, espera):
         limite = time.monotonic() + espera
@@ -286,19 +299,23 @@ class Cluster:
             raise KeyboardInterrupt()
 
 
-def comparar(cfg, cluster, generador=carga):
+def comparar(cfg, cluster, generador=carga, registro=None):
+    registro = registro or RegistroNulo()
     resultados = [dict(latencias=[], totales=[], outbox=[], posterior=[], solapados=0) for _ in range(2)]
     calentamiento = cfg.get('calentamiento', 0)
     try:
         validar_vigencia(cfg['tokens'])
         organizaciones = cluster.organizaciones(cfg['tokens'])
-        cluster.preparar()
+        registro.iniciar()  # La primera muestra del HPA queda antes de fijarlo.
+        cluster.preparar(fijar_hpa=cfg.get('autoescalado', 'fijo') == 'fijo')
+        registro.originales(cluster.hpas_originales)
         for org in organizaciones:
             cluster.sembrar(org, cfg['semilla'])
         for ronda in range(cfg['repeticiones']):
             for modo in ((0, 1) if ronda % 2 == 0 else (1, 0)):
                 validar_vigencia(cfg['tokens'])
-                cluster.modo(modo)
+                with registro.fase('reinicio', ronda + 1, modo):
+                    cluster.modo(modo)
                 cluster.verificar()
                 print(f'Ronda {ronda + 1}/{cfg["repeticiones"]}: ' +
                       ('CON RabbitMQ' if modo else 'SIN RabbitMQ en el recálculo'), flush=True)
@@ -307,7 +324,8 @@ def comparar(cfg, cluster, generador=carga):
                 for n, medido in fases:
                     validar_vigencia(cfg['tokens'])
                     correlacion = str(uuid.uuid4())
-                    respuestas = generador(cfg['url'], cfg['tokens'][modo], correlacion, n, cfg['conexiones'])
+                    with registro.fase('http' if medido else 'calentamiento', ronda + 1, modo):
+                        respuestas = generador(cfg['url'], cfg['tokens'][modo], correlacion, n, cfg['conexiones'])
                     codigos = Counter(r[0] for r in respuestas)
                     if codigos != {201: n}:
                         raise RuntimeError(f'Comparación inválida: respuestas HTTP {dict(codigos)}; no se sigue.')
@@ -315,24 +333,48 @@ def comparar(cfg, cluster, generador=carga):
                     cantidad = cfg['semilla'] + previas
                     total = cfg['semilla'] * 1000 + previas * 9990
                     tiempos = cluster.esperar(organizaciones[modo], correlacion, cantidad, total, n, modo, cfg['espera'])
-                    cluster.verificar()
+                    replicas = cluster.verificar()
                     if not medido:
                         cluster.drenar()
                         continue
+                    latencias = [r[1] for r in respuestas]
                     r = resultados[modo]
-                    r['latencias'].extend(r[1] for r in respuestas)
+                    r['latencias'].extend(latencias)
                     r['totales'].append(tiempos['lote_s'])
                     r['outbox'].extend(tiempos['outbox_ms'])
                     r['posterior'].extend(tiempos['posterior_ms'])
                     r['solapados'] += tiempos['solapados']
+                    registro.ronda(ronda + 1, modo, latencias, tiempos['lote_s'], replicas)
+                    avance(ronda + 1, modo, latencias, tiempos['lote_s'], registro.lineas_hpa())
+            if ronda + 1 < cfg['repeticiones']:
+                mostrar(resultados, parcial=f'Parcial tras la ronda {ronda + 1}/{cfg["repeticiones"]}')
     finally:
+        registro.detener()  # El muestreo solo lee; se corta antes de tocar la configuración.
         cluster.restaurar()
     return resultados
 
 
-def mostrar(resultados):
+def imprimir(texto=''):
+    # Python de Windows bajo Git Bash escribe en cp1252, que no tiene "→": sin esto,
+    # la tabla final cortaba la prueba recién terminada. main() ya fuerza UTF-8.
+    try:
+        print(texto, flush=True)
+    except UnicodeEncodeError:
+        codificacion = getattr(sys.stdout, 'encoding', None) or 'ascii'
+        print(texto.encode(codificacion, 'replace').decode(codificacion), flush=True)
+
+
+def avance(ronda, modo, latencias, lote_s, lineas_hpa):
+    imprimir(f'  {"CON" if modo else "SIN"} · ronda {ronda}: HTTP p50 {percentil(latencias, 50):.1f} ms, '
+             f'p95 {percentil(latencias, 95):.1f} ms · evento→resumen {lote_s:.2f} s')
+    for linea in lineas_hpa:
+        imprimir('    ' + linea)
+
+
+def mostrar(resultados, parcial=None):
     sin, con = resultados
-    print('\nMétrica                             SIN RabbitMQ   CON RabbitMQ   Diferencia')
+    imprimir('\n' + (parcial + '\n' if parcial else '') +
+             'Métrica                             SIN RabbitMQ   CON RabbitMQ   Diferencia')
     for etiqueta, a, b in (
         ('Respuesta HTTP p50 (ms)', percentil(sin['latencias'], 50), percentil(con['latencias'], 50)),
         ('Respuesta HTTP p95 (ms)', percentil(sin['latencias'], 95), percentil(con['latencias'], 95)),
@@ -340,20 +382,22 @@ def mostrar(resultados):
         ('Lote eventos→resumen BD mínimo (s)', min(sin['totales']), min(con['totales'])),
         ('Lote eventos→resumen BD máximo (s)', max(sin['totales']), max(con['totales'])),
     ):
-        print(f'{etiqueta:<37}{a:>11.2f}{b:>15.2f}{diferencia(a, b):>13}')
-    print(f'Operaciones medidas/completadas       {len(sin["latencias"]):>11}{len(con["latencias"]):>15}')
-    print('Errores                                        0              0')
-    print('\nEtapas por evento CON RabbitMQ (ms)           mínimo          p50       máximo')
+        imprimir(f'{etiqueta:<37}{a:>11.2f}{b:>15.2f}{diferencia(a, b):>13}')
+    imprimir(f'Operaciones medidas/completadas       {len(sin["latencias"]):>11}{len(con["latencias"]):>15}')
+    if parcial:
+        return
+    imprimir('Errores                                        0              0')
+    imprimir('\nEtapas por evento CON RabbitMQ (ms)           mínimo          p50       máximo')
     for nombre, valores in (('Outbox/Beat→marca publicación', con['outbox']),
                              ('Marca publicación→evidencia*', con['posterior'])):
-        print(f'{nombre:<40}{min(valores):>10.2f}{percentil(valores, 50):>13.2f}{max(valores):>13.2f}')
-    print('Diferencia = (CON - SIN) / SIN; negativo significa menor tiempo.')
-    print('BD: max(hecho_en) - min(ocurrido_en) por ronda; el sondeo NO suma tiempo.')
-    print('Outbox incluye el ciclo de Beat (cada 10 s), publicación y confirmación.')
-    print(f'* Desfase firmado, no latencia AMQP pura: {con["solapados"]} eventos con evidencia anterior a la marca de publicación.')
-    print('El publicador guarda publicado_en después del confirm; puede solaparse con el consumidor.')
-    print('Las marcas se generan en procesos de app: requieren relojes sincronizados y no son marcas de commit.')
-    print('El broker sigue activo para otros eventos. Esta prueba no mide ahorro de RAM.')
+        imprimir(f'{nombre:<40}{min(valores):>10.2f}{percentil(valores, 50):>13.2f}{max(valores):>13.2f}')
+    imprimir('Diferencia = (CON - SIN) / SIN; negativo significa menor tiempo.')
+    imprimir('BD: max(hecho_en) - min(ocurrido_en) por ronda; el sondeo NO suma tiempo.')
+    imprimir('Outbox incluye el ciclo de Beat (cada 10 s), publicación y confirmación.')
+    imprimir(f'* Desfase firmado, no latencia AMQP pura: {con["solapados"]} eventos con evidencia anterior a la marca de publicación.')
+    imprimir('El publicador guarda publicado_en después del confirm; puede solaparse con el consumidor.')
+    imprimir('Las marcas se generan en procesos de app: requieren relojes sincronizados y no son marcas de commit.')
+    imprimir('El broker sigue activo para otros eventos. Esta prueba no mide ahorro de RAM.')
 
 
 def main(argumentos=None):
@@ -379,8 +423,20 @@ def main(argumentos=None):
         print('Los datos sintéticos se conservan; ante un fallo usar cuentas nuevas o el flujo normal de eliminación.')
         print(f'{cfg["operaciones"]} operaciones × {cfg["repeticiones"]} rondas por modo; '
               f'{cfg["conexiones"]} conexiones, {cfg["semilla"]} iniciales, {cfg["calentamiento"]} POST de calentamiento por fase.')
-        resultados = comparar(cfg, Cluster())
+        print(f'Autoescalado {cfg.get("autoescalado", "fijo")}: ' + (
+            'el HPA queda fijo en las réplicas actuales mientras se mide.' if cfg.get('autoescalado', 'fijo') == 'fijo'
+            else 'el HPA puede escalar durante la prueba; las réplicas de cada ronda quedan en el snapshot.'))
+        cluster = Cluster()
+        registro = Registro(cfg, muestrear=lambda: cluster.k('get', 'hpa', '-o', 'json', timeout=20),
+                            abrir=cfg.get('abrir', True))
+        try:
+            resultados = comparar(cfg, cluster, registro=registro)
+        except BaseException as error:
+            registro.terminar(error=error)
+            raise
+        registro.terminar(resultados)
         mostrar(resultados)
+        print(f'\nSnapshot guardado: {registro.html}')
         return 0
     except (ValueError, RuntimeError, KeyError, StopIteration) as error:
         print('ERROR: ' + str(error), file=sys.stderr)
@@ -395,6 +451,10 @@ def interrumpir(*_):
 
 
 if __name__ == '__main__':
+    # Git Bash entrega una tubería y Python de Windows escribiría en cp1252: acentos rotos.
+    for flujo in (sys.stdout, sys.stderr):
+        if hasattr(flujo, 'reconfigure'):
+            flujo.reconfigure(encoding='utf-8')
     signal.signal(signal.SIGTERM, interrumpir)
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, interrumpir)

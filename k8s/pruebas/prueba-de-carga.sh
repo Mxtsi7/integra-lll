@@ -384,6 +384,8 @@ accion_comparar() {
   titulo "11 · COMPARAR TIEMPOS CON Y SIN RABBITMQ"
   nota "Genera operaciones desde este computador; no agrega pods al cluster."
   nota "Requiere URL_COMPARACION, TOKEN_SIN y TOKEN_CON de organizaciones de prueba vacías."
+  nota "Abre en el navegador un snapshot que se actualiza solo, con el HPA (k8s/pruebas/resultados/)."
+  nota "AUTOESCALADO=fijo (por defecto) o activo decide si el HPA puede escalar mientras se mide."
   bash "$AQUI/comparar-cola.sh" --tiempos
 }
 
