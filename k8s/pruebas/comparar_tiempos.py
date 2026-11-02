@@ -413,8 +413,11 @@ def comparar(cfg, cluster, generador=carga, registro=None):
             if ronda + 1 < cfg['repeticiones']:
                 mostrar(resultados, parcial=f'Parcial tras la ronda {ronda + 1}/{cfg["repeticiones"]}')
     finally:
-        registro.detener()  # El muestreo solo lee; se corta antes de tocar la configuración.
-        cluster.restaurar()
+        try:
+            registro.detener()  # El muestreo solo lee; se corta antes de tocar la configuración.
+        finally:
+            # detener() puede esperar al muestreo hasta 25 s: un Ctrl+C ahí no se salta la restauración.
+            cluster.restaurar()
     return resultados
 
 

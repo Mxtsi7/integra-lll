@@ -73,7 +73,7 @@ Una corrida, en orden:
 4. `preparar` respalda la configuración en la anotación del Deployment, como en #141, y fija el HPA solo si `AUTOESCALADO=fijo`. Con `activo`, antes de tocar nada exige exactamente un HPA de 1 a 2 réplicas para `gateway` y otro para `subscriptions`; si falta uno, hay duplicados o el rango es otro, la prueba no parte.
 5. Por ronda y modo: reinicio de la API (franja gris en la página). Con `activo`, espera a que el HPA vuelva a su mínimo de pods (franja gris clara); si en esa espera falta un HPA, la prueba se invalida. Después vienen el calentamiento, los POST medidos (franja SIN o CON), la espera de la evidencia y `verificar`, que ahora devuelve las réplicas. Cada fase se anota al entrar, así la página la dibuja abierta mientras dura. Al empezar los POST medidos se toma una lectura del HPA como base, y cada POST aparece en la página apenas responde, hueco hasta que se acredita su ronda. Al acreditarla se guardan los máximos del HPA de las lecturas que empezaron desde sus POST (pods, CPU y lo que pidió), y se escriben en la terminal junto a su p50/p95 y su tiempo evento→resumen.
 6. Al cerrar cada ronda, menos la última, la terminal muestra la tabla parcial.
-7. En el `finally`, primero se corta el muestreo: se espera hasta 25 s a que termine la lectura en curso, y si llega después se descarta. Recién entonces se restaura todo.
+7. En el `finally`, primero se corta el muestreo: se espera hasta 25 s a que termine la lectura en curso, y si llega después se descarta. Recién entonces se restaura todo, aunque llegue un Ctrl+C durante esa espera.
 8. `terminar` toma una última muestra, que deja constancia del HPA devuelto a 1–2, y fija la página como terminada o inválida, con el motivo.
 
 ## Decisiones
@@ -139,7 +139,7 @@ Una corrida, en orden:
 ## Cómo probarlo
 
 ```bash
-python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 41, 22 nuevas
+python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 43, 24 nuevas
 python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v  # 14
 python -m unittest discover -s scripts/tests -p 'test_estado_comparador.py' -v    # 4
 ```
@@ -154,7 +154,8 @@ pods por modo. Las de la revisión de Maxi: un POST que se ve en la página
 mientras el siguiente sigue colgado (con `carga()` real y un servidor local),
 el máximo del HPA que no hereda la lectura del enfriamiento, la base que toma
 la fase medida, la lectura tardía que no cambia la evidencia terminada, y
-`activo` sin HPA, con uno faltante, duplicado o con máximo 9. Ninguna toca un
+`activo` sin HPA, con uno faltante, duplicado o con máximo 9, y un Ctrl+C real
+mientras se espera al muestreo, que igual restaura. Ninguna toca un
 cluster ni abre el navegador. La CI ya corre `test_comparar*.py`, así que las toma sola.
 
 ## Lo que queda

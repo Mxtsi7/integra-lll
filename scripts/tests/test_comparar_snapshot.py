@@ -3,6 +3,7 @@ import importlib.util
 import io
 import itertools
 import json
+import signal
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -265,6 +266,68 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(registro.json.read_text(encoding='utf-8'), json_final)
         self.assertEqual([x['final'] for x in json.loads(json_final)['muestras']], [False, True])
         self.assertEqual(json.loads(json_final)['estado'], 'terminada')
+
+    def test_restaura_aunque_falle_o_interrumpan_el_cierre_del_muestreo(self):
+        for error in (None, RuntimeError('hilo'), KeyboardInterrupt()):
+            cluster = Mock()
+            cluster.organizaciones.return_value = ['a', 'b']
+            cluster.esperar.return_value = dict(lote_s=1, outbox_ms=[1.0], posterior_ms=[1.0], solapados=0)
+            registro = Mock(wraps=s.RegistroNulo())
+            registro.detener.side_effect = error
+            with self.subTest(error=type(error).__name__), patch('sys.stdout', io.StringIO()):
+                try:
+                    m.comparar(cfg(repeticiones=1), cluster, Mock(return_value=[(201, 1.0)] * 2), registro)
+                except (RuntimeError, KeyboardInterrupt) as recibido:
+                    self.assertIs(recibido, error)  # Se propaga: no hay resultado si se abortó.
+                else:
+                    self.assertIsNone(error)
+                cluster.restaurar.assert_called_once()
+
+    def test_ctrl_c_mientras_se_espera_al_muestreo_igual_restaura(self):
+        en_vuelo, liberar, uniendo = threading.Event(), threading.Event(), threading.Event()
+
+        def muestrear():
+            if threading.current_thread() is not threading.main_thread():
+                en_vuelo.set()
+                liberar.wait(10)  # La lectura del hilo queda colgada, como un kubectl lento.
+            return json.dumps({'items': [hpa('subscriptions')]})
+        registro = s.Registro(cfg(repeticiones=1), muestrear=muestrear, directorio=self.dir, abrir=False,
+                              intervalo=0.01, espera_cierre=10)
+        envuelto = []
+
+        def sembrar(*_):
+            self.assertTrue(en_vuelo.wait(10))
+            if not envuelto:  # Avisa cuando comparar() entra al join de detener().
+                hilo = registro._hilo
+                unir = hilo.join
+
+                def join(timeout=None):
+                    uniendo.set()
+                    return unir(timeout)
+                hilo.join = join
+                envuelto.append(hilo)
+        cluster = Mock()
+        cluster.organizaciones.return_value = ['a', 'b']
+        cluster.esperar.return_value = dict(lote_s=1, outbox_ms=[1.0], posterior_ms=[1.0], solapados=0)
+        cluster.sembrar.side_effect = sembrar
+
+        def ctrl_c():
+            if uniendo.wait(10):
+                if hasattr(signal, 'pthread_kill'):
+                    signal.pthread_kill(threading.main_thread().ident, signal.SIGINT)  # POSIX: despierta el join.
+                else:
+                    signal.raise_signal(signal.SIGINT)  # Windows: Python lo atiende en el hilo principal.
+        anterior = signal.signal(signal.SIGINT, signal.default_int_handler)
+        threading.Thread(target=ctrl_c, daemon=True).start()
+        try:
+            with patch('sys.stdout', io.StringIO()), self.assertRaises(KeyboardInterrupt):
+                m.comparar(cfg(repeticiones=1), cluster, Mock(return_value=[(201, 1.0)] * 2), registro)
+        finally:
+            signal.signal(signal.SIGINT, anterior)
+            liberar.set()
+            registro._hilo.join(10)
+        self.assertTrue(uniendo.is_set())
+        cluster.restaurar.assert_called_once()
 
     def test_comparacion_fallida_queda_marcada_como_invalida(self):
         registro = self.registro(cfg(), Mock(side_effect=RuntimeError('Falló kubectl')))
