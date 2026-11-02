@@ -65,6 +65,9 @@ desktop.ini
 *.bak
 *.tmp
 ~$*
+# Snapshots del comparador de RabbitMQ: evidencia local de cada corrida.
+# Se comparten a mano si hace falta (ver k8s/pruebas/README.md).
+k8s/pruebas/resultados/
 
 # ─── Documentación e investigación ────────────────────────────
 # La carpeta docs/ SÍ se versiona. La planilla de la encuesta fue

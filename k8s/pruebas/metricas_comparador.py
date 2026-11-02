@@ -1,6 +1,15 @@
 """Métricas del comparador calculadas desde timestamps persistidos por evento."""
+import math
 from datetime import datetime
 from uuid import UUID
+
+
+def percentil(valores, porcentaje):
+    ordenados = sorted(valores)
+    posicion = (len(ordenados) - 1) * porcentaje / 100
+    inferior = math.floor(posicion)
+    superior = math.ceil(posicion)
+    return ordenados[inferior] + (ordenados[superior] - ordenados[inferior]) * (posicion - inferior)
 
 
 def _fecha(fila, campo):
