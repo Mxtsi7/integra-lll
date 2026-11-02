@@ -12,15 +12,22 @@ hasta la tabla final.
 
 Con `AUTOESCALADO=fijo` (por defecto) el HPA se congela para medir los dos
 modos con las mismas réplicas, como antes, y la página muestra cuántas habría
-pedido. Con `AUTOESCALADO=activo` el HPA queda libre y la página marca cuándo
-escaló.
+pedido. Con `AUTOESCALADO=activo` el HPA queda libre: cada modo parte con el
+mínimo de pods y la página muestra hasta cuántos llegó cada uno.
+
+Lo que pidió el equipo para la defensa es **una corrida SIN RabbitMQ con
+autoscaling y otra CON RabbitMQ con autoscaling**. Eso es la opción 12 del menú
+(`prueba-de-carga.sh autoescalado`): una ronda de cada modo, con el HPA libre y
+una carga sostenida (500 operaciones, 8 conexiones) para que el HPA alcance a
+reaccionar.
 
 **Dónde está.**
 
 | Pieza | Archivo |
 |---|---|
 | El registro, el muestreo del HPA y la página HTML | `k8s/pruebas/snapshot_comparador.py` → `Registro`, `leer_hpa`, `estimar_replicas`, `pagina` |
-| Dónde se engancha a la comparación, el avance en la terminal y `AUTOESCALADO` | `k8s/pruebas/comparar_tiempos.py` → `comparar`, `avance`, `mostrar(parcial=…)`, `Cluster.preparar(fijar_hpa)`, `Cluster.verificar` |
+| Dónde se engancha a la comparación, el avance en la terminal y `AUTOESCALADO` | `k8s/pruebas/comparar_tiempos.py` → `comparar`, `avance`, `mostrar(parcial=…)`, `Cluster.preparar(fijar_hpa)`, `Cluster.verificar`, `Cluster.esperar_base` |
+| La opción 12 (autoscaling SIN y CON) | `k8s/pruebas/prueba-de-carga.sh` → `accion_autoescalado` |
 | El percentil, ahora compartido por los dos | `k8s/pruebas/metricas_comparador.py` → `percentil` |
 | Las pruebas | `scripts/tests/test_comparar_snapshot.py` |
 | Dónde quedan los snapshots (fuera de git) | `k8s/pruebas/resultados/`, ignorada en `.gitignore` |
@@ -38,6 +45,7 @@ una lectura del HPA:
 | Fijar el HPA, solo con `fijo` | `kubectl patch hpa` a mín. = máx. = réplicas actuales | Sí, y se restaura |
 | Leer la evidencia | `kubectl exec deployment/subscriptions -- python manage.py shell` | No |
 | Muestrear el autoscaling | `kubectl get hpa -o json` cada 5 s | No |
+| Esperar el mínimo de pods, solo con `activo` | `kubectl get hpa` y `kubectl get deployments` cada 5 s, hasta 6 min | No |
 | La página | `file:///…/k8s/pruebas/resultados/comparacion-AAAAMMDD-HHMMSS.html` | En tu disco |
 
 ## El flujo
@@ -63,7 +71,7 @@ Una corrida, en orden:
 2. Comprueba que las dos organizaciones existan, sean distintas y estén vacías.
 3. `Registro.iniciar()` toma la primera muestra del HPA, que queda **antes** de fijarlo, escribe la página, imprime su ruta y la abre en el navegador (`ABRIR_SNAPSHOT=0` para no abrirla).
 4. `preparar` respalda la configuración en la anotación del Deployment, como en #141, y fija el HPA solo si `AUTOESCALADO=fijo`.
-5. Por ronda y modo: reinicio de la API (franja gris en la página), calentamiento, POST medidos (franja SIN o CON), espera de la evidencia y `verificar`, que ahora devuelve las réplicas. Cada fase medida actualiza la página y escribe en la terminal su p50/p95, su tiempo evento→resumen y el estado del HPA.
+5. Por ronda y modo: reinicio de la API (franja gris en la página). Con `activo`, espera a que el HPA vuelva a su mínimo de pods (franja gris clara). Después vienen el calentamiento, los POST medidos (franja SIN o CON), la espera de la evidencia y `verificar`, que ahora devuelve las réplicas. Cada fase medida guarda los máximos del HPA desde sus POST (pods, CPU y lo que pidió), actualiza la página y los escribe en la terminal junto a su p50/p95 y su tiempo evento→resumen.
 6. Al cerrar cada ronda, menos la última, la terminal muestra la tabla parcial.
 7. En el `finally`, primero se corta el muestreo y después se restaura todo.
 8. `terminar` toma una última muestra, que deja constancia del HPA devuelto a 1–2, y fija la página como terminada o inválida, con el motivo.
@@ -90,9 +98,17 @@ Una corrida, en orden:
   `ceil(réplicas × CPU por pod ÷ objetivo)`, con 10 % de tolerancia y los
   límites originales. No incluye la ventana de estabilización de bajada, y la
   página lo dice.
-- **`activo` no invalida por réplicas.** Sigue exigiendo misma imagen, mismos
-  recursos y al menos un pod disponible. La tabla de rondas muestra con cuántos
-  pods corrió cada una, para que se vea si un modo tuvo más.
+- **`activo` no invalida por réplicas, pero cada modo parte del mínimo.** Si
+  SIN escala `subscriptions` a 2, el HPA tarda unos 2 a 3 minutos en volver a
+  1 (ventana de bajada de 120 s más un paso de 60 s). Sin esperar, CON partiría
+  con 2 pods que no pidió y la comparación no diría nada. Por eso, antes de la
+  carga de cada modo, `esperar_base` espera hasta 6 minutos a que cada HPA, y
+  su Deployment, estén en el mínimo; si no bajan, la prueba se invalida.
+  Durante la carga se sigue exigiendo misma imagen, mismos recursos y al menos
+  un pod disponible.
+- **La opción 12 tiene sus propias variables** (`OPERACIONES_HPA`,
+  `CONEXIONES_HPA`, `ESPERA_HPA`), para que un `OPERACIONES=20` exportado para
+  la opción 11 no deje la demo de autoscaling con una ráfaga demasiado corta.
 - **Colores revisados para daltonismo.** SIN usa azul, CON naranjo y la CPU
   verde agua. La combinación pasa el validador de daltonismo en modo claro y
   oscuro. Además, cada gráfico lleva rótulos SIN/CON y leyenda, y las tablas
@@ -106,7 +122,7 @@ Una corrida, en orden:
 ## Cómo probarlo
 
 ```bash
-python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 32, 13 nuevas
+python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 36, 17 nuevas
 python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v  # 14
 python -m unittest discover -s scripts/tests -p 'test_estado_comparador.py' -v    # 4
 ```
@@ -115,7 +131,9 @@ Las nuevas cubren las cantidades de CPU de Kubernetes, la fórmula del HPA,
 la lectura del HPA, una corrida completa con la página en curso y terminada,
 una comparación fallida, el escape del error en el HTML, que `activo` no fija
 el HPA y tolera réplicas, que `fijo` sí invalida, el rechazo de un
-`AUTOESCALADO` inválido y la tabla en cp1252. Ninguna toca un cluster ni abre
+`AUTOESCALADO` inválido, la tabla en cp1252, la espera hasta el mínimo de pods
+(y que invalide si no baja), el orden de fases con `activo` y el resumen de
+pods por modo. Ninguna toca un cluster ni abre
 el navegador. La CI ya corre `test_comparar*.py`, así que las toma sola.
 
 ## Lo que queda
@@ -123,8 +141,8 @@ el navegador. La CI ya corre `test_comparar*.py`, así que las toma sola.
 - **Correrla contra el cluster antes de la defensa.** Las pruebas usan dobles.
   La primera corrida real tiene que hacerse en una ventana sin otras pruebas,
   porque cambiar de modo reinicia la API.
-- **Con la carga por defecto el HPA puede no escalar.** La ráfaga dura
-  segundos y el HPA recalcula cada ~15 s. Para mostrarlo escalando con
-  `activo` hay que subir `OPERACIONES` y `CONEXIONES`.
+- **Los 500 × 8 de la opción 12 son una estimación.** No está medido cuánto
+  tarda un POST en el cluster. Si en la corrida real la CPU no pasa la línea
+  de 120m, subir `OPERACIONES_HPA`; la página lo muestra.
 - **Los tooltips son los nativos del navegador.** Alcanzan para leer cada
   punto; no hay cruz ni panel interactivo.

@@ -105,7 +105,29 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(list(self.dir.glob('*.tmp')), [])
         terminal = salida.getvalue()
         self.assertIn('Parcial tras la ronda 1/2', terminal)
-        self.assertIn('HPA subscriptions: 1 réplica(s) · CPU 150m de 120m · pediría 2', terminal)
+        self.assertIn('HPA subscriptions: hasta 1 pod(s) · CPU máx. 150m (objetivo 120m) · pediría hasta 2', terminal)
+
+    def test_resumen_del_hpa_por_modo_parte_de_la_muestra_anterior(self):
+        registro = self.registro(cfg(autoescalado='activo'), None)
+        registro._iniciado = True
+
+        def muestra(t, pods, cpu):
+            lectura = dict(minimo=1, maximo=2, objetivo_m=120, cpu_m=cpu, actuales=pods, deseadas=pods, pide=pods)
+            registro.datos['muestras'].append(dict(t=t, final=False, hpas={'subscriptions': lectura}))
+        muestra(0, 2, 40)    # Lo que escaló una corrida vieja: anterior a la última previa, no cuenta.
+        muestra(10, 1, 8)    # Última muestra antes de los POST: con cuántos pods partió.
+        muestra(25, 2, 190)  # Escaló durante la carga.
+        registro.datos['fases'].append(dict(tipo='http', ronda=1, modo=0, desde=20, hasta=40))
+        registro.ronda(1, 0, [100.0, 120.0], 4.0, None)
+        muestra(60, 1, 9)
+        registro.datos['fases'].append(dict(tipo='http', ronda=1, modo=1, desde=62, hasta=70))
+        registro.ronda(1, 1, [20.0, 25.0], 12.0, None)
+        self.assertEqual(registro.datos['rondas'][0]['hpa']['subscriptions'], dict(pods=2, cpu=190, pide=2))
+        self.assertEqual(registro.datos['rondas'][1]['hpa']['subscriptions'], dict(pods=1, cpu=9, pide=1))
+        pagina = registro.html.read_text(encoding='utf-8')
+        self.assertIn('Autoscaling: pods que alcanzó cada modo', pagina)
+        self.assertIn('SIN <b>2</b> pod(s)', pagina)
+        self.assertIn('CON <b>1</b> pod(s)', pagina)
 
     def test_comparacion_fallida_queda_marcada_como_invalida(self):
         registro = self.registro(cfg(), Mock(side_effect=RuntimeError('Falló kubectl')))
@@ -200,6 +222,50 @@ class AutoescaladoTests(unittest.TestCase):
             with self.subTest(modo=modo), patch.object(m, 'validar_vigencia'), patch('sys.stdout', io.StringIO()):
                 m.comparar(cfg(autoescalado=modo, repeticiones=1), cluster, Mock(return_value=[(201, 1.0)] * 2))
                 cluster.preparar.assert_called_once_with(fijar_hpa=fijar)
+                # Con el HPA libre, cada modo espera el mínimo de pods antes de su carga.
+                self.assertEqual(cluster.esperar_base.call_count, 0 if fijar else 2)
+
+    def hpa_y_despliegues(self, pods_subscriptions, deseadas=None):
+        hpas = [hpa('gateway'), hpa('subscriptions', actuales=pods_subscriptions,
+                                    deseadas=deseadas or pods_subscriptions)]
+        despliegues = self.despliegues()
+        despliegues[1]['spec']['replicas'] = despliegues[1]['status']['availableReplicas'] = pods_subscriptions
+        return [json.dumps({'items': hpas}), json.dumps({'items': despliegues})]
+
+    def test_espera_que_el_hpa_vuelva_al_minimo(self):
+        c = m.Cluster.__new__(m.Cluster)
+        c.recursos = {'gateway': {}, 'subscriptions': {}}
+        # Primero sigue en 2; después el HPA ya quiere 1 pero el Deployment no bajó; al final, 1.
+        c.k = Mock(side_effect=self.hpa_y_despliegues(2) + self.hpa_y_despliegues(2, deseadas=1)
+                   + self.hpa_y_despliegues(1))
+        with patch.object(m.time, 'sleep') as dormir, patch.object(m.time, 'monotonic', return_value=0):
+            c.esperar_base(espera=60)
+        self.assertEqual(dormir.call_count, 2)
+        self.assertEqual(c.k.call_count, 6)
+
+    def test_si_el_hpa_no_baja_la_comparacion_no_sigue(self):
+        c = m.Cluster.__new__(m.Cluster)
+        c.recursos = {'gateway': {}, 'subscriptions': {}}
+        c.k = Mock(side_effect=self.hpa_y_despliegues(2) * 2)
+        with patch.object(m.time, 'sleep'), patch.object(m.time, 'monotonic', side_effect=[0, 0, 61]), \
+                self.assertRaisesRegex(RuntimeError, 'mínimo'):
+            c.esperar_base(espera=60)
+
+    def test_comparar_activo_marca_la_espera_en_el_snapshot(self):
+        cluster = Mock()
+        cluster.organizaciones.return_value = ['a', 'b']
+        cluster.hpas_originales = None
+        cluster.esperar.return_value = dict(lote_s=1, outbox_ms=[1.0], posterior_ms=[1.0], solapados=0)
+        with tempfile.TemporaryDirectory() as directorio, patch.object(m, 'validar_vigencia'), \
+                patch('sys.stdout', io.StringIO()):
+            reloj = itertools.count(0, 1.5)
+            registro = s.Registro(cfg(autoescalado='activo', repeticiones=1), directorio=directorio, abrir=False,
+                                  reloj=lambda: next(reloj))
+            m.comparar(cfg(autoescalado='activo', repeticiones=1), cluster,
+                       Mock(return_value=[(201, 1.0)] * 2), registro)
+            fases = [(f['tipo'], f['modo']) for f in registro.datos['fases']]
+        self.assertEqual(fases, [('reinicio', 0), ('enfriamiento', 0), ('http', 0),
+                                 ('reinicio', 1), ('enfriamiento', 1), ('http', 1)])
 
 
 class TerminalTests(unittest.TestCase):

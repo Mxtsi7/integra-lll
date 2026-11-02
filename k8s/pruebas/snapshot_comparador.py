@@ -193,20 +193,46 @@ class Registro:
             self.datos['rondas'].append(dict(
                 ronda=ronda, modo=modo, latencias=[round(x, 1) for x in latencias],
                 p50=percentil(latencias, 50), p95=percentil(latencias, 95), lote_s=lote_s,
-                replicas=replicas if isinstance(replicas, dict) else None))
+                replicas=replicas if isinstance(replicas, dict) else None,
+                hpa=self._hpa_desde(ronda, modo)))
         self.guardar()
+
+    def _hpa_desde(self, ronda, modo):
+        """Máximos del HPA desde que empezaron los POST medidos hasta la evidencia.
+
+        Incluye la última muestra anterior: así una fase más corta que el
+        muestreo igual muestra con cuántos pods partió.
+        """
+        desde = next((f['desde'] for f in reversed(self.datos['fases'])
+                      if f['tipo'] == 'http' and f['ronda'] == ronda and f['modo'] == modo), None)
+        if desde is None:
+            return {}
+        muestras = [m for m in self.datos['muestras'] if m['hpas'] and not m['final']]
+        previas = [m for m in muestras if m['t'] < desde]
+        resumen = {}
+        for m in previas[-1:] + [m for m in muestras if m['t'] >= desde]:
+            for nombre, h in m['hpas'].items():
+                r = resumen.setdefault(nombre, dict(pods=None, cpu=None, pide=None))
+                for clave, valor in (('pods', h['actuales']), ('cpu', h['cpu_m']), ('pide', h['pide'])):
+                    if valor is not None:
+                        r[clave] = max(r[clave] or 0, valor)
+        return resumen
 
     def lineas_hpa(self):
         with self._candado:
-            ultima = next((m['hpas'] for m in reversed(self.datos['muestras']) if m['hpas']), None)
-        verbo = 'pide' if self.datos['config']['autoescalado'] == 'activo' else 'pediría'
+            if not self.datos['rondas']:
+                return []
+            resumen = self.datos['rondas'][-1]['hpa']
+            objetivos = {n: (self.datos['hpa_original'].get(n) or {}).get('objetivo_m') for n in resumen}
+        verbo = 'pidió' if self.datos['config']['autoescalado'] == 'activo' else 'pediría'
         lineas = []
-        for nombre in sorted(ultima or {}):
-            h = ultima[nombre]
-            cpu = 'sin métrica todavía' if h['cpu_m'] is None or not h['objetivo_m'] else \
-                f'CPU {h["cpu_m"]:.0f}m de {h["objetivo_m"]:.0f}m'
-            pide = '?' if h['pide'] is None else h['pide']
-            lineas.append(f'HPA {nombre}: {h["actuales"]} réplica(s) · {cpu} · {verbo} {pide}')
+        for nombre in sorted(resumen):
+            r, objetivo = resumen[nombre], objetivos[nombre]
+            cpu = 'sin métrica' if r['cpu'] is None else f'CPU máx. {r["cpu"]:.0f}m'
+            if objetivo and r['cpu'] is not None:
+                cpu += f' (objetivo {objetivo:.0f}m)'
+            pide = '?' if r['pide'] is None else r['pide']
+            lineas.append(f'HPA {nombre}: hasta {r["pods"] or "?"} pod(s) · {cpu} · {verbo} hasta {pide}')
         return lineas
 
     def detener(self):
@@ -339,6 +365,9 @@ def _bandas(fases, x, arriba, abajo, rotular):
         if f['tipo'] == 'reinicio':
             clase = 'banda-reinicio'
             titulo = f'Reinicio de la API para pasar a {NOMBRES[f["modo"]]} · ronda {f["ronda"]}'
+        elif f['tipo'] == 'enfriamiento':
+            clase = 'banda-espera'
+            titulo = f'Esperando que el HPA vuelva al mínimo antes de {NOMBRES[f["modo"]]} · ronda {f["ronda"]}'
         else:
             clase = f'banda-m{f["modo"]}' + (' calentamiento' if f['tipo'] == 'calentamiento' else '')
             titulo = (f'{"Calentamiento" if f["tipo"] == "calentamiento" else "POST medidos"} '
@@ -477,7 +506,12 @@ def _tabla_hpa(datos):
             + ''.join(filas) + '</tbody></table>')
 
 
-def _tiles(rondas):
+def _pods_por_modo(rondas, nombre):
+    return [max([(r.get('hpa') or {}).get(nombre, {}).get('pods') or 0 for r in rondas if r['modo'] == m] or [0])
+            for m in (0, 1)]
+
+
+def _tiles(rondas, activo):
     latencias = [[x for r in rondas if r['modo'] == m for x in r['latencias']] for m in (0, 1)]
     lotes = [[r['lote_s'] for r in rondas if r['modo'] == m] for m in (0, 1)]
     if not all(latencias):
@@ -491,19 +525,37 @@ def _tiles(rondas):
             f'<span><i class="clave m0"></i>SIN <b>{sin:.{decimales}f} {unidad}</b></span>'
             f'<span><i class="clave m1"></i>CON <b>{con:.{decimales}f} {unidad}</b></span></p>'
             f'<p class="tile-delta">{_diferencia(sin, con)}</p></div>')
+    nombres = sorted({n for r in rondas for n in (r.get('hpa') or {})})
+    if activo and nombres:
+        # El titular para el profe: cuántos pods necesitó cada modo con el HPA libre.
+        filas = ''.join(
+            f'<p class="tile-cifras"><span class="tile-nombre">{_e(n)}</span>'
+            f'<span><i class="clave m0"></i>SIN <b>{sin or "?"}</b> pod(s)</span>'
+            f'<span><i class="clave m1"></i>CON <b>{con or "?"}</b> pod(s)</span></p>'
+            for n in nombres for sin, con in [_pods_por_modo(rondas, n)])
+        tiles.append(f'<div class="tile tile-ancho"><p class="tile-titulo">Autoscaling: pods que alcanzó cada '
+                     f'modo durante sus POST, partiendo del mínimo</p>{filas}</div>')
     return '<div class="tiles">' + ''.join(tiles) + '</div>'
 
 
 def _tabla_rondas(rondas):
-    nombres = sorted({n for r in rondas for n in (r['replicas'] or {})})
-    cabecera = ''.join(f'<th>Réplicas {_e(n)}</th>' for n in nombres)
+    nombres = sorted({n for r in rondas for n in (r.get('hpa') or r['replicas'] or {})})
+    cabecera = ''.join(f'<th>{_e(n)}: pods · CPU máx.</th>' for n in nombres)
+
+    def celdas(r, n):
+        h = (r.get('hpa') or {}).get(n) or {}
+        pods = h.get('pods') or (r['replicas'] or {}).get(n, '?')
+        cpu = f'{h["cpu"]:.0f}m' if h.get('cpu') is not None else '?'
+        return f'<td>{pods} · {cpu}</td>'
     filas = ''.join(
         f'<tr><td>{r["ronda"]}</td><td class="izq"><i class="clave m{r["modo"]}"></i>{NOMBRES[r["modo"]]}</td>'
         f'<td>{r["p50"]:.1f}</td><td>{r["p95"]:.1f}</td><td>{r["lote_s"]:.2f}</td>'
-        + ''.join(f'<td>{(r["replicas"] or {}).get(n, "?")}</td>' for n in nombres) + '</tr>'
+        + ''.join(celdas(r, n) for n in nombres) + '</tr>'
         for r in rondas)
     return ('<table><thead><tr><th>Ronda</th><th class="izq">Modo</th><th>HTTP p50 (ms)</th><th>HTTP p95 (ms)</th>'
-            f'<th>Evento→resumen (s)</th>{cabecera}</tr></thead><tbody>{filas}</tbody></table>')
+            f'<th>Evento→resumen (s)</th>{cabecera}</tr></thead><tbody>{filas}</tbody></table>'
+            '<p class="nota">Pods y CPU: máximos del HPA desde que empezaron los POST medidos hasta que se '
+            'acreditó el trabajo.</p>')
 
 
 def _tabla_final(resumen):
@@ -552,7 +604,7 @@ border:1px solid var(--borde);background:var(--superficie);font-weight:600}
 section,.tile{background:var(--superficie);border:1px solid var(--borde);border-radius:12px;padding:16px;margin:12px 0}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.tile{margin:0}
 .tile-titulo{color:var(--tinta2);font-size:13px}.tile-cifras{display:flex;gap:20px;flex-wrap:wrap;font-size:18px}
-.tile-cifras b{font-size:24px}.tile-delta{color:var(--tinta2)}
+.tile-cifras b{font-size:24px}.tile-delta{color:var(--tinta2)}.tile-ancho{grid-column:1/-1}.tile-nombre{min-width:110px;color:var(--tinta2)}
 .clave{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:baseline}
 .leyenda{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--tinta2);margin:4px 0}
 .trazo{display:inline-block;width:22px;height:0;border-top:2px solid;vertical-align:middle;margin-right:6px}
@@ -565,7 +617,7 @@ svg text{font:12px system-ui,-apple-system,"Segoe UI",sans-serif}
 .punto{fill-opacity:.65;stroke:var(--superficie);stroke-width:2}
 .marca{stroke:var(--tinta);stroke-width:2;stroke-linecap:round}
 .banda-m0{fill:var(--m0);fill-opacity:.14}.banda-m1{fill:var(--m1);fill-opacity:.14}
-.calentamiento{fill-opacity:.06}.banda-reinicio{fill:var(--gris);fill-opacity:.7}
+.calentamiento{fill-opacity:.06}.banda-reinicio{fill:var(--gris);fill-opacity:.7}.banda-espera{fill:var(--gris);fill-opacity:.3}
 .umbral{stroke:var(--tinta2);stroke-width:1.5}
 .linea-cpu,.linea-reales{fill:none;stroke:var(--cpu);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .linea-pide{fill:none;stroke:var(--tinta2);stroke-width:2;stroke-dasharray:5 4}
@@ -599,9 +651,10 @@ def pagina(datos):
                            f'con tolerancia del {TOLERANCIA_HPA:.0%} y dentro de los límites originales. No '
                            'considera la ventana de estabilización de bajada.')
     else:
-        explicacion_hpa = ('El HPA estuvo libre durante la prueba (AUTOESCALADO=activo). La línea punteada son '
-                           'las réplicas que pidió el controlador y la continua las que tenía el Deployment. Si '
-                           'un modo corrió con más pods, la tabla de rondas lo muestra.')
+        explicacion_hpa = ('El HPA estuvo libre durante la prueba (AUTOESCALADO=activo). Antes de la carga de '
+                           'cada modo se espera que el HPA vuelva a su mínimo de pods (franja gris clara), así '
+                           'ningún modo hereda los pods que escaló el anterior. La línea punteada son las '
+                           'réplicas que pidió el controlador y la continua las que tenía el Deployment.')
     hpas = sorted({n for m in datos['muestras'] for n in (m['hpas'] or {})})
     graficos = ''.join(f'<h3>{_e(n)}</h3>{_graficos_hpa(datos, n)}' for n in hpas) or \
         '<p class="vacio">No se pudo leer el HPA con kubectl.</p>'
@@ -612,6 +665,8 @@ def pagina(datos):
     leyenda_modos = ('<p class="leyenda"><span><i class="clave m0"></i>SIN RabbitMQ: el recálculo dentro del POST</span>'
                      '<span><i class="clave m1"></i>CON RabbitMQ: el recálculo en el consumidor</span></p>')
     recarga = f'<meta http-equiv="refresh" content="{INTERVALO_S}">' if en_curso else ''
+    clave_espera = '' if fijo else ('<span><i class="franja-clave" style="background:var(--gris);opacity:.45">'
+                                    '</i>espera a que el HPA vuelva al mínimo</span>')
     tabla_rondas = _tabla_rondas(rondas) if rondas else '<p class="vacio">Todavía no termina ninguna ronda.</p>'
     final = (f'<section><h2>Resultado final</h2><div class="tabla">{_tabla_final(datos["resumen"])}</div></section>'
              if datos['resumen'] else '')
@@ -625,7 +680,7 @@ def pagina(datos):
 rondas por modo · {cfg["conexiones"]} conexiones · {cfg["semilla"]} suscripciones iniciales ·
 {cfg["calentamiento"]} POST de calentamiento · HPA {"fijo" if fijo else "activo"}</p>
 {estado}
-{_tiles(rondas)}
+{_tiles(rondas, not fijo)}
 <section><h2>Respuesta HTTP por petición</h2>
 <p class="sub">Cada punto es un POST medido desde este computador, en milisegundos. Incluye la red, el gateway y,
 SIN RabbitMQ, el recálculo del resumen.</p>{leyenda_modos}{http}</section>
@@ -640,7 +695,8 @@ despacha el outbox cada 10 s.</p>{leyenda_modos}{lote}</section>
 <div class="tabla">{_tabla_hpa(datos) if hpas else ''}</div>
 <p class="leyenda"><span><i class="franja-clave" style="background:var(--m0);opacity:.35"></i>POST SIN RabbitMQ</span>
 <span><i class="franja-clave" style="background:var(--m1);opacity:.35"></i>POST CON RabbitMQ</span>
-<span><i class="franja-clave" style="background:var(--gris)"></i>reinicio de la API al cambiar de modo</span></p>
+<span><i class="franja-clave" style="background:var(--gris)"></i>reinicio de la API al cambiar de modo</span>
+{clave_espera}</p>
 <p class="leyenda"><span><i class="trazo" style="border-color:var(--cpu)"></i>CPU promedio por pod (arriba) y réplicas reales (abajo)</span>
 <span><i class="trazo" style="border-color:var(--tinta2);border-top-style:dashed"></i>réplicas que {"pediría" if fijo else "pidió"} el HPA</span></p>
 {graficos}

@@ -99,6 +99,18 @@ def carga(url, token, correlacion, cantidad, conexiones):
         return list(pool.map(peticion, range(cantidad)))
 
 
+# Ventana de bajada del HPA (120 s) + un paso de su política (60 s) + margen.
+BASE_HPA_S = 360
+
+
+def en_minimo(hpa, despliegue):
+    minimo = hpa['spec'].get('minReplicas', 1)
+    estado = hpa.get('status') or {}
+    return (despliegue is not None and estado.get('currentReplicas') == minimo
+            and estado.get('desiredReplicas') == minimo and despliegue['spec']['replicas'] == minimo
+            and despliegue['status'].get('availableReplicas') == minimo)
+
+
 def comando(argumentos, entrada=None, timeout=190, aislar=False):
     opciones = {}
     if aislar:
@@ -241,6 +253,24 @@ class Cluster:
                 raise RuntimeError('Cambiaron réplicas, recursos o imágenes: comparación inválida.')
         return replicas
 
+    def esperar_base(self, espera=BASE_HPA_S):
+        """Con el HPA libre, espera a que cada HPA esté en su mínimo de pods.
+
+        Sin esto, el segundo modo heredaría los pods que escaló el primero: el
+        HPA tarda en bajar por su ventana de estabilización (k8s/30-autoescalado.yaml).
+        """
+        limite = time.monotonic() + espera
+        while True:
+            hpas = [h for h in json.loads(self.k('get', 'hpa', '-o', 'json'))['items']
+                    if h['spec']['scaleTargetRef']['name'] in self.recursos]
+            despliegues = {d['metadata']['name']: d
+                           for d in json.loads(self.k('get', 'deployments', '-o', 'json'))['items']}
+            if all(en_minimo(h, despliegues.get(h['spec']['scaleTargetRef']['name'])) for h in hpas):
+                return
+            if time.monotonic() >= limite:
+                raise RuntimeError('El HPA no volvió a su mínimo de pods dentro del plazo: revisar si hay otra carga.')
+            time.sleep(5)
+
     def esperar(self, org, correlacion, cantidad, total, operaciones, modo, espera):
         limite = time.monotonic() + espera
         autor = 'consumidor' if modo else 'api'
@@ -317,6 +347,10 @@ def comparar(cfg, cluster, generador=carga, registro=None):
                 with registro.fase('reinicio', ronda + 1, modo):
                     cluster.modo(modo)
                 cluster.verificar()
+                if cfg.get('autoescalado', 'fijo') == 'activo':
+                    # Cada modo parte con el mínimo de pods, no con los que escaló el anterior.
+                    with registro.fase('enfriamiento', ronda + 1, modo):
+                        cluster.esperar_base()
                 print(f'Ronda {ronda + 1}/{cfg["repeticiones"]}: ' +
                       ('CON RabbitMQ' if modo else 'SIN RabbitMQ en el recálculo'), flush=True)
                 previas = ronda * (cfg['operaciones'] + calentamiento)
