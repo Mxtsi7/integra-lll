@@ -380,6 +380,13 @@ accion_explicar() {
 FIN
 }
 
+accion_comparar() {
+  titulo "11 · COMPARAR TIEMPOS CON Y SIN RABBITMQ"
+  nota "Genera operaciones desde este computador; no agrega pods al cluster."
+  nota "Requiere URL_COMPARACION, TOKEN_SIN y TOKEN_CON de organizaciones de prueba vacías."
+  bash "$AQUI/comparar-cola.sh" --tiempos
+}
+
 # ── Menú ────────────────────────────────────────────────────────────────────
 menu() {
   cat <<'FIN'
@@ -395,6 +402,7 @@ menu() {
     8  ¿Qué es todo esto y qué se va a ver?           léelo una vez
     9  Ataque desde los PC de los compañeros          tú miras, ellos lanzan
    10  Mostrar pods y services                        qué hay prendido
+   11  Comparar tiempos con y sin RabbitMQ            mismo recálculo
     0  Salir
 FIN
 }
@@ -411,8 +419,9 @@ if [ $# -gt 0 ]; then
     explicar)  accion_explicar ;;
     companeros|compañeros) accion_companeros ;;
     pods)      accion_pods ;;
+    comparar)  accion_comparar ;;
     [0-9]*)    accion_carga "$1" "${2:-30s}" ;;
-    *) echo "uso: $0 [panel|demo|liberar|devolver|comprobar|limpiar|explicar|companeros|pods|<qps> [duración]]"; exit 1 ;;
+    *) echo "uso: $0 [panel|demo|liberar|devolver|comprobar|limpiar|explicar|companeros|pods|comparar|<qps> [duración]]"; exit 1 ;;
   esac
   exit $?
 fi
@@ -443,6 +452,7 @@ while true; do
     8) accion_explicar;  pausa ;;
     9) accion_companeros; pausa ;;
     10) accion_pods;     pausa ;;
+    11) accion_comparar; pausa ;;
     0|q|salir) echo "  chao."; exit 0 ;;
     *) mal "opción '$op' no existe." ;;
   esac
