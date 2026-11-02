@@ -74,7 +74,7 @@ def configuracion():
     return cfg
 
 
-def carga(url, token, correlacion, cantidad, conexiones):
+def carga(url, token, correlacion, cantidad, conexiones, al_responder=None):
     payload = json.dumps(dict(nombre='Comparador ' + correlacion, monto='9990', moneda='CLP',
                               frecuencia='mensual', fecha_proximo_cobro=date.today().isoformat(),
                               categoria='streaming', estado='activo')).encode()
@@ -93,7 +93,10 @@ def carga(url, token, correlacion, cantidad, conexiones):
             error.close()
         except (URLError, TimeoutError, OSError, ValueError, KeyError, TypeError):
             codigo = 0
-        return codigo, (time.monotonic() - inicio) * 1000
+        resultado = codigo, (time.monotonic() - inicio) * 1000
+        if al_responder:
+            al_responder(*resultado)  # El snapshot muestra cada POST apenas responde.
+        return resultado
 
     with ThreadPoolExecutor(max_workers=conexiones) as pool:
         return list(pool.map(peticion, range(cantidad)))
@@ -109,6 +112,26 @@ def en_minimo(hpa, despliegue):
     return (despliegue is not None and estado.get('currentReplicas') == minimo
             and estado.get('desiredReplicas') == minimo and despliegue['spec']['replicas'] == minimo
             and despliegue['status'].get('availableReplicas') == minimo)
+
+
+# Cuota del namespace: gateway y subscriptions escalan de 1 a 2 (k8s/30-autoescalado.yaml).
+REPLICAS_HPA = (1, 2)
+
+
+def hpas_medidos(items, servicios):
+    """Exactamente un HPA por servicio, de 1 a 2 réplicas: sin eso no hay autoscaling que acreditar."""
+    hpas = []
+    for nombre in servicios:
+        propios = [h for h in items if h['spec']['scaleTargetRef']['name'] == nombre]
+        if len(propios) != 1:
+            raise RuntimeError(f'{nombre} tiene {len(propios)} HPA y debe tener exactamente uno: '
+                               'sin él no se puede acreditar el autoscaling.')
+        spec = propios[0]['spec']
+        if (spec.get('minReplicas', 1), spec['maxReplicas']) != REPLICAS_HPA:
+            raise RuntimeError(f'El HPA de {nombre} debe escalar de 1 a 2 réplicas, como en '
+                               'k8s/30-autoescalado.yaml: revisar el clúster antes de medir.')
+        hpas.append(propios[0])
+    return hpas
 
 
 def comando(argumentos, entrada=None, timeout=190, aislar=False):
@@ -193,6 +216,9 @@ class Cluster:
         for h in hpas:
             if h['spec'].get('minReplicas', 1) >= h['spec']['maxReplicas']:
                 raise RuntimeError('HPA ya fijado: recuperar --restaurar o conciliarlo con el manifiesto antes de medir.')
+        if not fijar_hpa:
+            # Con el HPA libre se muestra el autoscaling: sin sus dos HPA no hay nada que acreditar.
+            hpas_medidos(hpas, self.recursos)
         self.hpas_originales = {h['spec']['scaleTargetRef']['name']: leer_hpa(h) for h in hpas}
         # Toda la configuración queda durable ANTES de congelar HPA o cambiar el modo.
         # Con el HPA activo se respalda igual: la restauración solo reaplica lo mismo.
@@ -258,11 +284,12 @@ class Cluster:
 
         Sin esto, el segundo modo heredaría los pods que escaló el primero: el
         HPA tarda en bajar por su ventana de estabilización (k8s/30-autoescalado.yaml).
+        Si en la espera falta o sobra un HPA, la comparación se invalida: una lista
+        vacía no acredita el mínimo.
         """
         limite = time.monotonic() + espera
         while True:
-            hpas = [h for h in json.loads(self.k('get', 'hpa', '-o', 'json'))['items']
-                    if h['spec']['scaleTargetRef']['name'] in self.recursos]
+            hpas = hpas_medidos(json.loads(self.k('get', 'hpa', '-o', 'json'))['items'], self.recursos)
             despliegues = {d['metadata']['name']: d
                            for d in json.loads(self.k('get', 'deployments', '-o', 'json'))['items']}
             if all(en_minimo(h, despliegues.get(h['spec']['scaleTargetRef']['name'])) for h in hpas):
@@ -358,8 +385,11 @@ def comparar(cfg, cluster, generador=carga, registro=None):
                 for n, medido in fases:
                     validar_vigencia(cfg['tokens'])
                     correlacion = str(uuid.uuid4())
+                    argumentos = (cfg['url'], cfg['tokens'][modo], correlacion, n, cfg['conexiones'])
+                    # Cada POST medido aparece en el snapshot al responder; la ronda se acredita después.
+                    avisar = registro.avisador(ronda + 1, modo) if medido else None
                     with registro.fase('http' if medido else 'calentamiento', ronda + 1, modo):
-                        respuestas = generador(cfg['url'], cfg['tokens'][modo], correlacion, n, cfg['conexiones'])
+                        respuestas = generador(*argumentos, al_responder=avisar) if avisar else generador(*argumentos)
                     codigos = Counter(r[0] for r in respuestas)
                     if codigos != {201: n}:
                         raise RuntimeError(f'Comparación inválida: respuestas HTTP {dict(codigos)}; no se sigue.')

@@ -70,10 +70,10 @@ Una corrida, en orden:
 1. Valida URL, tokens, rangos y `AUTOESCALADO` antes de tocar `kubectl`, y pide escribir `SI`.
 2. Comprueba que las dos organizaciones existan, sean distintas y estén vacías.
 3. `Registro.iniciar()` toma la primera muestra del HPA, que queda **antes** de fijarlo, escribe la página, imprime su ruta y la abre en el navegador (`ABRIR_SNAPSHOT=0` para no abrirla).
-4. `preparar` respalda la configuración en la anotación del Deployment, como en #141, y fija el HPA solo si `AUTOESCALADO=fijo`.
-5. Por ronda y modo: reinicio de la API (franja gris en la página). Con `activo`, espera a que el HPA vuelva a su mínimo de pods (franja gris clara). Después vienen el calentamiento, los POST medidos (franja SIN o CON), la espera de la evidencia y `verificar`, que ahora devuelve las réplicas. Cada fase medida guarda los máximos del HPA desde sus POST (pods, CPU y lo que pidió), actualiza la página y los escribe en la terminal junto a su p50/p95 y su tiempo evento→resumen.
+4. `preparar` respalda la configuración en la anotación del Deployment, como en #141, y fija el HPA solo si `AUTOESCALADO=fijo`. Con `activo`, antes de tocar nada exige exactamente un HPA de 1 a 2 réplicas para `gateway` y otro para `subscriptions`; si falta uno, hay duplicados o el rango es otro, la prueba no parte.
+5. Por ronda y modo: reinicio de la API (franja gris en la página). Con `activo`, espera a que el HPA vuelva a su mínimo de pods (franja gris clara); si en esa espera falta un HPA, la prueba se invalida. Después vienen el calentamiento, los POST medidos (franja SIN o CON), la espera de la evidencia y `verificar`, que ahora devuelve las réplicas. Cada fase se anota al entrar, así la página la dibuja abierta mientras dura. Al empezar los POST medidos se toma una lectura del HPA como base, y cada POST aparece en la página apenas responde, hueco hasta que se acredita su ronda. Al acreditarla se guardan los máximos del HPA de las lecturas que empezaron desde sus POST (pods, CPU y lo que pidió), y se escriben en la terminal junto a su p50/p95 y su tiempo evento→resumen.
 6. Al cerrar cada ronda, menos la última, la terminal muestra la tabla parcial.
-7. En el `finally`, primero se corta el muestreo y después se restaura todo.
+7. En el `finally`, primero se corta el muestreo: se espera hasta 25 s a que termine la lectura en curso, y si llega después se descarta. Recién entonces se restaura todo.
 8. `terminar` toma una última muestra, que deja constancia del HPA devuelto a 1–2, y fija la página como terminada o inválida, con el motivo.
 
 ## Decisiones
@@ -94,6 +94,18 @@ Una corrida, en orden:
 - **El muestreo no puede romper la prueba.** Solo lee, corre en un hilo
   aparte, se corta antes de restaurar y, si `kubectl` falla, deja un hueco en
   el gráfico.
+- **La evidencia terminada no cambia.** Una lectura del HPA que estaba en
+  vuelo al detener el muestreo puede volver con el HPA ya restaurado. Por eso
+  `detener` espera al hilo, y lo que llega después de la señal se descarta en
+  vez de entrar como muestra de la prueba o reescribir la página.
+- **Cada POST se ve al responder, pero cuenta al acreditarse.** `carga` avisa
+  al registro por cada respuesta y la escritura periódica lo publica. Esos
+  puntos van huecos y no entran en el p50 ni el p95 hasta que se verifican los
+  eventos, los autores y el resumen de su ronda.
+- **El máximo del HPA es solo de su fase.** Cuentan las lecturas que empezaron
+  desde los POST medidos, y la primera es una base que se toma al entrar. Una
+  lectura del enfriamiento, con los pods que escaló el modo anterior, no se le
+  atribuye a este. Si una fase no alcanza a tener lecturas, queda sin dato.
 - **"Pediría" con el HPA fijo.** Se calcula con la fórmula del controlador:
   `ceil(réplicas × CPU por pod ÷ objetivo)`, con 10 % de tolerancia y los
   límites originales. No incluye la ventana de estabilización de bajada, y la
@@ -106,6 +118,11 @@ Una corrida, en orden:
   su Deployment, estén en el mínimo; si no bajan, la prueba se invalida.
   Durante la carga se sigue exigiendo misma imagen, mismos recursos y al menos
   un pod disponible.
+- **Sin sus HPA, `activo` no parte.** Mostrar el autoscaling exige un HPA de 1 a
+  2 réplicas para `gateway` y otro para `subscriptions`, el límite de la cuota.
+  Se comprueba antes de tocar el clúster y en cada espera del mínimo: una lista
+  vacía nunca acredita el mínimo. Con `fijo` no se exige, porque ahí el HPA se
+  congela igual.
 - **La opción 12 tiene sus propias variables** (`OPERACIONES_HPA`,
   `CONEXIONES_HPA`, `ESPERA_HPA`), para que un `OPERACIONES=20` exportado para
   la opción 11 no deje la demo de autoscaling con una ráfaga demasiado corta.
@@ -122,7 +139,7 @@ Una corrida, en orden:
 ## Cómo probarlo
 
 ```bash
-python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 36, 17 nuevas
+python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v        # 41, 22 nuevas
 python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v  # 14
 python -m unittest discover -s scripts/tests -p 'test_estado_comparador.py' -v    # 4
 ```
@@ -133,8 +150,12 @@ una comparación fallida, el escape del error en el HTML, que `activo` no fija
 el HPA y tolera réplicas, que `fijo` sí invalida, el rechazo de un
 `AUTOESCALADO` inválido, la tabla en cp1252, la espera hasta el mínimo de pods
 (y que invalide si no baja), el orden de fases con `activo` y el resumen de
-pods por modo. Ninguna toca un cluster ni abre
-el navegador. La CI ya corre `test_comparar*.py`, así que las toma sola.
+pods por modo. Las de la revisión de Maxi: un POST que se ve en la página
+mientras el siguiente sigue colgado (con `carga()` real y un servidor local),
+el máximo del HPA que no hereda la lectura del enfriamiento, la base que toma
+la fase medida, la lectura tardía que no cambia la evidencia terminada, y
+`activo` sin HPA, con uno faltante, duplicado o con máximo 9. Ninguna toca un
+cluster ni abre el navegador. La CI ya corre `test_comparar*.py`, así que las toma sola.
 
 ## Lo que queda
 

@@ -281,7 +281,8 @@ junto a un JSON con los mismos datos, en `k8s/pruebas/resultados/` (git lo
 ignora). Sirve para mostrar la comparación en vivo y para guardarla como
 evidencia. No contiene tokens ni identificadores de organización.
 
-La página muestra cada POST medido, el tiempo del primer evento al resumen por
+La página muestra cada POST medido apenas responde (hueco hasta que se acredita
+el trabajo de su ronda), el tiempo del primer evento al resumen por
 ronda, la tabla de rondas con las réplicas, la tabla final cuando termina y el
 autoscaling: la CPU promedio por pod de `gateway` y `subscriptions` contra el
 objetivo de 120m, sus réplicas y las que pide el HPA, con franjas que marcan
@@ -297,7 +298,7 @@ estado del HPA de cada fase, más una tabla parcial al cerrar cada ronda.
 | Valor | Qué pasa | Para qué |
 |---|---|---|
 | `fijo` (por defecto) | El HPA se fija en las réplicas actuales; si cambian, la comparación se invalida. La página muestra lo que habría pedido el HPA con su fórmula: `ceil(réplicas × CPU ÷ objetivo)`, tolerancia de 10 % y límites originales. | Comparar tiempos con la misma cantidad de pods. |
-| `activo` | El HPA queda libre. Antes de la carga de cada modo se espera que vuelva a su mínimo de pods, así ninguno hereda los que escaló el anterior. Se sigue exigiendo la misma imagen y recursos, y al menos un pod disponible. | Ver cuántos pods necesita cada modo. |
+| `activo` | El HPA queda libre. Antes de la carga de cada modo se espera que vuelva a su mínimo de pods, así ninguno hereda los que escaló el anterior. Exige un HPA de 1 a 2 réplicas para `gateway` y otro para `subscriptions`: si no, no parte. Se sigue exigiendo la misma imagen y recursos, y al menos un pod disponible. | Ver cuántos pods necesita cada modo. |
 
 #### Autoscaling SIN y CON RabbitMQ (opción 12)
 

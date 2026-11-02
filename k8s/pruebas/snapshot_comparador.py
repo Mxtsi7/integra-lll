@@ -2,9 +2,10 @@
 
 Mientras corre la comparación, el HTML se recarga solo cada pocos segundos
 (meta refresh, sin servidor ni internet) y va llenando rondas, gráficos y el
-autoscaling. Al terminar queda fijo como evidencia, junto a un JSON con los
-mismos datos. Los dos van a k8s/pruebas/resultados/, que git ignora. Nunca se
-guardan tokens ni identificadores de organización.
+autoscaling. Cada POST medido aparece apenas responde, como provisional hasta
+que se acredita el trabajo de su ronda. Al terminar queda fijo como evidencia,
+junto a un JSON con los mismos datos. Los dos van a k8s/pruebas/resultados/,
+que git ignora. Nunca se guardan tokens ni identificadores de organización.
 
 El muestreador lee `kubectl get hpa` cada pocos segundos: la CPU promedio por
 pod contra el objetivo, las réplicas reales y las que pide (o pediría) el HPA.
@@ -29,6 +30,7 @@ from metricas_comparador import percentil
 
 RESULTADOS = Path(__file__).resolve().parent / 'resultados'
 INTERVALO_S = 5
+CIERRE_S = 25  # La lectura del HPA corta a los 20 s (comparar_tiempos.main).
 TOLERANCIA_HPA = 0.1  # La misma tolerancia por defecto del controlador.
 NOMBRES = ('SIN RabbitMQ', 'CON RabbitMQ')
 
@@ -99,6 +101,9 @@ class RegistroNulo:
     def ronda(self, *_):
         pass
 
+    def avisador(self, *_):
+        return None
+
     def detener(self):
         pass
 
@@ -110,8 +115,9 @@ class Registro:
     """Junta lo que pasa en la comparación y lo escribe como snapshot."""
 
     def __init__(self, cfg, muestrear=None, directorio=RESULTADOS, abrir=True,
-                 intervalo=INTERVALO_S, reloj=time.monotonic, ahora=datetime.now):
+                 intervalo=INTERVALO_S, reloj=time.monotonic, ahora=datetime.now, espera_cierre=CIERRE_S):
         self._muestrear, self._intervalo, self._reloj, self._abrir = muestrear, intervalo, reloj, abrir
+        self._espera_cierre, self._hilo = espera_cierre, None
         self._candado = threading.RLock()
         self._parar = threading.Event()
         self._iniciado = self._avisado = False
@@ -127,7 +133,7 @@ class Registro:
                 repeticiones=cfg['repeticiones'], conexiones=cfg['conexiones'],
                 semilla=cfg['semilla'], calentamiento=cfg.get('calentamiento', 0),
                 autoescalado=cfg.get('autoescalado', 'fijo')),
-            hpa_original={}, fases=[], rondas=[], muestras=[], resumen=None)
+            hpa_original={}, fases=[], rondas=[], provisionales=[], muestras=[], resumen=None)
 
     def _t(self):
         return round(self._reloj() - self._origen, 2)
@@ -142,26 +148,32 @@ class Registro:
                 webbrowser.open(self.html.resolve().as_uri())
             except Exception:  # Sin navegador (SSH, CI): el archivo igual queda.
                 pass
-        if self._muestrear:
-            threading.Thread(target=self._bucle, name='muestreo-hpa', daemon=True).start()
+        # Aunque no haya HPA que leer: la escritura periódica también publica los POST en curso.
+        self._hilo = threading.Thread(target=self._bucle, name='snapshot', daemon=True)
+        self._hilo.start()
 
     def _bucle(self):
         while not self._parar.wait(self._intervalo):
             self.muestrear()
-            self.guardar()
+            self.guardar(periodica=True)
 
     def muestrear(self, final=False):
         if not self._muestrear or (self._parar.is_set() and not final):
             return
+        # La marca es el inicio de la lectura: una lenta no cuenta dentro de una fase que empezó después.
+        t = self._t()
         try:
             lecturas = {h['spec']['scaleTargetRef']['name']: leer_hpa(h)
                         for h in json.loads(self._muestrear())['items']}
         except (RuntimeError, ValueError, KeyError, TypeError):
             lecturas = None  # Un hueco en el gráfico, no una comparación fallida.
         with self._candado:
+            if self._parar.is_set() and not final:
+                return  # Llegó después de detener: puede ser el HPA ya restaurado.
             for nombre, lectura in (lecturas or {}).items():
                 lectura['pide'] = self._pide(nombre, lectura)
-            self.datos['muestras'].append(dict(t=self._t(), final=final, hpas=lecturas))
+            self.datos['muestras'].append(dict(t=t, final=final, hpas=lecturas))
+            self.datos['muestras'].sort(key=lambda m: m['t'])
 
     def _pide(self, nombre, lectura):
         if self.datos['config']['autoescalado'] == 'activo':
@@ -178,15 +190,28 @@ class Registro:
                     n: dict(minimo=h['minimo'], maximo=h['maximo'], objetivo_m=h['objetivo_m'])
                     for n, h in hpas.items()}
 
+    def avisador(self, ronda, modo):
+        """Para el generador: cada POST medido entra a la página apenas responde."""
+        def avisar(codigo, ms):
+            with self._candado:
+                self.datos['provisionales'].append(dict(ronda=ronda, modo=modo, codigo=codigo, ms=round(ms, 1)))
+        return avisar
+
     @contextmanager
     def fase(self, tipo, ronda, modo):
-        desde = self._t()
+        # Se anota al entrar, abierta, para que la página la dibuje mientras dura.
+        actual = dict(tipo=tipo, ronda=ronda, modo=modo, desde=self._t(), hasta=None)
+        with self._candado:
+            self.datos['fases'].append(actual)
+        if tipo == 'http':
+            self.muestrear()  # Base propia: el máximo de este modo no hereda pods de la fase anterior.
+        self.guardar()
         try:
             yield
         finally:
             with self._candado:
-                self.datos['fases'].append(dict(tipo=tipo, ronda=ronda, modo=modo,
-                                                desde=desde, hasta=self._t()))
+                actual['hasta'] = self._t()
+            self.guardar()
 
     def ronda(self, ronda, modo, latencias, lote_s, replicas):
         with self._candado:
@@ -195,22 +220,27 @@ class Registro:
                 p50=percentil(latencias, 50), p95=percentil(latencias, 95), lote_s=lote_s,
                 replicas=replicas if isinstance(replicas, dict) else None,
                 hpa=self._hpa_desde(ronda, modo)))
+            # Acreditada: sus POST dejan de ser provisionales.
+            self.datos['provisionales'] = [p for p in self.datos['provisionales']
+                                           if (p['ronda'], p['modo']) != (ronda, modo)]
         self.guardar()
 
     def _hpa_desde(self, ronda, modo):
         """Máximos del HPA desde que empezaron los POST medidos hasta la evidencia.
 
-        Incluye la última muestra anterior: así una fase más corta que el
-        muestreo igual muestra con cuántos pods partió.
+        Solo cuentan lecturas que empezaron dentro de esa ventana; la primera es la
+        base que toma fase() al entrar. Una muestra del enfriamiento o del reinicio
+        no se le atribuye a este modo aunque sea la última antes de los POST. Sin
+        lecturas en la ventana, el HPA queda sin dato, no con un pico ajeno.
         """
         desde = next((f['desde'] for f in reversed(self.datos['fases'])
                       if f['tipo'] == 'http' and f['ronda'] == ronda and f['modo'] == modo), None)
         if desde is None:
             return {}
-        muestras = [m for m in self.datos['muestras'] if m['hpas'] and not m['final']]
-        previas = [m for m in muestras if m['t'] < desde]
         resumen = {}
-        for m in previas[-1:] + [m for m in muestras if m['t'] >= desde]:
+        for m in self.datos['muestras']:
+            if not m['hpas'] or m['final'] or m['t'] < desde:
+                continue
             for nombre, h in m['hpas'].items():
                 r = resumen.setdefault(nombre, dict(pods=None, cpu=None, pide=None))
                 for clave, valor in (('pods', h['actuales']), ('cpu', h['cpu_m']), ('pide', h['pide'])):
@@ -236,7 +266,10 @@ class Registro:
         return lineas
 
     def detener(self):
+        """Corta el muestreo antes de restaurar; una lectura que llegue después se descarta."""
         self._parar.set()
+        if self._hilo and self._hilo is not threading.current_thread():
+            self._hilo.join(self._espera_cierre)
 
     def terminar(self, resultados=None, error=None):
         if not self._iniciado:
@@ -253,8 +286,10 @@ class Registro:
         self.guardar()
         return self.html
 
-    def guardar(self):
+    def guardar(self, periodica=False):
         with self._candado:
+            if periodica and self._parar.is_set():
+                return  # El hilo ya se detuvo: no reescribe la evidencia terminada.
             if self.datos['estado'] == 'en_curso':
                 self.datos['duracion_s'] = self._t()
             contenido = (pagina(self.datos), json.dumps(self.datos, ensure_ascii=False, indent=1))
@@ -322,8 +357,12 @@ def _diferencia(sin, con):
 
 
 def _franja(filas, unidad, marcas):
-    """Una fila por modo; cada punto es una medición y las marcas son percentiles."""
-    valores = [v for fila in filas for v, _ in fila]
+    """Una fila por modo; cada punto es una medición y las marcas son percentiles.
+
+    Los puntos provisionales (POST de una ronda sin acreditar) van huecos y no
+    entran en los percentiles.
+    """
+    valores = [v for fila in filas for v, _, _ in fila]
     if not valores:
         return '<p class="vacio">Todavía no hay mediciones.</p>'
     izq, der, arriba, alto_fila = 120, 28, 10, 70
@@ -342,13 +381,15 @@ def _franja(filas, unidad, marcas):
         centro = arriba + alto_fila * modo + alto_fila / 2
         partes.append(f'<circle class="m{modo}" cx="12" cy="{centro:.1f}" r="5"/>'
                       f'<text class="rotulo" x="24" y="{centro + 4:.1f}">{NOMBRES[modo]}</text>')
-        for i, (v, etiqueta) in enumerate(fila):
+        for i, (v, etiqueta, provisional) in enumerate(fila):
             dy = ((i * 7) % 9 - 4) * 3  # Dispersión fija para que los puntos no se tapen.
-            partes.append(f'<circle class="punto m{modo}" cx="{x(v):.1f}" cy="{centro + dy:.1f}" r="4">'
+            clase = f'punto m{modo}' + (' provisional' if provisional else '')
+            partes.append(f'<circle class="{clase}" cx="{x(v):.1f}" cy="{centro + dy:.1f}" r="4">'
                           f'<title>{NOMBRES[modo]} · {_e(etiqueta)} · {v:.1f} {unidad}</title></circle>')
-        if fila:
+        acreditados = [v for v, _, provisional in fila if not provisional]
+        if acreditados:
             for posicion, (nombre, p) in enumerate(marcas):
-                v = percentil([v for v, _ in fila], p)
+                v = percentil(acreditados, p)
                 y_texto = centro - 22 if posicion == 0 else centro + 32
                 partes.append(f'<line class="marca" x1="{x(v):.1f}" x2="{x(v):.1f}" y1="{centro - 18:.1f}" '
                               f'y2="{centro + 18:.1f}"/><text class="valor" x="{x(v):.1f}" y="{y_texto:.1f}" '
@@ -372,7 +413,7 @@ def _bandas(fases, x, arriba, abajo, rotular):
             clase = f'banda-m{f["modo"]}' + (' calentamiento' if f['tipo'] == 'calentamiento' else '')
             titulo = (f'{"Calentamiento" if f["tipo"] == "calentamiento" else "POST medidos"} '
                       f'{NOMBRES[f["modo"]]} · ronda {f["ronda"]}')
-        titulo += f' · {f["hasta"] - f["desde"]:.1f} s'
+        titulo += ' · en curso' if f.get('abierta') else f' · {f["hasta"] - f["desde"]:.1f} s'
         partes.append(f'<rect class="{clase}" x="{x0:.1f}" y="{arriba}" width="{ancho:.1f}" '
                       f'height="{abajo - arriba}"><title>{_e(titulo)}</title></rect>')
         centro = x0 + ancho / 2
@@ -615,6 +656,8 @@ svg text{font:12px system-ui,-apple-system,"Segoe UI",sans-serif}
 .rejilla{stroke:var(--rejilla);stroke-width:1}.base{stroke:var(--eje);stroke-width:1}
 .m0{background:var(--m0);fill:var(--m0)}.m1{background:var(--m1);fill:var(--m1)}
 .punto{fill-opacity:.65;stroke:var(--superficie);stroke-width:2}
+.punto.provisional{fill:var(--superficie);fill-opacity:1;stroke-width:1.5}
+.punto.provisional.m0{stroke:var(--m0)}.punto.provisional.m1{stroke:var(--m1)}
 .marca{stroke:var(--tinta);stroke-width:2;stroke-linecap:round}
 .banda-m0{fill:var(--m0);fill-opacity:.14}.banda-m1{fill:var(--m1);fill-opacity:.14}
 .calentamiento{fill-opacity:.06}.banda-reinicio{fill:var(--gris);fill-opacity:.7}.banda-espera{fill:var(--gris);fill-opacity:.3}
@@ -631,11 +674,32 @@ thead th{color:var(--tinta2);font-weight:600;vertical-align:bottom}
 '''
 
 
+def _hasta_ahora(datos):
+    """Una fase abierta se dibuja hasta el momento de esta escritura."""
+    return dict(datos, fases=[dict(f, hasta=datos['duracion_s'], abierta=True) if f['hasta'] is None else f
+                              for f in datos['fases']])
+
+
+def _fase_actual(datos):
+    """Qué está pasando ahora, para la línea de estado en vivo."""
+    abierta = next((f for f in reversed(datos['fases']) if f.get('abierta')), None)
+    if abierta is None:
+        return ''
+    nombre = NOMBRES[abierta['modo']]
+    if abierta['tipo'] == 'http':
+        hechos = sum((p['ronda'], p['modo']) == (abierta['ronda'], abierta['modo']) for p in datos['provisionales'])
+        return f'POST {nombre}, ronda {abierta["ronda"]}: {hechos} de {datos["config"]["operaciones"]} · '
+    return {'reinicio': f'reiniciando la API para {nombre} · ',
+            'enfriamiento': f'esperando que el HPA vuelva al mínimo antes de {nombre} · ',
+            'calentamiento': f'calentamiento de {nombre} · '}.get(abierta['tipo'], '')
+
+
 def pagina(datos):
+    datos = _hasta_ahora(datos)
     cfg, rondas = datos['config'], datos['rondas']
     en_curso = datos['estado'] == 'en_curso'
     if en_curso:
-        estado = (f'<p class="estado en-curso"><span class="icono">●</span>En curso · se actualiza cada '
+        estado = (f'<p class="estado en-curso"><span class="icono">●</span>En curso · {_e(_fase_actual(datos))}se actualiza cada '
                   f'{INTERVALO_S} s · {_mmss(datos["duracion_s"])} transcurridos</p>')
     elif datos['estado'] == 'terminada':
         estado = (f'<p class="estado terminada"><span class="icono">✓</span>Terminada en '
@@ -658,9 +722,16 @@ def pagina(datos):
     hpas = sorted({n for m in datos['muestras'] for n in (m['hpas'] or {})})
     graficos = ''.join(f'<h3>{_e(n)}</h3>{_graficos_hpa(datos, n)}' for n in hpas) or \
         '<p class="vacio">No se pudo leer el HPA con kubectl.</p>'
-    http = _franja([[(x, f'ronda {r["ronda"]}') for r in rondas if r['modo'] == m for x in r['latencias']]
+    provisionales = datos['provisionales']
+    http = _franja([[(x, f'ronda {r["ronda"]}', False) for r in rondas if r['modo'] == m for x in r['latencias']]
+                    + [(p['ms'], f'ronda {p["ronda"]}, sin acreditar todavía', True)
+                       for p in provisionales if p['modo'] == m]
                     for m in (0, 1)], 'ms', (('p50', 50), ('p95', 95)))
-    lote = _franja([[(r['lote_s'], f'ronda {r["ronda"]}') for r in rondas if r['modo'] == m] for m in (0, 1)],
+    if provisionales:
+        http += ('<p class="nota">Los puntos huecos son POST ' + (
+            'de la ronda en curso: entran en el p50 y el p95 cuando se acredita su trabajo.' if en_curso
+            else 'de una ronda que no alcanzó a acreditarse: no entran en ningún resultado.') + '</p>')
+    lote = _franja([[(r['lote_s'], f'ronda {r["ronda"]}', False) for r in rondas if r['modo'] == m] for m in (0, 1)],
                    's', (('p50', 50),))
     leyenda_modos = ('<p class="leyenda"><span><i class="clave m0"></i>SIN RabbitMQ: el recálculo dentro del POST</span>'
                      '<span><i class="clave m1"></i>CON RabbitMQ: el recálculo en el consumidor</span></p>')
