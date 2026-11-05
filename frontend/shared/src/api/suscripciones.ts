@@ -33,12 +33,12 @@ type SuscripcionDeApi = Omit<Suscripcion, 'monto' | 'fin_prueba' | 'horas_uso_me
   horas_uso_mes?: string | number | null;
 };
 
-function desdeLaApi(s: SuscripcionDeApi): Suscripcion {
+function desdeLaApi(suscripcion: SuscripcionDeApi): Suscripcion {
   return {
-    ...s,
-    monto: Number(s.monto),
-    fin_prueba: s.fin_prueba ?? undefined,
-    horas_uso_mes: s.horas_uso_mes == null ? undefined : Number(s.horas_uso_mes),
+    ...suscripcion,
+    monto: Number(suscripcion.monto),
+    fin_prueba: suscripcion.fin_prueba ?? undefined,
+    horas_uso_mes: suscripcion.horas_uso_mes == null ? undefined : Number(suscripcion.horas_uso_mes),
   };
 }
 

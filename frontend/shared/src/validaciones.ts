@@ -165,8 +165,8 @@ export function validarCambioContrasena(datos: DatosCambioContrasena): ErroresCa
 
   if (!datos.actual) errores.actual = "Ingresa tu contraseña actual.";
 
-  const nueva = validarPassword(datos.nueva);
-  if (nueva) errores.nueva = nueva;
+  const importacionNueva = validarPassword(datos.nueva);
+  if (importacionNueva) errores.nueva = importacionNueva;
 
   if (!datos.confirmacion) errores.confirmacion = "Repite la contraseña nueva.";
   else if (datos.confirmacion !== datos.nueva) {

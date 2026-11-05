@@ -63,7 +63,7 @@ export function parsearMonto(texto: string): { valor: number } | { error: string
 Y una fecha tiene que **existir**, no solo tener el formato:
 
 ```ts
-export function esFechaReal(iso: string): boolean {
+export function esFechaReal(fechaEnTexto: string): boolean {
   // … separa año, mes y día …
   // Date.UTC "corre" las fechas imposibles (30 de febrero → 2 de marzo):
   // si al volver no da el mismo día, no existía.
@@ -211,7 +211,7 @@ toda la lista y buscaba el id; el propio código tenía un TODO esperando ese en
 validarSuscripcion(datos): ErroresSuscripcion       // {} = se puede enviar
 validarUso({ minutos, fecha }, hoy?): ErroresUso
 parsearMonto(texto): { valor } | { error }
-esFechaReal(iso): boolean · hoyLocalIso(): string
+esFechaReal(fechaEnTexto): boolean · hoyEnTexto(): string
 erroresDesdeServidor(campos, mapa): { porCampo, general }
 getUsos(id): Promise<RegistroUso[]>                 // RegistroUso = { fecha, minutos }
 registrarUso(id, { minutos, fecha? }): Promise<Suscripcion>

@@ -2,8 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   diasDelMes,
   esDelMes,
-  fechaDeIso,
-  isoDeFecha,
+  textoAFecha,
+  fechaATexto,
   mesDeFecha,
   partesDeMes,
   primerDiaDelMes,
@@ -63,16 +63,16 @@ describe('semanasDelMes', () => {
       expect(semanas.every((s) => s.length === 7)).toBe(true);
       const delMes = dias(semanas);
       expect(delMes).toHaveLength(diasDelMes(2026, mes));
-      expect(delMes[0]).toBe(isoDeFecha(new Date(2026, mes, 1)));
+      expect(delMes[0]).toBe(fechaATexto(new Date(2026, mes, 1)));
     }
   });
 });
 
 describe('fechas sin pasar por UTC', () => {
   it('el 1 del mes sigue siendo el 1 (new Date("2026-10-01") sería el 30 de septiembre en Chile)', () => {
-    const fecha = fechaDeIso('2026-10-01');
+    const fecha = textoAFecha('2026-10-01');
     expect([fecha.getFullYear(), fecha.getMonth(), fecha.getDate()]).toEqual([2026, 9, 1]);
-    expect(isoDeFecha(fecha)).toBe('2026-10-01');
+    expect(fechaATexto(fecha)).toBe('2026-10-01');
   });
 
   it('esDelMes', () => {

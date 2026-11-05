@@ -10,11 +10,11 @@ import { useEffect, type RefObject } from "react";
  */
 export function useAvisoAlSalir(hayCambios: RefObject<boolean>) {
   useEffect(() => {
-    function alSalir(e: BeforeUnloadEvent) {
+    function alSalir(evento: BeforeUnloadEvent) {
       if (!hayCambios.current) return;
-      e.preventDefault();
+      evento.preventDefault();
       // Chrome y Edge todavía exigen returnValue para mostrar el diálogo.
-      e.returnValue = "";
+      evento.returnValue = "";
     }
     window.addEventListener("beforeunload", alSalir);
     return () => window.removeEventListener("beforeunload", alSalir);

@@ -103,7 +103,7 @@ export function CuentasConectadasPage({ cargarCuentas, accionConectar }: Cuentas
             </BotonEnlace>
           }
         >
-          <ListaCuentas estado={estado} onReintentar={() => setIntento((n) => n + 1)} />
+          <ListaCuentas estado={estado} onReintentar={() => setIntento((anterior) => anterior + 1)} />
         </Seccion>
       </div>
     </AppLayout>

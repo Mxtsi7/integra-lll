@@ -106,7 +106,7 @@ export function useProgresoImportacion(id: string | undefined) {
     document.addEventListener('visibilitychange', alCambiarVisibilidad);
 
     // Al reintentar se sigue viendo lo último de esta misma importación; de otra, no.
-    setEstado((e) => (e.tipo === 'listo' && e.importacion.id === id ? { ...e, problema: null } : { tipo: 'cargando' }));
+    setEstado((actual) => (actual.tipo === 'listo' && actual.importacion.id === id ? { ...actual, problema: null } : { tipo: 'cargando' }));
     void consultar(); // la primera va siempre, aunque la pestaña esté oculta
 
     return () => {
@@ -116,5 +116,5 @@ export function useProgresoImportacion(id: string | undefined) {
     };
   }, [id, intento, capturarSesion, sesion]);
 
-  return { estado, reintentar: () => setIntento((n) => n + 1) };
+  return { estado, reintentar: () => setIntento((anterior) => anterior + 1) };
 }

@@ -129,7 +129,7 @@ export function PreferenciasAvisos() {
   });
 
   const cambiar = (clave: ClaveInterruptor, valor: boolean) => {
-    setEditadas((e) => (e ? { ...e, [clave]: valor } : e));
+    setEditadas((actual) => (actual ? { ...actual, [clave]: valor } : actual));
     setErrorGuardado(null);
   };
 
@@ -177,7 +177,7 @@ export function PreferenciasAvisos() {
       tinte="acento"
     >
       {carga.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tus avisos…</p>}
-      {carga.tipo === 'error' && <ErrorConReintento mensaje={carga.mensaje} onReintentar={() => setIntento((n) => n + 1)} />}
+      {carga.tipo === 'error' && <ErrorConReintento mensaje={carga.mensaje} onReintentar={() => setIntento((anterior) => anterior + 1)} />}
 
       {carga.tipo === 'listo' && editadas && (
         <>

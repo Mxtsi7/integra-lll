@@ -70,8 +70,8 @@ export function EditarNombre({ nombre, onGuardado }: EditarNombreProps) {
     setEditando(false);
   }
 
-  async function guardar(e: FormEvent) {
-    e.preventDefault();
+  async function guardar(evento: FormEvent) {
+    evento.preventDefault();
     if (enviandoRef.current) return;
 
     const errorLocal = validarNombre(valor);
@@ -105,9 +105,9 @@ export function EditarNombre({ nombre, onGuardado }: EditarNombreProps) {
     }
   }
 
-  function alTeclear(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
+  function alTeclear(evento: KeyboardEvent<HTMLInputElement>) {
+    if (evento.key === 'Escape') {
+      evento.preventDefault();
       cancelar();
     }
   }
@@ -130,7 +130,7 @@ export function EditarNombre({ nombre, onGuardado }: EditarNombreProps) {
         id={idCampo}
         etiqueta="Nombre"
         value={valor}
-        onChange={(e) => setValor(e.target.value)}
+        onChange={(evento) => setValor(evento.target.value)}
         onKeyDown={alTeclear}
         error={error ?? undefined}
         autoComplete="name"

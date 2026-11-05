@@ -25,16 +25,16 @@ interface FiltrosAlertasProps {
 export function FiltrosAlertas({ valor, alCambiar, pendientes }: FiltrosAlertasProps) {
   return (
     <div className={styles.filtros} role="group" aria-label="Filtrar alertas">
-      {FILTROS_ALERTAS.map((f) => (
+      {FILTROS_ALERTAS.map((nuevoFiltro) => (
         <button
-          key={f.valor}
+          key={nuevoFiltro.valor}
           type="button"
-          className={valor === f.valor ? `${styles.filtro} ${styles.filtroActivo}` : styles.filtro}
-          aria-pressed={valor === f.valor}
-          onClick={() => alCambiar(f.valor)}
+          className={valor === nuevoFiltro.valor ? `${styles.filtro} ${styles.filtroActivo}` : styles.filtro}
+          aria-pressed={valor === nuevoFiltro.valor}
+          onClick={() => alCambiar(nuevoFiltro.valor)}
         >
-          {f.etiqueta}
-          {f.valor === 'pendiente' && pendientes !== null && <span className={styles.filtroConteo}>{pendientes}</span>}
+          {nuevoFiltro.etiqueta}
+          {nuevoFiltro.valor === 'pendiente' && pendientes !== null && <span className={styles.filtroConteo}>{pendientes}</span>}
         </button>
       ))}
     </div>

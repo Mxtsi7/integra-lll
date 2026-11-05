@@ -26,5 +26,5 @@ export function esMesValido(mes: string): boolean {
 export async function getCobrosDelMes(mes: string): Promise<CobroCalendario[]> {
   if (!esMesValido(mes)) throw new RangeError(`Mes inválido: "${mes}". Debe ser YYYY-MM.`);
   const cobros = await pedir<CobroCalendarioDeApi[]>(`${RUTA_CALENDARIO}?mes=${mes}`);
-  return cobros.map((c) => ({ ...c, importe: Number(c.importe) }));
+  return cobros.map((cobro) => ({ ...cobro, importe: Number(cobro.importe) }));
 }

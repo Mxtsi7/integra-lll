@@ -12,7 +12,7 @@ interface CuadriculaMesProps {
   hoy: string;
   /** Día elegido, o null si ninguno. */
   seleccionado: string | null;
-  onSeleccionar: (iso: string) => void;
+  onSeleccionar: (fechaDelDia: string) => void;
   /**
    * Cobros del mes (VI-07). null mientras se cargan: así los días no dicen
    * "sin cobros" cuando todavía no se sabe.
@@ -49,16 +49,16 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, cob
 
   const cobrosPorDia = useMemo(() => {
     const porDia = new Map<string, CobroCalendario[]>();
-    for (const c of cobros ?? []) porDia.set(c.fecha, [...(porDia.get(c.fecha) ?? []), c]);
+    for (const cobro of cobros ?? []) porDia.set(cobro.fecha, [...(porDia.get(cobro.fecha) ?? []), cobro]);
     return porDia;
   }, [cobros]);
 
-  const dias = useMemo(() => semanas.flat().filter((d): d is string => d !== null), [semanas]);
+  const dias = useMemo(() => semanas.flat().filter((dia): dia is string => dia !== null), [semanas]);
   // El único día que recibe Tab (tabindex móvil): el último que tuvo el foco
   // (con flechas, clic o el lector de pantalla); si no, el elegido; si no,
   // hoy; si no, el 1. Siempre de este mes.
   const [enfocado, setEnfocado] = useState<string | null>(null);
-  const porDefecto = [seleccionado, hoy].find((d) => d !== null && esDelMes(d, anio, mes)) ?? dias[0];
+  const porDefecto = [seleccionado, hoy].find((dia) => dia !== null && esDelMes(dia, anio, mes)) ?? dias[0];
   const diaEnfocado = enfocado !== null && esDelMes(enfocado, anio, mes) ? enfocado : porDefecto;
   const cuadricula = useRef<HTMLTableElement>(null);
   // Día al que hay que llevar el foco después de una tecla. Se guarda la
@@ -73,22 +73,22 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, cob
     cuadricula.current?.querySelector<HTMLButtonElement>(`button[data-fecha="${destino}"]`)?.focus();
   }, [diaEnfocado, anio, mes]);
 
-  function alTeclear(e: KeyboardEvent<HTMLButtonElement>, iso: string) {
+  function alTeclear(evento: KeyboardEvent<HTMLButtonElement>, fechaDelDia: string) {
     // Inicio/Fin van al primer/último día de esta semana que sea del mes.
-    const semana = (semanas.find((s) => s.includes(iso)) ?? []).filter((d): d is string => d !== null);
-    const salto = DESPLAZAMIENTO[e.key];
-    const meses = MESES_POR_TECLA[e.key];
+    const semana = (semanas.find((semanaDelMes) => semanaDelMes.includes(fechaDelDia)) ?? []).filter((dia): dia is string => dia !== null);
+    const salto = DESPLAZAMIENTO[evento.key];
+    const meses = MESES_POR_TECLA[evento.key];
     let destino: string | undefined;
-    if (salto !== undefined) destino = sumarDias(iso, salto);
-    else if (meses !== undefined) destino = sumarMesesAFecha(iso, meses);
-    else if (e.key === 'Home') destino = semana[0];
-    else if (e.key === 'End') destino = semana[semana.length - 1];
+    if (salto !== undefined) destino = sumarDias(fechaDelDia, salto);
+    else if (meses !== undefined) destino = sumarMesesAFecha(fechaDelDia, meses);
+    else if (evento.key === 'Home') destino = semana[0];
+    else if (evento.key === 'End') destino = semana[semana.length - 1];
     else return; // Enter, Espacio y Tab hacen lo de siempre
 
-    e.preventDefault();
+    evento.preventDefault();
     // Sin movimiento (Inicio en el lunes) no queda un foco pendiente que
     // después se robe el foco de otro día.
-    if (!destino || destino === iso) return;
+    if (!destino || destino === fechaDelDia) return;
     const otroMes = !esDelMes(destino, anio, mes);
     if (otroMes && !onCambiarMes) return; // sin navegación, el foco no sale del mes
     focoPendiente.current = destino;
@@ -96,8 +96,8 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, cob
     if (otroMes) onCambiarMes?.(destino);
   }
 
-  function nombreAccesible(iso: string, delDia: CobroCalendario[]): string {
-    const fecha = formatearFechaLarga(iso);
+  function nombreAccesible(fechaDelDia: string, delDia: CobroCalendario[]): string {
+    const fecha = formatearFechaLarga(fechaDelDia);
     if (cobros === null) return fecha; // cargando: todavía no se sabe
     if (delDia.length === 0) return `${fecha}, ${textoCobros(0)}`;
     return `${fecha}, ${textoCobros(delDia.length)}: ${delDia.map(describirCobro).join('; ')}`;
@@ -113,8 +113,8 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, cob
     >
       <thead>
         <tr>
-          {cortos.map((corto, i) => (
-            <th key={largos[i]} scope="col" abbr={largos[i]} className={styles.diaSemana}>
+          {cortos.map((corto, indice) => (
+            <th key={largos[indice]} scope="col" abbr={largos[indice]} className={styles.diaSemana}>
               {corto}
             </th>
           ))}
@@ -122,37 +122,41 @@ export function CuadriculaMes({ anio, mes, hoy, seleccionado, onSeleccionar, cob
       </thead>
       <tbody>
         {semanas.map((semana) => (
-          <tr key={semana.find((d) => d !== null)}>
-            {semana.map((iso, columna) => {
-              if (!iso) return <td key={`vacia-${columna}`} role="gridcell" className={styles.vacia} />;
-              const delDia = cobrosPorDia.get(iso) ?? [];
-              const esHoy = iso === hoy;
-              const elegido = iso === seleccionado;
+          <tr key={semana.find((dia) => dia !== null)}>
+            {semana.map((fechaDelDia, columna) => {
+              if (!fechaDelDia) return <td key={`vacia-${columna}`} role="gridcell" className={styles.vacia} />;
+              const delDia = cobrosPorDia.get(fechaDelDia) ?? [];
+              const esHoy = fechaDelDia === hoy;
+              const elegido = fechaDelDia === seleccionado;
+              // Qué hace el botón de este día. Cada función recuerda su propia fecha (fechaDelDia).
+              const alRecibirFoco = () => setEnfocado(fechaDelDia);
+              const alHacerClic = () => {
+                setEnfocado(fechaDelDia); // Safari no enfoca los botones al hacer clic
+                onSeleccionar(fechaDelDia);
+              };
+              const alPresionarTecla = (evento: KeyboardEvent<HTMLButtonElement>) => alTeclear(evento, fechaDelDia);
               return (
-                <td key={iso} role="gridcell" aria-selected={elegido}>
+                <td key={fechaDelDia} role="gridcell" aria-selected={elegido}>
                   <button
                     type="button"
-                    data-fecha={iso}
-                    tabIndex={iso === diaEnfocado ? 0 : -1}
-                    aria-label={nombreAccesible(iso, delDia)}
+                    data-fecha={fechaDelDia}
+                    tabIndex={fechaDelDia === diaEnfocado ? 0 : -1}
+                    aria-label={nombreAccesible(fechaDelDia, delDia)}
                     aria-current={esHoy ? 'date' : undefined}
                     className={[styles.dia, esHoy ? styles.hoy : '', elegido ? styles.elegido : ''].join(' ')}
-                    onFocus={() => setEnfocado(iso)}
-                    onClick={() => {
-                      setEnfocado(iso); // Safari no enfoca los botones al hacer clic
-                      onSeleccionar(iso);
-                    }}
-                    onKeyDown={(e) => alTeclear(e, iso)}
+                    onFocus={alRecibirFoco}
+                    onClick={alHacerClic}
+                    onKeyDown={alPresionarTecla}
                   >
-                    <span className={styles.numero}>{Number(iso.slice(8))}</span>
+                    <span className={styles.numero}>{Number(fechaDelDia.slice(8))}</span>
                     {delDia.length > 0 && (
                       <>
                         {/* Escritorio: servicio e importe. El nombre accesible ya lo dice todo. */}
                         <span className={styles.cobrosDia} aria-hidden="true">
-                          {delDia.slice(0, VISIBLES_POR_DIA).map((c) => (
-                            <span key={c.id} className={styles.cobroDia} data-tipo={c.tipo}>
-                              <span className={styles.cobroServicio}>{c.servicio}</span>
-                              <span className={styles.cobroImporte}>{formatearMonto(c.importe, c.moneda)}</span>
+                          {delDia.slice(0, VISIBLES_POR_DIA).map((cobro) => (
+                            <span key={cobro.id} className={styles.cobroDia} data-tipo={cobro.tipo}>
+                              <span className={styles.cobroServicio}>{cobro.servicio}</span>
+                              <span className={styles.cobroImporte}>{formatearMonto(cobro.importe, cobro.moneda)}</span>
                             </span>
                           ))}
                           {delDia.length > VISIBLES_POR_DIA && (

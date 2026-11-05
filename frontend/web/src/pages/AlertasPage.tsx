@@ -87,7 +87,7 @@ export function AlertasPage() {
   // Una recarga que falló con la lista a la vista: la lista se queda y se avisa aparte.
   const [errorRecarga, setErrorRecarga] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
-  const recargar = useCallback(() => setRecarga((n) => n + 1), []);
+  const recargar = useCallback(() => setRecarga((anterior) => anterior + 1), []);
   // De qué filtro y página son las filas que se ven. Con la misma clave se
   // recarga sin borrar la lista; con otra, se muestra «Cargando».
   const claveActual = `${filtro}|${pagina}`;
@@ -176,12 +176,12 @@ export function AlertasPage() {
    */
   const aplicarCambio = (id: string, actualizada: Alerta | null) => {
     const { filtro: filtroAhora } = vista.current;
-    setCarga((c) => {
-      if (c.tipo !== 'listo') return c;
-      const alertas = c.alertas.flatMap((a) =>
-        a.id !== id ? [a] : actualizada && entraEn(filtroAhora, actualizada) ? [actualizada] : [],
+    setCarga((actual) => {
+      if (actual.tipo !== 'listo') return actual;
+      const alertas = actual.alertas.flatMap((alerta) =>
+        alerta.id !== id ? [alerta] : actualizada && entraEn(filtroAhora, actualizada) ? [actualizada] : [],
       );
-      return { ...c, alertas, total: c.total - (c.alertas.length - alertas.length) };
+      return { ...actual, alertas, total: actual.total - (actual.alertas.length - alertas.length) };
     });
     recargar();
   };
@@ -239,14 +239,14 @@ export function AlertasPage() {
       // Las que se ven ya no están sin leer. La recarga trae la fecha de lectura
       // real; en «Sin leer» la página queda vacía y se pasa a la de antes.
       const { filtro: filtroAhora } = vista.current;
-      setCarga((c) => {
-        if (c.tipo !== 'listo') return c;
-        const alertas = c.alertas.flatMap((a): Alerta[] => {
-          if (!a.pendiente) return [a];
-          const leida: Alerta = { ...a, lectura: 'leida', lectura_legible: 'Leída', pendiente: false };
+      setCarga((actual) => {
+        if (actual.tipo !== 'listo') return actual;
+        const alertas = actual.alertas.flatMap((alerta): Alerta[] => {
+          if (!alerta.pendiente) return [alerta];
+          const leida: Alerta = { ...alerta, lectura: 'leida', lectura_legible: 'Leída', pendiente: false };
           return entraEn(filtroAhora, leida) ? [leida] : [];
         });
-        return { ...c, alertas, total: c.total - (c.alertas.length - alertas.length) };
+        return { ...actual, alertas, total: actual.total - (actual.alertas.length - alertas.length) };
       });
       recargar();
     } catch (err: unknown) {
@@ -266,7 +266,7 @@ export function AlertasPage() {
   const vaciada = mostrada?.tipo === 'listo' && mostrada.alertas.length === 0 && pagina > 1;
   const lista = mostrada?.tipo === 'listo' && !vaciada ? mostrada : null;
 
-  const hayPendientesALaVista = lista !== null && lista.alertas.some((a) => a.pendiente);
+  const hayPendientesALaVista = lista !== null && lista.alertas.some((alerta) => alerta.pendiente);
   const acciones = (
     <>
       {((pendientes ?? 0) > 0 || hayPendientesALaVista) && (
@@ -295,7 +295,7 @@ export function AlertasPage() {
       angosto
     >
       <div className={styles.barra}>
-        <FiltrosAlertas valor={filtro} alCambiar={(f) => cambiarVista({ filtro: f })} pendientes={pendientes} />
+        <FiltrosAlertas valor={filtro} alCambiar={(nuevoFiltro) => cambiarVista({ filtro: nuevoFiltro })} pendientes={pendientes} />
       </div>
 
       {(mostrada === null || vaciada) && (
@@ -331,7 +331,7 @@ export function AlertasPage() {
                   totalPaginas={totalPaginas}
                   hayAnterior={lista.hayAnterior}
                   haySiguiente={lista.haySiguiente}
-                  alCambiar={(p) => cambiarVista({ pagina: p })}
+                  alCambiar={(nuevaPagina) => cambiarVista({ pagina: nuevaPagina })}
                 />
               )}
             </>

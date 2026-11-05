@@ -129,7 +129,7 @@ function BarraProgreso({ importacion: imp }: { importacion: Importacion }) {
 }
 
 function Candidatos({ importacion: imp }: { importacion: Importacion }) {
-  const n = imp.candidatos_detectados;
+  const anterior = imp.candidatos_detectados;
   if (imp.candidatos_confirmados) {
     return (
       <p className={styles.candidatos}>
@@ -137,13 +137,13 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
       </p>
     );
   }
-  if (n === 0) {
+  if (anterior === 0) {
     return <p className={styles.candidatos}>No encontramos cobros que parezcan suscripciones.</p>;
   }
   return (
     <div className={styles.candidatos}>
       <p>
-        Encontramos {n === 1 ? '1 cobro posible' : `${n.toLocaleString('es-CL')} cobros posibles`}.{' '}
+        Encontramos {anterior === 1 ? '1 cobro posible' : `${anterior.toLocaleString('es-CL')} cobros posibles`}.{' '}
         <strong>Todavía no se creó ni cambió ninguna suscripción:</strong> primero los revisas y los confirmas.
       </p>
       {/* El paso a la previsualización (FE-10) todavía no existe en la web. */}
@@ -162,10 +162,10 @@ function ErroresPorFila({ importacion: imp }: { importacion: Importacion }) {
         {imp.errores_totales === 1 ? '1 problema' : `${imp.errores_totales.toLocaleString('es-CL')} problemas`}
       </h3>
       <ul className={styles.listaErrores}>
-        {imp.errores.map((e, i) => (
-          <li key={`${e.fila ?? 'x'}-${i}`}>
-            {typeof e.fila === 'number' && <span className={styles.fila}>Fila {e.fila}</span>}
-            {e.mensaje}
+        {imp.errores.map((error, indice) => (
+          <li key={`${error.fila ?? 'x'}-${indice}`}>
+            {typeof error.fila === 'number' && <span className={styles.fila}>Fila {error.fila}</span>}
+            {error.mensaje}
           </li>
         ))}
       </ul>
