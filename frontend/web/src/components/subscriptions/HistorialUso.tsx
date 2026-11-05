@@ -51,9 +51,9 @@ export function HistorialUso({ estado, onReintentar }: HistorialUsoProps) {
 
   return (
     <ol className={styles.lista} aria-label="Historial de uso">
-      {estado.usos.map((uso, i) => (
+      {estado.usos.map((uso, indice) => (
         // El backend no manda id por registro y puede haber dos el mismo día.
-        <li key={`${uso.fecha}-${i}`} className={styles.fila}>
+        <li key={`${uso.fecha}-${indice}`} className={styles.fila}>
           <time dateTime={uso.fecha} className={styles.filaFecha}>
             {formatearFecha(uso.fecha)}
           </time>

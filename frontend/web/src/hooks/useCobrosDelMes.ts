@@ -39,7 +39,7 @@ export function useCobrosDelMes(mes: string): { estado: EstadoCobros; reintentar
     };
   }, [mes, intento]);
 
-  const reintentar = useCallback(() => setIntento((n) => n + 1), []);
+  const reintentar = useCallback(() => setIntento((anterior) => anterior + 1), []);
   const estado: EstadoCobros = resultado?.mes === mes ? resultado.estado : { tipo: 'cargando' };
   return { estado, reintentar };
 }

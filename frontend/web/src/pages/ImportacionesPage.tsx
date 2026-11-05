@@ -56,27 +56,27 @@ export function ImportacionesPage() {
     setEstado({ ...estado, cargandoMas: true, errorMas: null });
     try {
       const pagina = await getMisImportaciones(siguiente);
-      setEstado((e) =>
-        e.tipo === 'listo'
+      setEstado((actual) =>
+        actual.tipo === 'listo'
           ? {
-              ...e,
+              ...actual,
               // Si entró una nueva mientras tanto, la página corre una posición: no se repite.
-              importaciones: [...e.importaciones, ...pagina.results.filter((n) => !e.importaciones.some((v) => v.id === n.id))],
+              importaciones: [...actual.importaciones, ...pagina.results.filter((importacionNueva) => !actual.importaciones.some((importacionExistente) => importacionExistente.id === importacionNueva.id))],
               hayMas: pagina.next !== null,
               pagina: siguiente,
               cargandoMas: false,
             }
-          : e,
+          : actual,
       );
     } catch (err: unknown) {
-      setEstado((e) => (e.tipo === 'listo' ? { ...e, cargandoMas: false, errorMas: mensajeError(err) } : e));
+      setEstado((actual) => (actual.tipo === 'listo' ? { ...actual, cargandoMas: false, errorMas: mensajeError(err) } : actual));
     }
   };
 
   return (
     <AppLayout headerTitulo="Importaciones" headerSubtitulo="Tus cartolas y lecturas de correo." angosto>
       {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tus importaciones…</p>}
-      {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((n) => n + 1)} />}
+      {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((anterior) => anterior + 1)} />}
       {estado.tipo === 'listo' && estado.importaciones.length === 0 && (
         <EmptyState
           icon={<FileSpreadsheet size={48} aria-hidden="true" />}

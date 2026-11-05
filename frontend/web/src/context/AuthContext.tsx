@@ -99,10 +99,10 @@ function esErrorTemporal(err: unknown): boolean {
 }
 
 /** true si los dos tokens son de la misma sesión (uno es el refresh del otro). Si no se sabe, false. */
-function esLaMismaSesion(a: string | null, b: string | null): boolean {
-  if (a === null || b === null) return false;
-  const sesion = sesionDelToken(a);
-  return sesion !== null && sesion === sesionDelToken(b);
+function esLaMismaSesion(primerToken: string | null, segundoToken: string | null): boolean {
+  if (primerToken === null || segundoToken === null) return false;
+  const sesion = sesionDelToken(primerToken);
+  return sesion !== null && sesion === sesionDelToken(segundoToken);
 }
 
 function estadoInicial(): EstadoSesion {
@@ -371,9 +371,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth(): ApiAuth {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
+  const contexto = useContext(AuthContext);
+  if (!contexto) {
     throw new Error("useAuth() debe usarse dentro de <AuthProvider>");
   }
-  return ctx;
+  return contexto;
 }

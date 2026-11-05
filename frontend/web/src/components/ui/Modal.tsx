@@ -25,7 +25,7 @@ const ENFOCABLES = [
 /** Lo que se puede alcanzar con Tab dentro del panel, en orden. */
 function enfocablesDe(panel: HTMLElement): HTMLElement[] {
   return [...panel.querySelectorAll<HTMLElement>(ENFOCABLES)].filter(
-    (el) => !el.closest('[hidden], [inert]') && el.getAttribute('aria-hidden') !== 'true',
+    (elemento) => !elemento.closest('[hidden], [inert]') && elemento.getAttribute('aria-hidden') !== 'true',
   );
 }
 
@@ -75,22 +75,22 @@ export function Modal({
   const [abridor] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
 
   useEffect(() => {
-    const yo = Symbol('modal');
-    abiertos.push(yo);
+    const esteModal = Symbol('modal');
+    abiertos.push(esteModal);
     const contenedor = panel.current;
     // Si un hijo ya puso el foco adentro, se respeta su elección.
     if (contenedor && !contenedor.contains(document.activeElement)) focoInicial(contenedor).focus();
 
-    function alTeclear(e: KeyboardEvent) {
-      if (abiertos[abiertos.length - 1] !== yo || !contenedor) return;
-      if (e.key === 'Escape') {
+    function alTeclear(evento: KeyboardEvent) {
+      if (abiertos[abiertos.length - 1] !== esteModal || !contenedor) return;
+      if (evento.key === 'Escape') {
         cerrar.current();
         return;
       }
-      if (e.key !== 'Tab') return;
+      if (evento.key !== 'Tab') return;
       const enfocables = enfocablesDe(contenedor);
       if (enfocables.length === 0) {
-        e.preventDefault();
+        evento.preventDefault();
         contenedor.focus();
         return;
       }
@@ -98,11 +98,11 @@ export function Modal({
       const ultimo = enfocables[enfocables.length - 1];
       const actual = document.activeElement;
       const dentro = actual instanceof Node && contenedor.contains(actual);
-      if (e.shiftKey && (actual === primero || actual === contenedor || !dentro)) {
-        e.preventDefault();
+      if (evento.shiftKey && (actual === primero || actual === contenedor || !dentro)) {
+        evento.preventDefault();
         ultimo.focus();
-      } else if (!e.shiftKey && (actual === ultimo || !dentro)) {
-        e.preventDefault();
+      } else if (!evento.shiftKey && (actual === ultimo || !dentro)) {
+        evento.preventDefault();
         primero.focus();
       }
     }
@@ -111,7 +111,7 @@ export function Modal({
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', alTeclear);
-      abiertos.splice(abiertos.indexOf(yo), 1);
+      abiertos.splice(abiertos.indexOf(esteModal), 1);
       document.body.style.overflow = overflowAnterior;
       // Si lo que la abrió ya no está (p. ej. la fila que se eliminó), no se fuerza nada.
       if (abridor?.isConnected) abridor.focus();
@@ -121,8 +121,8 @@ export function Modal({
   return (
     <div
       className={styles.fondo}
-      onMouseDown={(e) => {
-        if (tipo === 'dialogo' && e.target === e.currentTarget) cerrar.current();
+      onMouseDown={(evento) => {
+        if (tipo === 'dialogo' && evento.target === evento.currentTarget) cerrar.current();
       }}
     >
       <div
