@@ -114,10 +114,10 @@ function DetalleDeSesion({ sesion }: { sesion: MarcaSesion }) {
   const empezarOperacion = useCallback((tipo: Operacion['tipo'], idDetalle: string): Operacion | null => {
     if (!sigueVigente()) return null;
     if (operacionesRef.current.has(idDetalle)) return null;
-    const nueva: Operacion = { tipo, id: idDetalle };
-    operacionesRef.current.set(idDetalle, nueva);
+    const importacionNueva: Operacion = { tipo, id: idDetalle };
+    operacionesRef.current.set(idDetalle, importacionNueva);
     setOperaciones(new Map(operacionesRef.current));
-    return nueva;
+    return importacionNueva;
   }, [sigueVigente]);
 
   /** Libera solo la reserva que terminó, nunca otra más nueva. */
@@ -189,7 +189,7 @@ function DetalleDeSesion({ sesion }: { sesion: MarcaSesion }) {
     };
   }, [id, recargaHistorial, sigueVigente]);
 
-  const recargarHistorial = useCallback(() => setRecargaHistorial((n) => n + 1), []);
+  const recargarHistorial = useCallback(() => setRecargaHistorial((anterior) => anterior + 1), []);
 
   // CH-14: registra el uso y refresca lo que depende de él.
   const registrar = useCallback(

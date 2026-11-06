@@ -118,7 +118,7 @@ function camposDesdeCuerpo(data: Record<string, unknown>): Record<string, string
   for (const [clave, valor] of Object.entries(data)) {
     if (CLAVES_NO_CAMPO.has(clave)) continue;
     if (Array.isArray(valor)) {
-      const mensajes = valor.filter((m): m is string => typeof m === "string");
+      const mensajes = valor.filter((mensaje): mensaje is string => typeof mensaje === "string");
       if (mensajes.length > 0) campos[clave] = mensajes;
     } else if (typeof valor === "string") {
       campos[clave] = [valor];
@@ -166,17 +166,17 @@ let storage: TokenStorage =
   typeof localStorage !== "undefined"
     ? localStorage
     : {
-        getItem: (k: string) => memoria[k] ?? null,
-        setItem: (k: string, v: string) => {
-          memoria[k] = v;
+        getItem: (clave: string) => memoria[clave] ?? null,
+        setItem: (clave: string, valor: string) => {
+          memoria[clave] = valor;
         },
-        removeItem: (k: string) => {
-          delete memoria[k];
+        removeItem: (clave: string) => {
+          delete memoria[clave];
         },
       };
 
-export function configurarTokenStorage(s: TokenStorage) {
-  storage = s;
+export function configurarTokenStorage(almacenamiento: TokenStorage) {
+  storage = almacenamiento;
 }
 
 const ACCESS_TOKEN_KEY = "access_token";
@@ -519,12 +519,12 @@ type BloqueoDePestanas = {
 };
 
 /** Serializa la renovación entre pestañas cuando el navegador lo permite. */
-async function conBloqueoDePestanas<T>(fn: () => Promise<T>): Promise<T> {
+async function conBloqueoDePestanas<T>(operacion: () => Promise<T>): Promise<T> {
   const navegador = (globalThis as { navigator?: { locks?: BloqueoDePestanas } }).navigator;
   if (navegador?.locks && typeof navegador.locks.request === "function") {
-    return navegador.locks.request("ojoalgasto:refresh", fn);
+    return navegador.locks.request("ojoalgasto:refresh", operacion);
   }
-  return fn();
+  return operacion();
 }
 
 // ── Revocación de la sesión en el backend ─────────────────────────────

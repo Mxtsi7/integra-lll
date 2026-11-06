@@ -75,8 +75,8 @@ export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaPro
     setDatos((anteriores) => ({ ...anteriores, [campo]: valor }));
   }
 
-  async function enviar(e: FormEvent) {
-    e.preventDefault();
+  async function enviar(evento: FormEvent) {
+    evento.preventDefault();
     if (enviandoRef.current) return;
 
     const locales = validarCambioContrasena(datos);
@@ -123,7 +123,7 @@ export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaPro
           id={ids.actual}
           etiqueta="Contraseña actual"
           value={datos.actual}
-          onChange={(e) => cambiar('actual', e.target.value)}
+          onChange={(evento) => cambiar('actual', evento.target.value)}
           error={errores.actual}
           autoComplete="current-password"
         />
@@ -131,7 +131,7 @@ export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaPro
           id={ids.nueva}
           etiqueta="Contraseña nueva"
           value={datos.nueva}
-          onChange={(e) => cambiar('nueva', e.target.value)}
+          onChange={(evento) => cambiar('nueva', evento.target.value)}
           error={errores.nueva}
           ayuda={MENSAJE_POLITICA_PASSWORD}
           autoComplete="new-password"
@@ -140,7 +140,7 @@ export function CambiarContrasena({ alCerrar, onCambiada }: CambiarContrasenaPro
           id={ids.confirmacion}
           etiqueta="Repite la contraseña nueva"
           value={datos.confirmacion}
-          onChange={(e) => cambiar('confirmacion', e.target.value)}
+          onChange={(evento) => cambiar('confirmacion', evento.target.value)}
           error={errores.confirmacion}
           autoComplete="new-password"
         />

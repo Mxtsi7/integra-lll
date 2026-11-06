@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   erroresDesdeServidor,
   esFechaReal,
-  hoyLocalIso,
+  hoyEnTexto,
   parsearMonto,
   validarSuscripcion,
   validarUso,
@@ -182,7 +182,7 @@ describe("validarUso: mismas reglas que RegistrarUsoSerializer (CH-14)", () => {
   });
 });
 
-describe("esFechaReal y hoyLocalIso", () => {
+describe("esFechaReal y hoyEnTexto", () => {
   it.each([
     ["2024-02-29", true],
     ["1900-02-29", false], // divisible por 100 y no por 400
@@ -193,8 +193,8 @@ describe("esFechaReal y hoyLocalIso", () => {
     expect(esFechaReal(fecha)).toBe(esperado);
   });
 
-  it("hoyLocalIso usa la fecha local, con ceros a la izquierda", () => {
-    expect(hoyLocalIso(new Date(2026, 0, 5, 23, 30))).toBe("2026-01-05");
+  it("hoyEnTexto usa la fecha local, con ceros a la izquierda", () => {
+    expect(hoyEnTexto(new Date(2026, 0, 5, 23, 30))).toBe("2026-01-05");
   });
 });
 

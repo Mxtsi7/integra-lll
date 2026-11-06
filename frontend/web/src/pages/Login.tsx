@@ -21,8 +21,8 @@ export default function Login() {
   // Los fallos salen como toast (tarea "Integrar Toasts de error en fallos de
   // Login/Register"): un solo lugar donde aparecen los errores.
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(evento: FormEvent) {
+    evento.preventDefault();
     setLoading(true);
     try {
       const { access_token, refresh_token } = await login({ correo, password });
@@ -68,7 +68,7 @@ export default function Login() {
           placeholder="tu@correo.cl"
           icono={<Mail size={16} />}
           value={correo}
-          onChange={(e) => setCorreo(e.target.value)}
+          onChange={(evento) => setCorreo(evento.target.value)}
           required
         />
 
@@ -80,7 +80,7 @@ export default function Login() {
           placeholder="Tu contraseña"
           icono={<Lock size={16} />}
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(evento) => setPassword(evento.target.value)}
           required
         />
 

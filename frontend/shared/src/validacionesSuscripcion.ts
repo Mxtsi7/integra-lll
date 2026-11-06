@@ -16,14 +16,14 @@ export const MONTO_MAXIMO = 99_999_999.99;
 /** 24 h × 60 min × 31 días, el tope del backend. */
 export const MINUTOS_MAXIMOS_USO = 44_640;
 
-const FECHA_ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
+const PATRON_ANIO_MES_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
- * true si `iso` es una fecha que existe (YYYY-MM-DD). "2026-02-30" o
+ * true si `fechaEnTexto` es una fecha que existe (YYYY-MM-DD). "2026-02-30" o
  * "2026-13-01" no existen aunque tengan el formato correcto.
  */
-export function esFechaReal(iso: string): boolean {
-  const partes = FECHA_ISO.exec(iso);
+export function esFechaReal(fechaEnTexto: string): boolean {
+  const partes = PATRON_ANIO_MES_DIA.exec(fechaEnTexto);
   if (!partes) return false;
   const [anio, mes, dia] = [Number(partes[1]), Number(partes[2]), Number(partes[3])];
   if (anio < 1 || mes < 1 || mes > 12 || dia < 1) return false;
@@ -34,10 +34,10 @@ export function esFechaReal(iso: string): boolean {
 }
 
 /** Fecha de hoy en la zona horaria del usuario, como YYYY-MM-DD. */
-export function hoyLocalIso(ahora: Date = new Date()): string {
-  const mm = String(ahora.getMonth() + 1).padStart(2, '0');
-  const dd = String(ahora.getDate()).padStart(2, '0');
-  return `${ahora.getFullYear()}-${mm}-${dd}`;
+export function hoyEnTexto(ahora: Date = new Date()): string {
+  const mesConDosDigitos = String(ahora.getMonth() + 1).padStart(2, '0');
+  const diaConDosDigitos = String(ahora.getDate()).padStart(2, '0');
+  return `${ahora.getFullYear()}-${mesConDosDigitos}-${diaConDosDigitos}`;
 }
 
 /**
@@ -128,7 +128,7 @@ export type ErroresUso = Partial<Record<CampoUso, string>>;
  * Valida el registro de minutos de uso (CH-14). Mismos mensajes que
  * RegistrarUsoSerializer. `fecha` vacía es válida: el backend usa hoy.
  */
-export function validarUso(datos: { minutos: string; fecha: string }, hoy: string = hoyLocalIso()): ErroresUso {
+export function validarUso(datos: { minutos: string; fecha: string }, hoy: string = hoyEnTexto()): ErroresUso {
   const errores: ErroresUso = {};
   const texto = datos.minutos.trim();
 
@@ -142,7 +142,7 @@ export function validarUso(datos: { minutos: string; fecha: string }, hoy: strin
 
   if (datos.fecha) {
     if (!esFechaReal(datos.fecha)) errores.fecha = 'Esa fecha no existe.';
-    // Las fechas ISO se comparan bien como texto.
+    // Las fechas YYYY-MM-DD se comparan bien como texto.
     else if (datos.fecha > hoy) errores.fecha = 'No se puede registrar uso de una fecha futura.';
   }
 

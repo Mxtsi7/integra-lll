@@ -89,7 +89,7 @@ export function useRecomendaciones() {
         setEstado({ tipo: 'error', mensaje: 'El servicio respondió en un formato inesperado.' });
         return;
       }
-      setEstado({ tipo: 'listo', ...lista, items: lista.items.filter((i) => !descartadas.current.has(i.id)) });
+      setEstado({ tipo: 'listo', ...lista, items: lista.items.filter((recomendacion) => !descartadas.current.has(recomendacion.id)) });
     } catch (err: unknown) {
       if (esta !== cargaActual.current) return;
       setEstado({
@@ -113,18 +113,18 @@ export function useRecomendaciones() {
     // Con la sesión ya cambiada no se manda: la tarjeta es de la cuenta anterior.
     if (!sigueVigente() || enviando.current.has(id)) return null;
     enviando.current.add(id);
-    setDescartes((d) => ({ ...d, [id]: { tipo: 'enviando' } }));
+    setDescartes((actuales) => ({ ...actuales, [id]: { tipo: 'enviando' } }));
     try {
       const confirmacion = await descartarRecomendacion(id);
       // Confirmado para la sesión anterior, o con la página ya cerrada: quien
       // llama no debe anunciarlo ni mover el foco.
       if (!sigueVigente()) return null;
       descartadas.current.add(id);
-      setEstado((e) => (e.tipo === 'listo' ? { ...e, items: e.items.filter((i) => i.id !== id) } : e));
-      setDescartes((d) => sinClave(d, id));
+      setEstado((actual) => (actual.tipo === 'listo' ? { ...actual, items: actual.items.filter((recomendacion) => recomendacion.id !== id) } : actual));
+      setDescartes((actuales) => sinClave(actuales, id));
       return confirmacion;
     } catch (err: unknown) {
-      setDescartes((d) => ({ ...d, [id]: { tipo: 'error', mensaje: mensajeErrorDescarte(err) } }));
+      setDescartes((actuales) => ({ ...actuales, [id]: { tipo: 'error', mensaje: mensajeErrorDescarte(err) } }));
       return null;
     } finally {
       enviando.current.delete(id);
