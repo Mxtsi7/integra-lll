@@ -13,7 +13,7 @@
 
 | Requisito de la Tarjeta | Estado | Implementación en Código |
 |---|---|---|
-| **Maquetación de campos** | **CUMPLIDO** | Campos para Nombre, Correo electrónico, Contraseña y Confirmar contraseña en `RegistroForm` / `RegistroScreen.tsx`. |
+| **Maquetación de campos** | **CUMPLIDO** | Campos para Nombre, Correo electrónico, Contraseña y Confirmar contraseña en `RegistroForm` / `RegistroScreen.tsx`, con estilos modularizados en `RegistroScreen.styles.ts`. |
 | **Errores por campo** | **CUMPLIDO** | Mensajes de error específicos ubicados directamente debajo de cada campo con `role="alert"` / `accessibilityRole="alert"` y bordes reactivos (`#f87171`). |
 | **Limpieza de errores al tipear** | **CUMPLIDO** | Modificar un campo limpia inmediatamente su error individual sin borrar los errores de los otros campos. |
 | **Alternar visibilidad de contraseña** | **CUMPLIDO** | Botones independientes "Ver" / "Ocultar" para la contraseña y su confirmación (`toggle-password`, `toggle-confirmacion`). |
