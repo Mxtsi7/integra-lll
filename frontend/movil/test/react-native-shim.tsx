@@ -43,8 +43,14 @@ export const KeyboardAvoidingView = React.forwardRef<HTMLDivElement, any>(
 KeyboardAvoidingView.displayName = 'KeyboardAvoidingView';
 
 export const Text = React.forwardRef<HTMLSpanElement, any>(
-  ({ testID, children, style, ...props }, ref) => (
-    <span data-testid={testID} style={typeof style === 'object' ? style : undefined} ref={ref} {...props}>
+  ({ testID, children, style, accessibilityRole, ...props }, ref) => (
+    <span
+      data-testid={testID}
+      role={accessibilityRole}
+      style={typeof style === 'object' ? style : undefined}
+      ref={ref}
+      {...props}
+    >
       {children}
     </span>
   )
@@ -74,6 +80,11 @@ export const Pressable = React.forwardRef<HTMLButtonElement, any>(
       aria-label={accessibilityLabel}
       aria-disabled={accessibilityState?.disabled ? 'true' : undefined}
       aria-busy={accessibilityState?.busy ? 'true' : undefined}
+      aria-checked={
+        accessibilityState?.checked !== undefined
+          ? (accessibilityState.checked as boolean | 'true' | 'false' | 'mixed')
+          : undefined
+      }
       style={typeof style === 'object' ? style : undefined}
       ref={ref}
       {...props}
