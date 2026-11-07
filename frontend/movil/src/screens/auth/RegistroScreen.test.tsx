@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { AuthError } from '@ojoalgasto/shared';
 import RegistroScreen, {
   RegistroForm,
   type RegistroScreenPropsContainer,
 } from './RegistroScreen';
+import { MENSAJE_ERROR_RED } from '../../services/clienteHttp';
 
 describe('Pantalla Móvil Registro (SE-11)', () => {
   describe('Maquetación, controles y accesibilidad básica', () => {
@@ -313,6 +315,429 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
 
       fireEvent.click(screen.getByTestId('go-back'));
       expect(navigation?.goBack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Conectar Registro móvil y validaciones del servidor (SE-12)', () => {
+    function llenarFormularioValido({
+      nombre = 'Sebastian Mena',
+      correo = 'seba@ojoalgasto.cl',
+      password = 'PasswordSegura123',
+      confirmacion = 'PasswordSegura123',
+      marcarConsentimiento = true,
+    }: {
+      nombre?: string;
+      correo?: string;
+      password?: string;
+      confirmacion?: string;
+      marcarConsentimiento?: boolean;
+    } = {}) {
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: nombre },
+      });
+      fireEvent.change(screen.getByTestId('input-correo'), {
+        target: { value: correo },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: password },
+      });
+      fireEvent.change(screen.getByTestId('input-confirmacion'), {
+        target: { value: confirmacion },
+      });
+      if (marcarConsentimiento) {
+        fireEvent.click(screen.getByTestId('checkbox-acepta-datos'));
+      }
+    }
+
+    describe('Criterio de Aceptación: Registro válido crea cuenta una sola vez', () => {
+      it('envía los datos limpios a la API con mapeo de campos (email y acepta_datos)', async () => {
+        const onRegisterApi = vi.fn().mockResolvedValue({
+          id: 'usr-123',
+          email: 'seba@ojoalgasto.cl',
+          nombre: 'Sebastian Mena',
+        });
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido({
+          nombre: '  Sebastian Mena  ',
+          correo: '  seba@ojoalgasto.cl  ',
+          password: 'PasswordSegura123',
+          confirmacion: 'PasswordSegura123',
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegisterApi).toHaveBeenCalledTimes(1);
+        expect(onRegisterApi).toHaveBeenCalledWith({
+          nombre: 'Sebastian Mena',
+          correo: 'seba@ojoalgasto.cl',
+          password: 'PasswordSegura123',
+          aceptaDatos: true,
+          codigoOrganizacion: undefined,
+        });
+
+        expect(onRegistroExitoso).toHaveBeenCalledTimes(1);
+        expect(onRegistroExitoso).toHaveBeenCalledWith({
+          id: 'usr-123',
+          email: 'seba@ojoalgasto.cl',
+          nombre: 'Sebastian Mena',
+        });
+      });
+
+      it('navega a Login por defecto tras registro exitoso si no se proveyó callback', async () => {
+        const onRegisterApi = vi.fn().mockResolvedValue({
+          id: 'usr-456',
+          email: 'nuevo@ojoalgasto.cl',
+          nombre: 'Nuevo Usuario',
+        });
+        const navigation = {
+          navigate: vi.fn(),
+          goBack: vi.fn(),
+        } as unknown as RegistroScreenPropsContainer['navigation'];
+
+        render(
+          <RegistroScreen
+            navigation={navigation}
+            onRegisterApi={onRegisterApi}
+          />
+        );
+
+        llenarFormularioValido({
+          nombre: 'Nuevo Usuario',
+          correo: 'nuevo@ojoalgasto.cl',
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegisterApi).toHaveBeenCalledTimes(1);
+        expect(navigation?.navigate).toHaveBeenCalledWith('Login');
+      });
+
+      it('previene envíos duplicados mientras la petición está en vuelo (crea la cuenta una sola vez)', async () => {
+        let resolverPeticion: (val: any) => void = () => {};
+        const promesaDemorada = new Promise((resolve) => {
+          resolverPeticion = resolve;
+        });
+
+        const onRegisterApi = vi.fn().mockImplementation(() => promesaDemorada);
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        // Primer envío: arranca la petición
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+        // Intentar pulsar repetidamente mientras está cargando
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        // La API no debe ser invocada nuevamente
+        expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+        // Completar la promesa
+        await act(async () => {
+          resolverPeticion({ id: 'usr-999', email: 'seba@ojoalgasto.cl', nombre: 'Sebastian' });
+        });
+
+        expect(onRegistroExitoso).toHaveBeenCalledTimes(1);
+      });
+
+      it('adapta e incluye codigoOrganizacion si viene por props o por route.params', async () => {
+        const onRegisterApi = vi.fn().mockResolvedValue({
+          id: 'usr-org-1',
+          email: 'miembro@empresa.cl',
+          nombre: 'Miembro Org',
+        });
+
+        render(
+          <RegistroScreen
+            codigoOrganizacion="ORG-EMPRESA-2026"
+            onRegisterApi={onRegisterApi}
+          />
+        );
+
+        llenarFormularioValido({
+          correo: 'miembro@empresa.cl',
+          nombre: 'Miembro Org',
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegisterApi).toHaveBeenCalledWith(
+          expect.objectContaining({
+            codigoOrganizacion: 'ORG-EMPRESA-2026',
+          })
+        );
+      });
+    });
+
+    describe('Criterio de Aceptación: Rechazo API no navega a éxito y conserva los errores útiles', () => {
+      it('si la API rechaza por correo duplicado (DRF: email), no navega a éxito, muestra el error bajo el campo y conserva los datos ingresados', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new AuthError('user with this email already exists.', 400, {
+            campos: {
+              email: ['Ya existe un usuario registrado con este correo electrónico.'],
+            },
+          })
+        );
+        const onRegistroExitoso = vi.fn();
+        const navigation = {
+          navigate: vi.fn(),
+          goBack: vi.fn(),
+        } as unknown as RegistroScreenPropsContainer['navigation'];
+
+        render(
+          <RegistroScreen
+            navigation={navigation}
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido({
+          nombre: 'Sebastian Mena',
+          correo: 'duplicado@ojoalgasto.cl',
+          password: 'PasswordSegura123',
+          confirmacion: 'PasswordSegura123',
+        });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        // 1. NO navega a éxito
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        expect(navigation?.navigate).not.toHaveBeenCalled();
+
+        // 2. Muestra el error mapeado bajo el campo correo
+        const errorCorreo = screen.getByTestId('error-correo');
+        expect(errorCorreo.textContent).toBe(
+          'Ya existe un usuario registrado con este correo electrónico.'
+        );
+
+        // 3. Conserva los datos ingresados en el formulario
+        expect((screen.getByTestId('input-nombre') as HTMLInputElement).value).toBe(
+          'Sebastian Mena'
+        );
+        expect((screen.getByTestId('input-correo') as HTMLInputElement).value).toBe(
+          'duplicado@ojoalgasto.cl'
+        );
+        expect((screen.getByTestId('input-password') as HTMLInputElement).value).toBe(
+          'PasswordSegura123'
+        );
+      });
+
+      it('si la API rechaza por contraseña no aceptada por el backend (MX-30), muestra el error bajo contraseña y no navega', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new AuthError('La contraseña no cumple las reglas del servidor.', 400, {
+            campos: {
+              password: [
+                'La contraseña debe tener al menos 8 caracteres, una letra y un número.',
+              ],
+            },
+          })
+        );
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        expect(screen.getByTestId('error-password').textContent).toBe(
+          'La contraseña debe tener al menos 8 caracteres, una letra y un número.'
+        );
+      });
+
+      it('si la API rechaza por código de organización inválido, lo muestra en la caja de error general', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new AuthError('El código de organización no es válido.', 400, {
+            campos: {
+              codigo_organizacion: ['El código de organización no es válido.'],
+            },
+          })
+        );
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            codigoOrganizacion="CODIGO-INVALIDO"
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        const errorGeneral = screen.getByTestId('registro-error-general');
+        expect(errorGeneral).toBeTruthy();
+        expect(errorGeneral.textContent).toContain(
+          'El código de organización no es válido.'
+        );
+      });
+
+      it('si la API rechaza por error general (non_field_errors o 400 sin campos), muestra la alerta general', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new AuthError('No se pudo procesar tu solicitud de registro.', 400, {
+            campos: {
+              non_field_errors: ['El sistema no permite registros temporales en este momento.'],
+            },
+          })
+        );
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        expect(screen.getByTestId('registro-error-general').textContent).toContain(
+          'El sistema no permite registros temporales en este momento.'
+        );
+      });
+
+      it('si ocurre un fallo de red, no navega y presenta mensaje amigable de conexión', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new TypeError('Failed to fetch')
+        );
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        const errorBox = screen.getByTestId('registro-error-general');
+        expect(errorBox.textContent).toBe(MENSAJE_ERROR_RED);
+      });
+
+      it('si el servidor responde 500, no navega a éxito y permite reintentar el envío', async () => {
+        const onRegisterApi = vi
+          .fn()
+          .mockRejectedValueOnce(new AuthError('Error interno del servidor (500)', 500))
+          .mockResolvedValueOnce({
+            id: 'usr-reintento',
+            email: 'seba@ojoalgasto.cl',
+            nombre: 'Sebastian Mena',
+          });
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        // Primer intento falla con 500
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegistroExitoso).not.toHaveBeenCalled();
+        expect(screen.getByTestId('registro-error-general').textContent).toContain(
+          'Error interno del servidor (500)'
+        );
+
+        // Segundo intento: el servidor se recupera y responde con éxito
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        expect(onRegisterApi).toHaveBeenCalledTimes(2);
+        expect(onRegistroExitoso).toHaveBeenCalledTimes(1);
+      });
+
+      it('al editar el campo correo tras un error del servidor, dicho error se limpia reactivamente', async () => {
+        const onRegisterApi = vi.fn().mockRejectedValue(
+          new AuthError('Correo duplicado', 400, {
+            campos: {
+              email: ['Este correo ya está en uso.'],
+            },
+          })
+        );
+
+        render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+        llenarFormularioValido({ correo: 'repetido@test.cl' });
+
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        // Error visible
+        expect(screen.getByTestId('error-correo')).toBeTruthy();
+
+        // Editar el correo para corregirlo
+        await act(async () => {
+          fireEvent.change(screen.getByTestId('input-correo'), {
+            target: { value: 'nuevo_correo@test.cl' },
+          });
+        });
+
+        // El error individual desaparece
+        expect(screen.queryByTestId('error-correo')).toBeNull();
+      });
     });
   });
 });

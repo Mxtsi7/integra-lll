@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -9,11 +9,21 @@ import {
   View,
 } from 'react-native';
 import {
+  register,
+  AuthError,
   validarRegistro,
+  erroresRegistroDesdeServidor,
   type CampoRegistro,
   type DatosRegistro,
   type ErroresRegistro,
+  type RegisterPayload,
+  type RegisterResponse,
 } from '@ojoalgasto/shared';
+import {
+  esErrorDeRed,
+  adaptarErrorRed,
+  MENSAJE_ERROR_RED,
+} from '../../services/clienteHttp';
 import { NavButton } from '../components/NavButton';
 import type { AuthScreenProps } from '../../navigation/types';
 import styles from './RegistroScreen.styles';
@@ -43,6 +53,8 @@ export interface RegistroFormProps {
   errores?: ErroresRegistro;
   /** Mensaje de error general del servidor o conexión */
   errorGeneral?: string | null;
+  /** Notifica cuando se edita un campo para limpiar su error en el contenedor */
+  onLimpiarError?: (campo: CampoRegistro) => void;
   /** Estado de carga u ocupado */
   cargando?: boolean;
   /** Deshabilita la interacción con el formulario */
@@ -75,6 +87,7 @@ export function RegistroForm({
   onAceptaDatosChange: propOnAceptaDatosChange,
   errores: propErrores,
   errorGeneral,
+  onLimpiarError,
   cargando = false,
   deshabilitado = false,
   onSubmit,
@@ -90,6 +103,7 @@ export function RegistroForm({
   // Criterio de aceptación SE-11: El consentimiento NO debe estar premarcado
   const [internalAceptaDatos, setInternalAceptaDatos] = useState(false);
   const [internalErrores, setInternalErrores] = useState<ErroresRegistro>({});
+  const [erroresLimpiados, setErroresLimpiados] = useState<Record<string, boolean>>({});
   const [mostrarPassword, setMostrarPassword] = useState(false);
   const [mostrarConfirmacion, setMostrarConfirmacion] = useState(false);
 
@@ -97,6 +111,11 @@ export function RegistroForm({
   const inputCorreoRef = useRef<TextInput>(null);
   const inputPasswordRef = useRef<TextInput>(null);
   const inputConfirmacionRef = useRef<TextInput>(null);
+
+  // Reiniciar máscara de limpiados al recibir nuevos errores del servidor
+  useEffect(() => {
+    setErroresLimpiados({});
+  }, [propErrores]);
 
   // Resolución de valores (controlados externamente o internos)
   const valorNombre = propNombre !== undefined ? propNombre : internalNombre;
@@ -106,19 +125,30 @@ export function RegistroForm({
     propConfirmacion !== undefined ? propConfirmacion : internalConfirmacion;
   const valorAceptaDatos =
     propAceptaDatos !== undefined ? propAceptaDatos : internalAceptaDatos;
-  const erroresActivos = propErrores !== undefined ? propErrores : internalErrores;
+
+  // Los errores visibles descuentan los campos que el usuario ya comenzó a corregir
+  const erroresBase = propErrores !== undefined ? propErrores : internalErrores;
+  const erroresActivos: ErroresRegistro = {};
+  for (const [campo, mensaje] of Object.entries(erroresBase)) {
+    if (!erroresLimpiados[campo] && mensaje) {
+      erroresActivos[campo as CampoRegistro] = mensaje;
+    }
+  }
 
   const estaBloqueado = Boolean(deshabilitado || cargando);
 
   // Limpieza individual de error al editar un campo
   const limpiarError = (campo: CampoRegistro) => {
-    if (propErrores) return;
+    setErroresLimpiados((actuales) => ({ ...actuales, [campo]: true }));
     setInternalErrores((actuales) => {
       if (!actuales[campo]) return actuales;
       const copia = { ...actuales };
       delete copia[campo];
       return copia;
     });
+    if (onLimpiarError) {
+      onLimpiarError(campo);
+    }
   };
 
   const handleNombreChange = (texto: string) => {
@@ -168,6 +198,7 @@ export function RegistroForm({
     const nuevosErrores = validarRegistro(datosParaValidar);
 
     if (Object.keys(nuevosErrores).length > 0) {
+      setErroresLimpiados({});
       setInternalErrores(nuevosErrores);
       return;
     }
@@ -453,27 +484,134 @@ export function RegistroForm({
 
 export interface RegistroScreenPropsContainer {
   navigation?: AuthScreenProps<'Registro'>['navigation'];
+  route?: Partial<AuthScreenProps<'Registro'>['route']> & {
+    params?: {
+      codigoOrganizacion?: string | null;
+      [key: string]: unknown;
+    };
+  };
+  /** Función para inyectar cliente de registro en pruebas (por defecto shared register) */
+  onRegisterApi?: (payload: RegisterPayload) => Promise<RegisterResponse>;
+  /** Callback ejecutado tras crear exitosamente la cuenta (desbloquea SE-13) */
+  onRegistroExitoso?: (respuesta: RegisterResponse) => void;
+  /** Código de organización opcional si el flujo lo incluye */
+  codigoOrganizacion?: string | null;
+  /** Sobrescribe onSubmit para pruebas personalizadas o arnés de navegación */
   onSubmit?: (datos: DatosRegistro) => void | Promise<void>;
+  /** Permite forzar el estado cargando en pruebas de interfaz */
   cargando?: boolean;
+  /** Permite inyectar un error general en pruebas de interfaz */
   errorGeneral?: string | null;
+  /** Identificador para pruebas automatizadas */
+  testID?: string;
 }
 
 /**
- * Contenedor de pantalla conectado a React Navigation (SE-11 / SE-12).
- * Gestiona el ruteo hacia Login y el retroceso a pantallas anteriores.
+ * Contenedor de pantalla conectado a React Navigation y al backend de Auth (SE-11 / SE-12).
+ * Conecta con register de @ojoalgasto/shared, mapea errores de DRF y previene envíos duplicados.
  */
 export default function RegistroScreen({
   navigation,
-  onSubmit,
-  cargando,
-  errorGeneral,
+  route,
+  onRegisterApi = register,
+  onRegistroExitoso,
+  codigoOrganizacion,
+  onSubmit: propOnSubmit,
+  cargando: propCargando,
+  errorGeneral: propErrorGeneral,
+  testID = 'screen-registro',
 }: RegistroScreenPropsContainer & Partial<AuthScreenProps<'Registro'>>) {
+  const [cargandoInterno, setCargandoInterno] = useState(false);
+  const [erroresServidor, setErroresServidor] = useState<ErroresRegistro>({});
+  const [errorGeneralInterno, setErrorGeneralInterno] = useState<string | null>(null);
+
+  const estaCargando = propCargando !== undefined ? propCargando : cargandoInterno;
+  const errorGeneral = propErrorGeneral !== undefined ? propErrorGeneral : errorGeneralInterno;
+
+  const handleLimpiarError = (campo: CampoRegistro) => {
+    setErroresServidor((prev) => {
+      if (!prev[campo]) return prev;
+      const copia = { ...prev };
+      delete copia[campo];
+      return copia;
+    });
+  };
+
+  const handleRegistro = async (datos: DatosRegistro) => {
+    // Criterio de aceptación SE-12: Registro válido crea cuenta una sola vez
+    // Bloquea de inmediato si ya hay una petición en curso
+    if (estaCargando) {
+      return;
+    }
+
+    if (propOnSubmit) {
+      await propOnSubmit(datos);
+      return;
+    }
+
+    setCargandoInterno(true);
+    setErrorGeneralInterno(null);
+    setErroresServidor({});
+
+    try {
+      const routeParams = route?.params as
+        | { codigoOrganizacion?: string | null }
+        | undefined;
+      const codigoOrg =
+        codigoOrganizacion !== undefined
+          ? codigoOrganizacion
+          : routeParams?.codigoOrganizacion ?? undefined;
+
+      const respuesta = await onRegisterApi({
+        nombre: datos.nombre.trim(),
+        correo: datos.correo.trim(),
+        password: datos.password,
+        aceptaDatos: datos.aceptaDatos,
+        codigoOrganizacion: codigoOrg,
+      });
+
+      // Éxito: notificar al callback (desbloquea SE-13) o continuar a Login
+      if (onRegistroExitoso) {
+        onRegistroExitoso(respuesta);
+      } else {
+        navigation?.navigate('Login');
+      }
+    } catch (err: unknown) {
+      // Criterio de aceptación SE-12: Rechazo API no navega a éxito y conserva errores útiles
+      if (err instanceof AuthError) {
+        if (err.campos) {
+          const { porCampo, general } = erroresRegistroDesdeServidor(err.campos);
+          setErroresServidor(porCampo);
+          if (general.length > 0) {
+            setErrorGeneralInterno(general.join(' '));
+          }
+        } else {
+          setErrorGeneralInterno(err.message);
+        }
+      } else if (esErrorDeRed(err)) {
+        setErrorGeneralInterno(
+          adaptarErrorRed(err) ?? MENSAJE_ERROR_RED
+        );
+      } else {
+        setErrorGeneralInterno(
+          err instanceof Error
+            ? err.message
+            : 'No fue posible completar el registro. Intenta de nuevo.'
+        );
+      }
+    } finally {
+      setCargandoInterno(false);
+    }
+  };
+
   return (
     <RegistroForm
-      testID="screen-registro"
-      cargando={cargando}
+      testID={testID}
+      cargando={estaCargando}
+      errores={erroresServidor}
       errorGeneral={errorGeneral}
-      onSubmit={onSubmit}
+      onLimpiarError={handleLimpiarError}
+      onSubmit={handleRegistro}
       onNavegarLogin={() => navigation?.navigate('Login')}
       onVolver={() => navigation?.goBack()}
     />
