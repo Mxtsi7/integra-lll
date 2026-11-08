@@ -1,0 +1,38 @@
+{
+  "android": {
+    "version": 1,
+    "event_id": "71cf2b28-055e-470e-b7c2-6800310ef536",
+    "recolector_id": "70141562-a241-47c4-bd72-e3689479b904",
+    "origen": "android",
+    "inicio": "2026-11-08T12:00:00.000Z",
+    "fin": "2026-11-08T12:02:00.000Z",
+    "duracion_ms": 120000,
+    "zona_horaria": "America/Santiago",
+    "cobertura": "completa",
+    "estado": "activo"
+  },
+  "navegador": {
+    "version": 1,
+    "event_id": "21e0cc35-c621-42f0-81c2-59d68cfb899e",
+    "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+    "origen": "navegador",
+    "inicio": "2026-11-08T12:00:00.000Z",
+    "fin": "2026-11-08T12:02:00.000Z",
+    "duracion_ms": 120000,
+    "zona_horaria": "America/Santiago",
+    "cobertura": "completa",
+    "estado": "activo"
+  },
+  "sin_medicion": {
+    "version": 1,
+    "event_id": "0c27f172-ec44-4553-bddd-51ae89046631",
+    "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+    "origen": "navegador",
+    "inicio": "2026-11-08T12:02:00.000Z",
+    "fin": "2026-11-08T12:03:00.000Z",
+    "duracion_ms": 0,
+    "zona_horaria": "America/Santiago",
+    "cobertura": "sin_medicion",
+    "estado": "sin_permiso"
+  }
+}
