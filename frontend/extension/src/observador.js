@@ -1,4 +1,5 @@
 import { dominioAutorizado } from './dominio.js';
+import { avanzarMedicion } from './medicion.js';
 
 export const UMBRAL_INACTIVIDAD_SEGUNDOS = 60;
 
@@ -27,9 +28,16 @@ export async function observar(api) {
     dominio = null;
     estado = 'sin_consentimiento';
   }
-  await api.storage.session.set({ observacion: { dominio, estado, observadoEn: Date.now() } });
+  const observacion = { dominio, estado, observadoEn: Date.now(), sesionId: vigente?.sesionId ?? vigente?.id,
+    suscripcionId: dominio ? vigente?.asociaciones?.[dominio] ?? null : null };
+  const { medicion: anterior } = await api.storage.session.get('medicion');
+  const medicion = avanzarMedicion(anterior, observacion);
+  if (medicion.limiteAlcanzado) observacion.estado = 'limite_de_sesion';
+  await api.storage.session.set({ observacion, medicion });
 }
 
 export async function registrarError(api) {
-  await api.storage.session.set({ observacion: { dominio: null, estado: 'error_de_consulta', observadoEn: Date.now() } });
+  const { medicion: anterior } = await api.storage.session.get('medicion');
+  const observacion = { dominio: null, estado: 'error_de_consulta', observadoEn: Date.now(), sesionId: anterior?.sesionId };
+  await api.storage.session.set({ observacion, medicion: avanzarMedicion(anterior, observacion) });
 }

@@ -46,3 +46,35 @@ Prueba manual pendiente: autorizar dominio, cambiar a otra aplicación → `sin_
 volver → `activo`; esperar 60 s sin entrada o bloquear pantalla → `inactivo`;
 volver a interactuar → se reevalúa dominio. Estos estados no significan uso cero.
 API: [idle](https://developer.chrome.com/docs/extensions/reference/api/idle).
+
+## Sesiones y asociación — S3-MX-13 y S3-MX-14
+
+El panel muestra minutos de esta sesión, calculados en milisegundos y sin redondear
+cada tramo. Cada cambio de dominio, foco o actividad cierra el tramo previo.
+Una alarma de 30 s confirma el avance y permite recuperar el estado al reiniciar
+el worker. Un hueco mayor a 45 s o reloj hacia atrás corta en la última observación:
+no se cuentan sueño del equipo ni huecos desconocidos como uso. Al detectar `idle`,
+se descuenta su umbral de 60 s del tramo abierto. La resolución depende de eventos
+del navegador, no demuestra atención humana ni reproduce estadísticas de Android.
+
+Intervalos UTC con origen y fin; el total se muestra por dominio para toda la sesión,
+sin agrupar por día local. Conservar intervalos evita perder cruces de medianoche;
+la agrupación local corresponde al contrato de Analytics. Máximo 500 tramos cerrados:
+al alcanzar el límite se detiene el cómputo y se muestra `limite_de_sesion`, sin truncar
+datos silenciosamente. Retirar y luego aceptar borra esta medición temporal;
+editar dominios conserva la sesión y cierra el tramo si cambia su asociación.
+Los permisos de hosts eliminados se retiran al actualizar la selección.
+No es la cola durable de S3-MX-16 ni un acuse de sincronización de S3-MX-19.
+
+Asociaciones opcionales, una por línea: `example.com=UUID-de-suscripcion`.
+Hostname en minúsculas, sin punto final; **no** se eliminan `www` ni subdominios.
+Cada subdominio necesita su autorización y asociación explícita. Se rechazan UUID
+inválidos, hosts no autorizados y duplicados. No se infiere proveedor por semejanza.
+Sin asociación puede verse actividad local, pero no debe convertirse en evento de
+una suscripción. El futuro envío autenticado debe validar pertenencia en servidor;
+este editor local no prueba que el UUID sea propio. S3-MX-15 añadirá selección real.
+
+Prueba manual pendiente: autorizar dos dominios, permanecer 35 s en uno, cambiar al
+otro, perder foco y regresar; contrastar tiempos con reloj, excluir el hueco. Dejar
+60 s sin interacción y comprobar descuento, reiniciar worker, recargar extensión,
+verificar que solo este último borra la sesión. Revisar asociaciones en storage.session.

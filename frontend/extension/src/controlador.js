@@ -1,5 +1,5 @@
 import { observar, registrarError } from './observador.js';
-import { normalizarDominio } from './dominio.js';
+import { normalizarDominio, leerAsociaciones } from './dominio.js';
 
 export function crearControlador(api) {
   let cola = Promise.resolve();
@@ -19,12 +19,13 @@ export function crearControlador(api) {
           dominios.some(dominio => normalizarDominio(dominio) !== dominio) || !configuracion.consentimiento) {
         throw new Error('Configuración inválida');
       }
+      const asociaciones = leerAsociaciones(Object.entries(configuracion.asociaciones ?? {}).map(([dominio, id]) => `${dominio}=${id}`).join('\n'), dominios);
       const origins = dominios.map(dominio => `https://${dominio}/*`);
       if (!await api.permissions.contains({ origins })) throw new Error('Permiso requerido');
       const { configuracion: anterior } = await api.storage.session.get('configuracion');
       await api.storage.session.set({ configuracion: {
         id: crypto.randomUUID(), sesionId: anterior?.sesionId ?? anterior?.id ?? crypto.randomUUID(),
-        consentimiento: true, dominios, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),
+        consentimiento: true, dominios, asociaciones, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),
       } });
       const permisos = await api.permissions.getAll();
       const sobrantes = (permisos.origins ?? []).filter(origen => !origins.includes(origen));

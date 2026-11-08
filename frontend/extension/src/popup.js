@@ -1,9 +1,12 @@
-import { normalizarDominio } from './dominio.js';
+import { normalizarDominio, leerAsociaciones } from './dominio.js';
+import { resumirMinutos } from './medicion.js';
 
 const estado = document.querySelector('#estado');
 async function mostrarEstado() {
-  const { configuracion, observacion } = await chrome.storage.session.get(['configuracion', 'observacion']);
+  const { configuracion, observacion, medicion } = await chrome.storage.session.get(['configuracion', 'observacion', 'medicion']);
   document.querySelector('#dominios').value = configuracion?.dominios.join('\n') ?? '';
+  document.querySelector('#asociaciones').value = Object.entries(configuracion?.asociaciones ?? {}).map(([dominio, id]) => `${dominio}=${id}`).join('\n');
+  document.querySelector('#minutos').textContent = JSON.stringify(resumirMinutos(medicion), null, 2);
   estado.textContent = `${observacion?.estado ?? 'sin_consentimiento'} ${observacion?.dominio ?? ''}`;
 }
 document.querySelector('#configuracion').addEventListener('submit', async evento => {
@@ -14,9 +17,12 @@ document.querySelector('#configuracion').addEventListener('submit', async evento
     return;
   }
   try {
+    const asociaciones = leerAsociaciones(document.querySelector('#asociaciones').value, dominios);
     const concedido = await chrome.permissions.request({ origins: dominios.map(dominio => `https://${dominio}/*`) });
     if (!concedido) { estado.textContent = 'Permiso denegado. No se activó la captura.'; return; }
-    const respuesta = await chrome.runtime.sendMessage({ tipo: 'guardar', configuracion: { consentimiento: true, dominios } });
+    const respuesta = await chrome.runtime.sendMessage({ tipo: 'guardar', configuracion: {
+      consentimiento: true, dominios, asociaciones,
+    } });
     if (!respuesta?.ok) throw new Error('No se pudo guardar');
     estado.textContent = 'Dominios autorizados. Vuelve a abrir este panel para consultar el estado.';
   } catch { estado.textContent = 'No se pudo autorizar. Inténtalo nuevamente.'; }

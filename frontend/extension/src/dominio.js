@@ -13,3 +13,18 @@ export function dominioAutorizado(direccion, dominios) {
     return dominios.includes(dominio) ? dominio : null;
   } catch { return null; } // Una pestaña interna o en carga puede no tener URL.
 }
+
+export function leerAsociaciones(texto, dominios) {
+  const asociaciones = {};
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  for (const linea of texto.split(/\r?\n/).filter(linea => linea.trim())) {
+    const partes = linea.split('=');
+    const dominio = normalizarDominio(partes[0]);
+    const id = partes[1]?.trim();
+    if (partes.length !== 2 || !dominios.includes(dominio) || !uuid.test(id ?? '') || Object.hasOwn(asociaciones, dominio)) {
+      throw new Error('Cada asociación requiere un dominio autorizado único y un UUID de suscripción.');
+    }
+    asociaciones[dominio] = id.toLowerCase();
+  }
+  return asociaciones;
+}

@@ -28,3 +28,9 @@ chrome.storage.onChanged.addListener((cambios, area) => {
 });
 chrome.runtime.onStartup.addListener(actualizar);
 chrome.runtime.onInstalled.addListener(actualizar);
+chrome.alarms.onAlarm.addListener(alarma => {
+  if (alarma.name === 'observar-uso') actualizar();
+});
+chrome.alarms.get('observar-uso').then(alarma => {
+  if (!alarma) return chrome.alarms.create('observar-uso', { periodInMinutes: 0.5 });
+}).catch(() => console.warn('No se pudo programar la observación de uso'));
