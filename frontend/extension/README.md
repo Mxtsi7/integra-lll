@@ -33,3 +33,16 @@ Los dobles de API prueban lógica, no instalación ni compatibilidad real de Chr
 Referencias: [permisos](https://developer.chrome.com/docs/extensions/reference/api/permissions),
 [pestañas](https://developer.chrome.com/docs/extensions/reference/api/tabs),
 [ciclo de vida](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+
+## Foco e inactividad — S3-MX-11 y S3-MX-12
+
+El permiso `idle` detecta inactividad o pantalla bloqueada. Umbral de esta entrega:
+60 segundos sin entrada; es una decisión técnica local, no un plazo de retención.
+`windows.onFocusChanged` suspende la observación si ninguna ventana tiene foco.
+Al recuperar foco o actividad se consulta de nuevo la pestaña activa; el tramo
+anterior no se considera actividad durante el hueco. No se usa `setInterval`
+para mantener vivo el worker. El cómputo de minutos corresponde a S3-MX-13.
+Prueba manual pendiente: autorizar dominio, cambiar a otra aplicación → `sin_foco`;
+volver → `activo`; esperar 60 s sin entrada o bloquear pantalla → `inactivo`;
+volver a interactuar → se reevalúa dominio. Estos estados no significan uso cero.
+API: [idle](https://developer.chrome.com/docs/extensions/reference/api/idle).

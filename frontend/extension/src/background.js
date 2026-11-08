@@ -1,3 +1,4 @@
+import { UMBRAL_INACTIVIDAD_SEGUNDOS } from './observador.js';
 import { crearControlador } from './controlador.js';
 
 const controlador = crearControlador(chrome);
@@ -18,6 +19,9 @@ chrome.tabs.onUpdated.addListener((_id, cambios, pestana) => {
   if (pestana.active && (cambios.url || cambios.status === 'complete')) actualizar();
 });
 chrome.tabs.onRemoved.addListener(actualizar);
+chrome.windows.onFocusChanged.addListener(actualizar);
+chrome.idle.onStateChanged.addListener(actualizar);
+chrome.idle.setDetectionInterval(UMBRAL_INACTIVIDAD_SEGUNDOS);
 chrome.permissions.onRemoved.addListener(actualizar);
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area === 'session' && cambios.configuracion) actualizar();
