@@ -250,6 +250,85 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
         aceptaDatos: true,
       });
     });
+
+    it('al pulsar Crear Cuenta con campos vacíos en el contenedor conectado RegistroScreen, despliega errores visibles bajo cada campo', async () => {
+      const onRegisterApi = vi.fn();
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      // No debe llamar a la API
+      expect(onRegisterApi).not.toHaveBeenCalled();
+
+      // Errores visibles bajo cada campo
+      expect(screen.getByTestId('error-nombre').textContent).toBe('Ingresa tu nombre.');
+      expect(screen.getByTestId('error-correo').textContent).toBe(
+        'Ingresa tu correo electrónico.'
+      );
+      expect(screen.getByTestId('error-password').textContent).toBe(
+        'La contraseña debe tener al menos 8 caracteres, una letra y un número.'
+      );
+      expect(screen.getByTestId('error-confirmacion').textContent).toBe(
+        'Repite la contraseña.'
+      );
+      expect(screen.getByTestId('error-acepta-datos').textContent).toBe(
+        'Debes aceptar el tratamiento de tus datos.'
+      );
+    });
+
+    it('al ingresar contraseñas no coincidentes en RegistroScreen, muestra el error y no llama a la API', async () => {
+      const onRegisterApi = vi.fn();
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Sebastian Mena' },
+      });
+      fireEvent.change(screen.getByTestId('input-correo'), {
+        target: { value: 'sebastian@ojoalgasto.cl' },
+      });
+      fireEvent.change(screen.getByTestId('input-password'), {
+        target: { value: 'PasswordSegura1' },
+      });
+      fireEvent.change(screen.getByTestId('input-confirmacion'), {
+        target: { value: 'PasswordDistinta2' },
+      });
+      fireEvent.click(screen.getByTestId('checkbox-acepta-datos'));
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(onRegisterApi).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('error-nombre')).toBeNull();
+      expect(screen.queryByTestId('error-correo')).toBeNull();
+      expect(screen.queryByTestId('error-password')).toBeNull();
+      expect(screen.queryByTestId('error-acepta-datos')).toBeNull();
+      expect(screen.getByTestId('error-confirmacion').textContent).toBe(
+        'Las contraseñas no coinciden.'
+      );
+    });
+
+    it('limpia el error de validación local al escribir en un campo en el contenedor RegistroScreen', async () => {
+      const onRegisterApi = vi.fn();
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.getByTestId('error-nombre')).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.change(screen.getByTestId('input-nombre'), {
+          target: { value: 'Sebastian' },
+        });
+      });
+
+      expect(screen.queryByTestId('error-nombre')).toBeNull();
+      expect(screen.getByTestId('error-correo')).toBeTruthy();
+    });
   });
 
   describe('Criterio de Aceptación: Estado ocupado y deshabilitación', () => {
@@ -461,6 +540,41 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
         // Completar la promesa
         await act(async () => {
           resolverPeticion({ id: 'usr-999', email: 'seba@ojoalgasto.cl', nombre: 'Sebastian' });
+        });
+
+        expect(onRegistroExitoso).toHaveBeenCalledTimes(1);
+      });
+
+      it('previene llamadas paralelas a la API ante pulsaciones rápidas dentro del mismo lote síncrono antes del re-render', async () => {
+        let resolverPeticion: (val: any) => void = () => {};
+        const promesaDemorada = new Promise((resolve) => {
+          resolverPeticion = resolve;
+        });
+
+        const onRegisterApi = vi.fn().mockImplementation(() => promesaDemorada);
+        const onRegistroExitoso = vi.fn();
+
+        render(
+          <RegistroScreen
+            onRegisterApi={onRegisterApi}
+            onRegistroExitoso={onRegistroExitoso}
+          />
+        );
+
+        llenarFormularioValido();
+
+        // Dos clics dentro del mismo lote síncrono (act) antes de que React renderice el nuevo estado
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('registro-submit'));
+          fireEvent.click(screen.getByTestId('registro-submit'));
+        });
+
+        // La API debe haberse invocado exactamente 1 sola vez gracias al candado síncrono
+        expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+        // Completar la promesa
+        await act(async () => {
+          resolverPeticion({ id: 'usr-100', email: 'seba@ojoalgasto.cl', nombre: 'Sebastian' });
         });
 
         expect(onRegistroExitoso).toHaveBeenCalledTimes(1);

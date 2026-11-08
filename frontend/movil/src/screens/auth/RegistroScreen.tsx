@@ -126,8 +126,9 @@ export function RegistroForm({
   const valorAceptaDatos =
     propAceptaDatos !== undefined ? propAceptaDatos : internalAceptaDatos;
 
-  // Los errores visibles descuentan los campos que el usuario ya comenzó a corregir
-  const erroresBase = propErrores !== undefined ? propErrores : internalErrores;
+  // Los errores visibles combinan la validación local con los errores del servidor
+  // (la validación local prevalece si existe), descontando campos que el usuario ya comenzó a corregir
+  const erroresBase: ErroresRegistro = { ...(propErrores ?? {}), ...internalErrores };
   const erroresActivos: ErroresRegistro = {};
   for (const [campo, mensaje] of Object.entries(erroresBase)) {
     if (!erroresLimpiados[campo] && mensaje) {
@@ -525,6 +526,17 @@ export default function RegistroScreen({
   const [erroresServidor, setErroresServidor] = useState<ErroresRegistro>({});
   const [errorGeneralInterno, setErrorGeneralInterno] = useState<string | null>(null);
 
+  // Candado síncrono para evitar dobles envíos concurrentes antes de que React renderice el nuevo estado
+  const peticionEnVueloRef = useRef(false);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const estaCargando = propCargando !== undefined ? propCargando : cargandoInterno;
   const errorGeneral = propErrorGeneral !== undefined ? propErrorGeneral : errorGeneralInterno;
 
@@ -539,16 +551,22 @@ export default function RegistroScreen({
 
   const handleRegistro = async (datos: DatosRegistro) => {
     // Criterio de aceptación SE-12: Registro válido crea cuenta una sola vez
-    // Bloquea de inmediato si ya hay una petición en curso
-    if (estaCargando) {
+    // Bloquea de inmediato con candado síncrono si ya hay una petición en curso
+    if (peticionEnVueloRef.current || estaCargando) {
       return;
     }
 
     if (propOnSubmit) {
-      await propOnSubmit(datos);
+      peticionEnVueloRef.current = true;
+      try {
+        await propOnSubmit(datos);
+      } finally {
+        peticionEnVueloRef.current = false;
+      }
       return;
     }
 
+    peticionEnVueloRef.current = true;
     setCargandoInterno(true);
     setErrorGeneralInterno(null);
     setErroresServidor({});
@@ -570,6 +588,8 @@ export default function RegistroScreen({
         codigoOrganizacion: codigoOrg,
       });
 
+      if (!isMountedRef.current) return;
+
       // Éxito: notificar al callback (desbloquea SE-13) o continuar a Login
       if (onRegistroExitoso) {
         onRegistroExitoso(respuesta);
@@ -577,6 +597,8 @@ export default function RegistroScreen({
         navigation?.navigate('Login');
       }
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+
       // Criterio de aceptación SE-12: Rechazo API no navega a éxito y conserva errores útiles
       if (err instanceof AuthError) {
         if (err.campos) {
@@ -600,7 +622,10 @@ export default function RegistroScreen({
         );
       }
     } finally {
-      setCargandoInterno(false);
+      peticionEnVueloRef.current = false;
+      if (isMountedRef.current) {
+        setCargandoInterno(false);
+      }
     }
   };
 
