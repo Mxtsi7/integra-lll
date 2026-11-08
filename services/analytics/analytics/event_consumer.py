@@ -2,11 +2,15 @@
 
 import json
 import logging
+from contextlib import ExitStack
 from datetime import datetime
 from decimal import Decimal
 
 import pika
 from django.db import IntegrityError, transaction
+from rest_framework.exceptions import PermissionDenied
+
+from shared.borrado.bloqueo import escritura_organizacion
 
 from analytics.jobs import procesar_evento_solapamiento
 from analytics.models import (
@@ -113,7 +117,10 @@ def _persistir_recomendaciones(salidas) -> None:
     vigente en vez de crear una copia. La operación es atómica y la restricción
     única por identidad impide dos filas equivalentes ante eventos concurrentes.
     """
-    with transaction.atomic():
+    with transaction.atomic(), ExitStack() as guardas:
+        # El mismo bloqueo que limpieza: un replay no recrea datos tras el ACK.
+        for org in sorted({str(salida["organizacion_id"]) for salida in salidas}):
+            guardas.enter_context(escritura_organizacion(org))
         for salida in salidas:
             _persistir_recomendacion(salida)
 
@@ -133,7 +140,12 @@ def procesar_mensaje(
 
     # Primero se guarda el resultado en Analytics y después se publica: así el
     # listado de VI-17 no depende de que exista un consumidor de la cola.
-    _persistir_recomendaciones(salidas)
+    try:
+        _persistir_recomendaciones(salidas)
+    except PermissionDenied:
+        # Es una marca durable, no un fallo transitorio que deba reintentarse.
+        channel.basic_ack(delivery_tag=delivery_tag)
+        return
 
     for salida in salidas:
         channel.basic_publish(

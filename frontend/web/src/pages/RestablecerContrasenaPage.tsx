@@ -54,8 +54,13 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
   // Sin handler real (CH-07) la funcionalidad no está disponible: no se simula éxito.
   const isAvailable = Boolean(onSubmitNewPassword);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Después del render: el campo pudo estar deshabilitado mientras se enviaba.
+  const enfocar = (id: 'password' | 'confirmPassword') => {
+    setTimeout(() => document.getElementById(id)?.focus());
+  };
+
+  const handleSubmit = async (evento: React.FormEvent) => {
+    evento.preventDefault();
     if (!onSubmitNewPassword || !token || isLoading) return;
 
     // Misma política que el registro y el backend (shared/validaciones.ts).
@@ -66,7 +71,11 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
     else if (password !== confirmPassword) locales.confirmacion = 'Las contraseñas no coinciden.';
     setErrores(locales);
     setErrorGeneral(null);
-    if (locales.password || locales.confirmacion) return;
+    if (locales.password || locales.confirmacion) {
+      // CH-25: el foco va al primer campo con error, como en el registro.
+      enfocar(locales.password ? 'password' : 'confirmPassword');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -83,6 +92,7 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
         setEstado(ESTADO_POR_CODIGO[err.codigo as CodigoErrorEnlace]);
       } else if (err instanceof AuthError && err.campos?.password) {
         setErrores({ password: err.campos.password.join(' ') });
+        enfocar('password');
       } else if (err instanceof TypeError) {
         setErrorGeneral('No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.');
       } else if (err instanceof AuthError) {
@@ -171,8 +181,8 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
           ayuda="Al menos 8 caracteres, con una letra y un número."
           icono={<Lock size={16} />}
           value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
+          onChange={(evento) => {
+            setPassword(evento.target.value);
             setErrores((actuales) => ({ ...actuales, password: undefined }));
           }}
           error={errores.password}
@@ -187,8 +197,8 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
           placeholder="La misma de arriba"
           icono={<Lock size={16} />}
           value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
+          onChange={(evento) => {
+            setConfirmPassword(evento.target.value);
             setErrores((actuales) => ({ ...actuales, confirmacion: undefined }));
           }}
           error={errores.confirmacion}

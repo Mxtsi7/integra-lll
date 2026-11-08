@@ -56,6 +56,16 @@ automáticamente. Los productores/consumidores reales corresponden a VI-26 y FE-
 En v2, `alerta.activada.datos.usuario_id` es entero positivo de Auth (no UUID),
 `moneda` acepta códigos de tres letras mayúsculas del catálogo de BD y
 `estado_cambiado` admite `evento_estado` opcional, tomado de `TransicionEstado.evento`.
+Los tres snapshots de suscripción v2 admiten **`datos.fin_prueba` opcional**:
+fecha `YYYY-MM-DD` o `null`. Su ausencia/null significa fecha desconocida y
+Notifications no genera aviso de fin de prueba; no se infiere de `proximo_cobro`.
+Subscriptions la publica cuando está disponible. Es una ampliación compatible:
+los receptores previos siguen aceptando campos adicionales; la aceptación humana
+de Victor/Felipe y de otros receptores sigue pendiente en la revisión de #140.
+`campos_modificados` admite `fin_prueba`: editar solo fecha o null genera un
+snapshot actualizado; un PATCH sin cambio efectivo no emite.
+Las regresiones del esquema verifican created/updated/state_changed con fecha,
+null, ausencia y rechazo de fechas/tipos inválidos.
 Una cancelación en VI-26 publica solo `suscripcion.estado_cambiado.v2` por defecto;
 `suscripcion.cancelada` v1 se conserva como definición, sin emisión doble automática.
 Si hay receptores v1 activos, acordar el adaptador descrito en MX-21 antes de migrarlos.

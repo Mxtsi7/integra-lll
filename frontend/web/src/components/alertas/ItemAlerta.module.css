@@ -1,0 +1,118 @@
+/* Una alerta del Centro (SE-01, CH-31). */
+
+.alerta {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+}
+
+/* Sin leer: una franja del acento a la izquierda y el título más fuerte. */
+.pendiente::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--acento);
+}
+
+.icono {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radio-m);
+  background: var(--vidrio-2);
+  color: var(--tinta-2);
+}
+
+.pendiente .icono {
+  background: var(--acento-suave);
+  color: var(--acento);
+}
+
+.texto {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.titulo {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--tinta);
+  overflow-wrap: anywhere;
+}
+
+.pendiente .titulo {
+  font-weight: 800;
+}
+
+.mensaje {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tinta-2);
+  overflow-wrap: anywhere;
+}
+
+/* --tinta-2 y no --tinta-3: con 12,5 px, la 3 no llega a 4,5:1 en ninguno de los dos temas. */
+.meta {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.acciones {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.enlace {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tinta-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.enlace:hover {
+  color: var(--tinta);
+}
+
+/* En celular las acciones pasan abajo, a lo ancho, para no apretar el texto. */
+@media (max-width: 640px) {
+  .alerta {
+    flex-wrap: wrap;
+  }
+
+  .acciones {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    width: 100%;
+    padding-left: 52px;
+  }
+}

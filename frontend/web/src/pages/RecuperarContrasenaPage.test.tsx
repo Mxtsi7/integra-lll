@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthError, solicitarRecuperacion } from "@ojoalgasto/shared";
@@ -124,7 +124,10 @@ describe("Solicitar recuperación de contraseña (CH-06)", () => {
     montar();
     await pedir("ana@ejemplo.com");
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Introduzca una dirección de correo electrónico válida.");
+    // Es un error del campo: queda asociado a él y el foco vuelve ahí (CH-25).
+    expect(correo()).toHaveAttribute("aria-invalid", "true");
+    expect(correo()).toHaveAccessibleDescription("Introduzca una dirección de correo electrónico válida.");
+    await waitFor(() => expect(correo()).toHaveFocus());
     expect(boton()).toBeEnabled();
   });
 
@@ -133,7 +136,19 @@ describe("Solicitar recuperación de contraseña (CH-06)", () => {
     await pedir("ana@");
 
     expect(solicitarMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Ingresa un correo electrónico válido.");
+    expect(correo()).toHaveAttribute("aria-invalid", "true");
+    expect(correo()).toHaveAccessibleDescription("Ingresa un correo electrónico válido.");
+    await waitFor(() => expect(correo()).toHaveFocus());
+    // Al corregirlo, el error se va.
+    fireEvent.change(correo(), { target: { value: "ana@ejemplo.com" } });
+    expect(correo()).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("vacío dice que falta el correo, en el campo (CH-25)", async () => {
+    montar();
+    await pedir("");
+    expect(correo()).toHaveAccessibleDescription("Ingresa tu correo electrónico.");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("'Usar otro correo' vuelve al formulario", async () => {

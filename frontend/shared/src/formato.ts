@@ -18,9 +18,14 @@ export function formatearMonto(monto: number, moneda: Moneda = 'CLP'): string {
   }).format(monto);
 }
 
+/** Una cifra identificada por divisa; no inventa una moneda para la lista vacía. */
+export function formatearTotales(totales: { moneda: Moneda; total: number }[]): string {
+  return totales.map(({ moneda, total }) => `${moneda} ${formatearMonto(total, moneda)}`).join(' · ') || 'Sin cobros';
+}
+
 /** "2026-10-05" → "05 oct 2026". Se parte la fecha a mano para no depender de la zona horaria. */
-export function formatearFecha(iso: string): string {
-  const [anio, mes, dia] = iso.split('-').map(Number);
+export function formatearFecha(fechaEnTexto: string): string {
+  const [anio, mes, dia] = fechaEnTexto.split('-').map(Number);
   return new Intl.DateTimeFormat('es-CL', { day: '2-digit', month: 'short', year: 'numeric' })
     .format(new Date(anio, mes - 1, dia));
 }
@@ -35,25 +40,25 @@ export function formatearMesAnio(anio: number, mes: number): string {
  * un día del calendario (lo lee el lector de pantalla). Igual que
  * formatearFecha, se parte a mano para que el día no cambie por la zona horaria.
  */
-export function formatearFechaLarga(iso: string): string {
-  const [anio, mes, dia] = iso.split('-').map(Number);
+export function formatearFechaLarga(fechaEnTexto: string): string {
+  const [anio, mes, dia] = fechaEnTexto.split('-').map(Number);
   return new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
     .format(new Date(anio, mes - 1, dia));
 }
 
 /**
- * Fecha y hora de un instante ISO con zona (p. ej. la última sincronización
+ * Fecha y hora de un instante con zona horaria (p. ej. la última sincronización
  * de una cuenta): "15 oct 2026, 02:30 p. m." en la hora local del navegador.
- * Acá sí se usa Date(iso): es un instante, no un día del calendario.
+ * Acá sí se usa Date(fechaYHoraEnTexto): es un instante, no un día del calendario.
  */
-export function formatearFechaHora(isoConHora: string): string {
+export function formatearFechaHora(fechaYHoraEnTexto: string): string {
   return new Intl.DateTimeFormat('es-CL', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(isoConHora));
+  }).format(new Date(fechaYHoraEnTexto));
 }
 
 // El 1 de enero de 2024 fue lunes: desde ahí se recorren los 7 días para

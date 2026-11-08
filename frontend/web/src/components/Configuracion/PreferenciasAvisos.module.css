@@ -1,0 +1,116 @@
+/* Avisos de Configuración (CH-30). */
+
+.mensaje {
+  padding: 8px 0;
+  color: var(--tinta-2);
+  font-size: 14px;
+}
+
+.subtitulo {
+  margin: 18px 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* --tinta-3 queda cerca de 3:1 en tema claro: poco para letra de 12px. */
+  color: var(--tinta-2);
+}
+
+.subtitulo:first-of-type {
+  margin-top: 0;
+}
+
+.nota {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.error {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radio-m);
+  background: var(--coral-suave);
+  color: var(--coral);
+  font-size: 13.5px;
+}
+
+.pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.estado,
+.estadoPendiente {
+  margin: 0;
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+/* El pendiente se distingue por el peso y el punto, no solo por el color
+   (--acento sobre fondo claro no llega a 4,5:1). */
+.estadoPendiente {
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+.estadoPendiente::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--acento);
+  vertical-align: 1px;
+}
+
+.acciones {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- Interruptor (antes en ConfiguracionPage.module.css) ---- */
+
+.interruptor {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 25px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--vidrio-borde-fuerte);
+  transition: background-color var(--rapido);
+}
+
+.interruptor:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.interruptorActivo {
+  background: var(--acento);
+  box-shadow: 0 0 16px -4px var(--acento);
+}
+
+.interruptorBola {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform var(--rapido);
+}
+
+.interruptorActivo .interruptorBola {
+  transform: translateX(19px);
+}

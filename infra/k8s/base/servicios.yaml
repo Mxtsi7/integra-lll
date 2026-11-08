@@ -168,7 +168,9 @@ spec:
       containers:
         - name: worker
           image: REGISTRO/connectors:TAG
-          command: ["celery", "-A", "config", "worker", "--beat", "--loglevel=info"]
+          # La app Celery está en connectors_config/celery.py (D-01). Beat
+          # guarda su estado en /tmp: el pod no tiene disco propio.
+          command: ["celery", "-A", "connectors_config", "worker", "--beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
           env:
             - name: ESQUEMA_BD
               value: connectors

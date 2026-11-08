@@ -35,7 +35,13 @@ spec:
           ports: [{ name: http, containerPort: 8000 }]
           envFrom:
             - configMapRef: { name: ojoalgasto }
-            - secretRef: { name: ojoalgasto }
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: JWT_SECRET }
           readinessProbe:
             httpGet:
               path: /health/

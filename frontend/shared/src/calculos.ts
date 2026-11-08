@@ -10,6 +10,22 @@ export function equivalenteMensual(monto: number, frecuencia: Frecuencia): numbe
   return frecuencia === 'anual' ? monto / 12 : monto;
 }
 
+/** Unidad común exacta para importes del contrato de dos decimales. */
+function doceavosDeCentavo(suscripcion: Suscripcion): number {
+  return Math.round(suscripcion.monto * 100) * (suscripcion.frecuencia === 'anual' ? 1 : 12);
+}
+
+/**
+ * Suma una selección de la misma moneda, sin cambiar sus estados ni redondear.
+ * El único redondeo se hace al presentar con formatearMonto (CLP sin decimales).
+ */
+export function sumarEquivalentesMensuales(suscripciones: Suscripcion[]): number {
+  if (new Set(suscripciones.map((suscripcion) => suscripcion.moneda)).size > 1) {
+    throw new RangeError('El gasto debe calcularse por moneda.');
+  }
+  return suscripciones.reduce((suma, suscripcion) => suma + doceavosDeCentavo(suscripcion), 0) / 1200;
+}
+
 /**
  * La métrica que distingue al producto: cuánto cuesta cada hora efectivamente
  * usada. Un servicio de $9.900 usado dos horas al mes cuesta $4.950 la hora.
@@ -33,9 +49,9 @@ export function costoPorHora(montoMensual: number, horasUsoMes: number): number 
  * La usa la proyección del Panel. El Calendario ya no: desde CH-18 los
  * cobros del mes los calcula el backend (VI-07).
  */
-export function generaCobro(s: Suscripcion): boolean {
-  if (s.estado === 'activo' || s.estado === 'fantasma') return true;
-  if (s.estado === 'prueba') return s.monto > 0 && Boolean(s.fin_prueba);
+export function generaCobro(suscripcion: Suscripcion): boolean {
+  if (suscripcion.estado === 'activo' || suscripcion.estado === 'fantasma') return true;
+  if (suscripcion.estado === 'prueba') return suscripcion.monto > 0 && Boolean(suscripcion.fin_prueba);
   return false;
 }
 
@@ -44,15 +60,27 @@ export function generaCobro(s: Suscripcion): boolean {
  * suscripciones que generan cobro (ver generaCobro).
  */
 export function gastoProyectado(suscripciones: Suscripcion[]): number {
-  return suscripciones
-    .filter(generaCobro)
-    .reduce((total, s) => total + equivalenteMensual(s.monto, s.frecuencia), 0);
+  if (new Set(suscripciones.filter(generaCobro).map((suscripcion) => suscripcion.moneda)).size > 1) {
+    throw new RangeError('El gasto debe calcularse por moneda.');
+  }
+  return gastosPorMoneda(suscripciones)[0]?.total ?? 0;
+}
+
+/** Proyección de toda la lista, sin convertir ni mezclar divisas. */
+export function gastosPorMoneda(suscripciones: Suscripcion[]): { moneda: Moneda; total: number }[] {
+  // Mismas unidades que sumarEquivalentesMensuales; se redondea solo al presentar.
+  const sumas = new Map<Moneda, number>();
+  for (const suscripcion of suscripciones.filter(generaCobro)) {
+    const unidades = doceavosDeCentavo(suscripcion);
+    sumas.set(suscripcion.moneda, (sumas.get(suscripcion.moneda) ?? 0) + unidades);
+  }
+  return [...sumas].map(([moneda, unidades]) => ({ moneda, total: unidades / 1200 }));
 }
 
 /** Cuántas suscripciones hay en cada estado. Alimenta el conteo del panel (RF-09). */
 export function conteoPorEstado(suscripciones: Suscripcion[]): Record<Suscripcion['estado'], number> {
   const conteo = { prueba: 0, activo: 0, por_confirmar: 0, cancelado: 0, fantasma: 0 };
-  for (const s of suscripciones) conteo[s.estado] += 1;
+  for (const suscripcion of suscripciones) conteo[suscripcion.estado] += 1;
   return conteo;
 }
 

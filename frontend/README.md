@@ -10,6 +10,7 @@ Un workspace de npm con tres paquetes. La regla que lo ordena todo:
 | `shared/` | Cliente de API, tipos del dominio, formato es-CL, cálculos | Se toca de a poco y con aviso: lo usan los dos clientes |
 | `web/` | React + Vite. Pantallas, rutas, estilos de la web | Frontend web |
 | `movil/` | React Native + Expo. Pantallas, navegación, push | Frontend móvil |
+| `desktop/` | Electron Windows; reutiliza las pantallas web y shared | [Build y arranque](desktop/README.md) |
 
 Qué **no** se comparte, porque no se puede: componentes (`<div>` contra
 `<View>`), estilos, navegación. Cada cliente hace su interfaz. Lo que sí se

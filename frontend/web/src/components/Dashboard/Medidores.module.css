@@ -4,6 +4,14 @@
   flex-shrink: 0;
 }
 
+/* El trazo llega justo al borde del SVG, y un SVG dentro de HTML recorta lo
+   que sale de su caja: el brillo terminaba en un cuadrado. El tile tiene
+   20-22px de padding, que alcanzan para el halo. */
+.anillo svg,
+.arco svg {
+  overflow: visible;
+}
+
 .pista {
   fill: none;
   stroke: var(--vidrio-2);
@@ -15,7 +23,8 @@
   stroke-linecap: round;
   transition: stroke-dashoffset 900ms cubic-bezier(0.2, 0, 0, 1);
   animation: llenar 900ms cubic-bezier(0.2, 0, 0, 1);
-  filter: drop-shadow(0 0 8px currentColor);
+  /* currentColor es el color del trazo: Medidores.tsx lo pone en `color`. */
+  filter: drop-shadow(0 0 6px currentColor);
 }
 
 @keyframes llenar {

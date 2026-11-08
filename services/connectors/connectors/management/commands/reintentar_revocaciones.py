@@ -17,6 +17,9 @@ No reintenta para siempre ni se rinde solo: no hay contador de intentos. Si
 un proveedor nunca confirma, la cuenta se queda en la lista y aparece en cada
 corrida, que es información y no un problema escondido. Cuando haga falta un
 límite, el lugar es `revocacion.pendientes_de_revocar`.
+
+Outlook no aparece en la lista: su proveedor no ofrece revocación y la limpieza
+lo trata como limitación conocida, no como un fallo reintentable.
 """
 
 from django.core.management.base import BaseCommand
@@ -75,6 +78,10 @@ class Command(BaseCommand):
             if resultado.confirmada:
                 confirmadas += 1
                 self.stdout.write(self.style.SUCCESS(f"  confirmada: {nombre}"))
+            elif resultado.ya_no_existe:
+                self.stdout.write(
+                    f"  se eliminó mientras tanto (limpieza de la organización), no se tocó: {nombre}"
+                )
             elif resultado.reconectada_mientras_tanto:
                 self.stdout.write(
                     f"  se reconectó mientras tanto, no se tocó: {nombre}"

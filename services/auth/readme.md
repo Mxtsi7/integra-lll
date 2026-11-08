@@ -1,5 +1,9 @@
 # Servicio de Autenticación (`auth`)
 
+MX-07 agrega `DELETE /api/usuarios/me/`: contraseña y confirmación, revocación de
+sesiones y outbox de limpieza por organización. Contrato, worker, pruebas y
+dependencia de revocación externa en [el flujo MX-07](../../docs/flujos/maximiliano-saez/07-eliminar-cuenta.md).
+
 Puerto `8001`. Registro, login y datos de usuario. Firma los tokens que el
 gateway valida en cada petición (ADR-004).
 

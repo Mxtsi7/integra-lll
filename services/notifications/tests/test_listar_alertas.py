@@ -11,6 +11,7 @@ Lo que tiene que quedar demostrado:
 """
 
 import uuid
+from datetime import timedelta
 
 import pytest
 from rest_framework import status
@@ -146,7 +147,8 @@ def test_el_listado_viene_paginado(cliente):
 
 
 def test_las_mas_nuevas_van_primero(cliente):
-    crear(titulo="vieja")
+    vieja = crear(titulo="vieja")
+    Alerta.objects.filter(pk=vieja.pk).update(creado_en=timezone.now() - timedelta(days=1))
     crear(titulo="nueva")
     titulos = [a["titulo"] for a in cliente.get(LISTA, headers=cab()).data["results"]]
     assert titulos == ["nueva", "vieja"]

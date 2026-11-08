@@ -60,9 +60,15 @@ class _EventoParaClave:
     version: int
 
 
-#: Los eventos que escucha la cola del resumen, como (nombre, versión).
-#: Agregar uno acá es la única forma de que esta cola lo reciba.
-EVENTOS_DEL_RESUMEN = (("suscripcion.creada", 2),)
+#: El resumen depende de creaciones, cambios de monto/moneda y transiciones
+#: de estado. Los tres hechos v2 deben tener una ruta DURABLE, incluso si el
+#: consumidor todavía no ha arrancado. Los nombres no llevan comodines: v3
+#: requiere una decisión de contrato explícita.
+EVENTOS_DEL_RESUMEN = (
+    ("suscripcion.creada", 2),
+    ("suscripcion.actualizada", 2),
+    ("suscripcion.estado_cambiado", 2),
+)
 
 #: Las routing keys efectivas, derivadas del publicador. No tocar a mano.
 PATRONES_RESUMEN = tuple(

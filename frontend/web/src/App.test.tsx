@@ -1,16 +1,35 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getCobrosDelMes, getRecomendaciones, getUsuarioActual, guardarTokens, type Usuario } from "@ojoalgasto/shared";
+import {
+  getAlertas,
+  getCobrosDelMes,
+  getContadorAlertas,
+  getPreferenciasAlertas,
+  getRecomendaciones,
+  getSuscripciones,
+  getUsuarioActual,
+  guardarTokens,
+  type Usuario,
+} from "@ojoalgasto/shared";
 import { App } from "./App";
 
 // Prueba el árbol de rutas REAL de App.tsx (RutaPrivada.test.tsx usa una
 // copia liviana). Solo se simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getUsuarioActual: vi.fn(), getCobrosDelMes: vi.fn(), getRecomendaciones: vi.fn() };
+  return {
+    ...real,
+    getUsuarioActual: vi.fn(),
+    getCobrosDelMes: vi.fn(),
+    getRecomendaciones: vi.fn(),
+    getSuscripciones: vi.fn(),
+    getPreferenciasAlertas: vi.fn(),
+    getAlertas: vi.fn(),
+    getContadorAlertas: vi.fn(),
+  };
 });
 
 const USUARIO: Usuario = {
@@ -22,10 +41,10 @@ const USUARIO: Usuario = {
   plan: "gratuito",
 };
 
-function jwtVigente(): string {
+function jwtVigente(claims: Record<string, string> = {}): string {
   const b64 = (o: unknown) =>
     btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `${b64({ alg: "HS256" })}.${b64({ exp: Math.floor(Date.now() / 1000) + 1800 })}.firma`;
+  return `${b64({ alg: "HS256" })}.${b64({ ...claims, exp: Math.floor(Date.now() / 1000) + 1800 })}.firma`;
 }
 
 function montar(ruta: string) {
@@ -40,6 +59,23 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(getUsuarioActual).mockReset();
   vi.mocked(getUsuarioActual).mockResolvedValue(USUARIO);
+  vi.mocked(getSuscripciones).mockReset().mockResolvedValue([]);
+  vi.mocked(getContadorAlertas).mockReset().mockResolvedValue({ pendientes: 2, total: 3 });
+  vi.mocked(getAlertas).mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
+  vi.mocked(getPreferenciasAlertas).mockReset().mockResolvedValue({
+    por_email: true,
+    por_push: false,
+    en_la_app: true,
+    avisar_proximo_cobro: true,
+    avisar_fin_prueba: true,
+    avisar_alza_tarifa: true,
+    avisar_doble_cobro: true,
+    avisar_presupuesto_excedido: true,
+    dias_anticipacion: 3,
+    canales_disponibles: ["email", "in_app"],
+    canales_elegidos: ["email", "in_app"],
+    actualizado_en: "2026-10-20T15:30:00Z",
+  });
 });
 
 afterEach(() => {
@@ -81,11 +117,13 @@ describe("App: secciones del menú que ya existen", () => {
     expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
   });
 
-  it("con sesión, /recomendaciones muestra Próximamente y no llama al backend mientras VI-17 no exista (AN-20)", async () => {
+  it("con sesión, /recomendaciones abre la página real y pide VI-17, ya no Próximamente (CH-26)", async () => {
+    vi.mocked(getRecomendaciones).mockResolvedValue({ results: [], disponible: true, motivo_sin_sugerencias: null });
     guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
     montar("/recomendaciones");
-    expect(await screen.findByText("En construcción")).toBeInTheDocument();
-    expect(getRecomendaciones).not.toHaveBeenCalled();
+    expect(await screen.findByText("No tienes recomendaciones por ahora")).toBeInTheDocument();
+    expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+    expect(getRecomendaciones).toHaveBeenCalledTimes(1);
   });
 
   it("con sesión, /calendario abre la cuadrícula del mes (CH-17)", async () => {
@@ -102,5 +140,77 @@ describe("App: secciones del menú que ya existen", () => {
     montar("/calendario/agenda?mes=2026-10");
     expect(await screen.findByText("No hay cobros en octubre de 2026.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Agenda" })).toHaveAttribute("aria-current", "page");
+  });
+});
+
+/** Con el router de datos, como main.tsx: Ajustes usa useBlocker. */
+async function montarConRouterDeDatos(ruta: string) {
+  const router = createMemoryRouter([{ path: "*", element: <App /> }], { initialEntries: [ruta] });
+  render(<RouterProvider router={router} />);
+  await act(async () => {});
+  return router;
+}
+
+describe("App: la campana abre el Centro de alertas (CH-31)", () => {
+  it.each(["/home", "/dashboard"])("desde %s monta el Centro con las sin leer, y Atrás vuelve", async (origen) => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    const router = await montarConRouterDeDatos(origen);
+
+    const campana = await screen.findByRole("link", { name: "Alertas" });
+    expect(campana).toHaveAccessibleDescription("2 alertas sin leer");
+    await act(async () => fireEvent.click(campana));
+    expect(router.state.location.pathname).toBe("/alertas");
+    expect(await screen.findByRole("heading", { level: 1, name: "Alertas" })).toBeInTheDocument();
+    expect(getAlertas).toHaveBeenCalled();
+
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    expect(router.state.location.pathname).toBe(origen);
+  });
+
+  it("desde el Centro, «Configurar avisos» monta Ajustes con Avisos", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    const router = await montarConRouterDeDatos("/alertas");
+
+    await act(async () => fireEvent.click(await screen.findByRole("link", { name: "Configurar avisos" })));
+    expect(router.state.location.pathname).toBe("/configuracion");
+    expect(await screen.findByRole("heading", { level: 1, name: "Ajustes" })).toBeInTheDocument();
+    const avisos = screen.getByRole("heading", { name: "Avisos" }).closest("section")!;
+    expect(await within(avisos).findByRole("switch", { name: "Por correo" })).toBeInTheDocument();
+  });
+
+  it("ya en Ajustes, con un cambio sin guardar, la campana pregunta antes de salir y no pierde el borrador", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    const router = await montarConRouterDeDatos("/configuracion");
+    const alza = await screen.findByRole("switch", { name: "Alza de tarifa" });
+    fireEvent.click(alza);
+    expect(alza).toHaveAttribute("aria-checked", "false");
+
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Alertas" })));
+    expect(router.state.location.pathname).toBe("/configuracion");
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Seguir editando" })));
+    // El mismo interruptor, con el cambio, y sin volver a pedir las preferencias.
+    expect(screen.getByRole("switch", { name: "Alza de tarifa" })).toBe(alza);
+    expect(alza).toHaveAttribute("aria-checked", "false");
+    expect(getPreferenciasAlertas).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("App: el número de la campana es de la sesión", () => {
+  it("con otra cuenta en otra pestaña, la campana vuelve a preguntar y no muestra el de la anterior", async () => {
+    guardarTokens({ access_token: jwtVigente({ sid: "sesion-a" }), refresh_token: "refresh" });
+    await montarConRouterDeDatos("/alertas");
+    expect(await screen.findByRole("link", { name: "Alertas" })).toHaveAccessibleDescription("2 alertas sin leer");
+    const llamadas = vi.mocked(getContadorAlertas).mock.calls.length;
+
+    // La otra cuenta no tiene ninguna sin leer.
+    vi.mocked(getContadorAlertas).mockResolvedValue({ pendientes: 0, total: 0 });
+    await act(async () => {
+      guardarTokens({ access_token: jwtVigente({ sid: "sesion-b" }), refresh_token: "otro-refresh" });
+      window.dispatchEvent(new StorageEvent("storage", { key: "access_token" }));
+    });
+    expect(vi.mocked(getContadorAlertas).mock.calls.length).toBeGreaterThan(llamadas);
+    expect(screen.getByRole("link", { name: "Alertas" })).not.toHaveAttribute("aria-describedby");
   });
 });

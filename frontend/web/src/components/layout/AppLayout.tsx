@@ -12,8 +12,6 @@ interface AppLayoutProps {
   headerSubtitulo?: string;
   /** Botones a la derecha del título: la acción principal de la página. */
   headerAccionDerecha?: ReactNode;
-  /** Cuántas cosas piden atención, para la campana. */
-  avisos?: number;
   /** Contenido más angosto, para páginas de lectura (detalle, próximamente). */
   angosto?: boolean;
   children: ReactNode;
@@ -27,7 +25,6 @@ export function AppLayout({
   headerTitulo,
   headerSubtitulo,
   headerAccionDerecha,
-  avisos,
   angosto = false,
   children,
 }: AppLayoutProps) {
@@ -69,7 +66,6 @@ export function AppLayout({
         <BarraSuperior
           nombreUsuario={nombreUsuario}
           plan={plan}
-          avisos={avisos}
           alCerrarSesion={manejarCerrarSesion}
           cerrandoSesion={cerrandoSesion}
         />

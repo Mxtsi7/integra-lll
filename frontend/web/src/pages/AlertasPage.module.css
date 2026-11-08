@@ -1,0 +1,20 @@
+/* El Centro de alertas (SE-01, CH-31). */
+
+.barra {
+  margin-bottom: 18px;
+}
+
+.mensaje {
+  padding: 8px 0;
+  color: var(--tinta-2);
+  font-size: 14px;
+}
+
+.lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

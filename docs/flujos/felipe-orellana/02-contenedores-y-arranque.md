@@ -41,17 +41,30 @@ Dos detalles que no son obvios:
 ## Red y orden de arranque
 
 Docker Compose crea una red por proyecto y cada servicio se resuelve por su
-nombre: `postgres`, `rabbitmq`, `auth`, `subscriptions`, `gateway`. Por eso
-`DATABASE_URL` apunta a `postgres:5432` y el gateway a `http://auth:8001`.
+nombre: `postgres`, `rabbitmq`, `redis`, `auth`, `subscriptions`, `connectors`,
+`analytics`, `notifications` y `gateway`. Por eso `DATABASE_URL` apunta a
+`postgres:5432` y el gateway a `http://auth:8001`.
 
 ```
-postgres ──healthy──▶ auth ──┐
-rabbitmq ──healthy──▶ subscriptions ──┴──▶ gateway
-                       subscriptions ──healthy──▶ subscriptions-worker / -beat
+postgres ──healthy──▶ auth ──────────────┐
+rabbitmq ──healthy──▶ subscriptions ─────┤
+redis    ──healthy──▶ connectors ────────┼──▶ gateway
+                       analytics ────────┤
+                       notifications ────┘
+subscriptions ──healthy──▶ subscriptions-worker / subscriptions-beat
+connectors    ──healthy──▶ connectors-worker
+analytics     ──healthy──▶ analytics-worker
 ```
 
 `depends_on` con `condition: service_healthy` es lo que ordena todo: un
-servicio no arranca hasta que su dependencia pasó el healthcheck.
+servicio no arranca hasta que su dependencia pasó el healthcheck. Los
+healthchecks HTTP pegan a `/health/`; los workers consultan su propia cola
+(`celery inspect ping`, `verificar_worker`). `subscriptions-beat` declara
+`healthcheck.disable: true` porque no expone un canal de consulta: se muestra
+`running`, no `healthy`, y ningún servicio depende de él.
+
+La guía de Windows/WSL2, volúmenes y line endings está en
+[docs/Windows/Docker-Desktop-WSL2.md](../../Windows/Docker-Desktop-WSL2.md).
 
 ## Arranque: migraciones y seed
 
@@ -121,8 +134,15 @@ vez de levantar un servidor.
 ## Cómo probarlo
 
 ```bash
-docker compose up -d postgres auth subscriptions
-docker compose ps                                   # los tres "healthy"
+# stack completo: healthchecks reales y dependencias de readiness (VI-13)
+python scripts/verificar_compose.py
+python scripts/verificar_servicios.py --compose-up --timeout 300
+
+# reinicio sin perder datos
+docker compose restart
+python scripts/verificar_servicios.py --timeout 180
+
+# pruebas por servicio
 docker compose exec auth pytest tests/test_salud.py tests/test_migraciones.py tests/test_seed.py -v
 docker compose exec subscriptions pytest tests/test_salud.py tests/test_migraciones.py tests/test_seed_subscriptions.py -v
 ```

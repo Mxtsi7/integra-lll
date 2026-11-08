@@ -26,6 +26,10 @@ import datetime as dt
 import logging
 import uuid
 
+from django.db import transaction
+
+from shared.borrado.bloqueo import bloquear_organizacion
+
 from analytics.uso import primer_dia, proyectar_uso, registrar_suscripcion
 
 
@@ -81,6 +85,14 @@ def aplicar(sobre: dict) -> bool:
     # en el evento. Sin esto no se sabe a quién pertenece el uso, y meterlo en
     # la organización equivocada es peor que descartarlo.
     organizacion_id = _uuid(sobre.get("organizacion_id"), "organizacion_id")
+    # Serializa toda la proyección con el borrado, incluidos eventos tardíos.
+    with transaction.atomic():
+        if bloquear_organizacion(organizacion_id, compartido=True).eliminada:
+            return False
+        return _aplicar_vigente(sobre, nombre, organizacion_id)
+
+
+def _aplicar_vigente(sobre, nombre, organizacion_id):
     datos = sobre.get("datos") or {}
     if not isinstance(datos, dict):
         raise SobreInvalido("`datos` no es un objeto.")

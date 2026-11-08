@@ -1,4 +1,4 @@
-import { equivalenteMensual, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
+import { gastoProyectado, sumarEquivalentesMensuales, formatearMonto, type Suscripcion } from '@ojoalgasto/shared';
 import { CalendarClock, Ghost, Home, Layers } from 'lucide-react';
 import { diasHasta } from '../../utils/fechas';
 import { useConteo } from '../../hooks/useConteo';
@@ -6,6 +6,7 @@ import styles from './Tiles.module.css';
 
 interface TileResumenProps {
   suscripciones: Suscripcion[];
+  moneda: string;
   nombreHogar: string;
 }
 
@@ -25,20 +26,10 @@ function fechaDeHoy(): string {
  *
  * Mismo criterio que gastoProyectado() en shared/calculos.ts (RN-CIC-005).
  */
-export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
-  let total = 0;
-  let sinUso = 0;
-  let activas = 0;
-  for (const s of suscripciones) {
-    const mensual = equivalenteMensual(s.monto, s.frecuencia);
-    if (s.estado === 'activo' || s.estado === 'fantasma') {
-      total += mensual;
-      activas += 1;
-      if (s.estado === 'fantasma') sinUso += mensual;
-    } else if (s.estado === 'prueba' && s.monto > 0 && s.fin_prueba) {
-      total += mensual;
-    }
-  }
+export function TileResumen({ suscripciones, moneda, nombreHogar }: TileResumenProps) {
+  const total = gastoProyectado(suscripciones);
+  const sinUso = sumarEquivalentesMensuales(suscripciones.filter((s) => s.estado === 'fantasma'));
+  const activas = suscripciones.filter((s) => s.estado === 'activo' || s.estado === 'fantasma').length;
   const semana = suscripciones
     .filter((s) => s.estado === 'activo' && diasHasta(s.fecha_proximo_cobro) >= 0 && diasHasta(s.fecha_proximo_cobro) <= 7)
     .reduce((suma, s) => suma + s.monto, 0);
@@ -59,7 +50,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
         <span className={styles.resumenOrbe} aria-hidden="true" />
         <div>
           <p className={styles.resumenCifra}>
-            {formatearMonto(Math.round(totalMostrado))}
+            {formatearMonto(totalMostrado, moneda)}
             <span className={styles.resumenCifraSufijo}>al mes</span>
           </p>
           <p className={styles.resumenDescripcion}>
@@ -84,7 +75,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
           </span>
           <span className={styles.resumenDatoTexto}>
             <span className={styles.resumenDatoEtiqueta}>Esta semana</span>
-            <span className={styles.resumenDatoValor}>{formatearMonto(semana)}</span>
+            <span className={styles.resumenDatoValor}>{formatearMonto(semana, moneda)}</span>
           </span>
         </div>
         <div className={`${styles.resumenDato} ${sinUso > 0 ? styles.resumenDatoCoral : ''}`}>
@@ -93,7 +84,7 @@ export function TileResumen({ suscripciones, nombreHogar }: TileResumenProps) {
           </span>
           <span className={styles.resumenDatoTexto}>
             <span className={styles.resumenDatoEtiqueta}>Sin uso</span>
-            <span className={styles.resumenDatoValor}>{formatearMonto(sinUso)}</span>
+            <span className={styles.resumenDatoValor}>{formatearMonto(sinUso, moneda)}</span>
           </span>
         </div>
       </div>

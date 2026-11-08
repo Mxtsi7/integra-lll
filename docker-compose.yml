@@ -2,47 +2,65 @@
 # Levanta el sistema completo con un solo comando:
 #     docker compose up --build
 #
-# Para trabajar en un servicio puntual, levanta solo sus dependencias:
-#     docker compose up postgres rabbitmq auth
+# Sólo los servicios con healthcheck pueden ser dependencia de otro con
+# `condition: service_healthy`. Un proceso que arrancó no es un servicio
+# sano: los HTTP prueban su base/Redis, y los workers prueban su cola.
+#
+# Para trabajar en un servicio puntual, levanta sólo sus dependencias:
+#     docker compose up postgres rabbitmq redis auth
 # ══════════════════════════════════════════════════════════════════
+
+# Credenciales compartidas explícitas para eventos y limpieza. Usar claves hex.
+x-eventos: &eventos
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-ojoalgasto}:${RABBITMQ_PASSWORD:?Definir RABBITMQ_PASSWORD en .env}@rabbitmq:5672/
+  ELIMINACION_INTERNA_SECRET: ${ELIMINACION_INTERNA_SECRET:?Definir ELIMINACION_INTERNA_SECRET en .env}
 
 services:
 
   # ─── Infraestructura ────────────────────────────────────────────
 
   postgres:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: suscripciones
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports: ["5432:5432"]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
     volumes:
       - datos_postgres:/var/lib/postgresql/data
       # Crea un esquema por servicio en el primer arranque
       - ./infra/migraciones/01-esquemas.sql:/docker-entrypoint-initdb.d/01-esquemas.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-suscripciones}"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 5s
 
   rabbitmq:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: rabbitmq:3.13-management-alpine
-    ports:
-      - "5672:5672"      # protocolo
-      - "15672:15672"    # panel web
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ojoalgasto}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Definir RABBITMQ_PASSWORD en .env}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
+      timeout: 10s
       retries: 10
+      start_period: 10s
 
   redis:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    # Sin healthcheck (D-11): no se publica y los servicios que lo usan lo
+    # esperan con `service_started`. Si se le agrega uno, cambiar también esas
+    # dependencias y `SIN_HEALTHCHECK` en scripts/verificar_servicios.py.
 
   # ─── Gateway ────────────────────────────────────────────────────
 
   gateway:
+    networks: [web, auth, subscriptions, connectors, analytics, notifications]
     build: ./gateway
     ports: ["8000:8000"]
     env_file: .env
@@ -52,34 +70,79 @@ services:
       URL_CONNECTORS: http://connectors:8003
       URL_ANALYTICS: http://analytics:8004
       URL_NOTIFICATIONS: http://notifications:8005
-    depends_on: [auth, subscriptions, connectors, analytics, notifications, redis]
+    depends_on:
+      auth: { condition: service_healthy }
+      subscriptions: { condition: service_healthy }
+      connectors: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+      notifications: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
     volumes: ["./gateway:/app", "./shared:/app/shared:ro"]
 
   # ─── Servicios de dominio ───────────────────────────────────────
-  # Todos comparten la misma forma: build, env, depends_on, volumes.
 
   auth:
+    networks: [auth]
     build: ./services/auth
-    ports: ["8001:8001"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: auth
-      SEED_DEMO: "1"   # usuario de demostracion al arrancar (solo desarrollo)
+      SEED_DEMO: ${SEED_DEMO:-0}
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
       redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
+
+  auth-eliminaciones:
+    networks: [auth, subscriptions, connectors, analytics, notifications]
+    build: ./services/auth
+    entrypoint: ["python", "manage.py", "procesar_eliminaciones", "--continuo"]
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    env_file: .env
+    environment:
+      <<: *eventos
+      ESQUEMA_BD: auth
+    depends_on:
+      auth: { condition: service_healthy }
+      subscriptions: { condition: service_healthy }
+      connectors: { condition: service_healthy }
+      analytics: { condition: service_healthy }
+      notifications: { condition: service_healthy }
     volumes: ["./services/auth:/app", "./shared:/app/shared:ro"]
 
   subscriptions:
+    networks: [subscriptions]
     build: ./services/subscriptions
-    ports: ["8002:8002"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   # El actor Temporizador (RF-13): beat programa las tareas periódicas,
@@ -87,6 +150,7 @@ services:
   # punto de entrada; no corren migrate (lo hace subscriptions) y arrancan
   # cuando ese ya está sano, así la base está migrada.
   subscriptions-worker:
+    networks: [subscriptions]
     build: ./services/subscriptions
     entrypoint: ["celery", "-A", "config"]
     command: ["worker", "--loglevel=info"]
@@ -99,90 +163,176 @@ services:
       retries: 3
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
       redis: { condition: service_started }
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   subscriptions-beat:
+    networks: [subscriptions]
     build: ./services/subscriptions
     entrypoint: ["celery", "-A", "config"]
     # El archivo de estado de beat va fuera de /app para no aparecer en el repo
     command: ["beat", "--loglevel=info", "--schedule", "/tmp/celerybeat-schedule"]
+    # Beat no expone un canal de consulta. Se declara explícitamente sin
+    # healthcheck para no fingir salud: `docker compose ps` lo muestra
+    # "running", no "healthy", y ningún servicio depende de él.
     healthcheck:
       disable: true
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: subscriptions
     depends_on:
       subscriptions: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
       redis: { condition: service_started }
     volumes: ["./services/subscriptions:/app", "./shared:/app/shared:ro"]
 
   connectors:
+    networks: [connectors]
     build: ./services/connectors
-    ports: ["8003:8003"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: connectors
     command: ["python", "manage.py", "runserver", "0.0.0.0:8003"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8003/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   # Trabajador que ejecuta las sincronizaciones periódicas.
   # Mismo código que connectors, distinto punto de entrada.
+  # La app Celery está en connectors_config/celery.py (D-01). El archivo de
+  # estado de beat va fuera de /app para no aparecer en el repo.
   connectors-worker:
+    networks: [connectors]
     build: ./services/connectors
-    command: celery -A config worker --beat --loglevel=info
+    command: celery -A connectors_config worker --beat --loglevel=info --schedule /tmp/celerybeat-schedule
+    # El healthcheck del Dockerfile es HTTP; un worker no sirve HTTP.
+    healthcheck:
+      test: ["CMD", "celery", "-A", "connectors_config", "inspect", "ping", "--timeout", "5"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    env_file: .env
+    environment:
+      <<: *eventos
+      ESQUEMA_BD: connectors
+      APLICAR_MIGRACIONES: "0"
+    depends_on:
+      connectors: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      redis: { condition: service_started }
+    volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
+
+  # Purga de los archivos de importación vencidos (FE-07). Son cartolas: no
+  # pueden quedarse más allá de `vence_en`. Corre una vez por hora; cada pasada
+  # es una consulta y unos DELETE. No migra por su cuenta: espera a que
+  # `connectors` quede sano, y ese es quien aplica las migraciones. Si una
+  # pasada falla, la siguiente vuelve a tomar los mismos archivos.
+  connectors-purga:
+    # La red de connectors es la que comparte con postgres. Sin esto Compose
+    # la deja en `default`, donde postgres no está, y la purga nunca llega a
+    # la base: lo encontró la revisión de #120.
+    networks: [connectors]
+    build: ./services/connectors
+    command:
+      - sh
+      - -c
+      - while true; do python manage.py purgar_archivos_importacion --aplicar || echo "purga fallida, se reintenta en una hora"; sleep 3600; done
     env_file: .env
     environment:
       ESQUEMA_BD: connectors
-    depends_on: [connectors, redis]
+      APLICAR_MIGRACIONES: "0"
+    # El HEALTHCHECK de la imagen consulta el servidor HTTP, que acá no corre.
+    healthcheck: { disable: true }
+    depends_on:
+      connectors: { condition: service_healthy }
     volumes: ["./services/connectors:/app", "./shared:/app/shared:ro"]
 
   analytics:
+    networks: [analytics]
     build: ./services/analytics
-    ports: ["8004:8004"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: analytics
     command: ["python", "manage.py", "runserver", "0.0.0.0:8004"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8004/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # Mismo código e imagen que analytics; migra solo el servidor. Si los dos
+  # migraran el mismo esquema a la vez, uno muere con UniqueViolation.
+  # Consumidor pika de solapamientos. No migra: analytics ya lo hizo.
+  # `verificar_worker` comprueba que el proceso siga vivo y que RabbitMQ
+  # siga alcanzable; no declara sano un contenedor cuyo consumidor murió.
   analytics-worker:
+    networks: [analytics]
     build: ./services/analytics
-    command: ["python", "manage.py", "consumir_solapamientos"]
+    entrypoint: ["python", "manage.py"]
+    command: ["consumir_solapamientos"]
     healthcheck:
-      disable: true
+      test: ["CMD", "python", "manage.py", "verificar_worker"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: analytics
+      APLICAR_MIGRACIONES: "0"
     depends_on:
+      analytics: { condition: service_healthy }
+      postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
   notifications:
+    networks: [notifications]
     build: ./services/notifications
-    ports: ["8005:8005"]
     env_file: .env
     environment:
+      <<: *eventos
       ESQUEMA_BD: notifications
     command: ["python", "manage.py", "runserver", "0.0.0.0:8005"]
     depends_on:
       postgres: { condition: service_healthy }
       rabbitmq: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8005/health/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     volumes: ["./services/notifications:/app", "./shared:/app/shared:ro"]
 
   # ─── Frontend ───────────────────────────────────────────────────
 
   frontend:
+    networks: [web]
     # El contexto es frontend/ entero porque web/ importa shared/.
     # No depende del gateway al arrancar: la web lo llama desde el navegador,
     # no desde el contenedor.
@@ -202,3 +352,12 @@ services:
 volumes:
   datos_postgres:
 
+
+# Cada dominio solo comparte red con gateway y sus dependencias.
+networks:
+  web: {}
+  auth: {}
+  subscriptions: {}
+  connectors: {}
+  analytics: {}
+  notifications: {}

@@ -348,3 +348,87 @@ def test_contrato_de_rutas_publicas_exactas_de_main(upstream, ruta):
     assert respuesta.status_code == 200
     assert len(upstream.llamadas) == 1
 
+
+# ── VI-19 / VI-25: rutas nuevas de subscriptions ────────────────────
+
+def test_hallazgos_listado_detalle_y_revision_llegan_a_subscriptions(upstream):
+    hallazgo = str(uuid.uuid4())
+
+    assert cliente.get("/api/hallazgos/", **con_token(token())).status_code == 200
+    assert upstream.llamadas[-1]["metodo"] == "GET"
+    assert upstream.llamadas[-1]["url"] == (
+        settings.SERVICIOS["subscriptions"] + "/api/hallazgos/"
+    )
+
+    assert cliente.get(
+        f"/api/hallazgos/{hallazgo}/", **con_token(token())
+    ).status_code == 200
+    assert upstream.llamadas[-1]["url"] == (
+        settings.SERVICIOS["subscriptions"] + f"/api/hallazgos/{hallazgo}/"
+    )
+
+    cuerpo = '{"estado": "revisada"}'
+    assert cliente.post(
+        f"/api/hallazgos/{hallazgo}/revisar/",
+        data=cuerpo,
+        content_type="application/json",
+        **con_token(token()),
+    ).status_code == 200
+    llamada = upstream.llamadas[-1]
+    assert llamada["metodo"] == "POST"
+    assert llamada["url"] == (
+        settings.SERVICIOS["subscriptions"] + f"/api/hallazgos/{hallazgo}/revisar/"
+    )
+    assert llamada["data"] == cuerpo.encode()
+
+
+def test_ambas_rutas_de_exportacion_llegan_a_subscriptions_con_sus_filtros(upstream):
+    query = (
+        "?desde=2026-10-01&hasta=2026-10-31&moneda=CLP&origen=manual"
+    )
+
+    for ruta in ("/api/export/cobros/", "/api/suscripciones/exportar-csv/"):
+        respuesta = cliente.get(ruta + query, **con_token(token()))
+        assert respuesta.status_code == 200
+        llamada = upstream.llamadas[-1]
+        assert llamada["metodo"] == "GET"
+        assert llamada["url"] == settings.SERVICIOS["subscriptions"] + ruta + query
+
+
+@pytest.mark.parametrize(
+    "metodo,ruta",
+    [
+        ("get", "/api/hallazgos/"),
+        ("get", f"/api/hallazgos/{uuid.uuid4()}/"),
+        ("post", f"/api/hallazgos/{uuid.uuid4()}/revisar/"),
+        ("get", "/api/export/cobros/?desde=2026-10-01&hasta=2026-10-31"),
+        (
+            "get",
+            "/api/suscripciones/exportar-csv/?desde=2026-10-01&hasta=2026-10-31",
+        ),
+    ],
+)
+def test_rutas_nuevas_sin_sesion_son_401_y_no_reenvian(upstream, metodo, ruta):
+    assert getattr(cliente, metodo)(ruta).status_code == 401
+    assert not upstream.llamadas
+
+
+def test_rutas_nuevas_ignoran_identidad_del_cliente(upstream):
+    cliente.get(
+        "/api/hallazgos/",
+        HTTP_X_ORGANIZACION_ID="organizacion-ajena",
+        HTTP_X_USUARIO_ID="otro",
+        HTTP_X_ROL="admin",
+        **con_token(token()),
+    )
+    cab = upstream.llamadas[-1]["headers"]
+    assert cab["X-Usuario-Id"] == "7f3a1b"
+    assert cab["X-Organizacion-Id"] == "9c2140"
+    assert cab["X-Rol"] == "titular"
+
+
+def test_las_rutas_nuevas_no_son_publicas():
+    assert "/api/hallazgos/" not in settings.RUTAS_PUBLICAS
+    assert "/api/export/cobros/" not in settings.RUTAS_PUBLICAS
+
+

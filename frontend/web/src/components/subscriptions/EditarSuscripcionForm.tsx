@@ -39,14 +39,14 @@ const DEFAULT_SUSCRIPCION: EditarSuscripcionFormData = {
 };
 
 /** Pasa una suscripción del dominio al formulario. */
-export function aFormulario(s: Suscripcion): EditarSuscripcionFormData {
+export function aFormulario(suscripcion: Suscripcion): EditarSuscripcionFormData {
   return {
-    id: s.id,
-    nombre: s.nombre,
-    monto: String(s.monto),
-    moneda: s.moneda,
-    frecuencia: s.frecuencia,
-    categoria: s.categoria,
+    id: suscripcion.id,
+    nombre: suscripcion.nombre,
+    monto: String(suscripcion.monto),
+    moneda: suscripcion.moneda,
+    frecuencia: suscripcion.frecuencia,
+    categoria: suscripcion.categoria,
   };
 }
 
@@ -62,7 +62,7 @@ export function EditarSuscripcionForm({
   // Los datos con que se abrió: contra ellos se comparan los cambios (CH-16).
   const [inicial] = useState<EditarSuscripcionFormData>(suscripcion);
   const hayCambios = (Object.keys(inicial) as (keyof EditarSuscripcionFormData)[]).some(
-    (k) => formData[k] !== inicial[k],
+    (campo) => formData[campo] !== inicial[campo],
   );
   useEffect(() => {
     onCambiosSinGuardar?.(hayCambios);
@@ -72,20 +72,20 @@ export function EditarSuscripcionForm({
   const monedas = datos?.monedas ?? [];
   const categorias = datos?.categorias ?? [];
   const frecuencias = datos?.frecuencias ?? [];
-  const monedasPermitidas = monedas.filter((o) => o.activo || o.codigo === suscripcion.moneda);
-  const categoriasPermitidas = categorias.filter((o) => o.activo || o.codigo === suscripcion.categoria);
+  const monedasPermitidas = monedas.filter((opcion) => opcion.activo || opcion.codigo === suscripcion.moneda);
+  const categoriasPermitidas = categorias.filter((opcion) => opcion.activo || opcion.codigo === suscripcion.categoria);
   const listo = !!datos && !cargando && !errorCatalogo
     && monedasPermitidas.length > 0 && categoriasPermitidas.length > 0 && frecuencias.length > 0;
-  const seleccionValida = monedasPermitidas.some((o) => o.codigo === formData.moneda)
-    && categoriasPermitidas.some((o) => o.codigo === formData.categoria)
-    && frecuencias.some((o) => o.codigo === formData.frecuencia);
+  const seleccionValida = monedasPermitidas.some((opcion) => opcion.codigo === formData.moneda)
+    && categoriasPermitidas.some((opcion) => opcion.codigo === formData.categoria)
+    && frecuencias.some((opcion) => opcion.codigo === formData.frecuencia);
 
   const handleChange = (field: keyof EditarSuscripcionFormData, value: string) => {
-    setFormData((prev) => ({ ...prev, [field]: value }) as EditarSuscripcionFormData);
+    setFormData((actual) => ({ ...actual, [field]: value }) as EditarSuscripcionFormData);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = (evento: React.FormEvent) => {
+    evento.preventDefault();
     if (!listo || !seleccionValida || isSaving) return;
     onSubmit?.(formData);
   };
@@ -104,7 +104,7 @@ export function EditarSuscripcionForm({
           etiqueta="Servicio"
           type="text"
           value={formData.nombre}
-          onChange={(e) => handleChange("nombre", e.target.value)}
+          onChange={(evento) => handleChange("nombre", evento.target.value)}
           autoFocus
         />
 
@@ -116,18 +116,18 @@ export function EditarSuscripcionForm({
             step="0.01"
             min="0"
             value={formData.monto}
-            onChange={(e) => handleChange("monto", e.target.value)}
+            onChange={(evento) => handleChange("monto", evento.target.value)}
           />
           <CampoSelect
             etiqueta="Moneda"
             className={styles.moneda}
             value={formData.moneda}
-            onChange={(e) => handleChange("moneda", e.target.value)}
+            onChange={(evento) => handleChange("moneda", evento.target.value)}
           >
             {!formData.moneda && <option value="">Selecciona una moneda</option>}
-            {monedasPermitidas.map((m) => (
-              <option key={m.codigo} value={m.codigo}>
-                {m.nombre} ({m.codigo}){!m.activo && " (inactiva)"}
+            {monedasPermitidas.map((moneda) => (
+              <option key={moneda.codigo} value={moneda.codigo}>
+                {moneda.nombre} ({moneda.codigo}){!moneda.activo && " (inactiva)"}
               </option>
             ))}
           </CampoSelect>
@@ -137,24 +137,24 @@ export function EditarSuscripcionForm({
           <CampoSelect
             etiqueta="Se cobra"
             value={formData.frecuencia}
-            onChange={(e) => handleChange("frecuencia", e.target.value)}
+            onChange={(evento) => handleChange("frecuencia", evento.target.value)}
           >
             {!formData.frecuencia && <option value="">Selecciona frecuencia</option>}
-            {frecuencias.map((f) => (
-              <option key={f.codigo} value={f.codigo}>
-                {f.nombre}
+            {frecuencias.map((opcion) => (
+              <option key={opcion.codigo} value={opcion.codigo}>
+                {opcion.nombre}
               </option>
             ))}
           </CampoSelect>
           <CampoSelect
             etiqueta="Categoría"
             value={formData.categoria}
-            onChange={(e) => handleChange("categoria", e.target.value)}
+            onChange={(evento) => handleChange("categoria", evento.target.value)}
           >
             {!formData.categoria && <option value="">Selecciona una categoría</option>}
-            {categoriasPermitidas.map((c) => (
-              <option key={c.codigo} value={c.codigo}>
-                {c.nombre}{!c.activo && " (inactiva)"}
+            {categoriasPermitidas.map((nombreDeCampo) => (
+              <option key={nombreDeCampo.codigo} value={nombreDeCampo.codigo}>
+                {nombreDeCampo.nombre}{!nombreDeCampo.activo && " (inactiva)"}
               </option>
             ))}
           </CampoSelect>

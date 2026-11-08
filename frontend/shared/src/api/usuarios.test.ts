@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { configurarApi, ErrorDeApi } from './cliente';
-import { actualizarNombre, cambiarContrasena } from './usuarios';
+import { actualizarNombre, cambiarContrasena, getUsuarioActual } from './usuarios';
 
 const URL_BASE = 'http://api.test/api';
 
@@ -46,7 +46,7 @@ describe('actualizarNombre (CH-08 → MX-06)', () => {
       // CambioPerfilSerializer rechaza cualquier clave que no sea "nombre".
       cuerpo: { nombre: 'Ana Pérez' },
     });
-    expect(usuario).toEqual(USUARIO_API);
+    expect(usuario).toEqual({ ...USUARIO_API, id: '7' });
   });
 
   it('un 400 trae el error del campo nombre', async () => {
@@ -58,6 +58,11 @@ describe('actualizarNombre (CH-08 → MX-06)', () => {
     expect((error as ErrorDeApi).status).toBe(400);
     expect((error as ErrorDeApi).campos).toEqual({ nombre: ['Este campo no puede estar en blanco.'] });
   });
+});
+
+it('adapta el id numérico y el tenant/rol nulos del contrato Auth para la presentación', async () => {
+  fetchFalso.mockResolvedValue(respuesta(200, { ...USUARIO_API, rol: null, organizacion_id: null, plan: 'free' }));
+  await expect(getUsuarioActual()).resolves.toEqual({ ...USUARIO_API, id: '7', rol: '', organizacion_id: '', plan: 'free' });
 });
 
 describe('cambiarContrasena (CH-29 → MX-05)', () => {

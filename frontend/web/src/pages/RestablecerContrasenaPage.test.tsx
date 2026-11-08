@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -97,7 +97,9 @@ describe("Restablecer contraseña: enlace válido (CH-07)", () => {
 
     expect(restablecerMock).not.toHaveBeenCalled();
     expect(campo("Nueva contraseña")).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText(POLITICA)).toBeInTheDocument();
+    expect(campo("Nueva contraseña")).toHaveAccessibleDescription(POLITICA);
+    // El foco va al primer campo con error (CH-25).
+    await waitFor(() => expect(campo("Nueva contraseña")).toHaveFocus());
   });
 
   it("contraseñas distintas: error bajo la confirmación y no se envía", async () => {
@@ -105,7 +107,9 @@ describe("Restablecer contraseña: enlace válido (CH-07)", () => {
     await cambiar("nueva 1234", "nueva 12345");
 
     expect(restablecerMock).not.toHaveBeenCalled();
-    expect(screen.getByText("Las contraseñas no coinciden.")).toBeInTheDocument();
+    expect(campo("Repite la contraseña")).toHaveAccessibleDescription("Las contraseñas no coinciden.");
+    // La nueva está bien: el foco va a la confirmación, que es la que falló.
+    await waitFor(() => expect(campo("Repite la contraseña")).toHaveFocus());
   });
 
   it("si el backend rechaza la contraseña, su mensaje sale bajo el campo y se puede corregir", async () => {
@@ -113,8 +117,9 @@ describe("Restablecer contraseña: enlace válido (CH-07)", () => {
     montar();
     await cambiar("nueva 1234");
 
-    expect(screen.getByText(POLITICA)).toBeInTheDocument();
+    expect(campo("Nueva contraseña")).toHaveAccessibleDescription(POLITICA);
     expect(boton()).toBeEnabled();
+    await waitFor(() => expect(campo("Nueva contraseña")).toHaveFocus());
     expect(screen.getByRole("heading", { name: "Restablecer contraseña" })).toBeInTheDocument();
   });
 

@@ -186,6 +186,10 @@ EOF
 
   nota "python manage.py check && pytest ${PYTEST_ARGS[*]:-}"
   echo
+  # Las mismas variables que el `env:` de .github/workflows/ci.yml. Si tu copia
+  # tiene .env, los settings también lo leen (el repo va montado) y pueden tapar
+  # una variable obligatoria que falte acá: en el CI no hay .env. connectors
+  # exige CELERY_BROKER_URL (D-01); las pruebas no se conectan al broker.
   docker run --rm --network "$RED" \
     -v "$RAIZ_HOST:/repo" -w "/repo/$dir" \
     -e DEBUG=True \
@@ -195,6 +199,7 @@ EOF
     -e ESQUEMA_BD="$svc" \
     -e JWT_SECRET=secreto-solo-para-tests \
     -e JWT_ALGORITMO=HS256 \
+    -e CELERY_BROKER_URL=redis://localhost:6379/0 \
     -e PYTHONPATH=/repo \
     "$img" bash -c "python manage.py check && pytest -p no:cacheprovider ${PYTEST_ARGS[*]:-}" \
     2>&1 | tee "$log"

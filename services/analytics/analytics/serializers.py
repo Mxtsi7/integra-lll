@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from analytics.models import (
     DIAS_VIGENCIA_DESCARTE_DEFAULT,
@@ -55,6 +56,12 @@ class PuntajeUsoSerializer(serializers.Serializer):
     )
 
 
+class EvidenciaRecomendacionSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    url = serializers.URLField()
+    descripcion = serializers.CharField()
+
+
 class RecomendacionConsolidacionSerializer(serializers.ModelSerializer):
     """Contrato compatible con ``frontend/shared/src/api/recomendaciones.ts``."""
 
@@ -82,6 +89,7 @@ class RecomendacionConsolidacionSerializer(serializers.ModelSerializer):
             "ocurrido_en",
         ]
 
+    @extend_schema_field(EvidenciaRecomendacionSerializer)
     def get_evidencia(self, recomendacion):
         return {
             "id": recomendacion.evidencia_id,
@@ -163,3 +171,15 @@ class RecomendacionDescartadaSerializer(serializers.ModelSerializer):
 
     def get_descartado(self, obj) -> bool:
         return True
+
+
+class ConsultaAsistenteSerializer(serializers.Serializer):
+    """Mensaje opcional del usuario para el asistente (VI-22)."""
+
+    mensaje = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Pregunta libre sobre los datos de la organización",
+    )

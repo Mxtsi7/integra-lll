@@ -68,6 +68,12 @@ class ConfiguracionOAuth:
     # Google quiere access_type=offline + prompt=consent para entregar el
     # refresh token; Microsoft lo entrega con el scope offline_access.
     extra_autorizacion: tuple[tuple[str, str], ...] = ()
+    #: ¿El proveedor ofrece una operación de revocación que podamos usar?
+    #: No se deduce de `url_revocacion`: un fallo del proveedor y una
+    #: limitación permanente son cosas distintas. Outlook es el caso conocido
+    #: en que no existe revocación por token; su política se documenta en
+    #: `docs/decisiones/mx-07-outlook-revocacion.md`.
+    revocacion_soportada: bool = True
 
     @property
     def scope_junto(self) -> str:
@@ -92,6 +98,7 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
             # queda sin poder refrescarse.
             ("prompt", "consent"),
         ),
+        revocacion_soportada=True,
     ),
     CuentaConectada.Proveedor.OUTLOOK: ConfiguracionOAuth(
         url_autorizacion="https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
@@ -108,6 +115,8 @@ CONFIGURACIONES: dict[str, ConfiguracionOAuth] = {
         # Microsoft emite por tenant: https://login.microsoftonline.com/{tid}/v2.0
         # El prefijo se comprueba aparte, en `_emisor_aceptado`.
         emisores=("https://login.microsoftonline.com/",),
+        # Limitación permanente del proveedor, no un fallo reintentable.
+        revocacion_soportada=False,
     ),
 }
 
@@ -124,6 +133,26 @@ def configuracion_de(proveedor: str) -> ConfiguracionOAuth:
         raise ProveedorNoSoportado(
             f"{proveedor} no usa OAuth; no se puede iniciar una autorización."
         ) from None
+
+
+def soporta_revocacion(proveedor: str) -> bool:
+    """¿El proveedor ofrece una revocación que podamos intentar?
+
+    Un proveedor desconocido se trata como **soportado** para que la limpieza
+    lo bloquee en vez de aceptarlo por error. El CSV tampoco está en
+    `CONFIGURACIONES`, pero la limpieza lo excluye antes de llegar acá.
+    """
+    config = CONFIGURACIONES.get(proveedor)
+    return True if config is None else config.revocacion_soportada
+
+
+def proveedores_sin_revocacion() -> tuple[str, ...]:
+    """Proveedores cuya limitación es permanente, no un fallo reintentable."""
+    return tuple(
+        proveedor
+        for proveedor, config in CONFIGURACIONES.items()
+        if not config.revocacion_soportada
+    )
 
 
 def credenciales_de(proveedor: str) -> tuple[str, str]:
@@ -210,10 +239,46 @@ def canjear_codigo(
     return datos
 
 
-def revocar(proveedor: str, *, access_token: str) -> bool:
+class _TokenInvalido:
+    """El proveedor contestó, y lo que dijo es que ese token ya no es válido.
+
+    Es FALSO como booleano a propósito: quien trate la respuesta de `revocar`
+    como un bool lo lee como "no confirmó", que es la lectura segura. Solo
+    `revocacion.py` lo distingue, porque es la que sabe QUÉ token mandó.
+    """
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return "TOKEN_INVALIDO"
+
+
+#: Lo que devuelve `revocar` cuando Google responde 400 con
+#: `error=invalid_token`. No es lo mismo que "no confirmó" (red caída, 5xx):
+#: el proveedor sí contestó, pero rechazó una credencial. No acredita que
+#: toda la autorización haya sido revocada, tampoco si se envió un refresh.
+TOKEN_INVALIDO = _TokenInvalido()
+
+
+def _error_oauth(respuesta) -> str:
+    """El campo `error` del cuerpo JSON (RFC 6749), o "" si no hay."""
+    try:
+        cuerpo = respuesta.json()
+    except ValueError:
+        return ""
+    return str(cuerpo.get("error") or "") if isinstance(cuerpo, dict) else ""
+
+
+def revocar(proveedor: str, *, access_token: str):
     """Pide al proveedor que invalide el token. True si lo confirmó.
 
-    ── Por qué devuelve bool y no lanza ─────────────────────────────────────
+    Devuelve True (200/204), `TOKEN_INVALIDO` (400 `invalid_token`) o False
+    (cualquier otra cosa: red, timeout, 5xx, otro 4xx). El argumento se sigue
+    llamando `access_token` por compatibilidad, pero es el token que se quiere
+    revocar, y `revocacion.py` manda el de REFRESCO cuando lo hay.
+
+    ── Por qué devuelve y no lanza ──────────────────────────────────────────
     Desconectar tiene que funcionar aunque el proveedor no conteste. Lo que el
     usuario pidió es dejar de darnos acceso, y de eso nos encargamos nosotros
     borrando las credenciales. Si además el proveedor confirma, mejor; si no,
@@ -224,9 +289,14 @@ def revocar(proveedor: str, *, access_token: str) -> bool:
     Microsoft no tiene endpoint de revocación por token: devuelve False y el
     detalle lo explica. El token igual queda inservible de este lado porque se
     borra, y expira solo.
+
+    Este `False` no distingue “el proveedor no lo soporta” de “el proveedor
+    falló”. Para esa decisión, usar `soporta_revocacion()`; la limpieza de
+    Outlook no debe confundir la limitación permanente con un fallo
+    reintentable.
     """
     config = configuracion_de(proveedor)
-    if not config.url_revocacion:
+    if not config.revocacion_soportada or not config.url_revocacion:
         return False
     try:
         respuesta = requests.post(
@@ -236,7 +306,11 @@ def revocar(proveedor: str, *, access_token: str) -> bool:
         )
     except requests.RequestException:
         return False
-    return respuesta.status_code in (200, 204)
+    if respuesta.status_code in (200, 204):
+        return True
+    if respuesta.status_code == 400 and _error_oauth(respuesta) == "invalid_token":
+        return TOKEN_INVALIDO
+    return False
 
 
 def _emisor_aceptado(config: ConfiguracionOAuth, iss: str) -> bool:

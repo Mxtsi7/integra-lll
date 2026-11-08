@@ -50,6 +50,16 @@ def sobre_creada(*, ocurrido="2026-01-15T08:30:00Z", nombre="Netflix", susc=SUSC
 
 
 class TestSuscripcionCreada:
+    @pytest.mark.parametrize("sobre", [sobre_creada(), sobre_uso()])
+    def test_evento_tardio_no_recrea_datos_de_organizacion_eliminada(self, sobre):
+        from shared.borrado.models import EstadoOrganizacion
+
+        EstadoOrganizacion.objects.create(organizacion_id=ORG, eliminada=True)
+        assert aplicar(sobre) is False
+        assert not SuscripcionObservada.objects.exists()
+        assert not UsoProyectado.objects.exists()
+        assert not UsoMensual.objects.exists()
+
     def test_deja_constancia_de_que_existe_y_desde_cuando(self):
         assert aplicar(sobre_creada()) is True
         fila = SuscripcionObservada.objects.get()

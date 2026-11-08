@@ -15,6 +15,13 @@ def sesiones_en_memoria(settings):
     caches["sesiones"].clear()
 
 
+@pytest.fixture(autouse=True)
+def secreto_eliminacion(monkeypatch):
+    # Eliminar una cuenta exige el secreto de la limpieza entre servicios
+    # (MX-07). Las pruebas que lo quitan lo hacen a propósito.
+    monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
+
+
 def crear_esquema_del_servicio(sender, using, **kwargs):
     from django.conf import settings
     from django.db import connections

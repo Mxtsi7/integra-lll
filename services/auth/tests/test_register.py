@@ -1,9 +1,11 @@
 import pytest
+from unittest.mock import patch
+from django.db import DatabaseError
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from app.models import User
+from app.models import Organizacion, User
 
 
 @pytest.mark.django_db
@@ -31,6 +33,7 @@ class TestRegisterEndpoint:
         assert user.check_password("ClaveSegura123")
         assert user.password != "ClaveSegura123"
         assert user.consentimiento_en is not None
+        assert User.objects.count() == Organizacion.objects.count() == 1
 
     def test_register_email_duplicado_devuelve_400(self):
         response1 = self.client.post(self.url, self.valid_payload, format="json")
@@ -77,6 +80,7 @@ class TestRegisterEndpoint:
         response = self.client.post(self.url, payload, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "acepta_datos" in response.data
+        assert not User.objects.exists() and not Organizacion.objects.exists()
 
     def test_al_registrarse_queda_como_titular_de_su_organizacion(self):
         self.client.post(
@@ -113,10 +117,9 @@ class TestRegisterConOrganizacion:
         assert user.organizacion is not None
         assert user.rol == User.Rol.TITULAR
         assert user.organizacion.nombre == "Hogar de Ana"
+        assert Organizacion.objects.count() == User.objects.count() == 1
 
     def test_con_codigo_valido_se_une_como_integrante(self):
-        from app.models import Organizacion
-
         org = Organizacion.objects.create(nombre="Hogar de Familia")
 
         payload = {
@@ -125,6 +128,8 @@ class TestRegisterConOrganizacion:
             "nombre": "Pedro",
             "acepta_datos": True,
             "codigo_organizacion": str(org.id),
+            "rol": "titular",
+            "organizacion_id": "00000000-0000-0000-0000-000000000000",
         }
         response = self.client.post(self.url, payload, format="json")
         assert response.status_code == status.HTTP_201_CREATED
@@ -132,6 +137,9 @@ class TestRegisterConOrganizacion:
         user = User.objects.get(email="pedro@test.com")
         assert user.organizacion_id == org.id
         assert user.rol == User.Rol.INTEGRANTE
+        assert Organizacion.objects.count() == 1 and org.usuarios.count() == 1
+        org.refresh_from_db()
+        assert org.nombre == "Hogar de Familia"
 
     def test_codigo_invalido_devuelve_400(self):
         payload = {
@@ -144,3 +152,17 @@ class TestRegisterConOrganizacion:
         response = self.client.post(self.url, payload, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "codigo_organizacion" in response.data
+        assert not User.objects.exists() and not Organizacion.objects.exists()
+
+    @pytest.mark.parametrize("con_codigo", [False, True])
+    def test_fallo_al_crear_usuario_revierte_la_transaccion(self, con_codigo):
+        org = Organizacion.objects.create(nombre="Organización existente") if con_codigo else None
+        payload = {"email": "fallo@test.com", "nombre": "Fallo", "password": "ClaveSegura123", "acepta_datos": True}
+        if org:
+            payload["codigo_organizacion"] = str(org.pk)
+        organizaciones = set(Organizacion.objects.values_list("pk", flat=True))
+        with patch("app.serializers.User.objects.create_user", side_effect=DatabaseError("Fallo controlado")):
+            with pytest.raises(DatabaseError):
+                self.client.post(self.url, payload, format="json")
+        assert not User.objects.exists()
+        assert set(Organizacion.objects.values_list("pk", flat=True)) == organizaciones

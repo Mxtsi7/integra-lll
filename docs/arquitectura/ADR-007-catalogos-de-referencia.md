@@ -109,6 +109,10 @@ aparecen sin recompilar la web.
 
 ## Límites deliberados
 
+La ampliación de presupuesto, resumen y presentación multimoneda se documenta
+en [Monedas y totales](../flujos/monedas-y-totales.md); actualiza los límites
+de cálculos y reportes descritos a continuación.
+
 El catálogo de países queda disponible para futuros selectores. No se añade un
 campo país al usuario ni se vuelve obligatorio en el registro. La app móvil
 puede reutilizar `getCatalogosSuscripciones`/`getPaises` del paquete compartido.

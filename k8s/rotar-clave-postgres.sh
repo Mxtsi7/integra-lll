@@ -37,7 +37,7 @@ APLICAR=0
 
 # Los que abren conexiones a la base. El gateway recibe el Secret pero no
 # consulta Postgres, así que no se reinicia: sería corte sin motivo.
-SERVICIOS=(auth subscriptions subscriptions-worker subscriptions-beat)
+SERVICIOS=(auth auth-eliminaciones subscriptions subscriptions-worker subscriptions-beat)
 SECRETO=ojoalgasto
 
 paso() { echo; echo "── $* ──"; }

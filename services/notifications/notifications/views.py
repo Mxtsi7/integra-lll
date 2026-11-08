@@ -15,7 +15,8 @@ from rest_framework.views import APIView
 
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from .models import Alerta, PreferenciaNotificacion
+from .models import Alerta, PreferenciaNotificacion, UsuarioEliminado
+from shared.borrado.bloqueo import escritura_organizacion
 from .serializers import (
     AlertaSerializer,
     ContadorSerializer,
@@ -217,9 +218,13 @@ class PreferenciasNotificacionView(APIView):
             # personales. Devolver las de la organización sería mezclar a dos
             # personas en una misma fila.
             raise PermissionDenied("Falta el contexto de usuario")
-        preferencia, _ = PreferenciaNotificacion.objects.get_or_create(
-            organizacion_id=org, usuario_id=str(usuario)
-        )
+        # GET también escribe los valores iniciales: participa del bloqueo.
+        with escritura_organizacion(org):
+            if UsuarioEliminado.objects.filter(organizacion_id=org, usuario_id=str(usuario)).exists():
+                raise PermissionDenied("El usuario fue eliminado")
+            preferencia, _ = PreferenciaNotificacion.objects.get_or_create(
+                organizacion_id=org, usuario_id=str(usuario)
+            )
         return preferencia
 
     def get(self, request):

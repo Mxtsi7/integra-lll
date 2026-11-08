@@ -18,6 +18,7 @@ interface CancelarSuscripcionDialogProps {
 /**
  * Cuerpo de la confirmación de cancelar (CH-10). Se muestra dentro de
  * <Modal tipo="alerta">, que pone el título y evita el cierre accidental.
+ * La usan el detalle y el interruptor de las tarjetas de Inicio.
  *
  * Cancelar no es eliminar: explica qué se conserva y qué deja de pasar, y
  * el botón para cerrar dice "Volver" (no "Cancelar") para no confundirlo
@@ -37,6 +38,12 @@ const CancelarSuscripcionDialog: React.FC<CancelarSuscripcionDialogProps> = ({
         calendario. Su historial de cobros y de uso se conserva.
       </p>
       <p className={styles.mensaje}>Esto no la elimina: si quieres sacarla de tu lista, usa Eliminar.</p>
+      {/* Lo que se cambia acá es el seguimiento en Ojo al Gasto: el cobro real
+          solo se detiene en el proveedor. */}
+      <p className={styles.mensaje}>
+        Esto solo cambia el seguimiento en Ojo al Gasto. Para que dejen de cobrarte, cancela el servicio con su
+        proveedor.
+      </p>
 
       {error && (
         <p className={styles.error} role="alert">

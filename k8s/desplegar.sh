@@ -4,7 +4,7 @@
 #     ./k8s/desplegar.sh                 # construye, publica y aplica
 #     SOLO_APLICAR=1 ./k8s/desplegar.sh  # solo aplica (no reconstruye)
 #
-# Requisitos: docker, kubectl con el contexto del ramo, y sesión en el
+# Requisitos: python3, docker, kubectl con el contexto del ramo, y sesión en el
 # registro (docker login ghcr.io).
 set -euo pipefail
 
@@ -13,6 +13,17 @@ ETIQUETA="${ETIQUETA:-$(git rev-parse --short HEAD)}"
 HOST_PUBLICO="${HOST_PUBLICO:-ojoalgasto-forellana.dev.censei.cl}"
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$RAIZ"
+
+# El contenido llega por stdin; ni las claves ni el JSON aparecen en argv.
+# El subshell limita umask y trampas a cada parche, también si kubectl falla.
+parchear_secreto() (
+  umask 077
+  PARCHE="$(mktemp)"
+  trap 'rm -f "$PARCHE"' EXIT
+  trap 'exit 1' HUP INT TERM
+  cat > "$PARCHE"
+  kubectl patch secret ojoalgasto --type=merge --patch-file "$PARCHE" >/dev/null
+)
 
 IMAGEN_AUTH="$REGISTRO/ojoalgasto-auth:$ETIQUETA"
 IMAGEN_SUBSCRIPTIONS="$REGISTRO/ojoalgasto-subscriptions:$ETIQUETA"
@@ -36,12 +47,8 @@ echo "── credencial del registro ──"
 # El cluster solo necesita BAJAR las imágenes, así que con un token de
 # `read:packages` basta. Pásalo en GHCR_TOKEN:
 #     https://github.com/settings/tokens/new?scopes=read:packages
-# Sin él se usa el de `gh`, que tiene permiso de escritura: funciona, pero
-# deja en el cluster una credencial que puede publicar paquetes a tu nombre.
-if [ -z "${GHCR_TOKEN:-}" ]; then
-  echo "   OJO: sin GHCR_TOKEN se usa el token de gh, que puede escribir."
-  GHCR_TOKEN="$(gh auth token)"
-fi
+# No se copia al cluster el token de escritura de la cuenta de desarrollo.
+: "${GHCR_TOKEN:?Definir GHCR_TOKEN con permiso read:packages para el cluster}"
 kubectl create secret docker-registry ghcr \
   --docker-server=ghcr.io \
   --docker-username="${GHCR_USUARIO:-FelipeOrellanaCaro}" \
@@ -68,8 +75,7 @@ elif ! kubectl get secret ojoalgasto -o jsonpath='{.data.DATABASE_URL}' | grep -
   # NO se cambia (POSTGRES_PASSWORD solo se aplica en el primer arranque).
   # Solo se agrega la URL que faltaba.
   CLAVE_POSTGRES="$(kubectl get secret ojoalgasto -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d)"
-  kubectl patch secret ojoalgasto --type=merge \
-    -p "{\"stringData\":{\"DATABASE_URL\":\"postgres://postgres:$CLAVE_POSTGRES@postgres:5432/suscripciones\"}}" >/dev/null
+  printf '{"stringData":{"DATABASE_URL":"postgres://postgres:%s@postgres:5432/suscripciones"}}' "$CLAVE_POSTGRES" | parchear_secreto
   echo "   secret al día: DATABASE_URL agregada con la clave que ya usaba la base"
 else
   echo "   ya existía, se deja como está"
@@ -91,15 +97,41 @@ fi
 # Se agrega una sola vez; rotarla es un procedimiento aparte
 # (shared/cifrado/README.md), nunca se regenera sola o lo guardado queda ilegible.
 if ! kubectl get secret ojoalgasto -o jsonpath='{.data.CLAVES_CIFRADO}' | grep -q .; then
-  kubectl patch secret ojoalgasto --type=merge \
-    -p "{\"stringData\":{\"CLAVES_CIFRADO\":\"$(openssl rand -base64 32 | tr '+/' '-_')\"}}" >/dev/null
+  printf '{"stringData":{"CLAVES_CIFRADO":"%s"}}' "$(openssl rand -base64 32 | tr '+/' '-_')" | parchear_secreto
   echo "   CLAVES_CIFRADO agregada al secret"
 fi
 
+# Firma independiente de JWT, compartida por Auth y consumidores de limpieza.
+# Se añade también al Secret existente, sin rotar otras credenciales.
+if ! kubectl get secret ojoalgasto -o jsonpath='{.data.ELIMINACION_INTERNA_SECRET}' | grep -q .; then
+  CLAVE_ELIMINACION="$(openssl rand -hex 32)"
+  printf '{"stringData":{"ELIMINACION_INTERNA_SECRET":"%s"}}' "$CLAVE_ELIMINACION" | parchear_secreto
+fi
+
 echo "── aplicando manifiestos ──"
-for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml k8s/02-redis-rabbitmq.yaml \
+# Credencial dedicada; en un despliegue existente se conserva el Secret.
+if ! kubectl get secret ojoalgasto-rabbitmq >/dev/null 2>&1; then
+  CLAVE_RABBITMQ="$(openssl rand -hex 32)"
+  printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"ojoalgasto-rabbitmq"},"type":"Opaque","stringData":{"RABBITMQ_USER":"ojoalgasto","RABBITMQ_PASSWORD":"%s","RABBITMQ_URL":"amqp://ojoalgasto:%s@rabbitmq:5672/"}}' \
+    "$CLAVE_RABBITMQ" "$CLAVE_RABBITMQ" | kubectl create -f - >/dev/null
+fi
+# Verificar/drenar el broker ANTES de reemplazarlo o reiniciar sus consumidores.
+# Si falla, no se aplica el manifiesto ni se prosigue con la migración.
+python3 k8s/actualizar-rabbitmq.py
+# El usuario del broker NO lo crean RABBITMQ_DEFAULT_USER/PASS cuando ya hay
+# datos en el PVC: solo actuan en el primer arranque. Sin esto los clientes
+# quedan sin poder autenticarse. Ver el encabezado del guion.
+bash k8s/configurar-usuario-rabbitmq.sh
+
+# Preparar Postgres antes de las migraciones de dominio.
+kubectl apply -f k8s/00-configuracion.yaml
+kubectl apply -f k8s/01-postgres.yaml
+kubectl rollout status statefulset/postgres --timeout=300s
+bash k8s/configurar-usuarios-bd.sh
+
+for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml \
          k8s/10-auth.yaml k8s/11-subscriptions.yaml k8s/12-gateway.yaml \
-         k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml; do
+         k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml k8s/40-red.yaml; do
   sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \
       -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
       -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \
@@ -110,7 +142,7 @@ done
 
 echo "── esperando a que todo quede arriba ──"
 kubectl rollout status statefulset/postgres --timeout=300s
-for d in redis rabbitmq auth subscriptions subscriptions-worker subscriptions-beat gateway web; do
+for d in redis rabbitmq auth auth-eliminaciones subscriptions subscriptions-worker subscriptions-beat gateway web; do
   # Un deployment en 0 réplicas está así a propósito (RabbitMQ hasta el
   # Sprint 2). `rollout status` se quedaría esperando 300s y saldría con
   # error, tumbando el script entero por algo que no es una falla.

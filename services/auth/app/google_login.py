@@ -20,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
+from .contratos_auth import LoginRespuestaSerializer
 from .models import IdentidadGoogle, IntentoGoogle, User
 from .sesiones import emitir_tokens
 
@@ -90,7 +91,7 @@ class GoogleLoginView(APIView):
     authentication_classes = permission_classes = []
 
     @extend_schema(tags=["Auth"], request=GoogleSerializer,
-                   responses={200: None, 400: None, 401: None, 409: None, 503: None},
+                   responses={200: LoginRespuestaSerializer, 400: None, 401: None, 409: None, 503: None},
                    description="Valida ID token OIDC con nonce de un uso. Primera vinculación exige password local. No registra cuentas.")
     def post(self, request):
         if not settings.GOOGLE_CLIENT_ID:

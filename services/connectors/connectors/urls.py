@@ -6,6 +6,7 @@ from .views import (
     CuentaConectadaViewSet,
     ImportacionViewSet,
     IniciarAutorizacionView,
+    SubirArchivoView,
 )
 
 router = DefaultRouter()
@@ -36,6 +37,14 @@ urlpatterns = [
         "conectores/autorizaciones/callback/",
         CallbackAutorizacionView.as_view(),
         name="callback-autorizacion",
+    ),
+    # Va ANTES del include del router: `importaciones/<pk>/` aceptaria
+    # "archivos" como pk y moriria en un 404 raro (ver el comentario de
+    # arriba sobre el lookup de DRF).
+    path(
+        "importaciones/archivos/",
+        SubirArchivoView.as_view(),
+        name="subir-archivo-importacion",
     ),
     path("", include(router.urls)),
 ]

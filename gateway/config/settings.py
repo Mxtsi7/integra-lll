@@ -88,6 +88,12 @@ RUTAS = {
     "/api/usuarios/": "auth",
     "/api/organizacion/": "auth",
     "/api/suscripciones/": "subscriptions",
+    # VI-19: hallazgos de anomalías (listado, detalle y revisión).
+    "/api/hallazgos/": "subscriptions",
+    # VI-25: alias anunciado de la exportación CSV de cobros. La ruta
+    # canónica es /api/suscripciones/exportar-csv/ y llega por el prefijo
+    # "/api/suscripciones/"; el alias necesita su propia entrada.
+    "/api/export/cobros/": "subscriptions",
     "/api/usos/": "subscriptions",
     "/api/conectores/": "connectors",
     # FE-08: progreso de las importaciones (lo consulta CH-27).
@@ -113,6 +119,17 @@ RUTAS_PUBLICAS = (
     "/api/auth/google/nonce/", "/api/auth/google/",
     "/api/auth/logout/",
     "/api/auth/email-verification/confirm/",
+)
+
+# ── El tope de la subida de archivos (FE-07) ────────────────────────
+# El gateway tiene que conocerlo para poder rechazar con el mismo 413 que el
+# servicio, ANTES de leer el cuerpo. Es la MISMA variable de entorno que usa
+# connectors, así que los dos leen el mismo número y no se desincronizan.
+#
+# No se toca DATA_UPLOAD_MAX_MEMORY_SIZE: el límite global de 2,5 MB sigue
+# valiendo para todas las demás rutas.
+IMPORTACION_TAMANO_MAXIMO_BYTES = env.int(
+    "IMPORTACION_TAMANO_MAXIMO_BYTES", default=5 * 1024 * 1024
 )
 
 # Cuánto se espera a un servicio antes de responder 504.

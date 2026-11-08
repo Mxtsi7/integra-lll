@@ -400,6 +400,16 @@ class ConsolidationRecommendationJobTests(SimpleTestCase):
 
 
 class RabbitMessageConsumerTests(TestCase):
+    def test_late_event_does_not_recreate_or_publish_after_deletion(self):
+        from shared.borrado.models import EstadoOrganizacion
+
+        EstadoOrganizacion.objects.create(organizacion_id=ORG, eliminada=True)
+        canal = CanalFalso()
+        procesar_mensaje(canal, 99, json.dumps(evento_solapamiento()).encode("utf-8"))
+        self.assertFalse(RecomendacionConsolidacion.objects.exists())
+        self.assertEqual(canal.publicados, [])
+        self.assertEqual(canal.confirmados, [99])
+
     def test_rabbit_message_persists_and_publishes_before_acknowledging_input(self):
         canal = CanalFalso()
         procesar_mensaje(

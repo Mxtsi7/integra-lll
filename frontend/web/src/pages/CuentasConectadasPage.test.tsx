@@ -70,6 +70,11 @@ describe("Cuentas conectadas (CH-23)", () => {
     expect(screen.queryByText("La conexión con Gmail y Outlook todavía no está disponible.")).not.toBeInTheDocument();
   });
 
+  it("lleva a las importaciones, donde se ve cómo va cada una (CH-27)", async () => {
+    await montar();
+    expect(within(seccionCuentas()).getByRole("link", { name: "Ver importaciones" })).toHaveAttribute("href", "/importaciones");
+  });
+
   it("mientras carga muestra el indicador", async () => {
     await montar({ cargarCuentas: () => new Promise(() => {}) });
 

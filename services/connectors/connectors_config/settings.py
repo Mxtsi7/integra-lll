@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "connectors",
+    "shared.borrado.apps.BorradoConfig",
 ]
 
 MIDDLEWARE = [
@@ -45,6 +46,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "shared.borrado.middleware.EscrituraOrganizacionMiddleware",
 ]
 
 ROOT_URLCONF = "connectors_config.urls"
@@ -121,6 +123,21 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "0.1.0",
 }
 
+# ── Subida de archivos para importar (FE-07) ──────────────────────────
+# Tope de tamaño por archivo. 5 MB alcanza para años de cartola en CSV y
+# para una cartola PDF; más que eso no es una cartola, es otra cosa.
+IMPORTACION_TAMANO_MAXIMO_BYTES = env.int(
+    "IMPORTACION_TAMANO_MAXIMO_BYTES", default=5 * 1024 * 1024
+)
+# Cuántos archivos puede subir una organización por día. Es la cuota de
+# ingesta de la tarjeta: sin ella, un cliente en bucle llenaría la base de
+# archivos pendientes.
+IMPORTACION_CUOTA_DIARIA = env.int("IMPORTACION_CUOTA_DIARIA", default=20)
+# Cuánto se guarda el archivo. Es almacenamiento TEMPORAL: lo necesita el
+# procesamiento (FE-09) y después sobra. `purgar_archivos_importacion` borra
+# los vencidos; la importación y sus candidatos quedan.
+IMPORTACION_DIAS_RETENCION = env.int("IMPORTACION_DIAS_RETENCION", default=7)
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
@@ -128,3 +145,29 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# ── Celery: el trabajador de connectors (D-01) ──────────────────────
+# `connectors-worker` arranca con `celery -A connectors_config worker --beat`;
+# la app (connectors_config/celery.py) lee de aquí todo lo que empieza con
+# CELERY_.
+#
+# Broker: el Redis de .env. Sin valor por omisión, igual que DATABASE_URL:
+# si falta, el servicio no arranca en vez de buscar un broker inventado. Los
+# resultados van al mismo Redis salvo que CELERY_RESULT_BACKEND diga otro.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_TIMEZONE = TIME_ZONE
+# subscriptions usa el mismo Redis con la cola y el canal de control por
+# omisión ("celery"). Con nombres propios, este worker no le quita las tareas
+# del Temporizador (las descartaría por no conocerlas) y a `inspect ping`
+# solo contestan los workers de connectors.
+CELERY_TASK_DEFAULT_QUEUE = SERVICE_NAME
+CELERY_CONTROL_EXCHANGE = SERVICE_NAME
+# Beat corre dentro del worker (--beat). Por ahora solo el latido; las tareas
+# reales (lectura de correo, FE-13) se programan aquí.
+CELERY_BEAT_SCHEDULE = {
+    "latido-de-connectors": {
+        "task": "connectors.tasks.latido",
+        "schedule": env.float("CONECTORES_LATIDO_SEGUNDOS", default=60.0),
+    },
+}

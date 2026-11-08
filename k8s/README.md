@@ -1,5 +1,11 @@
 # Despliegue en Kubernetes
 
+Seguridad D-11: antes de migrar, leer [aislamiento de red y secretos](../docs/seguridad-d11.md).
+El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`.
+Hace falta un CNI con NetworkPolicy y un `GHCR_TOKEN` de lectura explícito.
+La contraseña histórica de PostgreSQL requiere la rotación indicada abajo;
+la PR por sí sola no la invalida.
+
 El sistema completo corriendo en el cluster del ramo:
 **https://ojoalgasto-forellana.dev.censei.cl**
 
@@ -19,7 +25,8 @@ El sistema completo corriendo en el cluster del ramo:
 | `subscriptions-worker` / `-beat` | Deployment | El Temporizador del RF-13 |
 | `gateway` | Deployment | Único punto de entrada (ADR-004) |
 | `web` | Deployment | SPA compilada + nginx, que además hace de proxy hacia el gateway |
-| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→3 y 1→2 (ver `30-autoescalado.yaml`) |
+| `auth-eliminaciones` | Deployment | Reintenta la limpieza durable de organizaciones e integrantes |
+| `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→2 y 1→2 (ver `30-autoescalado.yaml`) |
 
 `connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
 tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
@@ -70,13 +77,13 @@ puede subir. Los límites de cada pod están calculados para que **el HPA tenga
 espacio donde escalar**: si la cuota está llena, el autoescalado no sirve de
 nada, porque el pod nuevo recibe `exceeded quota` y nunca nace.
 
-| Recurso | Tope | En reposo (9 pods) | Peor caso (HPA al máximo, 12 pods) |
+| Recurso | Tope | En reposo (10 pods) | Peor caso (HPA al máximo, 12 pods) |
 |---|---|---|---|
-| `limits.memory` | 2752Mi | 1760Mi | 2496Mi |
-| `requests.memory` | 1152Mi | 648Mi | 888Mi |
-| `limits.cpu` | 2000m | 1150m | 1750m |
-| `requests.cpu` | 1000m | 375m | 525m |
-| `pods` | 12 | 9 | 12 |
+| `limits.memory` | 2752Mi | 2176Mi | 2688Mi |
+| `requests.memory` | 1152Mi | 776Mi | 952Mi |
+| `limits.cpu` | 2000m | 1350m | 1750m |
+| `requests.cpu` | 1000m | 425m | 525m |
+| `pods` | 12 | 10 | 12 |
 
 **Una `ResourceQuota` no mata los pods que ya están corriendo**, solo bloquea
 los nuevos. Por eso un despliegue puede venir funcionando semanas y reventar
@@ -86,7 +93,7 @@ es esto.
 Para recalcular el presupuesto después de tocar un límite, sin aplicar nada:
 
 ```bash
-python k8s/pruebas/presupuesto.py k8s
+python k8s/pruebas/presupuesto.py k8s --generador k8s/pruebas/carga-fortio-otro-namespace.yaml --namespace-generador student-TUUSUARIO
 ```
 
 ### Los límites salen de medir
@@ -180,9 +187,8 @@ porque todo queda en el mismo origen.
   tiene Service) y `celery inspect ping` tarda más que cualquier timeout
   razonable con el CPU acotado. Que está vivo se ve en sus logs.
 - **Las imágenes son privadas** en GHCR: el cluster las baja con el Secret
-  `ghcr`, que crea el script de despliegue. Pásale un token de solo lectura en
-  `GHCR_TOKEN` (`read:packages`); si no, usa el de `gh`, que puede publicar
-  paquetes a tu nombre y queda guardado dentro del cluster.
+  `ghcr`, que crea el script de despliegue. Es obligatorio pasar un token de
+  solo lectura en `GHCR_TOKEN` (`read:packages`).
 - **`DATABASE_URL` vive en el Secret**, no en el ConfigMap: lleva la
   contraseña adentro y se arma con la misma clave que recibe Postgres. Ojo:
   `POSTGRES_PASSWORD` solo se aplica en el primer arranque, con el disco
@@ -197,3 +203,38 @@ kubectl logs -f deployment/gateway        # seguir un log
 kubectl port-forward service/web 8090:80  # abrir la web sin pasar por internet
 kubectl exec -it postgres-0 -- psql -U postgres -d suscripciones
 ```
+
+
+## Limpieza de cuentas (MX-07)
+
+`10-auth.yaml` incluye `auth-eliminaciones`; espera que Auth migre antes de ejecutar
+el worker durable. `desplegar.sh` añade `ELIMINACION_INTERNA_SECRET` al Secret si
+falta, sin rotar las demás credenciales. Todos los consumidores usan ese secreto.
+La demo configura `ELIMINACION_DESTINOS=subscriptions` porque es su único consumidor
+desplegado. Agregar Connectors/Analytics/Notifications exige desplegarlos, migrarlos
+y agregarlos a la lista antes de que almacenen datos. No retirar destinos de un
+entorno que ya tiene datos: las operaciones existentes conservan sus ACK pendientes.
+Ver [flujo y límites](../docs/flujos/maximiliano-saez/07-eliminar-cuenta.md).
+
+## Purga de archivos de importación (FE-07)
+
+Este cluster **no tiene un CronJob de purga**, y no es un olvido:
+
+- `connectors` no tiene Deployment acá, así que nadie sube archivos y su
+  esquema no se migra. Un CronJob purgaría una tabla que no existe.
+- Con los dos HPA al máximo se usan los 12 pods de la cuota, que no se puede
+  subir. El pod de la purga sería el 13.º y no podría crearse justo en un pico.
+
+La purga corre donde corre `connectors`: en `docker-compose.yml` es el
+servicio `connectors-purga`, una vez por hora y después de que `connectors`
+migró. Cuando `connectors` se despliegue en este cluster, su purga tiene que
+llegar con él y entrar en el presupuesto: `presupuesto.py` cuenta cada
+`CronJob` en el peor caso y falla si no cabe, y una prueba exige que el
+despliegue aplique todos los manifiestos numerados de `k8s/`.
+
+Esa prueba mira las tres vías por las que `desplegar.sh` aplica un
+manifiesto: el ciclo con los reemplazos de imagen, los `kubectl apply -f`
+sueltos de antes de las migraciones, y los que aplica un guion que él invoca
+—`02-redis-rabbitmq.yaml` va por ahí desde D-11, porque el broker se drena
+antes de reemplazarlo—. Lo que exige no es que vaya por el ciclo, sino que
+alguna vía lo aplique.

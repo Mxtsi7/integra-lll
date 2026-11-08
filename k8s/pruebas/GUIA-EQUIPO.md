@@ -117,7 +117,7 @@ Se levanta un pod de prueba, se le pide que llame al gateway, y se borra:
 ```powershell
 kubectl apply -f k8s/pruebas/diagnostico-busybox.yaml
 kubectl wait --for=condition=Ready pod/diagnostico --timeout=90s
-kubectl exec diagnostico -- wget -qO- -T 8 --header="Host: gateway" http://gateway.student-forellana.svc.cluster.local:8000/health/
+kubectl exec diagnostico -- wget -qO- -T 8 http://ojoalgasto-forellana.dev.censei.cl/health/
 kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
 ```
 
@@ -127,8 +127,8 @@ kubectl delete -f k8s/pruebas/diagnostico-busybox.yaml
 {"servicio": "gateway", "estado": "ok"}
 ```
 
-**Si se queda colgado o dice que no se puede conectar**, hay una regla de red
-entre namespaces y el profe tiene que abrirla. Avisen en el grupo apenas pase.
+**Si se queda colgado o dice que no se puede conectar**, comprobar DNS del host público, salida HTTP e Ingress. No abrir acceso
+al Service interno entre namespaces: ese bloqueo es parte del aislamiento.
 
 > Antes este paso usaba `kubectl run ... --overrides='{\"spec\":...}'` en una
 > sola línea. En Windows PowerShell 5.1 eso falla con `error: Invalid JSON
@@ -187,46 +187,19 @@ esperando a un cliente que quizás no pida nada más.
 
 ---
 
-## Las dos cosas que NO hay que cambiar
+## Ruta autorizada de la carga
 
-En el archivo `carga-fortio-otro-namespace.yaml`:
-
-**1. El nombre completo del servicio.**
-`gateway.student-forellana.svc.cluster.local` — el nombre corto `gateway` solo
-funciona dentro del namespace del proyecto, no desde el tuyo.
-
-**2. La cabecera `-H "Host: gateway"`.**
-Sin ella **todas las peticiones responden 400** y la prueba no mide nada. Los
-servicios corren con `DEBUG=False` y Django solo acepta los nombres de host que
-tiene en su lista; el nombre largo no está.
-
-Comprobado:
-
-```
-gateway:8000                                      ->  200 OK
-gateway.student-forellana.svc.cluster.local:8000  ->  400 Bad Request
-el mismo + Host: gateway                          ->  200 OK
-```
-
-## Si quieren apuntar a otro servicio
-
-Hay que cambiar **las dos cosas juntas**:
-
-| Servicio | URL | Cabecera |
-|---|---|---|
-| gateway | `gateway.student-forellana.svc.cluster.local:8000` | `Host: gateway` |
-| auth | `auth.student-forellana.svc.cluster.local:8001` | `Host: auth` |
-| subscriptions | `subscriptions.student-forellana.svc.cluster.local:8002` | `Host: subscriptions` |
-
-`gateway/health/` no toca la base de datos; `auth/health/` y
-`subscriptions/health/` sí hacen una consulta. Comparar los tres muestra cuánto
-cuesta la base.
+El manifiesto externo usa `http://ojoalgasto-forellana.dev.censei.cl/health/`.
+No agregar `Host: gateway`: el Ingress enruta por el hostname público y web
+envía el Host correcto a Gateway. La medición incluye ambos proxies.
+Las APIs internas de auth y subscriptions permanecen bloqueadas desde otros
+namespaces; para acciones de negocio usar la API pública y una sesión válida.
 
 ## Problemas típicos
 
 | Lo que ves | Qué pasa |
 |---|---|
-| `Code 400 : ...` | te falta la cabecera `-H "Host: gateway"` |
+| `Code 400 : ...` | revisar el host público; no enviar `Host: gateway` al Ingress |
 | `the path "carga-fortio-otro-namespace.yaml" does not exist` | no estás en la raíz del repo, o te falta el `k8s/pruebas/` delante |
 | `error: Invalid JSON Patch` | estás usando la versión vieja del paso 4 con `--overrides`; usa la de arriba |
 | `pods "prueba" already exists` | quedó un pod de un intento anterior: `kubectl delete pod prueba` |

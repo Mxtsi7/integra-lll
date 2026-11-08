@@ -1,40 +1,60 @@
 import React from 'react';
-import { Text, StyleSheet } from 'react-native';
-import { ScreenPlaceholder } from '../components/ScreenPlaceholder';
-import { NavButton } from '../components/NavButton';
+import { ScrollView, StyleSheet, Text } from 'react-native';
+import { actualizarNombre } from '@ojoalgasto/shared';
 import { useAuth } from '../../../context/AuthContext';
+import { Loading, NetworkError } from '../../components/estados';
+import { PerfilContenido } from '../components/perfil/PerfilContenido';
+import { COLORES_PERFIL as C } from '../components/perfil/estilos';
+import { NavButton } from '../components/NavButton';
 import type { ConfiguracionScreenProps } from '../../navigation/types';
 
 export default function PerfilScreen({ navigation }: ConfiguracionScreenProps<'Perfil'>) {
-  const { usuario, estadoPerfil } = useAuth();
+  const { usuario, estadoPerfil, errorPerfil, recargarPerfil } = useAuth();
+
+  // El dato que se muestra es el que confirma el servidor: se guarda y se vuelve a leer GET /usuarios/me/.
+  async function guardarNombre(nombre: string) {
+    await actualizarNombre(nombre);
+    await recargarPerfil();
+  }
+
+  let cuerpo: React.ReactNode;
+  if (usuario) {
+    cuerpo = <PerfilContenido usuario={usuario} onGuardarNombre={guardarNombre} />;
+  } else if (estadoPerfil === 'error') {
+    cuerpo = (
+      <NetworkError
+        onReintentar={() => void recargarPerfil()}
+        mensaje={errorPerfil ?? undefined}
+      />
+    );
+  } else {
+    cuerpo = <Loading mensaje="Cargando tu perfil…" />;
+  }
 
   return (
-    <ScreenPlaceholder
-      testID="screen-perfil"
-      titulo="Perfil de Usuario"
-      tareaId="AN-03"
-      responsable="Andrea Travola"
-      descripcion="Consulta y edición de datos de tu perfil de usuario."
-    >
-      <Text style={styles.infoText}>Nombre: {usuario?.nombre ?? (estadoPerfil === 'cargando' ? 'Cargando...' : 'No disponible')}</Text>
-      <Text style={styles.infoText}>Correo: {usuario?.correo ?? (estadoPerfil === 'cargando' ? 'Cargando...' : 'No disponible')}</Text>
-      <Text style={styles.infoText}>Rol: {usuario?.rol ?? (estadoPerfil === 'cargando' ? 'Cargando...' : 'No disponible')}</Text>
-      <Text style={styles.infoText}>Plan: {usuario?.plan ?? (estadoPerfil === 'cargando' ? 'Cargando...' : 'No disponible')}</Text>
-      <Text style={styles.infoText}>Organización: {usuario?.organizacion_id || (estadoPerfil === 'cargando' ? 'Cargando...' : 'No asignada')}</Text>
+    <ScrollView testID="screen-perfil" contentContainerStyle={styles.contenedor}>
+      <Text style={styles.titulo}>Mi perfil</Text>
+      {cuerpo}
       <NavButton
         testID="go-back"
         title="Volver a Configuración"
+        variant="secondary"
         onPress={() => navigation.goBack()}
       />
-    </ScreenPlaceholder>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  infoText: {
-    fontSize: 14,
-    color: '#334155',
-    marginBottom: 6,
-    textAlign: 'center',
+  contenedor: {
+    flexGrow: 1,
+    padding: 20,
+    gap: 16,
+    backgroundColor: C.fondo,
+  },
+  titulo: {
+    fontSize: 26,
+    fontWeight: 'bold',
+    color: C.tinta,
   },
 });

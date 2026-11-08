@@ -57,6 +57,7 @@ La clase base que aplica el filtro en cada servicio está en `shared/tenant/`.
 
 ## Nota sobre los puertos en desarrollo
 
-El archivo `docker-compose.yml` publica los puertos 8001 a 8005 para facilitar el
-trabajo y las pruebas. **Esa configuración es exclusiva de desarrollo local.** En
-el despliegue, esos puertos no se publican.
+`docker-compose.yml` publica solo gateway y frontend; cada dominio usa una red
+separada. Para depurar un servicio, usar herramientas dentro del contenedor o
+un override local limitado a `127.0.0.1`. Kubernetes aplica las políticas de
+`k8s/40-red.yaml`. Ver [migración y comprobaciones de D-11](../seguridad-d11.md).

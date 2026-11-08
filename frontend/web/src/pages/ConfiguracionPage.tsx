@@ -1,21 +1,13 @@
-import { useState } from 'react';
-import { Bell, Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
+import { Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
+import { PreferenciasAvisos } from '../components/Configuracion/PreferenciasAvisos';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
 import { useTema } from '../hooks/useTema';
 import styles from './ConfiguracionPage.module.css';
 import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
-// TODO: cuando exista un endpoint de preferencias, estos estados se cargan
-// con un GET al montar la página y se guardan con un PATCH al cambiar,
-// igual que hicimos con getUsuarioActual() en Perfil.
-export function ConfiguracionPage() {
-  // Notificaciones
-  const [avisoCobros, setAvisoCobros] = useState(true);
-  const [avisoPruebaGratis, setAvisoPruebaGratis] = useState(true);
-  const [avisoAnomalias, setAvisoAnomalias] = useState(true);
-  const [consejosAhorro, setConsejosAhorro] = useState(false);
 
+export function ConfiguracionPage() {
   // Apariencia (persistente y aplicada a toda la app)
   const [tema, setTema] = useTema();
 
@@ -23,37 +15,9 @@ export function ConfiguracionPage() {
     <AppLayout headerTitulo="Ajustes" headerSubtitulo="Avisos, apariencia y tus datos.">
       <div className={styles.grid}>
         <div className={styles.columna}>
-          <Seccion
-            titulo="Avisos"
-            descripcion="Te avisamos por correo antes de que pase."
-            icono={<Bell size={19} aria-hidden="true" />}
-            tinte="acento"
-          >
-            <FilaInterruptor
-              etiqueta="Antes de cada cobro"
-              descripcion="3 días antes si es mensual; 7 días y 24 horas antes si es anual."
-              activo={avisoCobros}
-              onChange={setAvisoCobros}
-            />
-            <FilaInterruptor
-              etiqueta="Cuando termina una prueba gratis"
-              descripcion="48 y 24 horas antes de que empiece a cobrar."
-              activo={avisoPruebaGratis}
-              onChange={setAvisoPruebaGratis}
-            />
-            <FilaInterruptor
-              etiqueta="Alza de precio o cobro doble"
-              descripcion="Cuando un cobro no calza con lo esperado."
-              activo={avisoAnomalias}
-              onChange={setAvisoAnomalias}
-            />
-            <FilaInterruptor
-              etiqueta="Consejos para gastar menos"
-              descripcion="Sugerencias según lo que usas y lo que no."
-              activo={consejosAhorro}
-              onChange={setConsejosAhorro}
-            />
-          </Seccion>
+          {/* CH-30: los avisos se leen y se guardan en FE-21. Antes eran
+              estados locales que se perdían al recargar. */}
+          <PreferenciasAvisos />
 
           <Seccion titulo="Apariencia" icono={<Palette size={19} aria-hidden="true" />} tinte="morado">
             <Fila etiqueta="Tema" detalle="Se guarda en este navegador.">
@@ -127,32 +91,5 @@ export function ConfiguracionPage() {
         </div>
       </div>
     </AppLayout>
-  );
-}
-
-function FilaInterruptor({
-  etiqueta,
-  descripcion,
-  activo,
-  onChange,
-}: {
-  etiqueta: string;
-  descripcion: string;
-  activo: boolean;
-  onChange: (valor: boolean) => void;
-}) {
-  return (
-    <Fila etiqueta={etiqueta} detalle={descripcion}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={activo}
-        aria-label={etiqueta}
-        className={activo ? `${styles.interruptor} ${styles.interruptorActivo}` : styles.interruptor}
-        onClick={() => onChange(!activo)}
-      >
-        <span className={styles.interruptorBola} />
-      </button>
-    </Fila>
   );
 }

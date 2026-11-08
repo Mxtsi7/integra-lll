@@ -27,7 +27,7 @@ const ID_CAMPO: Record<CampoRegistro, string> = {
 };
 
 function enfocarPrimerError(errores: ErroresRegistro) {
-  const campo = ORDEN_CAMPOS.find((c) => errores[c]);
+  const campo = ORDEN_CAMPOS.find((nombreDeCampo) => errores[nombreDeCampo]);
   if (campo) document.getElementById(ID_CAMPO[campo])?.focus();
 }
 
@@ -49,13 +49,13 @@ export default function Register() {
   function limpiarError(campo: CampoRegistro) {
     setErrores((actuales) => {
       if (!actuales[campo]) return actuales;
-      const { [campo]: _, ...resto } = actuales;
+      const { [campo]: errorQuitado, ...resto } = actuales;
       return resto;
     });
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(evento: FormEvent) {
+    evento.preventDefault();
     if (loading) return;
 
     // Misma política que el backend (shared/validaciones.ts). Si algo no
@@ -133,8 +133,8 @@ export default function Register() {
           placeholder="Cómo quieres que te llamemos"
           icono={<User size={16} />}
           value={nombre}
-          onChange={(e) => {
-            setNombre(e.target.value);
+          onChange={(evento) => {
+            setNombre(evento.target.value);
             limpiarError("nombre");
           }}
           error={errores.nombre}
@@ -149,8 +149,8 @@ export default function Register() {
           placeholder="tu@correo.cl"
           icono={<Mail size={16} />}
           value={correo}
-          onChange={(e) => {
-            setCorreo(e.target.value);
+          onChange={(evento) => {
+            setCorreo(evento.target.value);
             limpiarError("correo");
           }}
           error={errores.correo}
@@ -166,8 +166,8 @@ export default function Register() {
           ayuda="Al menos 8 caracteres, con una letra y un número."
           icono={<Lock size={16} />}
           value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
+          onChange={(evento) => {
+            setPassword(evento.target.value);
             limpiarError("password");
           }}
           error={errores.password}
@@ -181,8 +181,8 @@ export default function Register() {
           placeholder="La misma de arriba"
           icono={<Lock size={16} />}
           value={confirm}
-          onChange={(e) => {
-            setConfirm(e.target.value);
+          onChange={(evento) => {
+            setConfirm(evento.target.value);
             limpiarError("confirmacion");
           }}
           error={errores.confirmacion}
@@ -195,8 +195,8 @@ export default function Register() {
               id={ID_CAMPO.aceptaDatos}
               type="checkbox"
               checked={accepted}
-              onChange={(e) => {
-                setAccepted(e.target.checked);
+              onChange={(evento) => {
+                setAccepted(evento.target.checked);
                 limpiarError("aceptaDatos");
               }}
               aria-invalid={errores.aceptaDatos ? true : undefined}

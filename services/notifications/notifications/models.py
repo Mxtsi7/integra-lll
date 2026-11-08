@@ -201,6 +201,18 @@ class Alerta(ModeloTenant):
         return f"{self.get_tipo_display()}: {self.titulo} ({self.get_lectura_display()})"
 
 
+class UsuarioEliminado(ModeloTenant):
+    """Marca mínima que impide recrear preferencias con solicitudes en vuelo."""
+
+    usuario_id = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "usuario_eliminado"
+        constraints = [models.UniqueConstraint(
+            fields=["organizacion_id", "usuario_id"], name="usuario_eliminado_tenant",
+        )]
+
+
 class PreferenciaNotificacion(ModeloTenant):
     """Qué avisos quiere recibir una persona, y por dónde (FE-21 / RF-09).
 
@@ -355,3 +367,99 @@ class PreferenciaNotificacion(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.usuario_id}: {', '.join(self.canales_elegidos()) or 'sin canales'}"
+
+
+class SuscripcionVigilada(ModeloTenant):
+    """Lo que notifications sabe de cada suscripción, copiado de los eventos (FE-17 / FE-18).
+
+    ── Por qué una copia y no una consulta ──────────────────────────────────
+    Para avisar "Netflix se cobra en 3 días" hay que saber cuándo se cobra
+    Netflix, y eso vive en el esquema de `subscriptions`, que ningún otro
+    servicio consulta (ADR-002). El dato llega por los eventos del catálogo
+    (`suscripcion.creada`, `.actualizada`, `.estado_cambiado`) y se guarda
+    acá: es una PROYECCIÓN de lectura, igual que la de uso en analytics.
+
+    La escribe únicamente `proyeccion.aplicar()` a partir de un sobre. No hay
+    POST que la toque: si alguien pudiera escribirla a mano dejaría de
+    coincidir con la fuente y las alertas avisarían fechas inventadas.
+
+    ── Qué pasa con la fecha de fin de prueba ──────────────────────────────
+    El contrato MX-21 v2 admite `datos.fin_prueba` como fecha opcional o null.
+    Subscriptions la copia de `Subscription`; se guarda cuando el sobre la
+    trae y queda en NULL si no. Sin fecha no hay aviso de
+    fin de prueba: es el criterio de FE-18, "prueba sin fecha válida no
+    genera envío", y es mejor que adivinarla desde `proximo_cobro`.
+    """
+
+    suscripcion_id = models.UUIDField(
+        verbose_name="Suscripción",
+        help_text="UUID suelto, no FK: vive en el esquema de subscriptions (ADR-002).",
+    )
+    nombre = models.CharField(max_length=120, blank=True, default="")
+    monto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    moneda = models.CharField(max_length=3, default="CLP")
+    ciclo = models.CharField(max_length=10, default="mensual")
+    proximo_cobro = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Próximo cobro",
+    )
+    estado = models.CharField(
+        max_length=20,
+        verbose_name="Estado en subscriptions",
+        help_text="Tal como viene en el evento: prueba, activo, por_confirmar, cancelado, fantasma.",
+    )
+    fin_prueba = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="Fin del período de prueba",
+        help_text="Solo si el evento la trae. NULL = no se sabe, y no se avisa.",
+    )
+    observada_en = models.DateTimeField(
+        verbose_name="Fecha del último evento aplicado",
+        help_text=(
+            "El `ocurrido_en` del evento más reciente que se aplicó. Un evento "
+            "más viejo que llega después (reentrega, fuera de orden) no pisa "
+            "datos más nuevos."
+        ),
+    )
+
+    #: Los estados en que una suscripción puede generar un aviso de cobro.
+    ESTADOS_VIGENTES = ("activo", "prueba")
+
+    @property
+    def vigente(self) -> bool:
+        return self.estado in self.ESTADOS_VIGENTES
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "suscripcion_vigilada"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "suscripcion_id"],
+                name="suscripcion_vigilada_unica_por_tenant",
+            ),
+        ]
+        indexes = ModeloTenant.Meta.indexes + [
+            # El generador recorre las vigentes por fecha de cobro.
+            models.Index(
+                fields=["estado", "proximo_cobro"],
+                name="vigilada_estado_cobro",
+            ),
+        ]
+        verbose_name = "Suscripción vigilada"
+        verbose_name_plural = "Suscripciones vigiladas"
+
+    def __str__(self) -> str:
+        return f"{self.nombre or self.suscripcion_id} ({self.estado}, cobra {self.proximo_cobro})"
+
+
+class EventoRecibido(ModeloTenant):
+    """Inbox por consumidor FE-24; se borra con la organización."""
+    consumidor = models.CharField(max_length=64, default='suscripciones.v2')
+    evento_id = models.UUIDField()
+
+    class Meta(ModeloTenant.Meta):
+        db_table = 'evento_recibido'
+        constraints = [models.UniqueConstraint(
+            fields=['consumidor', 'organizacion_id', 'evento_id'], name='notifications_evento_unico',
+        )]

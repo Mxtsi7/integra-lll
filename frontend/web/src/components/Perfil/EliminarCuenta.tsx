@@ -153,6 +153,22 @@ export function EliminarCuenta({
                     los comprobantes de pago del plan Premium (si los hubo) y los registros de auditoría anonimizados.
                   </li>
                 </ul>
+                <p>
+                  Si también se elimina tu organización y tiene cuentas Outlook conectadas, se destruyen
+                  sus credenciales guardadas aquí. Microsoft no revoca automáticamente ese acceso:
+                  debes retirarlo desde tu cuenta Microsoft.{' '}
+                  <a href="https://account.live.com/consent/Manage" target="_blank" rel="noopener noreferrer">
+                    Retirar el acceso en tu cuenta Microsoft personal
+                  </a>. Para una cuenta personal, selecciona esta aplicación y retira su acceso.
+                </p>
+                <p>
+                  Para una cuenta de trabajo o escuela, abre{' '}
+                  <a href="https://myapplications.microsoft.com/" target="_blank" rel="noopener noreferrer">
+                    Retirar permisos en tu cuenta de trabajo o escuela
+                  </a>, busca esta aplicación y elige administrar la aplicación y revocar permisos.
+                  Si no puedes retirarlos o si el permiso lo concedió tu organización, contacta a su administrador.
+                  Puedes completar el borrado aquí aunque todavía no hayas retirado ese permiso en Microsoft.
+                </p>
               </div>
 
               <CampoContrasena

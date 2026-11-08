@@ -1,0 +1,14 @@
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.texto {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--tinta-2);
+}

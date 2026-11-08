@@ -1,0 +1,50 @@
+/* Los mismos chips que los filtros de Inicio, para que se lean igual. */
+
+.filtros {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Espacio para la sombra del elegido: el scroll horizontal recorta también en vertical. */
+  padding: 6px 12px 20px;
+  margin: -6px -12px -4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.filtros::-webkit-scrollbar {
+  display: none;
+}
+
+.filtro {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: 999px;
+  background: var(--vidrio);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tinta-2);
+  white-space: nowrap;
+  transition: background-color var(--rapido), color var(--rapido), border-color var(--rapido);
+}
+
+.filtro:hover {
+  color: var(--tinta);
+  border-color: var(--vidrio-borde-fuerte);
+}
+
+.filtroActivo,
+.filtroActivo:hover {
+  background: linear-gradient(135deg, var(--acento-hover), var(--acento));
+  border-color: transparent;
+  color: var(--acento-tinta);
+  box-shadow: 0 8px 20px -8px var(--acento);
+}
+
+/* Sin la opacidad de Inicio (0,65): con ella el número queda en 3:1 en tema claro. */
+.filtroConteo {
+  font-size: 11.5px;
+  font-weight: 800;
+}

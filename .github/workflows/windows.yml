@@ -1,0 +1,65 @@
+name: Cliente Windows
+on:
+  pull_request:
+    paths: ['frontend/**', 'gateway/**', 'shared/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Empaquetar aplicación portable
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run package:win --workspace=desktop
+      - name: Preparar Gateway
+        run: pip install -r gateway/requirements.txt
+      - name: Abrir ejecutable y consumir Gateway real
+        shell: pwsh
+        env:
+          DEBUG: 'True'
+          SECRET_KEY: clave-solo-para-smoke-windows
+          JWT_SECRET: jwt-solo-para-smoke-windows
+          ALLOWED_HOSTS: localhost,127.0.0.1
+          CORS_ALLOWED_ORIGINS: app://ojoalgasto
+          DESKTOP_API_URL: http://127.0.0.1:8015/api
+        run: |
+          $env:DESKTOP_SMOKE_OUTPUT = Join-Path $env:RUNNER_TEMP 'MX23-windows.json'
+          $gatewayPrueba = Start-Process python -ArgumentList 'manage.py','runserver','127.0.0.1:8015','--noreload' -WorkingDirectory gateway -WindowStyle Hidden -PassThru
+          try {
+            $listo = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              try {
+                $respuesta = Invoke-RestMethod http://127.0.0.1:8015/health/
+                if ($respuesta.estado -eq 'ok') { $listo = $true; break }
+              } catch {}
+              Start-Sleep -Milliseconds 500
+            }
+            if (!$listo) { throw 'Gateway no inició' }
+            $appPrueba = Start-Process -FilePath frontend/desktop/release/OjoAlGasto-win32-x64/OjoAlGasto.exe -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+            if (!$appPrueba.WaitForExit(45000)) { $appPrueba.Kill(); throw 'Timeout de ejecutable Windows' }
+            if ($appPrueba.ExitCode -ne 0) { throw 'Falló ejecutable Windows' }
+            $evidencia = Get-Content $env:DESKTOP_SMOKE_OUTPUT | ConvertFrom-Json
+            if (!$evidencia.renderer -or !$evidencia.nodeAislado -or $evidencia.estadoApi -ne 200) { throw 'Evidencia inválida' }
+            Get-Content $env:DESKTOP_SMOKE_OUTPUT
+          } finally { Stop-Process -Id $gatewayPrueba.Id -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: MX23-windows
+          path: |
+            frontend/desktop/release/OjoAlGasto-win32-x64/
+            ${{ runner.temp }}/MX23-windows.*
+          retention-days: 7

@@ -1,0 +1,53 @@
+# Qué se levanta y qué se baja en cada tanda.
+#
+# Existe para que nadie tenga que recordar los argumentos de `presupuesto.py`,
+# y sobre todo para que `faltan` quede escrito al lado del número: un perfil
+# puede dar "TODO ENTRA" y aun así no ser demostrable, porque lo que falta no
+# está en ningún manifiesto todavía. `scripts/tests/test_tandas.py` corre cada
+# perfil y exige que esa lista esté declarada.
+#
+# Para correr uno a mano:
+#   python k8s/pruebas/presupuesto.py k8s \
+#     --generador k8s/pruebas/carga-fortio-otro-namespace.yaml \
+#     --namespace-generador student-carga \
+#     --sin-autoescalado --extra k8s/tandas/notifications.yaml \
+#     --extra k8s/tandas/alertas-notifications.yaml
+
+tandas:
+  notifications:
+    descripcion: >-
+      FE-17/18. API y consumidor en un pod, generador como CronJob. Es la
+      prioridad: RF-09 es Must.
+    # La bandera síncrona solo recalcula el resumen dentro del POST.
+    # RabbitMQ recibe el outbox por la tarea que agenda Beat, en ambos modos.
+    # Perfil de demostración completo: Beat activo, sin rollouts simultáneos.
+    pausar: []
+    # Los manifiestos se nombran uno a uno: un comodin se tragaba
+    # este mismo archivo y la herramienta se negaba, con razon.
+    extra: ["k8s/tandas/notifications.yaml", "k8s/tandas/alertas-notifications.yaml"]
+    faltan: []
+    # Sin faltantes de código no implica despliegue ni medición real.
+    validacion_cluster: pendiente
+
+  connectors:
+    descripcion: >-
+      FE-07/08. API y worker en dos pods. Demostrar una importación que
+      TERMINA, no solo el 202 de aceptación.
+    pausar: [subscriptions-beat]
+    extra: []
+    faltan:
+      - "Deployment de connectors y de connectors-worker"
+      - "Service de connectors y su ruta en el Gateway"
+      - "imagen ojoalgasto-connectors: desplegar.sh no la construye"
+      - "CronJob de la purga de FE-07, que hoy solo corre en compose"
+
+  analytics:
+    descripcion: >-
+      API y worker en dos pods. Elegir un flujo cuyas dependencias estén
+      presentes; no simular una ausente para declarar éxito.
+    pausar: [subscriptions-beat]
+    extra: []
+    faltan:
+      - "Deployment de analytics y de analytics-worker"
+      - "Service de analytics y su ruta en el Gateway"
+      - "imagen ojoalgasto-analytics: desplegar.sh no la construye"

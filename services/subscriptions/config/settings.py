@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "app",
+    "shared.borrado.apps.BorradoConfig",
 ]
 
 MIDDLEWARE = [
@@ -49,6 +50,7 @@ MIDDLEWARE = [
     # Lee las cabeceras X-Organizacion-Id, X-Usuario-Id, X-Rol que inyecta
     # el gateway (ADR-004). Es la misma pieza en los cinco servicios.
     "shared.tenant.base.ContextoTenantMiddleware",
+    "shared.borrado.middleware.EscrituraOrganizacionMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"

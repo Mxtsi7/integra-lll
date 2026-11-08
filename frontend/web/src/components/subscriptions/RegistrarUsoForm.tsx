@@ -4,7 +4,7 @@ import {
   ErrorDeApi,
   erroresDesdeServidor,
   formatearFecha,
-  hoyLocalIso,
+  hoyEnTexto,
   validarUso,
   type CampoUso,
   type ErroresUso,
@@ -52,7 +52,7 @@ function textoConfirmacion(minutos: number, fecha: string | undefined, hoy: stri
  * y el backend sigue siendo la validación definitiva.
  */
 export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente = () => true }: RegistrarUsoFormProps) {
-  const hoy = hoyLocalIso();
+  const hoy = hoyEnTexto();
   const [minutos, setMinutos] = useState("");
   // Se propone hoy; el contrato admite otra fecha pasada (o ninguna).
   const [fecha, setFecha] = useState(hoy);
@@ -63,8 +63,8 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente 
   // Ref y no solo estado: dos envíos en el mismo instante verían el estado viejo.
   const enviandoRef = useRef(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (evento: React.FormEvent) => {
+    evento.preventDefault();
     // Un doble clic no registra dos veces el mismo uso.
     if (enviandoRef.current || bloqueado || !sigueVigente()) return;
 
@@ -72,7 +72,7 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente 
     setErrores(locales);
     setErrorGeneral(null);
     setConfirmacion(null);
-    const primero = (Object.keys(ID_CAMPO) as CampoUso[]).find((c) => locales[c]);
+    const primero = (Object.keys(ID_CAMPO) as CampoUso[]).find((nombreDeCampo) => locales[nombreDeCampo]);
     if (primero) {
       document.getElementById(ID_CAMPO[primero])?.focus();
       return;
@@ -124,9 +124,9 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente 
           placeholder="Ej: 45"
           icono={<Clock size={16} />}
           value={minutos}
-          onChange={(e) => {
-            setMinutos(e.target.value);
-            setErrores((prev) => ({ ...prev, minutos: undefined }));
+          onChange={(evento) => {
+            setMinutos(evento.target.value);
+            setErrores((actuales) => ({ ...actuales, minutos: undefined }));
             setConfirmacion(null);
           }}
           error={errores.minutos}
@@ -137,9 +137,9 @@ export function RegistrarUsoForm({ onRegistrar, bloqueado = false, sigueVigente 
           type="date"
           max={hoy}
           value={fecha}
-          onChange={(e) => {
-            setFecha(e.target.value);
-            setErrores((prev) => ({ ...prev, fecha: undefined }));
+          onChange={(evento) => {
+            setFecha(evento.target.value);
+            setErrores((actuales) => ({ ...actuales, fecha: undefined }));
           }}
           error={errores.fecha}
         />

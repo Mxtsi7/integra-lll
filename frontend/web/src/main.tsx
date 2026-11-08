@@ -8,7 +8,7 @@ import { iniciarTema } from './hooks/useTema';
 
 iniciarTema();
 
-const urlBase = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
+const urlBase = window.ojoDesktop?.apiUrl ?? import.meta.env.VITE_API_URL ?? "http://localhost:8000/api";
 configurarApi({ urlBase });
 configureAuthApi({ baseUrl: urlBase });
 // El manejador del 401 ya no se registra acá: lo registra <AuthProvider>

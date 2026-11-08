@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "notifications",
+    "shared.borrado.apps.BorradoConfig",
 ]
 
 MIDDLEWARE = [
@@ -45,6 +46,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "shared.borrado.middleware.EscrituraOrganizacionMiddleware",
 ]
 
 ROOT_URLCONF = "notifications_config.urls"
@@ -108,3 +110,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Solo el consumidor lo exige; la API y el generador no abren AMQP.
+RABBITMQ_URL = env("RABBITMQ_URL", default="")

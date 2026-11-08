@@ -46,6 +46,7 @@ from app.models import (  # noqa: E402
     OutboxEvento,
     ResumenOrganizacion,
     Subscription,
+    TrabajoDerivado,
 )
 from events import publicador, topologia  # noqa: E402
 from events.contrato import routing_key  # noqa: E402
@@ -302,6 +303,81 @@ class TestRecorridoReal:
         assert resumen.cantidad_activas == 1
 
         # Y confirmó: la cola quedó vacía y nada cayó a la de fallos.
+        assert esperar_mensaje(canal, topologia.COLA_RESUMEN, intentos=3) is None
+        assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
+
+    def test_D02_actualizada_y_estado_cambiado_se_enrutan_y_recalculan(
+        self, canal, cliente, settings, sin_reciclar_conexiones
+    ):
+        """Regresión real: el broker confirma y enruta AMBAS claves v2.
+
+        Antes solo estaba enlazada suscripcion.creada.v2. Tras modificar el
+        monto o cancelar, despachar_pendientes() obtenía UnroutableError,
+        dejando ambos eventos pendientes en el outbox. No se parchea pika
+        ni el consumidor: se ejercitan el API, outbox, RabbitMQ y comando.
+        """
+        settings.EVENTOS_ASINCRONOS = True
+        org = uuid.uuid4()
+        cabeceras = {"X-Organizacion-Id": str(org)}
+        respuesta = cliente.post(
+            "/api/suscripciones/", CUERPO, format="json", headers=cabeceras
+        )
+        assert respuesta.status_code == status.HTTP_201_CREATED
+        suscripcion_id = respuesta.data["id"]
+
+        # La creación ya se procesa: cada cambio posterior debe tener
+        # su propia evidencia y actualizar la proyección otra vez.
+        assert despachar_pendientes() == {"publicados": 1, "reintentados": 0}
+        call_command("consumir_eventos", uno=True)
+        assert ResumenOrganizacion.objects.get(
+            organizacion_id=org, moneda="CLP"
+        ).total_mensual == Decimal("9990.00")
+
+        respuesta = cliente.patch(
+            f"/api/suscripciones/{suscripcion_id}/",
+            {"monto": "12990.00"},
+            format="json",
+            headers=cabeceras,
+        )
+        assert respuesta.status_code == status.HTTP_200_OK
+        actualizada = OutboxEvento.objects.get(
+            organizacion_id=org, evento="suscripcion.actualizada"
+        )
+        assert routing_key(actualizada) == "suscripcion.actualizada.v2"
+        # Aún no hay ningún consumidor escuchando. La cola durable basta.
+        assert despachar_pendientes() == {"publicados": 1, "reintentados": 0}
+        actualizada.refresh_from_db()
+        assert actualizada.publicado_en is not None
+        call_command("consumir_eventos", uno=True)
+        assert ResumenOrganizacion.objects.get(
+            organizacion_id=org, moneda="CLP"
+        ).total_mensual == Decimal("12990.00")
+        assert TrabajoDerivado.objects.filter(evento_id=actualizada.id).count() == 1
+
+        respuesta = cliente.post(
+            f"/api/suscripciones/{suscripcion_id}/cancelar/",
+            headers={
+                **cabeceras,
+                "X-Usuario-Id": "42",
+                "X-Rol": "titular",
+            },
+        )
+        assert respuesta.status_code == status.HTTP_200_OK
+        estado_cambiado = OutboxEvento.objects.get(
+            organizacion_id=org, evento="suscripcion.estado_cambiado"
+        )
+        assert routing_key(estado_cambiado) == "suscripcion.estado_cambiado.v2"
+        assert despachar_pendientes() == {"publicados": 1, "reintentados": 0}
+        estado_cambiado.refresh_from_db()
+        assert estado_cambiado.publicado_en is not None
+        call_command("consumir_eventos", uno=True)
+
+        # Si no quedan activas, el cálculo elimina la fila de esa moneda:
+        # no fabrica un resumen CLP con ceros (contrato actual de trabajo.py).
+        assert not ResumenOrganizacion.objects.filter(
+            organizacion_id=org, moneda="CLP"
+        ).exists()
+        assert TrabajoDerivado.objects.filter(evento_id=estado_cambiado.id).count() == 1
         assert esperar_mensaje(canal, topologia.COLA_RESUMEN, intentos=3) is None
         assert esperar_mensaje(canal, topologia.COLA_FALLIDOS, intentos=3) is None
 
