@@ -134,6 +134,7 @@ export type RegisterPayload = {
   correo: string;
   password: string;
   aceptaDatos: boolean;
+  codigoOrganizacion?: string | null;
 };
 
 export type AuthResponse = AuthSchemas['LoginRespuesta'];
@@ -148,12 +149,16 @@ export function login(payload: LoginPayload): Promise<AuthResponse> {
 }
 
 export function register(payload: RegisterPayload): Promise<RegisterResponse> {
-  return postJSON<RegisterResponse>(endpoints.register, {
+  const body: Record<string, unknown> = {
     nombre: payload.nombre,
     email: payload.correo,
     password: payload.password,
     acepta_datos: payload.aceptaDatos,
-  });
+  };
+  if (payload.codigoOrganizacion !== undefined) {
+    body.codigo_organizacion = payload.codigoOrganizacion;
+  }
+  return postJSON<RegisterResponse>(endpoints.register, body);
 }
 type TokenStorage = {
   getItem(key: string): string | null;

@@ -6,7 +6,7 @@ import type { CompositeScreenProps } from '@react-navigation/native';
 // ── 1. Flujo Público (Stack Acceso) ──────────────────────────────────
 export type AuthStackParamList = {
   Login: undefined;
-  Registro: undefined;
+  Registro: { codigoOrganizacion?: string } | undefined;
   RecuperarContrasena: undefined;
   VerificarCorreo: { token?: string } | undefined;
 };
