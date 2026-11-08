@@ -49,6 +49,11 @@ export interface ExplicacionRecomendacion {
   advertencia_uso: string;
 }
 
+/**
+ * MX-25 (GET /api/recomendaciones/<id>/explicar/): la explicación sale de los
+ * hechos guardados con la recomendación, sin IA y sin gastar cuota. Responde 404
+ * si ya no está visible: descartada, de otra organización o bajo el umbral.
+ */
 export async function explicarRecomendacion(id: string): Promise<ExplicacionRecomendacion> {
   return await pedir(`/recomendaciones/${encodeURIComponent(id)}/explicar/`);
 }
