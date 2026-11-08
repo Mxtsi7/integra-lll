@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<title>Uso consentido — Ojo al Gasto</title>
+<body>
+  <h1>Seguimiento temporal</h1>
+  <p>Solo dominios elegidos. Sin rutas, títulos ni contenido. No se envía información.
+    La sesión se elimina al cerrar el navegador o recargar la extensión.</p>
+  <form id="configuracion">
+    <label>Dominios HTTPS exactos, uno por línea <textarea id="dominios" required></textarea></label>
+    <label><input id="consentimiento" type="checkbox" required> Acepto observar estos dominios durante esta sesión.</label>
+    <button>Autorizar dominios</button>
+  </form>
+  <button id="retirar">Retirar consentimiento y borrar sesión</button>
+  <p id="estado" role="status" aria-live="polite"></p>
+  <script type="module" src="src/popup.js"></script>
+</body>
+</html>
