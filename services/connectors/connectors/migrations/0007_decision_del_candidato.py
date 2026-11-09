@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('connectors', '0005_cobro_candidato'),
+        ('connectors', '0006_orden_total_del_candidato'),
     ]
 
     operations = [

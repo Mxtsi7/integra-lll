@@ -19,7 +19,7 @@ Los dos criterios de la tarjeta:
 | El serializer | `connectors/serializers.py` → `CobroCandidatoSerializer` |
 | La ruta del servicio | `connectors/urls.py` |
 | La ruta del gateway | `gateway/config/settings.py` → `RUTAS` |
-| Las pruebas | `services/connectors/tests/test_candidatos_api.py`, 28, más 3 en `gateway/tests/test_gateway.py` |
+| Las pruebas | `services/connectors/tests/test_candidatos_api.py`, 29, más 3 en `gateway/tests/test_gateway.py` |
 
 ## El flujo: de dónde vienen los datos
 
@@ -134,10 +134,24 @@ prueba que lo fija.
 
 ### El orden, que parece un detalle y no lo es
 
-Cronológico por fecha de cobro, como venían en la cartola. Tiene que ser
-**estable**: con un orden que empata —por ejemplo solo por `fecha`, con tres
-filas del mismo día— la paginación repite filas en una página y se salta otras
-entre consultas. El desempate va por `creado_en`.
+Cronológico por fecha de cobro, como venían en la cartola, y desempatado por
+`creado_en` y por `id`. Los tres: el orden tiene que ser **total**, no solo
+parecerlo.
+
+La primera versión ordenaba por `fecha, creado_en` y eso **no alcanza**. Los
+candidatos de un CSV entran con un solo `bulk_create`, así que comparten
+`creado_en` al microsegundo; con el empate sin desempatar, PostgreSQL puede
+devolverlos en distinto orden en cada consulta con `LIMIT/OFFSET`, y entonces
+una página repite filas que ya salieron en la anterior y se salta otras.
+
+Medido, no supuesto: 250 candidatos empatados, recorridos en 25 páginas de 10,
+devolvían **239 ids únicos**. Once candidatos que la vista previa no mostraba
+nunca, sin un solo error y con `count` diciendo 250. Lo encontró la revisión
+de #155.
+
+El `id` es un UUID, así que el desempate no significa nada para la persona. No
+importa: lo que la paginación necesita no es que el orden sea bonito, es que
+sea el mismo en las dos consultas.
 
 ## Lo que falta
 
@@ -160,7 +174,7 @@ cd services/connectors && python -m pytest tests/test_candidatos_api.py -q
 cd gateway && python -m pytest tests/test_gateway.py -q -k candidatos
 ```
 
-28 pruebas acá y 3 en el gateway. Una sube un CSV por el endpoint real, corre
+29 pruebas acá y 3 en el gateway. Una sube un CSV por el endpoint real, corre
 la tarea y lista por la API: con candidatos creados a mano, la prueba pasaría
 igual aunque el cable estuviera cortado.
 
@@ -169,6 +183,11 @@ Dos cosas se comprobaron rompiendo el código a propósito:
 - quitar la entrada del gateway en `RUTAS` hace fallar 2 de sus 3 pruebas;
 - saltarse el filtro por organización hace fallar las **4** pruebas de
   aislamiento, que es el criterio que importa de esta tarjeta.
+
+Y hay una que no vino de un chequeo sino de la revisión: la del recorrido
+completo de páginas. **Solo muerde contra PostgreSQL** —en SQLite el plan es
+estable y pasa aunque el orden no sea total—, así que en el entorno local no
+avisa. La CI corre PostgreSQL.
 
 Y una trampa que ya costó un rato: las pruebas de contrato miran
 `respuesta.json()` y **no** `respuesta.data`. En `.data` todavía hay objetos de
