@@ -348,7 +348,7 @@ def convertir_fecha(valor: str, orden: str | None) -> date:
         raise _ErrorDeCampo(
             FECHA_AMBIGUA,
             f"{texto!r} puede ser día/mes o mes/día y el archivo no lo aclara. "
-            "Indicá el orden de fecha al importar.",
+            "Indica el orden de fecha al importar.",
         )
 
     try:
@@ -385,7 +385,7 @@ def detectar_moneda(texto_monto: str, texto_moneda: str, por_defecto: str | None
         raise _ErrorDeCampo(
             MONEDA_AMBIGUA,
             "El monto trae «$», que no distingue pesos de dólares. "
-            "Agregá una columna de moneda o indicá cuál es al importar.",
+            "Agrega una columna de moneda o indica cuál es al importar.",
         )
 
     if por_defecto:
