@@ -1,38 +1,227 @@
 {
   "android": {
-    "version": 1,
-    "event_id": "71cf2b28-055e-470e-b7c2-6800310ef536",
-    "recolector_id": "70141562-a241-47c4-bd72-e3689479b904",
-    "origen": "android",
-    "inicio": "2026-11-08T12:00:00.000Z",
-    "fin": "2026-11-08T12:02:00.000Z",
-    "duracion_ms": 120000,
-    "zona_horaria": "America/Santiago",
-    "cobertura": "completa",
-    "estado": "activo"
+    "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+    "evento": {
+      "version": 1,
+      "event_id": "71cf2b28-055e-470e-b7c2-6800310ef536",
+      "recolector_id": "70141562-a241-47c4-bd72-e3689479b904",
+      "origen": "android",
+      "inicio": "2026-11-08T12:00:00.000Z",
+      "fin": "2026-11-08T12:02:00.000Z",
+      "duracion_ms": 120000,
+      "zona_horaria": "America/Santiago",
+      "cobertura": "completa",
+      "estado": "activo"
+    }
   },
   "navegador": {
-    "version": 1,
-    "event_id": "21e0cc35-c621-42f0-81c2-59d68cfb899e",
-    "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
-    "origen": "navegador",
-    "inicio": "2026-11-08T12:00:00.000Z",
-    "fin": "2026-11-08T12:02:00.000Z",
-    "duracion_ms": 120000,
-    "zona_horaria": "America/Santiago",
-    "cobertura": "completa",
-    "estado": "activo"
+    "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+    "evento": {
+      "version": 1,
+      "event_id": "21e0cc35-c621-42f0-81c2-59d68cfb899e",
+      "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+      "origen": "navegador",
+      "inicio": "2026-11-08T12:00:00.000Z",
+      "fin": "2026-11-08T12:02:00.000Z",
+      "duracion_ms": 120000,
+      "zona_horaria": "America/Santiago",
+      "cobertura": "completa",
+      "estado": "activo"
+    }
   },
   "sin_medicion": {
-    "version": 1,
-    "event_id": "0c27f172-ec44-4553-bddd-51ae89046631",
-    "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
-    "origen": "navegador",
-    "inicio": "2026-11-08T12:02:00.000Z",
-    "fin": "2026-11-08T12:03:00.000Z",
-    "duracion_ms": 0,
+    "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+    "evento": {
+      "version": 1,
+      "event_id": "0c27f172-ec44-4553-bddd-51ae89046631",
+      "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+      "origen": "navegador",
+      "inicio": "2026-11-08T12:02:00.000Z",
+      "fin": "2026-11-08T12:03:00.000Z",
+      "duracion_ms": 0,
+      "zona_horaria": "America/Santiago",
+      "cobertura": "sin_medicion",
+      "estado": "sin_permiso"
+    }
+  },
+  "destinos_autorizados": [
+    "11111111-1111-4111-8111-111111111111",
+    "22222222-2222-4222-8222-222222222222"
+  ],
+  "medianoche": {
     "zona_horaria": "America/Santiago",
-    "cobertura": "sin_medicion",
-    "estado": "sin_permiso"
+    "observacion": {
+      "inicio": "2026-11-09T02:59:30.000Z",
+      "fin": "2026-11-09T03:00:30.000Z"
+    },
+    "actividad": [
+      {
+        "inicio": "2026-11-09T02:59:50.000Z",
+        "fin": "2026-11-09T03:00:05.000Z"
+      }
+    ],
+    "pendientes": [
+      {
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "evento": {
+          "version": 1,
+          "event_id": "30000000-0000-4000-8000-000000000001",
+          "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+          "origen": "navegador",
+          "inicio": "2026-11-09T02:59:30.000Z",
+          "fin": "2026-11-09T03:00:00.000Z",
+          "duracion_ms": 10000,
+          "zona_horaria": "America/Santiago",
+          "cobertura": "completa",
+          "estado": "activo"
+        }
+      },
+      {
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "evento": {
+          "version": 1,
+          "event_id": "30000000-0000-4000-8000-000000000002",
+          "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+          "origen": "navegador",
+          "inicio": "2026-11-09T03:00:00.000Z",
+          "fin": "2026-11-09T03:00:30.000Z",
+          "duracion_ms": 5000,
+          "zona_horaria": "America/Santiago",
+          "cobertura": "completa",
+          "estado": "activo"
+        }
+      }
+    ],
+    "esperado_ms_por_dia": {
+      "2026-11-08": 10000,
+      "2026-11-09": 5000
+    }
+  },
+  "precision": {
+    "pendientes": [
+      {
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "evento": {
+          "version": 1,
+          "event_id": "40000000-0000-4000-8000-000000000001",
+          "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+          "origen": "navegador",
+          "inicio": "2026-11-08T12:00:00.000Z",
+          "fin": "2026-11-08T12:00:30.000Z",
+          "duracion_ms": 30000,
+          "zona_horaria": "America/Santiago",
+          "cobertura": "completa",
+          "estado": "activo"
+        }
+      },
+      {
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "evento": {
+          "version": 1,
+          "event_id": "40000000-0000-4000-8000-000000000002",
+          "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+          "origen": "navegador",
+          "inicio": "2026-11-08T12:00:30.000Z",
+          "fin": "2026-11-08T12:01:00.000Z",
+          "duracion_ms": 30000,
+          "zona_horaria": "America/Santiago",
+          "cobertura": "completa",
+          "estado": "activo"
+        }
+      }
+    ],
+    "esperado_total_ms_por_paso": [
+      30000,
+      60000
+    ],
+    "esperado_minutos_enteros_por_paso": [
+      0,
+      1
+    ],
+    "esperado_residuo_ms_por_paso": [
+      30000,
+      0
+    ],
+    "esperado_incrementos_minutos": [
+      0,
+      1
+    ],
+    "acredita_dia_completo": false
+  },
+  "cero_observado": {
+    "pendiente": {
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
+        "version": 1,
+        "event_id": "50000000-0000-4000-8000-000000000001",
+        "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+        "origen": "navegador",
+        "inicio": "2026-11-08T03:00:00.000Z",
+        "fin": "2026-11-09T03:00:00.000Z",
+        "duracion_ms": 0,
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo"
+      }
+    },
+    "esperado": {
+      "uso_real_ms": 0,
+      "acredita_dia_completo": true,
+      "crea_uso_positivo": false,
+      "actualiza_ultima_actividad": false
+    }
+  },
+  "ausencia_medicion": {
+    "pendiente": {
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
+        "version": 1,
+        "event_id": "50000000-0000-4000-8000-000000000002",
+        "recolector_id": "9433da3f-5389-452d-a15e-501250b27482",
+        "origen": "navegador",
+        "inicio": "2026-11-08T03:00:00.000Z",
+        "fin": "2026-11-09T03:00:00.000Z",
+        "duracion_ms": 0,
+        "zona_horaria": "America/Santiago",
+        "cobertura": "sin_medicion",
+        "estado": "sin_permiso"
+      }
+    },
+    "esperado": {
+      "uso_real_ms": null,
+      "acredita_dia_completo": false,
+      "crea_uso_positivo": false,
+      "actualiza_ultima_actividad": false
+    }
+  },
+  "duplicados": {
+    "primer_envio": {
+      "pendiente": "android",
+      "ruta_destino": "11111111-1111-4111-8111-111111111111",
+      "http_esperado": 201,
+      "acuse": {
+        "event_id": "71cf2b28-055e-470e-b7c2-6800310ef536",
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "estado": "aceptado",
+        "recibido_en": "2026-11-08T12:02:01.000Z"
+      }
+    },
+    "reintento": {
+      "pendiente": "android",
+      "ruta_destino": "11111111-1111-4111-8111-111111111111",
+      "http_esperado": 200,
+      "acuse": {
+        "event_id": "71cf2b28-055e-470e-b7c2-6800310ef536",
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+        "estado": "duplicado",
+        "recibido_en": "2026-11-08T12:02:01.000Z"
+      }
+    },
+    "otro_destino_autorizado": {
+      "pendiente": "android",
+      "ruta_destino": "22222222-2222-4222-8222-222222222222",
+      "http_esperado": 409,
+      "error": "event_id_conflictivo"
+    }
   }
 }

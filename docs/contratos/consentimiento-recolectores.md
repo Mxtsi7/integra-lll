@@ -59,3 +59,18 @@ no amplía plazos ni cambia retención de auditoría o consentimiento de la cuen
 Victor debe validar el contrato, almacenamiento y purga. Chris debe validar texto
 y estados visibles en S3-CH-21. Registrar aprobación con PR/commit y el plazo acordado;
 no inventar una reunión o consentimiento ajeno. Esta propuesta deja esos acuerdos pendientes.
+
+### Registro obligatorio antes de cerrar S3-MX-02
+
+| Acuerdo/validación | Contenido y evidencia que debe registrarse | Estado |
+| --- | --- | --- |
+| Plazo del historial persistente | Duración y unidad por tipo de dato; inicio del cómputo; responsable; acta/PR y fecha | Pendiente, sin plazo aprobado |
+| Purga | Qué se elimina, cuándo corre, máximo de demora y pendientes/reintentos; prueba y responsable | Pendiente |
+| Texto informado | Texto completo y versión aceptada; datos, finalidad, destino, plazo, pausa y retirada | Pendiente |
+| Recepción de Victor | Aprobación explícita de plazo/purga y su implementación, con PR/commit o acta | Pendiente |
+| Validación con Chris | Aprobación del texto/versión y estados visibles, con PR/commit o acta | Pendiente |
+
+Las evidencias deben referirse a esta versión del contrato y conservar quién aprobó,
+cuándo y qué acordó. Mantener la tarjeta abierta hasta completar este registro.
+Corregir documentación o pasar ejemplos no certifica estas aprobaciones; tampoco
+habilita automáticamente captura persistente, envíos ni el cierre de S3-MX-01.
