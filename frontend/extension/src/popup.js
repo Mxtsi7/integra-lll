@@ -1,15 +1,21 @@
 import { normalizarDominio } from './dominio.js';
 
 const estado = document.querySelector('#estado');
+const captura = document.querySelector('#observacion');
 const autorizar = document.querySelector('#autorizar');
 let generacion = 0;
 let preparacion = null;
+let revisionObservacion = 0;
 autorizar.disabled = true;
+function mostrarObservacion(observacion) {
+  captura.textContent = `${observacion?.estado ?? 'sin_consentimiento'} ${observacion?.dominio ?? ''}`.trim();
+}
 async function mostrarEstado(generacionEsperada = generacion) {
+  const revisionInicial = revisionObservacion;
   const { configuracion, observacion } = await chrome.storage.session.get(['configuracion', 'observacion']);
   if (generacionEsperada !== generacion) return;
   document.querySelector('#dominios').value = configuracion?.dominios.join('\n') ?? '';
-  estado.textContent = `${observacion?.estado ?? 'sin_consentimiento'} ${observacion?.dominio ?? ''}`;
+  if (revisionInicial === revisionObservacion) mostrarObservacion(observacion);
 }
 // Registrar al editar deja el gesto de Autorizar disponible para la petición nativa.
 async function prepararAutorizacion() {
@@ -58,7 +64,7 @@ document.querySelector('#configuracion').addEventListener('submit', async evento
     if (actual !== generacion) return;
     if (respuesta?.cancelado) { estado.textContent = 'Autorización cancelada. Acepta de nuevo para activar.'; return; }
     if (!respuesta?.ok) throw new Error('No se pudo guardar');
-    estado.textContent = 'Dominios autorizados. Vuelve a abrir este panel para consultar el estado.';
+    estado.textContent = 'Dominios autorizados. El estado de captura se actualiza automáticamente.';
   } catch {
     await chrome.runtime.sendMessage({ tipo: 'cancelar_autorizacion', intentoId }).catch(() => {});
     if (actual === generacion) estado.textContent = 'No se pudo autorizar. Edita los dominios para volver a intentar.';
@@ -77,5 +83,11 @@ document.querySelector('#retirar').addEventListener('click', async () => {
   } catch {
     if (actual === generacion) estado.textContent = 'No se pudo completar la retirada. Deshabilita la extensión y vuelve a intentarlo.';
   }
+});
+// Suscribir antes de leer el snapshot para no perder cambios mientras se abre el panel.
+chrome.storage.onChanged.addListener((cambios, area) => {
+  if (area !== 'session' || !Object.hasOwn(cambios, 'observacion')) return;
+  ++revisionObservacion;
+  mostrarObservacion(cambios.observacion.newValue);
 });
 mostrarEstado().catch(() => { estado.textContent = 'No se pudo leer el estado de la sesión.'; });
