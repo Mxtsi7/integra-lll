@@ -411,3 +411,74 @@ test('un error real del worker corta el tramo antes de recuperar actividad', asy
     assert.deepEqual(JSON.parse(document.querySelector('#minutos').textContent), {});
   } finally { Date.now = reloj; }
 });
+
+test('navegar sin URL en el evento deja de mostrar A antes de terminar la carga de B', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  assert.match(textoCaptura(), /activo example.com/);
+  let actual = [{ active: true }]; // Chrome oculta la URL de B porque no tiene permiso.
+  api.tabs.query = async () => actual;
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, null);
+  assert.ok(!textoCaptura().includes('example.com'), 'el panel no espera status=complete');
+  actual = [{ active: true, url: 'https://example.com/regreso' }];
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, 'example.com');
+  assert.match(textoCaptura(), /activo example.com/);
+  assert.deepEqual([...almacen.configuracion.dominios], ['example.com']);
+});
+
+test('los tramos no se solapan al pausar, reanudar y alternar entre ventanas', async () => {
+  const { api, almacen, enfocar } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  try {
+    await aceptar();
+    await vaciarCola();
+    for (const [t, ventana] of [[2000, -1], [9000, 1], [12000, 2], [16000, 1], [19000, -1]]) {
+      instante = t;
+      if (ventana === -1) api.windows.onFocusChanged.emitir(-1);
+      else enfocar(ventana);
+      await vaciarCola();
+    }
+    const sesiones = almacen.medicion.sesiones;
+    assert.deepEqual(sesiones.map(s => [s.inicio, s.fin]), [[0, 2000], [9000, 12000], [16000, 19000]]);
+    for (let i = 1; i < sesiones.length; i++) assert.ok(sesiones[i - 1].fin <= sesiones[i].inicio);
+    assert.equal(sesiones.reduce((ms, s) => ms + s.duracionMs, 0), 8000);
+    assert.equal(almacen.medicion.tramo, null);
+  } finally { Date.now = reloj; }
+});
+
+test('loading con URL anterior no conserva A y un commit sin URL tampoco lo reactiva', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  let actual = { active: true, url: 'https://example.com/anterior', status: 'loading' };
+  api.tabs.query = async () => [actual];
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, null, 'la última URL confirmada no prueba actividad de la navegación pendiente');
+  actual = { active: true, status: 'loading' };
+  api.tabs.onUpdated.emitir(7, {}, { id: 7, active: true, status: 'loading' });
+  await vaciarCola();
+  assert.ok(!textoCaptura().includes('example.com'));
+  actual = { active: true, url: 'https://example.com/regreso', status: 'complete' };
+  api.tabs.onUpdated.emitir(7, { status: 'complete' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, 'example.com');
+});
+
+test('cargar la pestaña activa de otra ventana no pausa la ventana enfocada', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  api.tabs.onUpdated.emitir(8, { status: 'loading' }, { id: 8, active: true, windowId: 2 });
+  await vaciarCola();
+  assert.equal(almacen.observacion.estado, 'activo');
+  assert.equal(almacen.observacion.dominio, 'example.com');
+});
+

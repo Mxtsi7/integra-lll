@@ -163,3 +163,29 @@ Son dobles de API/DOM. Chrome 156 headless no permitió abrir el panel de la
 extensión (ERR_BLOCKED_BY_CLIENT); no se acredita recorrido interactivo real.
 Persisten los acuerdos de Victor/Chris y las tareas posteriores de selección real,
 cola durable y sincronización. No se añade envío HTTP ni historial persistente.
+
+## Navegación y pausas — revisión del plan del 9 de noviembre de 2026
+
+Reevaluar la pestaña activa no depende de que Chrome incluya la URL en el evento.
+Durante status=loading se publica navegando sin dominio: Tab.url puede seguir
+siendo la última URL confirmada. Se vuelve a evaluar cualquier actualización de
+la pestaña activa y se consulta exclusivamente la ventana enfocada. Volver a un
+host autorizado tras completar la navegación recupera activo. No cambian permisos.
+Las regresiones cubren A autorizado → B sin URL/permiso con carga pendiente,
+la URL anterior durante loading, commit sin URL y regreso; otra ventana cargando
+no debe pausar la enfocada. Las pruebas usan módulos reales y dobles de Chrome/DOM.
+
+Recorrido real: se cargó la extensión de trabajo y abrió su panel en Chrome
+156.0.8078.75, perfil aislado, sin sembrar consentimiento. El usuario confirmó
+aceptar el permiso solicitado para example.com. Antes de verificar navegación,
+foco e inactividad, Computer Use se detuvo porque no pudo identificar la URL de
+la ventana con suficiente certeza. No se acredita el recorrido completo, ni la
+versión final corregida en Chrome, ni ejecución en Edge. Estas comprobaciones
+siguen pendientes, al igual que los acuerdos de consentimiento de Victor/Chris.
+
+Verificación ampliada: 39 pruebas de extensión. La integración alterna ventanas y pausas y obtiene tramos [0,2000), [9000,12000), [16000,19000), total 8000 ms, sin solapamiento ni tiempo suspendido. Las pausas explícitas no consultan pestañas. Mantener secuencia #149 → #150 → #151.
+
+
+Suite completa final: 1038/1038 (268 shared, 581 web, 146 móvil, 4 desktop, 39 extensión), tipos y build web aprobados. En el primer intento fallaron dos casos existentes de PerfilPage.test.tsx: guarda con PATCH (timeout 5000 ms) y Cancelar (no encontró Editar nombre). El segundo intento de la suite completa pasó sin cambios en web; se registra la incidencia y no se modifica ese alcance.
+
+
