@@ -25,6 +25,17 @@ def interseccion_ms(inicio, fin, tramo):
     return max(0, int((hasta - desde).total_seconds() * 1000))
 
 
+def duracion_union_ms(tramos):
+    intervalos = sorted((instante(tramo["inicio"]), instante(tramo["fin"])) for tramo in tramos)
+    unidos = []
+    for inicio, fin in intervalos:
+        if unidos and inicio <= unidos[-1][1]:
+            unidos[-1] = (unidos[-1][0], max(unidos[-1][1], fin))
+        else:
+            unidos.append((inicio, fin))
+    return sum(int((fin - inicio).total_seconds() * 1000) for inicio, fin in unidos)
+
+
 class EjemplosContratoUso(unittest.TestCase):
     def test_android_y_navegador_comparten_significado_y_destino(self):
         android, navegador = (EJEMPLOS[origen] for origen in ("android", "navegador"))
@@ -109,3 +120,33 @@ class EjemplosContratoUso(unittest.TestCase):
         for campo in ("event_id", "suscripcion_id", "recibido_en"):
             self.assertEqual(primero["acuse"][campo], repetido["acuse"][campo])
         self.assertEqual(primero["acuse"]["suscripcion_id"], EJEMPLOS[primero["pendiente"]]["suscripcion_id"])
+
+    def test_solapamientos_cuentan_tiempo_de_suscripcion_no_suma_de_recolectores(self):
+        for nombre, caso in EJEMPLOS["solapamientos"].items():
+            with self.subTest(caso=nombre):
+                eventos = [pendiente["evento"] for pendiente in caso["pendientes"]]
+                tramos = [tramo for evento in eventos for tramo in evento["tramos_actividad"]]
+                for evento in eventos:
+                    self.assertEqual(duracion_union_ms(evento["tramos_actividad"]), evento["duracion_ms"])
+                self.assertEqual(sum(evento["duracion_ms"] for evento in eventos), caso["esperado_suma_recolectores_ms"])
+                esperado = caso["esperado_uso_suscripcion_ms"]
+                self.assertEqual(duracion_union_ms(tramos), esperado)
+                self.assertEqual(duracion_union_ms(list(reversed(tramos)) + tramos), esperado)
+
+    def test_todos_los_eventos_conservan_detalle_y_duracion_coherentes(self):
+        def recorrer(nodo):
+            if isinstance(nodo, dict):
+                if "evento" in nodo:
+                    yield nodo["evento"]
+                else:
+                    for valor in nodo.values():
+                        yield from recorrer(valor)
+            elif isinstance(nodo, list):
+                for valor in nodo:
+                    yield from recorrer(valor)
+        for evento in recorrer(EJEMPLOS):
+            self.assertEqual(duracion_union_ms(evento["tramos_actividad"]), evento["duracion_ms"])
+            for tramo in evento["tramos_actividad"]:
+                self.assertLess(instante(tramo["inicio"]), instante(tramo["fin"]))
+                self.assertGreaterEqual(instante(tramo["inicio"]), instante(evento["inicio"]))
+                self.assertLessEqual(instante(tramo["fin"]), instante(evento["fin"]))

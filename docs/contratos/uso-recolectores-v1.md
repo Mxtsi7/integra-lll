@@ -22,6 +22,7 @@ No aceptar IDs de una asociación de otra cuenta aunque el UUID sea válido.
 | `origen` | `android` o `navegador` |
 | `inicio`, `fin` | Instantes UTC ISO 8601 terminados en `Z`; intervalo semiabierto `[inicio, fin)`; inicio < fin; contenido en un solo día de `zona_horaria` |
 | `duracion_ms` | Entero no negativo, <= fin − inicio; tiempo observado, nunca reloj de procesamiento |
+| `tramos_actividad` | Lista ordenada de `{inicio, fin}` UTC, positivos, sin solapamientos internos y contenidos en la ventana; obligatoria, vacía si no hay actividad |
 | `zona_horaria` | Nombre IANA; el receptor valida que exista; sirve para agrupación por día local |
 | `cobertura` | `completa`, `parcial` o `sin_medicion` |
 | `estado` | `activo`, `pausado`, `sin_permiso` o `revocado` |
@@ -44,7 +45,42 @@ Estos límites todavía requieren confirmación de Victor antes de integrar.
 Los ejemplos de [uso-recolectores-v1.ejemplos.json](uso-recolectores-v1.ejemplos.json)
 son fixtures sintéticas, **no uso capturado**. Cada ejemplo de envío es un pendiente
 `{suscripcion_id, evento}`; solo `evento` se envía como cuerpo. Android y navegador
-representan 120000 ms de actividad en el mismo intervalo.
+representan cada uno 120000 ms de actividad en el mismo intervalo; recibidos juntos
+acreditan 120000 ms de uso de la suscripción, no 240000 ms.
+
+### Unidad de uso y varios recolectores
+
+**Propuesta a validar con Victor:** la métrica principal es tiempo transcurrido de
+uso observado de una suscripción, en milisegundos de la **unión** de sus tramos reales
+de actividad. No es la suma de minutos por dispositivo, pestaña o recolector.
+Dos observaciones válidas pueden tener IDs distintos y solaparse sin ser un reintento.
+Ambas se conservan como fuentes; aceptar la segunda no duplica el tiempo ya cubierto.
+La deduplicación por ID y la unión temporal resuelven problemas distintos.
+
+`duracion_ms` resume la unión de `tramos_actividad` de ese evento y debe coincidir
+exactamente con ella. Una duración escalar no basta para deshacer solapamientos:
+el receptor rechaza el detalle faltante/inconsistente con `400 detalle_actividad_invalido`,
+sin inventar su distribución. Esta v1 sigue en borrador; emisores y adaptador deben
+adoptar juntos el campo obligatorio antes de integrarla. Esta PR no los implementa.
+El límite de 4 KiB sigue vigente: dividir una ventana grande en pendientes con IDs
+propios si hace falta; nunca truncar su lista de tramos ni cambiar el cuerpo al reintentar.
+
+Primero unir en UTC todos los tramos aceptados del mismo tenant y suscripción;
+después intersectar esa unión con los días de la zona de informe acordada para esa
+suscripción. Los recolectores reciben la misma zona de informe del receptor, no
+eligen zonas distintas según el dispositivo. Una zona discrepante se rechaza antes
+de aceptar/proyectar; su cambio requiere política explícita para no recontar historia.
+La zona y su suministro por el adaptador quedan pendientes de validación de Victor.
+
+| Caso conjunto | Suma por recolector (solo diagnóstico) | Uso de suscripción por unión |
+| --- | ---: | ---: |
+| Android y navegador: ambos [12:00, 12:02) | 240000 ms | 120000 ms = 2 min |
+| Android [12:00, 12:02), navegador [12:01, 12:03) | 240000 ms | 180000 ms = 3 min |
+| Misma ventana de 2 min, actividad Android [12:00, 12:00:30), navegador [12:00:20, 12:00:50) | 60000 ms | 50000 ms; el total escalar no permite deducirlo |
+
+Las fixtures `solapamientos` declaran estos resultados. Si dos ventanas son iguales
+pero solo se conoce que cada una contiene 30 s de uso, el resultado podría variar:
+no aplicar `min(suma, longitud_ventana)` como sustituto de los tramos reales.
 
 ### Emisión por día local
 
@@ -88,8 +124,12 @@ manual exige al menos 1 y `Subscription.registrar_uso` convierte mediante `int`.
 cuerpos, ni pasarle `0.5`, `0` o los eventos crudos de recolectores.
 
 El adaptador debe persistir el evento aceptado con milisegundos enteros y cobertura,
-destino y zona originales como fuente exacta, en la misma operación idempotente.
-La proyección exacta por suscripción/fecha/zona suma esos milisegundos una sola vez.
+destino, zona y tramos originales como fuente exacta, en la misma operación idempotente.
+La proyección exacta por suscripción/fecha/zona mide la unión temporal definida arriba.
+Sumar duraciones solo cuando sus tramos sean disjuntos; al llegar un evento solapado,
+recalcular la unión y proyectar exclusivamente el incremento efectivo. El orden de
+llegada, el origen y un reintento no cambian el total. Esto aplica también dentro
+de un mismo recolector y mantiene los residuos sobre el total unido, no sobre sumas.
 Para compatibilidad entera: `minutos_enteros = total_ms // 60000` y
 `residuo_ms = total_ms % 60000`. Conservar el residuo por día; nunca trasladarlo al
 día siguiente ni descartar una fracción al cerrar mes. Proyectar solo el incremento
@@ -133,7 +173,7 @@ El acuse lleva `recibido_en` UTC **del servidor**; una petición enviada no prue
 sincronización. Clave de deduplicación: identidad autenticada + recolector_id +
 event_id, **sin añadir suscripcion_id a la clave**. El registro de deduplicación
 vincula esa clave al destino de la ruta y a **todos** los campos validados del cuerpo:
-version, event_id, recolector_id, origen, inicio, fin, duracion_ms, zona_horaria,
+version, event_id, recolector_id, origen, inicio, fin, duracion_ms, tramos_actividad, zona_horaria,
 cobertura y estado. Comparar valores tipados normalizados (UUID e instantes), sin
 depender del orden/espacios del JSON. Resolver autenticación, consentimiento y permiso
 al destino antes de consultar duplicados para no revelar recursos ajenos.
@@ -165,7 +205,7 @@ PostgreSQL o acuerdo humano. Registro de recepción a completar antes de cerrar:
 
 | Validación requerida | Responsable | Evidencia | Estado |
 | --- | --- | --- | --- |
-| Reparto local, precisión, cobertura y deduplicación de esta versión | Victor | PR/commit revisado + aprobación explícita enlazada | Pendiente |
+| Reparto local, precisión, cobertura, unidad de uso, solapamientos, zona de informe y deduplicación de esta versión | Victor | PR/commit revisado + aprobación explícita enlazada | Pendiente |
 | Adaptador, casos HTTP y proyecciones reales sin pérdida | Victor y Maxi | Endpoint, commit y resultados reproducibles | Pendiente |
 
 No cerrar S3-MX-01 por haber añadido esta tabla. La validación debe referirse al
