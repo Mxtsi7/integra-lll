@@ -36,6 +36,8 @@ from django.utils import timezone
 from shared.cifrado import SECRETO_ILEGIBLE, CampoCifrado
 from shared.tenant.base import ModeloTenant
 
+from . import candidatos
+
 
 class CuentaConectada(ModeloTenant):
     """Autorización de una organización sobre una fuente externa de cobros."""
@@ -742,3 +744,182 @@ class ArchivoImportacion(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.importacion_id}: {self.formato} de {self.tamano} bytes"
+
+
+class CobroCandidato(ModeloTenant):
+    """Un cobro propuesto, ya guardado (S3-FE-10, y S3-FE-09 lo reutiliza).
+
+    Es la forma persistida de `candidatos.Candidato`: ese dataclass es lo que
+    devuelve un lector —`csv_candidatos.leer` hoy, el de correo en S3-FE-09— y
+    esta tabla es donde queda para que alguien lo mire.
+
+    ── Por qué hace falta guardarlos ───────────────────────────────────────
+    `Importacion.candidatos_detectados` es un CONTEADOR: sirve para la barra
+    de progreso y nada más. La vista previa (S3-FE-14) necesita las filas, y
+    volver a leer el archivo no es una opción: `ArchivoImportacion` es
+    temporal y `purgar_archivos_importacion` lo borra a los
+    `IMPORTACION_DIAS_RETENCION` días. Lo que sobra es el archivo; el
+    resultado queda.
+
+    ── Sigue sin ser una suscripción ───────────────────────────────────────
+    Guardar un candidato no crea ni toca nada del dinero de nadie: nace
+    `propuesto` y ahí se queda hasta que una persona lo confirme (S3-FE-15) o
+    lo rechace (S3-FE-16). Es el mismo límite que cuida `Importacion`: que el
+    análisis termine no significa que se haya tocado una suscripcion.
+
+    ── La unicidad es la de `clave_deduplicacion()` ─────────────────────────
+    (organizacion, origen, identificador de origen). En CSV el identificador
+    es `<sha256 del archivo>:<número de fila>`, así que reprocesar el mismo
+    archivo no duplica nada y la tarea puede reintentarse sin miedo. Es la
+    base de S3-FE-17.
+
+    Va en la base y no solo en el código porque una unicidad que se comprueba
+    leyendo antes de escribir deja pasar dos tareas simultaneas.
+    """
+
+    class Origen(models.TextChoices):
+        # Los valores salen de `candidatos.py` y no de literales repetidos:
+        # un candidato que nace con `origen="csv"` tiene que poder guardarse
+        # sin traducir nada, y dos listas de literales se separan con el
+        # tiempo sin que nadie se entere.
+        CSV = candidatos.ORIGEN_CSV, "Archivo CSV o cartola"
+        CORREO = candidatos.ORIGEN_CORREO, "Correo"
+
+    class TipoMensaje(models.TextChoices):
+        COBRO_REALIZADO = candidatos.TipoMensaje.COBRO_REALIZADO, "Cobro realizado"
+        AVISO_DE_COBRO = candidatos.TipoMensaje.AVISO_DE_COBRO, "Aviso de cobro"
+        PAGO_FALLIDO = candidatos.TipoMensaje.PAGO_FALLIDO, "Pago fallido"
+
+    class Estado(models.TextChoices):
+        PROPUESTO = candidatos.EstadoCandidato.PROPUESTO, "Propuesto"
+        CONFIRMADO = candidatos.EstadoCandidato.CONFIRMADO, "Confirmado"
+        RECHAZADO = candidatos.EstadoCandidato.RECHAZADO, "Rechazado"
+
+    importacion = models.ForeignKey(
+        Importacion,
+        on_delete=models.CASCADE,
+        related_name="candidatos",
+        verbose_name="Importación de la que salió",
+        help_text=(
+            "CASCADE: un candidato es el resultado de esa lectura y no "
+            "significa nada sin ella. Si la importación se borra, lo que "
+            "quedaría es una propuesta sin procedencia."
+        ),
+    )
+
+    origen = models.CharField(max_length=10, choices=Origen.choices, verbose_name="Origen")
+    identificador_origen = models.CharField(
+        max_length=200,
+        verbose_name="Identificador en su origen",
+        help_text=(
+            "En CSV, `<sha256>:<número de fila>`; en correo, el Message-ID. "
+            "Estable: el mismo hecho leído dos veces da el mismo valor."
+        ),
+    )
+
+    # ── a quién se le paga ───────────────────────────────────────────
+
+    servicio = models.CharField(
+        max_length=120,
+        null=True,
+        blank=True,
+        verbose_name="Proveedor reconocido",
+        help_text=(
+            "NULL, y no cadena vacía, cuando no se pudo resolver sin "
+            "inventar: son cosas distintas y `servicio_resultado` dice por "
+            "qué. Inventar un proveedor es peor que no asignar ninguno."
+        ),
+    )
+    servicio_texto = models.CharField(
+        max_length=300,
+        verbose_name="Texto original del servicio",
+        help_text="La glosa tal cual venía. Siempre, aunque se haya reconocido.",
+    )
+    servicio_resultado = models.CharField(
+        max_length=20,
+        verbose_name="Resultado del reconocimiento",
+        help_text="`reconocido`, `ambiguo` o `desconocido`, de `normalizacion.py`.",
+    )
+
+    # ── cuánto, en qué y cuándo ──────────────────────────────────────
+
+    importe = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        verbose_name="Importe",
+        help_text=(
+            "NUMERIC y no float: en binario 0.1 + 0.2 no da 0.3 y esto es "
+            "plata de otra persona. Dos decimales porque ninguna de las "
+            "monedas admitidas tiene tres (ver DECIMALES_POR_MONEDA)."
+        ),
+    )
+    moneda = models.CharField(
+        max_length=3,
+        verbose_name="Moneda",
+        help_text="ISO 4217 en mayúsculas. Nunca un símbolo: `$` no distingue CLP de USD.",
+    )
+    fecha = models.DateField(verbose_name="Fecha del cobro")
+
+    tipo_mensaje = models.CharField(
+        max_length=20,
+        choices=TipoMensaje.choices,
+        verbose_name="Tipo de mensaje",
+        help_text="Mezclarlos inventaría un cobro que no ocurrió, o lo contaría dos veces.",
+    )
+    estado = models.CharField(
+        max_length=12,
+        choices=Estado.choices,
+        default=Estado.PROPUESTO,
+        db_index=True,
+        verbose_name="Estado",
+    )
+
+    evidencia = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Evidencia",
+        help_text=(
+            "Lo mínimo para comprobar de dónde salió sin volver al archivo: "
+            "en CSV, el número de fila y la glosa original."
+        ),
+    )
+
+    @classmethod
+    def desde_candidato(cls, candidato, *, importacion: Importacion) -> "CobroCandidato":
+        """Instancia SIN guardar, para que el llamador haga un `bulk_create`.
+
+        Un `save()` por fila son 200 UPDATE en una cartola de 200 líneas.
+        """
+        return cls(
+            organizacion_id=importacion.organizacion_id,
+            importacion=importacion,
+            origen=candidato.origen,
+            identificador_origen=candidato.identificador_origen,
+            servicio=candidato.servicio,
+            servicio_texto=candidato.servicio_texto[:300],
+            servicio_resultado=candidato.servicio_resultado,
+            importe=candidato.importe,
+            moneda=candidato.moneda,
+            fecha=candidato.fecha,
+            tipo_mensaje=candidato.tipo_mensaje,
+            estado=candidato.estado,
+            evidencia=dict(candidato.evidencia),
+        )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "cobro_candidato"
+        ordering = ["fecha", "creado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "origen", "identificador_origen"],
+                name="candidato_unico_por_origen",
+            ),
+        ]
+        indexes = ModeloTenant.Meta.indexes + [
+            models.Index(fields=["importacion", "estado"], name="candidato_importacion"),
+        ]
+        verbose_name = "Cobro candidato"
+        verbose_name_plural = "Cobros candidatos"
+
+    def __str__(self) -> str:
+        return f"{self.servicio or self.servicio_texto}: {self.importe} {self.moneda}"
