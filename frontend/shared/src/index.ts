@@ -40,6 +40,7 @@ export * from './api/conectores';
 export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
+export * from './api/asistente';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/planes';
