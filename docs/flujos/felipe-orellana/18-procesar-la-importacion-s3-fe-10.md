@@ -21,7 +21,7 @@ Los dos criterios de la tarjeta:
 | El encolado | `connectors/views.py` → `_encolar_procesamiento` |
 | Donde quedan los candidatos | `connectors/models.py` → `CobroCandidato` |
 | La migración | `connectors/migrations/0005_cobro_candidato.py` |
-| Las pruebas | `services/connectors/tests/test_procesar_importacion.py`, 33 |
+| Las pruebas | `services/connectors/tests/test_procesar_importacion.py`, 33, y `test_carrera_publicacion_postgres.py`, 4 contra PostgreSQL |
 
 ## El flujo: de dónde vienen los datos
 
@@ -156,7 +156,18 @@ sola operación condicionada, y por eso el rescate puede volver a usarla.
 
 El `UPDATE` condicionado también **bloquea la fila** hasta el commit, así que
 en PostgreSQL nadie se mete entre el cierre y la inserción: el que llega
-segundo reevalúa el `WHERE` con la fila ya cambiada y se encuentra 0 filas.
+segundo espera el lock y después reevalúa su `WHERE` con la fila ya
+confirmada, y se encuentra 0 filas. Eso es `READ COMMITTED`, que es el nivel
+de aislamiento por omisión y el que usa el proyecto (no fija ninguno).
+
+Ese bloqueo **no se puede comprobar en SQLite**, donde se bloquea la base
+entera y no hay dos transacciones mirándose. Por eso está
+`test_carrera_publicacion_postgres.py`, con dos conexiones de verdad: el
+worker se detiene con el cierre reclamado y sin confirmar, el rescate llega
+por otra conexión y la prueba exige que **quede bloqueado** —si no lo
+estuviera, ya habría terminado— y que después se encuentre 0 filas. Cubre los
+dos órdenes, el camino de error y dos workers simultáneos sobre la misma
+importación.
 
 **Ningún estado se queda sin final.** El broker es Redis y Redis no es
 durable: si el worker se cae con la tarea tomada, el mensaje se pierde. Sin
@@ -213,6 +224,17 @@ está.
 
 ```bash
 cd services/connectors && python -m pytest tests/test_procesar_importacion.py -q
+```
+
+Las de dos conexiones necesitan un PostgreSQL de verdad y **se saltan solas**
+sin él:
+
+```bash
+docker run -d --name pg-prueba -e POSTGRES_DB=suscripciones -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5433:5432 postgres:16-alpine
+```
+
+```bash
+cd services/connectors && DATABASE_URL=postgres://postgres:postgres@localhost:5433/suscripciones ESQUEMA_BD=public python -m pytest tests/test_carrera_publicacion_postgres.py -q
 ```
 
 33 pruebas. La primera sube un CSV por el endpoint real con Celery en modo

@@ -28,7 +28,7 @@ estado real contrastado con `main`.
 | **Sprint 2 · FE-28 y FE-29** Uso por periodo y puntaje de bajo uso | Hecho, 130 pruebas; el consumidor de eventos todavía no está conectado | [15-uso-por-periodo-y-bajo-uso-fe28-fe29.md](15-uso-por-periodo-y-bajo-uso-fe28-fe29.md) |
 | **Sprint 2 · Pedido del profesor** Snapshot en vivo de la comparación con y sin RabbitMQ, con autoscaling | Hecho, 24 pruebas nuevas y opción 12 del menú; falta una corrida real en el cluster | [16-snapshot-comparacion-rabbitmq-y-hpa.md](16-snapshot-comparacion-rabbitmq-y-hpa.md) |
 | **Sprint 3 · S3-FE-01, 11, 12 y 13** Candidato común y lectura de CSV: columnas, valores canónicos y errores por fila | Hecho, 84 pruebas | [17-candidatos-desde-csv-s3-fe-01-11-12-13.md](17-candidatos-desde-csv-s3-fe-01-11-12-13.md) |
-| **Sprint 3 · S3-FE-10** Conectar el archivo subido con el parser: la tarea, los candidatos guardados y el rescate de lo estancado | Hecho, 33 pruebas; en el cluster falta el Deployment del worker | [18-procesar-la-importacion-s3-fe-10.md](18-procesar-la-importacion-s3-fe-10.md) |
+| **Sprint 3 · S3-FE-10** Conectar el archivo subido con el parser: la tarea, los candidatos guardados y el rescate de lo estancado | Hecho, 37 pruebas (4 piden PostgreSQL); en el cluster falta el Deployment del worker | [18-procesar-la-importacion-s3-fe-10.md](18-procesar-la-importacion-s3-fe-10.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su
