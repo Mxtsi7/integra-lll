@@ -8,6 +8,7 @@ function navegador(configuracion = { id: 'A', consentimiento: true, dominios: ['
     storage: { session: { get: async () => ({ ...almacen }), set: async valores => Object.assign(almacen, valores) } },
     tabs: { query: async () => [{ url: 'https://netflix.com/perfil?privado=1', incognito: false }] },
     permissions: { contains: async () => true },
+    windows: { getLastFocused: async () => ({ id: 1, focused: true }) },
   };
   return { api, almacen };
 }

@@ -3,6 +3,21 @@ import { normalizarDominio } from './dominio.js';
 
 export function crearControlador(api) {
   let cola = Promise.resolve();
+  function validarDominios(dominios) {
+    if (!Array.isArray(dominios) || !dominios.length || dominios.length > 20 ||
+        dominios.some(dominio => normalizarDominio(dominio) !== dominio)) {
+      throw new Error('Configuración inválida');
+    }
+  }
+  async function limpiarPermisosSobrantes() {
+    const { configuracion, autorizacion } = await api.storage.session.get(['configuracion', 'autorizacion']);
+    // Una concesión tardía no puede quitar permisos de una aceptación nueva o en curso.
+    const dominios = [...(configuracion?.consentimiento ? configuracion.dominios : []), ...(autorizacion?.dominios ?? [])];
+    const vigentes = new Set(dominios.map(dominio => `https://${dominio}/*`));
+    const permisos = await api.permissions.getAll();
+    const sobrantes = (permisos.origins ?? []).filter(origen => !vigentes.has(origen));
+    if (sobrantes.length) await api.permissions.remove({ origins: sobrantes });
+  }
   function encolar(operacion) {
     const pendiente = cola.then(operacion);
     cola = pendiente.catch(() => {}); // El llamador recibe el rechazo; la cola sigue utilizable.
@@ -13,22 +28,38 @@ export function crearControlador(api) {
       try { await observar(api); }
       catch { await registrarError(api); }
     }),
-    guardar: configuracion => encolar(async () => {
-      const dominios = configuracion.dominios;
-      if (!Array.isArray(dominios) || !dominios.length || dominios.length > 20 ||
-          dominios.some(dominio => normalizarDominio(dominio) !== dominio) || !configuracion.consentimiento) {
-        throw new Error('Configuración inválida');
+    iniciarAutorizacion: (id, dominios) => encolar(async () => {
+      validarDominios(dominios);
+      if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Intento inválido');
+      await api.storage.session.set({ autorizacion: { id, dominios } });
+    }),
+    cancelarAutorizacion: id => encolar(async () => {
+      const { autorizacion } = await api.storage.session.get('autorizacion');
+      if (autorizacion?.id === id) await api.storage.session.remove('autorizacion');
+      await limpiarPermisosSobrantes();
+    }),
+    limpiarPermisos: () => encolar(limpiarPermisosSobrantes),
+    guardar: (configuracion, intentoId) => encolar(async () => {
+      const { autorizacion } = await api.storage.session.get('autorizacion');
+      if (!intentoId || autorizacion?.id !== intentoId) {
+        await limpiarPermisosSobrantes();
+        return { ok: false, cancelado: true };
       }
+      const dominios = autorizacion.dominios;
+      if (!configuracion?.consentimiento) throw new Error('Consentimiento requerido');
       const origins = dominios.map(dominio => `https://${dominio}/*`);
-      if (!await api.permissions.contains({ origins })) throw new Error('Permiso requerido');
+      if (!await api.permissions.contains({ origins })) {
+        await api.storage.session.remove('autorizacion');
+        await limpiarPermisosSobrantes();
+        throw new Error('Permiso requerido');
+      }
       const { configuracion: anterior } = await api.storage.session.get('configuracion');
       await api.storage.session.set({ configuracion: {
         id: crypto.randomUUID(), sesionId: anterior?.sesionId ?? anterior?.id ?? crypto.randomUUID(),
         consentimiento: true, dominios, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),
       } });
-      const permisos = await api.permissions.getAll();
-      const sobrantes = (permisos.origins ?? []).filter(origen => !origins.includes(origen));
-      if (sobrantes.length) await api.permissions.remove({ origins: sobrantes });
+      await api.storage.session.remove('autorizacion');
+      await limpiarPermisosSobrantes();
     }),
     retirar: () => encolar(async () => {
       await api.storage.session.clear();

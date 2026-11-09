@@ -5,7 +5,8 @@ export async function observar(api) {
   let dominio = null;
   let estado = 'sin_consentimiento';
   if (configuracion?.consentimiento) {
-    const [pestana] = await api.tabs.query({ active: true, currentWindow: true });
+    const ventana = await api.windows.getLastFocused();
+    const [pestana] = ventana.focused ? await api.tabs.query({ active: true, windowId: ventana.id }) : [];
     dominio = !pestana?.incognito ? dominioAutorizado(pestana?.url, configuracion.dominios) : null;
     estado = 'sin_dominio_autorizado';
     if (dominio) {
