@@ -342,3 +342,52 @@ test('conserva idle y bloqueo recibidos durante una consulta pendiente', async (
     assert.equal(estados.at(-1).estado, 'activo');
   } finally { liberar(); Date.now = reloj; }
 });
+
+test('navegar sin URL en el evento deja de mostrar A antes de terminar la carga de B', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  assert.match(textoCaptura(), /activo example.com/);
+  let actual = [{ active: true }]; // Chrome oculta la URL de B porque no tiene permiso.
+  api.tabs.query = async () => actual;
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, null);
+  assert.ok(!textoCaptura().includes('example.com'), 'el panel no espera status=complete');
+  actual = [{ active: true, url: 'https://example.com/regreso' }];
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, 'example.com');
+  assert.match(textoCaptura(), /activo example.com/);
+  assert.deepEqual([...almacen.configuracion.dominios], ['example.com']);
+});
+
+test('loading con URL anterior no conserva A y un commit sin URL tampoco lo reactiva', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  let actual = { active: true, url: 'https://example.com/anterior', status: 'loading' };
+  api.tabs.query = async () => [actual];
+  api.tabs.onUpdated.emitir(7, { status: 'loading' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, null, 'la última URL confirmada no prueba actividad de la navegación pendiente');
+  actual = { active: true, status: 'loading' };
+  api.tabs.onUpdated.emitir(7, {}, { id: 7, active: true, status: 'loading' });
+  await vaciarCola();
+  assert.ok(!textoCaptura().includes('example.com'));
+  actual = { active: true, url: 'https://example.com/regreso', status: 'complete' };
+  api.tabs.onUpdated.emitir(7, { status: 'complete' }, { id: 7, active: true });
+  await vaciarCola();
+  assert.equal(almacen.observacion.dominio, 'example.com');
+});
+
+test('cargar la pestaña activa de otra ventana no pausa la ventana enfocada', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  api.tabs.onUpdated.emitir(8, { status: 'loading' }, { id: 8, active: true, windowId: 2 });
+  await vaciarCola();
+  assert.equal(almacen.observacion.estado, 'activo');
+  assert.equal(almacen.observacion.dominio, 'example.com');
+});
+

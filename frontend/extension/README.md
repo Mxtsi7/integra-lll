@@ -114,3 +114,25 @@ la pausa no desplaza su instante al finalizar. Precedencia: bloqueo, ausencia de
 foco, inactividad, dominio. Los eventos de bloqueo conservan su estado aunque no
 haya foco. Regresiones de consulta pendiente, pausa de 7 s e idle/bloqueo: 23/23.
 Pruebas con módulos reales y dobles de API; recorrido interactivo pendiente.
+
+## Navegación y pausas — revisión del plan del 9 de noviembre de 2026
+
+Reevaluar la pestaña activa no depende de que Chrome incluya la URL en el evento.
+Durante status=loading se publica navegando sin dominio: Tab.url puede seguir
+siendo la última URL confirmada. Se vuelve a evaluar cualquier actualización de
+la pestaña activa y se consulta exclusivamente la ventana enfocada. Volver a un
+host autorizado tras completar la navegación recupera activo. No cambian permisos.
+Las regresiones cubren A autorizado → B sin URL/permiso con carga pendiente,
+la URL anterior durante loading, commit sin URL y regreso; otra ventana cargando
+no debe pausar la enfocada. Las pruebas usan módulos reales y dobles de Chrome/DOM.
+
+Recorrido real: se cargó la extensión de trabajo y abrió su panel en Chrome
+156.0.8078.75, perfil aislado, sin sembrar consentimiento. El usuario confirmó
+aceptar el permiso solicitado para example.com. Antes de verificar navegación,
+foco e inactividad, Computer Use se detuvo porque no pudo identificar la URL de
+la ventana con suficiente certeza. No se acredita el recorrido completo, ni la
+versión final corregida en Chrome, ni ejecución en Edge. Estas comprobaciones
+siguen pendientes, al igual que los acuerdos de consentimiento de Victor/Chris.
+
+Verificación ampliada: 27 pruebas de extensión, incluidas pausas explícitas sin consultar pestañas ni ventanas. La base #149 corregida se incorpora antes de esta entrega.
+

@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((mensaje, emisor, responder) => {
 });
 chrome.tabs.onActivated.addListener(() => actualizar());
 chrome.tabs.onUpdated.addListener((_id, cambios, pestana) => {
-  if (pestana.active && (cambios.url || cambios.status === 'complete')) actualizar();
+  if (pestana.active) actualizar();
 });
 chrome.tabs.onRemoved.addListener(() => actualizar());
 let ultimaActividad;

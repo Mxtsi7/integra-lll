@@ -9,6 +9,7 @@ async function leerActividad(api, dominios) {
   if (!ventana.focused) return { dominio: null, estado: 'sin_foco' };
   if (actividad !== 'active') return { dominio: null, estado: 'inactivo' };
   const [pestana] = await api.tabs.query({ active: true, windowId: ventana.id });
+  if (pestana?.status === 'loading') return { dominio: null, estado: 'navegando' };
   const dominio = !pestana?.incognito ? dominioAutorizado(pestana?.url, dominios) : null;
   if (!dominio) return { dominio: null, estado: 'sin_dominio_autorizado' };
   const tienePermiso = await api.permissions.contains({ origins: [`https://${dominio}/*`] });
