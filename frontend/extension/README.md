@@ -3,8 +3,8 @@
 Chrome/Edge de escritorio, Manifest V3, sin build ni dependencias. Carga esta carpeta
 desde «Extensiones → Modo desarrollador → Cargar descomprimida». No es la app web.
 Abre su botón, escribe dominios exactos (por ejemplo `netflix.com`), lee y marca el
-consentimiento, pulsa Autorizar y acepta el permiso del navegador. Cambia de pestaña
-y vuelve a abrir el panel para consultar el dominio autorizado.
+consentimiento, pulsa Autorizar y acepta el permiso del navegador. El estado de
+captura se actualiza automáticamente mientras el panel permanece abierto.
 
 Permisos: `storage` conserva configuración/observación en **storage.session**, no
 historial duradero. Los hosts son opcionales y se solicitan individualmente desde
@@ -29,6 +29,8 @@ en un navegador real hasta que otra persona ejecute la comprobación siguiente.
 6. Con dos ventanas ya abiertas y una pestaña fija en cada una: A=`example.com`,
    B=un host no autorizado. Cambiar A → B → A sin cambiar pestañas: el panel debe
    mostrar `example.com` → ningún dominio → `example.com`.
+   Abrir el panel inmediatamente en B y mantenerlo abierto mientras termina la
+   consulta: su estado de captura debe actualizarse sin cerrar/reabrir el panel.
 7. Iniciar autorización y retirar mientras el permiso está pendiente; concederlo
    después: consentimiento retirado y sin permisos sobrantes. Solo una aceptación
    nueva puede reactivar. Repetir con una aceptación posterior del mismo host y
@@ -54,6 +56,12 @@ gesto. Así una limpieza antigua no puede quitar una concesión nueva cuyo regis
 todavía estaba encolado. La generación del popup impide también que una operación
 antigua reemplace el mensaje de estado de una aceptación posterior.
 
+El estado de captura del panel recibe cambios de `storage.session.observacion`
+mientras está abierto. Se presenta separado de los mensajes de autorización y
+error, y actualizarlo no reescribe los dominios que el usuario está editando.
+La suscripción se registra antes de leer el estado inicial; una lectura inicial
+demorada no puede reemplazar un cambio más reciente que ya se mostró.
+
 `windows.onFocusChanged` reconsulta la pestaña de la última ventana enfocada
 por su ID. El test integrado de popup/worker comprueba A → B → A y que A deja
 de figurar activo al pasar a B. Estos cambios no añaden el motor temporal de
@@ -66,7 +74,7 @@ integrado antes de dar por cerrado ese comportamiento; no basta su código hist�
 | Comprobación | Resultado |
 | --- | --- |
 | Tres regresiones principales contra la implementación anterior | Fallaron: reactivación tardía, reemplazo de sesión nueva y dominio A retenido en B |
-| Suite de extensión con módulos reales y dobles de API/DOM | 14/14 aprobadas; incluye aceptación nueva pendiente, limpieza antigua detenida dentro de `permissions.getAll()` y retirada lenta sin borrar una selección posterior |
+| Suite de extensión con módulos reales y dobles de API/DOM | 16/16 aprobadas; incluye las regresiones de autorización anteriores y panel abierto durante consulta/lectura inicial demoradas, sin sobrescribir la edición |
 | Sintaxis de los módulos | Aprobada con el comando indicado arriba |
 | Recorrido interactivo en Chrome/Edge de esta corrección | Pendiente: no hay navegador local instalado; descarga de Chromium falló con ZIP truncado (`End of central directory record signature not found`) |
 | Validación de consentimiento S3-MX-02 | Pendiente en [PR #148](https://github.com/Mxtsi7/integra-lll/pull/148), por Victor y Chris; no se sustituye por estas pruebas |
