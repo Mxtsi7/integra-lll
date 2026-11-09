@@ -23,7 +23,7 @@ pasada sobre el archivo:
 | La lectura del CSV | `connectors/csv_candidatos.py` |
 | La decodificación compartida con FE-07 | `connectors/archivos.py` → `decodificar` |
 | El catálogo de proveedores que se reutiliza | `connectors/normalizacion.py` (FE-12) |
-| Las pruebas | `services/connectors/tests/test_csv_candidatos.py`, 51 |
+| Las pruebas | `services/connectors/tests/test_csv_candidatos.py`, 84 |
 
 ## El flujo: de dónde vienen los datos
 
@@ -184,6 +184,49 @@ que revisar **esta regla**, no solo la tabla de monedas.
 Y el peso chileno no tiene centavos: `1500,50` en CLP se rechaza en vez de
 redondearse.
 
+### Lo que no calza se rechaza; no se limpia
+
+Esta es la corrección más importante de la revisión de #147. El código
+original **borraba** del texto cualquier carácter que no fuera dígito o
+separador y pegaba lo que quedaba. Eso no es ser tolerante con una cartola
+sucia: es inventar un monto y guardarlo como si fuera el de la cartola.
+
+| Celda | Salía antes, sin un solo error | Ahora |
+|---|---|---|
+| `1e3` | 13 | `importe_invalido` |
+| `10abc20` | 1020 | `importe_invalido` |
+| `1500 2000` | 15002000 | `importe_invalido` |
+| `1,2,3` | 12.3 | `importe_invalido` |
+| `1EUR000` | 1000 | `importe_invalido` |
+
+Ahora hay una gramática: alrededor del número se admiten un signo, unos
+paréntesis y un token de moneda, **solo al principio o al final**; lo que
+queda tiene que ser dígitos con separadores, los de miles todos del mismo
+carácter y agrupando de a tres. Cualquier otra cosa es `importe_invalido` con
+el texto original en el mensaje.
+
+El espacio **agrupa miles pero nunca es decimal**, que es lo que distingue
+`1 234,56` —mil doscientos treinta y cuatro con cincuenta y seis— de
+`1500 2000`, que son dos montos en una celda.
+
+### Una fecha imposible no vota, y no se lleva el archivo
+
+La otra corrección de la misma revisión. Para inferir el orden bastaba con que
+un número pasara de 12. Con eso:
+
+- `99/99/2026` votaba por los **dos** órdenes a la vez y el archivo entero
+  moría con `orden_fecha_inconsistente`. Una sola fila imposible se llevaba
+  puestas todas las buenas, que es exactamente lo que S3-FE-13 existe para
+  impedir.
+- `31/02/2026` votaba por día/mes sin ser una fecha, y con ese voto decidía
+  cómo leer las fechas ambiguas del resto del archivo.
+
+Ahora una fila vota solo si su lectura **existe en el calendario**. Las
+imposibles no votan y se rechazan una por una con `fecha_invalida`. La
+contradicción de verdad —fechas válidas que solo se explican con órdenes
+distintos— sigue botando el archivo, porque ahí no falta información: el
+archivo está mal.
+
 ## Quién lo usa, y lo que falta
 
 **S3-FE-10** es el cable: `procesar_importacion` toma el archivo que
@@ -201,8 +244,13 @@ previa), **S3-FE-15 y S3-FE-16** (confirmar y rechazar) y **S3-FE-17**
 cd services/connectors && python -m pytest tests/test_csv_candidatos.py -q
 ```
 
-51 pruebas, todas funciones puras: sin base, sin red y sin API. Cubren un
+84 pruebas, todas funciones puras: sin base, sin red y sin API. Cubren un
 caso por criterio de aceptación de cada tarjeta, más los que rompen una
 cartola real: separadores al revés, el `$` solo, la fecha que solo se entiende
 mirando el archivo entero, una cartola en Latin-1 y una glosa con un salto de
 línea entre comillas.
+
+Las 33 últimas salieron de la revisión de #147 y están escritas al revés que
+las demás: cada una lleva **el valor que el código viejo devolvía en
+silencio**, para que quede claro qué se está impidiendo y no solo qué se
+espera.

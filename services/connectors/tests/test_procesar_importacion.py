@@ -185,36 +185,34 @@ def test_termina_completada_con_sus_numeros():
     assert resultado["candidatos"] == 2
 
 
-def test_los_numeros_estan_escritos_antes_del_estado_terminal(monkeypatch):
+def test_el_estado_y_los_contadores_se_escriben_en_la_misma_operacion(monkeypatch):
     """Quien vea `completada` tiene que ver ya los candidatos contados.
 
-    Al revés —estado primero, números después— un polling con la suerte justa
-    leería una importación terminada con cero candidatos, y ese estado es
-    terminal: no vuelve a cambiar para corregirse.
+    Con dos escrituras separadas, un polling con la suerte justa leería una
+    importación terminada con cero candidatos, y ese estado es terminal: no
+    vuelve a cambiar para corregirse.
 
-    Se espía el momento exacto de la transición y se lee la BASE, no la
-    instancia en memoria: comprobar el resultado al final no distingue un
-    orden del otro.
+    Se espía el momento de insertar los candidatos, que ocurre DESPUÉS de
+    reclamar el cierre y dentro de la misma transacción. Si alguien volviera
+    a partirlo en dos pasos, acá faltaría uno de los dos datos.
     """
-    visto_al_cerrar = {}
-    original = Importacion.avanzar_a
+    importacion = crear_importacion()
+    visto = {}
+    original = CobroCandidato.objects.bulk_create
 
-    def espiar(self, estado, **extra):
-        # Solo la PRIMERA vez: si se anotara en cada llamada, una segunda
-        # transición (aunque no mueva nada) pisaría la observación y la
-        # prueba pasaría igual con el orden al revés. Pasó.
-        if estado == Importacion.Estado.COMPLETADA and not visto_al_cerrar:
-            visto_al_cerrar["candidatos"] = Importacion.objects.values_list(
-                "candidatos_detectados", flat=True
-            ).get(pk=self.pk)
-            visto_al_cerrar["filas"] = CobroCandidato.objects.filter(importacion=self).count()
-        return original(self, estado, **extra)
+    def espiar(filas, **extra):
+        visto.update(
+            Importacion.objects.values("estado", "candidatos_detectados").get(
+                pk=importacion.pk
+            )
+        )
+        return original(filas, **extra)
 
-    monkeypatch.setattr(Importacion, "avanzar_a", espiar)
+    monkeypatch.setattr(CobroCandidato.objects, "bulk_create", espiar)
 
-    tasks.procesar_importacion(str(crear_importacion().pk))
+    tasks.procesar_importacion(str(importacion.pk))
 
-    assert visto_al_cerrar == {"candidatos": 2, "filas": 2}
+    assert visto == {"estado": Importacion.Estado.COMPLETADA, "candidatos_detectados": 2}
 
 
 def test_una_fila_mala_no_bota_el_archivo():
@@ -519,12 +517,12 @@ def test_la_moneda_por_defecto_se_normaliza_a_mayusculas(settings):
 
 
 def test_el_rescate_no_pisa_una_que_justo_termino_bien(settings, monkeypatch):
-    """La carrera entre el rescate y el worker que todavía estaba vivo.
+    """La carrera al revés: el worker cierra mientras el rescate decide.
 
-    El rescate ve una `procesando` vieja, pero el worker que la tenía la
-    cierra en el mismo instante. Si el motivo se escribiera antes de mover el
-    estado, una importación que SÍ terminó bien quedaría con el error de
-    "se interrumpió" y sin sus errores de verdad.
+    Si el motivo se escribiera antes de reclamar el estado, una importación
+    que SÍ terminó bien quedaría con el error de "se interrumpió" y sin sus
+    errores de verdad. El punto de inyección es `anotar_error`, que corre
+    entre leer el estado y el UPDATE condicionado.
     """
     importacion = crear_importacion()
     importacion.avanzar_a(Importacion.Estado.PROCESANDO)
@@ -538,18 +536,18 @@ def test_el_rescate_no_pisa_una_que_justo_termino_bien(settings, monkeypatch):
         - timedelta(minutes=settings.IMPORTACION_ESTANCADA_TRAS_MINUTOS + 1),
     )
 
-    original = Importacion.avanzar_a
+    original = Importacion.anotar_error
 
-    def el_worker_gana(self, estado, **extra):
-        if estado == Importacion.Estado.FALLIDA:
+    def el_worker_gana(self, codigo, mensaje, fila=None):
+        if codigo == tasks.PROCESAMIENTO_INTERRUMPIDO:
             # El worker original la cierra justo antes de que el rescate
-            # alcance a mover nada.
+            # alcance a reclamar la transición.
             Importacion.objects.filter(pk=self.pk).update(
                 estado=Importacion.Estado.COMPLETADA, terminada_en=timezone.now()
             )
-        return original(self, estado, **extra)
+        return original(self, codigo, mensaje, fila)
 
-    monkeypatch.setattr(Importacion, "avanzar_a", el_worker_gana)
+    monkeypatch.setattr(Importacion, "anotar_error", el_worker_gana)
 
     resultado = tasks.rescatar_importaciones_estancadas()
 
@@ -558,3 +556,108 @@ def test_el_rescate_no_pisa_una_que_justo_termino_bien(settings, monkeypatch):
     assert importacion.estado == Importacion.Estado.COMPLETADA
     assert importacion.errores_totales == 1
     assert importacion.errores[0]["codigo"] == csv_candidatos.IMPORTE_INVALIDO
+
+
+# ══════════════════════════════════════════════════════════════════════
+# El worker tardío contra el cierre ajeno (revisión de #147)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def _envejecer_y_rescatar(importacion, settings):
+    """Simula que pasó el plazo y el rescate corre AHORA.
+
+    Es el intercalado de la revisión: el parser está a medio camino y el
+    rescate decide que la importación se quedó colgada.
+    """
+    envejecer(
+        importacion,
+        actualizado=timezone.now()
+        - timedelta(minutes=settings.IMPORTACION_ESTANCADA_TRAS_MINUTOS + 1),
+    )
+    return tasks.rescatar_importaciones_estancadas()
+
+
+def test_el_worker_tardio_no_pisa_el_cierre_del_rescate(monkeypatch, settings):
+    """El rescate cierra la importación mientras el parser todavía corre.
+
+    Reproducción de la revisión de #147: el worker seguía después y escribía
+    candidatos, contadores y `errores=[]` sobre una importación ya FALLIDA,
+    borrando el motivo `procesamiento_interrumpido`. Quedaba una terminal
+    mentirosa: FALLIDA con 2 candidatos y sin errores.
+
+    Lo que tiene que pasar: el worker descubre que perdió y no toca nada.
+    """
+    importacion = crear_importacion()
+    rescate = {}
+    original = csv_candidatos.leer
+
+    def leer_y_que_entre_el_rescate(*args, **extra):
+        resultado = original(*args, **extra)
+        # Acá adentro, con el parseo ya hecho y nada publicado todavía.
+        rescate.update(_envejecer_y_rescatar(importacion, settings))
+        return resultado
+
+    monkeypatch.setattr(csv_candidatos, "leer", leer_y_que_entre_el_rescate)
+
+    salida = tasks.procesar_importacion(str(importacion.pk))
+
+    assert rescate["fallidas"] == 1
+    importacion.refresh_from_db()
+    # El estado y el motivo del rescate quedan intactos.
+    assert importacion.estado == Importacion.Estado.FALLIDA
+    assert importacion.errores_totales == 1
+    assert importacion.errores[0]["codigo"] == tasks.PROCESAMIENTO_INTERRUMPIDO
+    # Y no se publicó NADA del parseo.
+    assert importacion.candidatos_detectados == 0
+    assert CobroCandidato.objects.count() == 0
+    # Lo que devuelve la tarea tampoco puede decir que completó.
+    assert salida["estado"] == Importacion.Estado.FALLIDA
+    assert salida.get("repetida") is True
+
+
+def test_el_worker_tardio_tampoco_pisa_con_un_error_de_archivo(monkeypatch, settings):
+    """El mismo intercalado por el camino de fallo, que usa `_terminar_mal`.
+
+    Un CSV sin columna obligatoria termina en `_terminar_mal`, que también
+    escribía el motivo sin comprobar quién tenía la importación.
+    """
+    importacion = crear_importacion(CSV_SIN_MONTO)
+    original = csv_candidatos.leer
+
+    def leer_y_que_entre_el_rescate(*args, **extra):
+        try:
+            return original(*args, **extra)
+        finally:
+            _envejecer_y_rescatar(importacion, settings)
+
+    monkeypatch.setattr(csv_candidatos, "leer", leer_y_que_entre_el_rescate)
+
+    tasks.procesar_importacion(str(importacion.pk))
+
+    importacion.refresh_from_db()
+    assert importacion.estado == Importacion.Estado.FALLIDA
+    # El motivo es el del rescate, que ganó, y no el del archivo.
+    assert importacion.errores_totales == 1
+    assert importacion.errores[0]["codigo"] == tasks.PROCESAMIENTO_INTERRUMPIDO
+
+
+def test_si_la_publicacion_falla_no_queda_nada_a_medias(monkeypatch):
+    """Todo junto o nada: candidatos, contadores y estado terminal.
+
+    Si el `bulk_create` revienta, la importación no puede quedar
+    `completada` con cero candidatos ni con el contador puesto.
+    """
+    importacion = crear_importacion()
+
+    def reventar(*_args, **_extra):
+        raise RuntimeError("se cayó la base a mitad de la inserción")
+
+    monkeypatch.setattr(CobroCandidato.objects, "bulk_create", reventar)
+
+    with pytest.raises(RuntimeError):
+        tasks.procesar_importacion(str(importacion.pk))
+
+    importacion.refresh_from_db()
+    assert importacion.estado == Importacion.Estado.PROCESANDO
+    assert importacion.candidatos_detectados == 0
+    assert CobroCandidato.objects.count() == 0

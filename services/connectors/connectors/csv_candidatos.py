@@ -151,8 +151,33 @@ ORDEN_DMY = "dmy"
 ORDEN_MDY = "mdy"
 
 _SEPARADORES_FECHA = re.compile(r"[/\-.]")
-_SOLO_DIGITOS_Y_SEPARADORES = re.compile(r"[^0-9,.\-]")
 _ESPACIOS = re.compile(r"\s+")
+
+# ── La gramática del monto ───────────────────────────────────────────
+# Un número, y nada más: dígitos separados por punto, coma o espacio, sin
+# grupos vacíos y sin nada pegado.
+#
+# Antes acá había un filtro que BORRABA todo lo que no fuera dígito o
+# separador y concatenaba el resto. Eso no rechazaba: transformaba. `1e3`
+# salía como 13, `10abc20` como 1020 y `1500 2000` como 15002000, los tres
+# sin un solo error en el archivo. Lo encontró la revisión de #147.
+#
+# `\s` y no un espacio escrito: antes de mirar la gramática los espacios se
+# colapsan con `_ESPACIOS`, que también alcanza al espacio duro y al fino que
+# usan algunas cartolas para agrupar miles.
+_NUMERO = re.compile(r"^[0-9]+(?:[.,\s][0-9]+)*$")
+_SEPARADOR_DEL_NUMERO = re.compile(r"[.,\s]")
+
+#: Lo que se admite alrededor del número, y solo al principio o al final.
+#: Un token de moneda en MEDIO de los dígitos no se quita: quitarlo
+#: convertiría `1EUR000` en 1000, que es la misma transformación silenciosa.
+_SIGNOS_DE_MONTO = ("-", "+")
+_TOKENS_DE_MONEDA = tuple(
+    sorted({*SIMBOLOS, *DECIMALES_POR_MONEDA, SIMBOLO_AMBIGUO}, key=len, reverse=True)
+)
+
+#: Cuántos dígitos tiene un grupo de miles, y cuántos puede tener el primero.
+_DIGITOS_POR_GRUPO = 3
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -254,6 +279,15 @@ def mapear_columnas(cabecera: Sequence[str]) -> dict[str, int]:
 # ══════════════════════════════════════════════════════════════════════
 
 
+def _es_fecha_posible(dia: int, mes: int, anio: int) -> bool:
+    """Si ese día existe de verdad en el calendario."""
+    try:
+        date(anio, mes, dia)
+    except ValueError:
+        return False
+    return True
+
+
 def detectar_orden_fecha(valores: Iterable[str]) -> str | None:
     """Qué orden usa el archivo, si es que lo demuestra.
 
@@ -261,16 +295,30 @@ def detectar_orden_fecha(valores: Iterable[str]) -> str | None:
     Lanza si el archivo se contradice: hay filas que solo se explican como
     día/mes y otras que solo se explican como mes/día, y entonces no es que
     falte información, es que el archivo está mal.
+
+    ── Solo vota una fecha que EXISTE ──────────────────────────────────────
+    Antes bastaba con que un número pasara de 12 para que la fila votara por
+    un orden. Con eso, un `99/99/2026` votaba por los dos a la vez y el
+    archivo entero moría con `orden_fecha_inconsistente`: una fila imposible
+    se llevaba puestas todas las buenas, que es exactamente lo que S3-FE-13
+    existe para impedir. Y un `31/02/2026` votaba por día/mes sin ser una
+    fecha, dejando que una fila imposible decidiera cómo leer las ambiguas.
+
+    Ahora una fila vota solo si su lectura es un día del calendario. Las
+    imposibles no votan y se rechazan una por una con `fecha_invalida`. La
+    contradicción de verdad —fechas VÁLIDAS que solo se explican con órdenes
+    distintos— sigue botando el archivo. Lo encontró la revisión de #147.
     """
     hay_dmy = hay_mdy = False
     for valor in valores:
         partes = _partes_fecha(valor)
         if partes is None:
             continue
-        primera, segunda, _ = partes
-        if primera > 12:
+        primera, segunda, anio = partes
+        anio = _normalizar_anio(anio)
+        if primera > 12 and _es_fecha_posible(primera, segunda, anio):
             hay_dmy = True
-        if segunda > 12:
+        if segunda > 12 and _es_fecha_posible(segunda, primera, anio):
             hay_mdy = True
 
     if hay_dmy and hay_mdy:
@@ -396,6 +444,96 @@ def detectar_moneda(texto_monto: str, texto_moneda: str, por_defecto: str | None
     )
 
 
+def _quitar_ruido_del_monto(texto: str) -> str:
+    """Saca lo documentado que rodea al número: signo, paréntesis y moneda.
+
+    Saca SOLO lo que está al principio o al final, y en cualquier orden:
+    `-$ 1.500`, `$ -1.500`, `(1.500) CLP`. Un token de moneda en MEDIO de los
+    dígitos no se toca, porque quitarlo convertiría `1EUR000` en 1000.
+
+    El signo se descarta a propósito, venga como `-1500` o como `(1500)`: en
+    una cartola el mismo cargo sale negativo o positivo según el banco, y lo
+    que importa es cuánto se pagó. Distinguir cargos de abonos es trabajo del
+    tipo de mensaje (S3-FE-08) y no del signo.
+    """
+    limpio = _ESPACIOS.sub(" ", texto or "").strip()
+    # Hasta cuatro pasadas, porque signo, paréntesis y moneda pueden venir en
+    # cualquier orden y a los dos lados. Se corta en cuanto no saca nada.
+    for _ in range(4):
+        antes = limpio
+        if limpio[:1] in _SIGNOS_DE_MONTO:
+            limpio = limpio[1:].strip()
+        if limpio[-1:] in _SIGNOS_DE_MONTO:
+            limpio = limpio[:-1].strip()
+        # Los paréntesis solo si están los dos: uno suelto no es un signo,
+        # es un monto mal escrito, y la gramática lo rechaza más abajo.
+        if limpio.startswith("(") and limpio.endswith(")"):
+            limpio = limpio[1:-1].strip()
+        arriba = limpio.upper()
+        for token in _TOKENS_DE_MONEDA:
+            if arriba.startswith(token):
+                limpio = limpio[len(token) :].strip()
+                break
+            if arriba.endswith(token):
+                limpio = limpio[: -len(token)].strip()
+                break
+        if limpio == antes:
+            break
+    return limpio
+
+
+def _enteros_y_decimales(limpio: str) -> tuple[str, str] | None:
+    """(enteros, decimales) de un monto ya sin ruido, o `None` si no calza.
+
+    Devuelve `None` en vez de lanzar para que el llamador pueda poner el
+    texto ORIGINAL en el mensaje de error, que es lo que la persona ve en su
+    planilla.
+
+    Las reglas, que son las documentadas en `convertir_importe`:
+
+        · solo dígitos y separadores, sin grupos vacíos y sin nada pegado
+        · el separador decimal es el último, si hay dos distintos o si lo
+          siguen 1 o 2 dígitos
+        · los de miles tienen que ser todos el mismo carácter, agrupar de a 3
+          y dejar entre 1 y 3 dígitos al principio
+        · el espacio NUNCA es decimal: solo agrupa miles
+
+    La última regla es la que distingue `1 234,56` (mil doscientos treinta y
+    cuatro con cincuenta y seis) de `1500 2000`, que son dos montos en una
+    celda y se rechaza.
+    """
+    if not _NUMERO.match(limpio):
+        return None
+
+    piezas = _SEPARADOR_DEL_NUMERO.split(limpio)
+    separadores = _SEPARADOR_DEL_NUMERO.findall(limpio)
+    if not separadores:
+        return limpio, ""
+
+    sin_espacios = {s for s in separadores if not s.isspace()}
+    cola = piezas[-1]
+    es_decimal = not separadores[-1].isspace() and (
+        len(sin_espacios) == 2 or len(cola) in (1, 2)
+    )
+
+    if es_decimal:
+        decimales, grupos, de_miles = cola, piezas[:-1], separadores[:-1]
+    else:
+        decimales, grupos, de_miles = "", piezas, separadores
+
+    if de_miles:
+        # Un archivo no mezcla `1.234 567`: o agrupa con punto, o con coma, o
+        # con espacio. Dos caracteres distintos agrupando es un monto roto.
+        if len({s for s in de_miles}) != 1:
+            return None
+        if not 1 <= len(grupos[0]) <= _DIGITOS_POR_GRUPO:
+            return None
+        if any(len(grupo) != _DIGITOS_POR_GRUPO for grupo in grupos[1:]):
+            return None
+
+    return "".join(grupos), decimales
+
+
 def convertir_importe(valor: str, moneda: str) -> Decimal:
     """«1.234,56», «1,234.56», «-$ 1.500» a `Decimal` positivo.
 
@@ -411,42 +549,29 @@ def convertir_importe(valor: str, moneda: str) -> Decimal:
     El grupo de 3 es miles y no decimales porque ninguna de las monedas que
     aceptamos tiene tres decimales. Si alguna vez entra una que sí (el dinar
     kuwaití tiene tres), hay que revisar esta regla y no solo la tabla.
+
+    ── Lo que no se entiende se RECHAZA, no se arregla ──────────────────
+    Esta función reconoce una gramática y rechaza todo lo demás con
+    `importe_invalido`. Antes hacía lo contrario: borraba del texto cualquier
+    carácter que no fuera dígito o separador y pegaba lo que quedaba. Eso no
+    es ser tolerante, es inventar:
+
+        `1e3`        salía 13
+        `10abc20`    salía 1020
+        `1500 2000`  salía 15002000
+        `1,2,3`      salía 12.3
+
+    Los cuatro sin un solo error, y con el monto equivocado guardado como si
+    fuera el de la cartola. Lo encontró la revisión de #147.
     """
     texto = (valor or "").strip()
     if not texto:
         raise _ErrorDeCampo(IMPORTE_INVALIDO, "El monto está vacío.")
 
-    # El signo se descarta a propósito, venga como `-1500` o como `(1500)`:
-    # en una cartola el mismo cargo sale negativo o positivo según el banco, y
-    # lo que importa acá es cuánto se pagó. Distinguir cargos de abonos es
-    # trabajo de S3-FE-08, con el tipo de mensaje y no con el signo.
-    limpio = _SOLO_DIGITOS_Y_SEPARADORES.sub("", texto).replace("-", "")
-    if not limpio or not any(c.isdigit() for c in limpio):
+    partes = _enteros_y_decimales(_quitar_ruido_del_monto(texto))
+    if partes is None:
         raise _ErrorDeCampo(IMPORTE_INVALIDO, f"No se entiende el monto {texto!r}.")
-
-    ultima_coma = limpio.rfind(",")
-    ultimo_punto = limpio.rfind(".")
-    corte = max(ultima_coma, ultimo_punto)
-
-    if corte == -1:
-        entero, decimales = limpio, ""
-    else:
-        cola = limpio[corte + 1 :]
-        hay_los_dos = ultima_coma != -1 and ultimo_punto != -1
-        if not cola.isdigit():
-            raise _ErrorDeCampo(IMPORTE_INVALIDO, f"No se entiende el monto {texto!r}.")
-        if hay_los_dos or len(cola) in (1, 2):
-            entero, decimales = limpio[:corte], cola
-        elif len(cola) == 3:
-            entero, decimales = limpio, ""  # separador de miles
-        else:
-            raise _ErrorDeCampo(IMPORTE_INVALIDO, f"No se entiende el monto {texto!r}.")
-
-    entero = entero.replace(",", "").replace(".", "")
-    if not entero:
-        entero = "0"
-    if not entero.isdigit():
-        raise _ErrorDeCampo(IMPORTE_INVALIDO, f"No se entiende el monto {texto!r}.")
+    entero, decimales = partes
 
     try:
         importe = Decimal(entero + ("." + decimales if decimales else ""))

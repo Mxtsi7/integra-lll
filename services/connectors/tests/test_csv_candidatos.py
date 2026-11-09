@@ -372,3 +372,151 @@ def test_una_cartola_en_latin1_se_lee_igual_que_al_validarla():
     resultado = cc.leer(contenido, separador=";", organizacion_id=ORG, sha256=SHA)
     assert resultado.filas_validas == 1
     assert "Telef" in resultado.candidatos[0].servicio_texto
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Lo que no se entiende se RECHAZA, no se arregla (revisión de #147)
+# ══════════════════════════════════════════════════════════════════════
+#
+# El filtro anterior borraba del texto cualquier carácter que no fuera dígito
+# o separador y pegaba el resto. Eso no rechazaba: inventaba un monto y lo
+# guardaba como si fuera el de la cartola, sin un solo error.
+
+
+@pytest.mark.parametrize(
+    "monto,salia_antes",
+    [
+        ("1e3", "13"),
+        ("10abc20", "1020"),
+        ("1500 2000", "15002000"),
+        ("1,2,3", "12.3"),
+        ("1..2", "1.2"),
+        ("1EUR000", "1000"),
+    ],
+)
+def test_un_monto_que_no_calza_se_rechaza_en_vez_de_transformarse(monto, salia_antes):
+    """`salia_antes` es el valor que el filtro viejo guardaba en silencio."""
+    with pytest.raises(cc._ErrorDeCampo) as e:
+        cc.convertir_importe(monto, "USD")
+    assert e.value.codigo == cc.IMPORTE_INVALIDO
+    # Y el mensaje lleva el texto ORIGINAL, que es lo que la persona ve.
+    assert monto in e.value.mensaje
+
+
+@pytest.mark.parametrize(
+    "monto,esperado",
+    [
+        ("1500", "1500"),
+        ("1500,5", "1500.5"),
+        ("1500,50", "1500.50"),
+        ("1.234,56", "1234.56"),
+        ("1,234.56", "1234.56"),
+        ("1,500", "1500"),
+        ("1.234.567", "1234567"),
+        ("12345,67", "12345.67"),
+        ("$ 1.500", "1500"),
+        ("US$ 10,50", "10.50"),
+        ("-1500", "1500"),
+        ("1500-", "1500"),
+        ("(1500)", "1500"),
+        ("CLP 9990", "9990"),
+        ("9990 CLP", "9990"),
+    ],
+)
+def test_los_formatos_documentados_siguen_entrando(monto, esperado):
+    assert cc.convertir_importe(monto, "USD") == Decimal(esperado)
+
+
+def test_un_espacio_agrupa_miles_pero_no_une_dos_montos():
+    """La diferencia entre `1 234,56` y dos cantidades en una celda.
+
+    Es la misma regla de los grupos de tres: `1 234,56` agrupa bien, y en
+    `1500 2000` ni el primer grupo ni el segundo tienen el largo que
+    corresponde.
+    """
+    assert cc.convertir_importe("1 234,56", "USD") == Decimal("1234.56")
+    with pytest.raises(cc._ErrorDeCampo):
+        cc.convertir_importe("1500 2000", "USD")
+
+
+def test_un_parentesis_sin_cerrar_no_es_un_signo():
+    with pytest.raises(cc._ErrorDeCampo) as e:
+        cc.convertir_importe("(1500", "CLP")
+    assert e.value.codigo == cc.IMPORTE_INVALIDO
+
+
+def test_el_monto_malo_de_una_fila_no_se_lleva_las_otras():
+    """El CSV de la revisión: 1e3 fuera, 10 adentro."""
+    resultado = leer(
+        "fecha;descripcion;monto;moneda",
+        "2026-10-01;Netflix;1e3;USD",
+        "2026-10-02;Spotify;10;USD",
+    )
+    assert [str(c.importe) for c in resultado.candidatos] == ["10"]
+    assert [(e.fila, e.codigo) for e in resultado.errores] == [(2, cc.IMPORTE_INVALIDO)]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Una fecha imposible no vota ni bota el archivo (revisión de #147)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_una_fecha_imposible_no_bota_el_archivo_entero():
+    """El CSV de la revisión: `99/99/2026` votaba por los dos órdenes.
+
+    Con eso el archivo entero moría con `orden_fecha_inconsistente` y la fila
+    buena se perdía, que es justo lo que S3-FE-13 existe para impedir.
+    """
+    resultado = leer(
+        "fecha;descripcion;monto;moneda",
+        "2026-10-01;Netflix;9990;CLP",
+        "99/99/2026;Spotify;4990;CLP",
+    )
+    assert [c.servicio_texto for c in resultado.candidatos] == ["Netflix"]
+    assert [(e.fila, e.codigo) for e in resultado.errores] == [(3, cc.FECHA_INVALIDA)]
+
+
+@pytest.mark.parametrize("imposible", ["99/99/2026", "31/02/2026", "30/02/26", "00/01/2026"])
+def test_una_fecha_que_no_existe_no_vota_por_ningun_orden(imposible):
+    """Y por lo tanto no decide cómo se leen las fechas ambiguas del archivo.
+
+    `31/02/2026` votaba por día/mes solo porque 31 pasa de 12, sin ser una
+    fecha. Una fila imposible no puede decidir nada sobre las demás.
+    """
+    assert cc.detectar_orden_fecha(["2026-10-01", imposible]) is None
+
+
+def test_el_29_de_febrero_vota_solo_si_el_anio_es_bisiesto():
+    assert cc.detectar_orden_fecha(["29/02/2024"]) == cc.ORDEN_DMY
+    assert cc.detectar_orden_fecha(["29/02/2025"]) is None
+
+
+def test_el_anio_corto_tambien_se_normaliza_antes_de_votar():
+    """`26` es 2026, y 2026 no es bisiesto."""
+    assert cc.detectar_orden_fecha(["29/02/24"]) == cc.ORDEN_DMY
+    assert cc.detectar_orden_fecha(["29/02/26"]) is None
+
+
+def test_la_contradiccion_de_verdad_sigue_botando_el_archivo():
+    """Dos fechas VÁLIDAS que solo se explican con órdenes distintos.
+
+    Acá sí no es que falte información: el archivo está mal, y leerlo con
+    cualquiera de los dos órdenes daría fechas equivocadas en silencio.
+    """
+    with pytest.raises(cc.CsvInvalido) as e:
+        cc.detectar_orden_fecha(["13/10/2026", "01/13/2026"])
+    assert e.value.codigo == cc.ORDEN_FECHA_INCONSISTENTE
+
+
+def test_una_fecha_imposible_conviviendo_con_ambiguas_las_deja_ambiguas():
+    """Sin un voto legítimo, lo ambiguo se rechaza en vez de adivinarse."""
+    resultado = leer(
+        "fecha;descripcion;monto;moneda",
+        "31/02/2026;Netflix;9990;CLP",
+        "03/04/2026;Spotify;4990;CLP",
+    )
+    assert resultado.candidatos == ()
+    assert [(e.fila, e.codigo) for e in resultado.errores] == [
+        (2, cc.FECHA_INVALIDA),
+        (3, cc.FECHA_AMBIGUA),
+    ]
