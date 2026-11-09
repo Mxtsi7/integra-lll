@@ -54,7 +54,7 @@
 
 .sutil {
   background: transparent;
-  color: var(--acento);
+  color: var(--acento-texto);
   padding-inline: 10px;
 }
 
@@ -64,7 +64,7 @@
 
 .peligro {
   background: var(--coral);
-  color: #1a0606;
+  color: var(--coral-tinta);
 }
 
 .peligro:hover:not(:disabled) {

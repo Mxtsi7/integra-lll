@@ -1,16 +1,18 @@
-# Recomendaciones: estado vacío y "No me interesa" (web)
+# Recomendaciones: estado vacío, "No me interesa", ahorro y explicación (web)
 
-**Rama:** `Christopher/recomendaciones_web` · **Responsable:** Christopher Solís
+**Ramas:** `Christopher/recomendaciones_web` (CH-26 y CH-32) y `Christopher/explicacion_recomendaciones` (CH-22) · **Responsable:** Christopher Solís
 
 | # | Tarea | Estado |
 |---|---|---|
 | CH-26 | Integrar estado vacío de Recomendaciones web | ✅ |
 | CH-32 | Descartar recomendaciones desde web | ✅ |
+| CH-22 | Integrar motivo y ahorro en recomendaciones web | Hecha en su rama; falta la revisión de otra persona |
 
 **Dependencias, ya en `main`:**
 - AN-20 (Andrea, PR #64): la página `/recomendaciones` y `useRecomendaciones`.
 - VI-17 (Victor, PR #105): `GET /api/recomendaciones/`, enrutada por el gateway a Analytics.
 - VI-18 (Victor, PR #109): `POST /api/recomendaciones/<id>/dismiss/`, idempotente y con vigencia (30 días por omisión).
+- MX-25 (Maximiliano, PR #126): `GET /api/recomendaciones/<id>/explicar/`, la explicación armada con los hechos guardados, sin IA.
 
 ## Dónde está
 
@@ -18,10 +20,13 @@ Rutas relativas a `frontend/`.
 
 | Archivo | Qué hace |
 |---|---|
-| [shared/src/api/recomendaciones.ts](shared/src/api/recomendaciones.ts) | `RECOMENDACIONES_DISPONIBLES = true`, tipos de VI-17 y `descartarRecomendacion(id)` |
-| [web/src/hooks/useRecomendaciones.ts](web/src/hooks/useRecomendaciones.ts) | Lee la lista (con `disponible` y el motivo) y `descartar(id)` |
-| [web/src/pages/RecomendacionesPage.tsx](web/src/pages/RecomendacionesPage.tsx) | Tarjetas, estado vacío, error con reintento y botón "No me interesa" |
+| [shared/src/api/recomendaciones.ts](shared/src/api/recomendaciones.ts) | `RECOMENDACIONES_DISPONIBLES = true`, tipos de VI-17, `descartarRecomendacion(id)` y `explicarRecomendacion(id)` (MX-25) |
+| [web/src/hooks/useRecomendaciones.ts](web/src/hooks/useRecomendaciones.ts) | Lee la lista (con `disponible` y el motivo), `descartar(id)` y `cargarExplicacion(id)` |
+| [web/src/pages/RecomendacionesPage.tsx](web/src/pages/RecomendacionesPage.tsx) | Tarjetas, estado vacío, error con reintento, botón "No me interesa" y botón "Ver explicación" |
 | [web/src/pages/RecomendacionesPage.module.css](web/src/pages/RecomendacionesPage.module.css) | Colores del tema en vez de blancos fijos |
+| [shared/src/formato.ts](shared/src/formato.ts) | `formatearAhorro(ahorro, moneda)` (CH-22): el ahorro con su moneda, o `null` si falta el dato |
+| [web/src/components/recomendaciones/PanelExplicacion.tsx](web/src/components/recomendaciones/PanelExplicacion.tsx) | Archivo nuevo (CH-22): el panel de la explicación. Cargando, error con reintento, sin datos y el texto |
+| [web/src/components/recomendaciones/PanelExplicacion.module.css](web/src/components/recomendaciones/PanelExplicacion.module.css) | Archivo nuevo (CH-22): estilos del panel con los colores del tema |
 | [web/src/App.tsx](web/src/App.tsx) | Solo el comentario de la ruta: ya no muestra "Próximamente" |
 | [web/src/context/AuthContext.tsx](web/src/context/AuthContext.tsx) | La marca de sesión también como estado (`sesion`); un refresh no la cambia |
 | [web/src/components/RutaPrivada.tsx](web/src/components/RutaPrivada.tsx) | `<Outlet key={sesion} />`: lo privado se vuelve a montar al cambiar de sesión |
@@ -62,6 +67,22 @@ Rutas relativas a `frontend/`.
   - **No reaparece al recargar:** el backend la excluye mientras el descarte esté vigente. Además, si
     una carga en vuelo la trae porque el servidor la respondió antes de guardar el descarte, la web
     también la filtra.
+- **Ahorro: dato faltante ≠ cero (CH-22).** `formatearAhorro` da formato al número que manda la API
+  con su moneda. Si falta el monto o la moneda, o no son válidos, la tarjeta dice "Ahorro estimado no
+  disponible": no se inventa una moneda ni un cero. Un `0` que sí manda la API se muestra como `$0`.
+- **Explicación (CH-22).** Cada tarjeta tiene el botón **Ver explicación**, con `aria-expanded` y el
+  nombre accesible `Ver explicación: <suscripción>`. La explicación no viene con la lista: se pide la
+  primera vez que se abre (`GET /api/recomendaciones/<id>/explicar/`, sin IA y sin gastar cuota) y se
+  guarda; ocultarla y volver a abrirla no la pide otra vez.
+  - Se muestra el texto que arma el backend, tal cual, y su `advertencia_uso`: la consolidación se basa
+    en solapamiento y no afirma bajo uso. La web no agrega ni completa texto.
+  - `estado: datos_insuficientes`: solo el texto que da el backend, sin advertencia. Si el texto viene
+    vacío: "No hay una explicación disponible para esta recomendación."
+  - Mientras llega: "Cargando explicación…" (`role="status"`). Si falla: el error dentro del panel
+    (`role="alert"`) y **Reintentar**. Sin red lo dice, y un 404 dice que ya no está disponible. Cerrar y
+    volver a abrir después de un error la pide de nuevo.
+  - Al descartar la recomendación, o al recargar la lista, se borra su explicación. Una respuesta de otra
+    sesión, o de una lista anterior, no se aplica.
 - **Tarjetas.** El ahorro se formatea con su moneda (`$5.000`, `US$4,50`); antes se mostraba el número
   crudo con un "$". El título es el `nombre` de la suscripción. "Ver suscripción" es un enlace y solo
   aparece si la recomendación trae `suscripcion_id`. La tarjeta ya no es un `div` clicable: así no se
@@ -109,6 +130,25 @@ guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
   - descartar con el botón deshabilitado en vuelo, el aviso y el foco;
   - el fallo con su alerta en la tarjeta, y descartar la última.
 - `web/src/App.test.tsx`: `/recomendaciones` ya no muestra "En construcción" y pide VI-17.
+- **CH-22:**
+  - `shared/src/formato.test.ts`: `formatearAhorro` con moneda, el cero real y los casos sin dato (sin
+    monto, `null`, `NaN`, infinito, sin moneda, moneda vacía o inválida).
+  - `shared/src/api/recomendaciones.test.ts`: `explicarRecomendacion` pide `GET .../explicar/`, codifica
+    el id y propaga el error.
+  - `web/src/hooks/useRecomendaciones.test.tsx`: un solo pedido aunque se pida dos veces, el error y el
+    reintento, el 404 y el 500, la respuesta que llega después de recargar la lista y el borrado al
+    descartar.
+  - `web/src/pages/RecomendacionesPage.test.tsx`: el ahorro con su moneda frente al dato faltante y al
+    cero real; abrir pide una sola vez, muestra el texto y la advertencia y no repite al reabrir;
+    cargando; sin datos suficientes; texto vacío; error de red con Reintentar; 404; descartar con la
+    explicación abierta.
+  - `web/src/pages/RecomendacionesPage.sesion.test.tsx`: la explicación de A que llega después de entrar
+    B no aparece en B.
+  - **Mutaciones:** se rompió a propósito cada comportamiento y en las 6 falla alguna prueba: la
+    respuesta de una lista anterior que se aplica, el doble pedido sin freno, el dato faltante como
+    `$0`, no volver a pedir tras un error, la advertencia en "sin datos" y no pedir al abrir.
+  - **Suites completas** sobre `main` (91d70bc) con CH-22: `shared` 268 y `web` 534 pruebas, y typecheck
+    de las dos. `movil` y `desktop` no se corrieron. No se probó en el navegador.
 - `web/src/pages/RecomendacionesPage.sesion.test.tsx` (revisión de #128): `AuthProvider`, guarda
   privada y tokens reales; solo se simula la red. Cubre:
   - A→B por evento `storage` en la misma ruta, con `/usuarios/me/` de B pendiente;
@@ -175,8 +215,8 @@ guarda privada conserva el `Outlet` y el hook solo cargaba al montar.
 
 ## Fuera de esta tarea
 
-- **CH-22** (motivo, ahorro y explicación) sigue esperando a MX-25, la explicación en lenguaje natural.
-  Aquí solo se formateó el ahorro con su moneda, porque al activar la página el número crudo con "$"
-  quedaba mal para USD.
+- **Cancelar y límite de tiempo:** el cliente `pedir` no los admite. Una explicación en vuelo cuando se
+  sale de la página termina igual, pero su respuesta no se muestra.
+- **La base de cálculo** no se muestra aparte: ya va dentro del texto que arma el backend.
 - La evidencia (`evidencia.url`) y el `motivo` opcional del descarte que acepta VI-18 no se muestran ni se
   piden.

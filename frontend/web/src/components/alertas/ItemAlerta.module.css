@@ -34,7 +34,7 @@
 
 .pendiente .icono {
   background: var(--acento-suave);
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .texto {
