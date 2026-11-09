@@ -24,10 +24,13 @@ export function crearControlador(api) {
     return pendiente;
   }
   return {
-    actualizar: () => encolar(async () => {
-      try { await observar(api); }
-      catch { await registrarError(api); }
-    }),
+    actualizar: (senal = {}) => {
+      const instante = { ...senal, observadoEn: Date.now() };
+      return encolar(async () => {
+        try { await observar(api, instante); }
+        catch { await registrarError(api, instante.observadoEn); }
+      });
+    },
     iniciarAutorizacion: (id, dominios) => encolar(async () => {
       validarDominios(dominios);
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Intento inválido');

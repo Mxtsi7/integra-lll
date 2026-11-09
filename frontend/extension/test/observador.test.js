@@ -73,3 +73,11 @@ test('inactividad o bloqueo son estados distintos y no se interpretan como cero 
   await observar(api);
   assert.equal(almacen.observacion.estado, 'activo');
 });
+
+test('bloqueo prevalece cuando tampoco hay foco', async () => {
+  const { api, almacen } = navegador();
+  api.windows.getLastFocused = async () => ({ id: 1, focused: false });
+  api.idle.queryState = async () => 'locked';
+  await observar(api);
+  assert.equal(almacen.observacion.estado, 'bloqueado');
+});

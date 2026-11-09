@@ -260,3 +260,85 @@ test('el worker integrado conserva foco, idle y bloqueo sin reactivar una retira
   assert.equal(almacen.observacion.estado, 'sin_consentimiento');
   assert.equal(almacen.observacion.dominio, null);
 });
+
+test('retirar sustituye mensajes de preparación y autorización confirmadas', async () => {
+  await cargar();
+  await document.querySelector('#dominios').input();
+  assert.match(document.querySelector('#estado').textContent, /Revisa/);
+  await retirar();
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+  document.querySelector('#dominios').value = 'example.com';
+  document.querySelector('#consentimiento').checked = true;
+  await aceptar();
+  assert.match(document.querySelector('#estado').textContent, /Dominios autorizados/);
+  await retirar();
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+});
+
+test('conserva la pausa y su instante aunque la cola espere siete segundos', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  const reloj = Date.now;
+  const consultar = api.tabs.query;
+  let liberar, avisar;
+  const esperando = new Promise(resolve => { avisar = resolve; });
+  const espera = new Promise(resolve => { liberar = resolve; });
+  const estados = [];
+  api.storage.onChanged.addListener(cambios => {
+    if (cambios.observacion) estados.push(cambios.observacion.newValue);
+  });
+  let instante = 1000;
+  Date.now = () => instante;
+  try {
+    api.tabs.query = async consulta => { avisar(); await espera; return consultar(consulta); };
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.windows.onFocusChanged.emitir(-1);
+    instante = 9000;
+    api.windows.onFocusChanged.emitir(1);
+    liberar();
+    await vaciarCola();
+    const pausa = estados.find(estado => estado.estado === 'sin_foco');
+    assert.ok(pausa, 'la recuperación no debe borrar la pausa encolada');
+    assert.equal(pausa.observadoEn, 2000);
+    assert.equal(almacen.observacion.estado, 'activo');
+    assert.equal(estados.at(-1).observadoEn, 9000);
+  } finally { liberar(); Date.now = reloj; }
+});
+
+test('conserva idle y bloqueo recibidos durante una consulta pendiente', async () => {
+  const { api } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  const reloj = Date.now;
+  const consultar = api.tabs.query;
+  let liberar, avisar;
+  const espera = new Promise(resolve => { liberar = resolve; });
+  const esperando = new Promise(resolve => { avisar = resolve; });
+  const estados = [];
+  api.storage.onChanged.addListener(cambios => {
+    if (cambios.observacion) estados.push(cambios.observacion.newValue);
+  });
+  let instante = 1000;
+  Date.now = () => instante;
+  try {
+    api.tabs.query = async consulta => { avisar(); await espera; return consultar(consulta); };
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.idle.onStateChanged.emitir('idle');
+    instante = 3000;
+    api.idle.onStateChanged.emitir('locked');
+    api.windows.onFocusChanged.emitir(-1);
+    instante = 9000;
+    api.idle.onStateChanged.emitir('active');
+    liberar();
+    await vaciarCola();
+    assert.ok(estados.some(e => e.estado === 'inactivo' && e.observadoEn === 2000));
+    assert.equal(estados.filter(e => e.observadoEn === 3000).length, 2);
+    assert.ok(estados.filter(e => e.observadoEn === 3000).every(e => e.estado === 'bloqueado'));
+    assert.equal(estados.at(-1).estado, 'activo');
+  } finally { liberar(); Date.now = reloj; }
+});

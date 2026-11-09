@@ -97,3 +97,20 @@ No cerrar S3-MX-09/10 por estas pruebas automatizadas. Adjuntar navegador/versi�
 commit probado, pasos, resultado real y evidencia visual o registro del recorrido
 1–7, además de las validaciones anteriores. Una carga descomprimida informada para
 un HEAD anterior no demuestra el recorrido interactivo de esta corrección.
+
+## Retirada — corrección de revisión del 9 de noviembre de 2026
+
+Al confirmar la retirada, el panel sustituye el mensaje anterior por
+«Consentimiento retirado. Sesión borrada.». Se conserva la comprobación de
+generación para no sobrescribir una selección posterior. Regresión de preparación
+y autorización activas: fallaba antes y pasa tras el cambio; suite 17/17.
+El recorrido interactivo completo y las validaciones de consentimiento siguen pendientes.
+
+## Pausas pendientes — corrección de revisión
+
+Foco e idle conservan la pausa y su instante al recibir el evento, antes de esperar
+la cola. Recuperar actividad reconsulta la pestaña. Una consulta iniciada antes de
+la pausa no desplaza su instante al finalizar. Precedencia: bloqueo, ausencia de
+foco, inactividad, dominio. Los eventos de bloqueo conservan su estado aunque no
+haya foco. Regresiones de consulta pendiente, pausa de 7 s e idle/bloqueo: 23/23.
+Pruebas con módulos reales y dobles de API; recorrido interactivo pendiente.
