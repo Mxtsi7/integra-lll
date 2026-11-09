@@ -199,7 +199,32 @@ autorizado → 409. No basta confirmar un event_id de otra ruta para borrar un p
 
 ## Evidencia y cierre de S3-MX-01
 
-Comprobación reproducible de los ejemplos: `python -m unittest discover -s docs/contratos/tests -v`.
+Ejecutar desde la raíz del repositorio con Python 3.9 o posterior. Las pruebas
+requieren datos IANA para `ZoneInfo("America/Santiago")`. Python puede obtenerlos
+del sistema o del paquete `tzdata`; Windows normalmente no incluye esa base.
+Si falta, aparece `ZoneInfoNotFoundError`: instalar `tzdata` en el mismo entorno
+de Python que ejecuta las pruebas, sin sustituir la zona por un desfase UTC fijo.
+
+Preparación desde un entorno virtual nuevo en Windows (PowerShell):
+
+```powershell
+python -m venv .venv-contrato
+.\.venv-contrato\Scripts\python.exe -m pip install tzdata
+.\.venv-contrato\Scripts\python.exe -m unittest discover -s docs/contratos/tests -v
+```
+
+No es necesario activar el entorno. En Linux/macOS, si el sistema no proporciona
+datos IANA, instalar igualmente `tzdata` con el intérprete del entorno:
+
+```sh
+python -m venv .venv-contrato
+.venv-contrato/bin/python -m pip install tzdata
+.venv-contrato/bin/python -m unittest discover -s docs/contratos/tests -v
+```
+
+Con el entorno ya preparado, el comando es
+`python -m unittest discover -s docs/contratos/tests -v`. Resultado esperado:
+**10 pruebas aprobadas**, incluidas las de reparto por día en Santiago.
 Es evidencia de cálculo/consistencia de fixtures, **no** de un endpoint, migración,
 PostgreSQL o acuerdo humano. Registro de recepción a completar antes de cerrar:
 
