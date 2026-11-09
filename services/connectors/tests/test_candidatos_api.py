@@ -482,3 +482,62 @@ def test_el_desempate_del_orden_va_por_creado_en(cliente):
     listados = cliente.get(RUTA, headers=cabecera()).json()["results"]
 
     assert [c["identificador_origen"] for c in listados] == ["a:4", "a:2", "a:3"]
+
+
+def test_recorrer_todas_las_paginas_no_pierde_ni_repite_candidatos(cliente):
+    """250 candidatos EMPATADOS en fecha y en `creado_en`, 25 páginas.
+
+    Lo encontró la revisión de #155 y es un defecto de producción, no un caso
+    de laboratorio: los candidatos de un CSV se insertan con un solo
+    `bulk_create`, así que compartir `creado_en` al microsegundo es lo normal
+    y no lo excepcional. El esquema tampoco lo prohíbe.
+
+    Con el orden del modelo —`fecha, creado_en`— esos empates no tienen
+    desempate, y PostgreSQL puede devolverlos en distinto orden en cada
+    consulta con LIMIT/OFFSET. Resultado: la página 2 repite filas que ya
+    salieron en la 1 y se saltan otras. La vista previa no puede mostrar
+    todos los cobros detectados, que es justo para lo que existe.
+
+    No es una carrera: el conjunto está inmóvil entre consultas.
+
+    OJO: esta prueba solo muerde contra PostgreSQL. En SQLite el plan es
+    estable y pasa aunque el orden no sea total. La CI corre PostgreSQL.
+    """
+    importacion = crear_importacion()
+    mismo_dia = date(2026, 10, 1)
+    CobroCandidato.objects.bulk_create(
+        [
+            CobroCandidato(
+                organizacion_id=ORG_A,
+                importacion=importacion,
+                origen=CobroCandidato.Origen.CSV,
+                identificador_origen=f"sha:{numero}",
+                servicio="Netflix",
+                servicio_texto="NETFLIX.COM",
+                servicio_resultado="reconocido",
+                importe=Decimal("9990"),
+                moneda="CLP",
+                fecha=mismo_dia,
+                tipo_mensaje=CobroCandidato.TipoMensaje.COBRO_REALIZADO,
+            )
+            for numero in range(250)
+        ]
+    )
+    # El empate exacto, forzado para que no dependa del reloj de la máquina.
+    CobroCandidato.objects.filter(importacion=importacion).update(creado_en=timezone.now())
+    esperados = set(str(i) for i in CobroCandidato.objects.values_list("id", flat=True))
+
+    vistos = []
+    for pagina in range(1, 26):
+        cuerpo = cliente.get(
+            RUTA, {"page": pagina, "page_size": 10}, headers=cabecera()
+        ).json()
+        assert cuerpo["count"] == 250
+        vistos.extend(fila["id"] for fila in cuerpo["results"])
+
+    assert len(vistos) == 250
+    assert len(set(vistos)) == 250, (
+        f"se perdieron {250 - len(set(vistos))} candidatos al paginar: "
+        "el orden no es total"
+    )
+    assert set(vistos) == esperados

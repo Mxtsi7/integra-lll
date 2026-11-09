@@ -908,7 +908,22 @@ class CobroCandidato(ModeloTenant):
 
     class Meta(ModeloTenant.Meta):
         db_table = "cobro_candidato"
-        ordering = ["fecha", "creado_en"]
+        # ── El orden TIENE que ser total ─────────────────────────────────
+        # Cronológico, con `id` como desempate. El `id` no es por gusto: sin
+        # él el orden no es total, y PostgreSQL puede devolver los empates en
+        # distinto orden en cada consulta con LIMIT/OFFSET. Con eso la
+        # paginación repite filas en una página y se salta otras: 250
+        # candidatos empatados recorridos en 25 páginas devolvían 239 ids
+        # únicos. Lo encontró la revisión de #155.
+        #
+        # Y los empates son lo NORMAL, no un caso de laboratorio: los
+        # candidatos de un CSV entran con un solo `bulk_create`, así que
+        # comparten `fecha` y `creado_en` al microsegundo.
+        #
+        # El `id` es un UUID, así que el desempate no significa nada para la
+        # persona. No importa: lo que la paginación necesita no es que el
+        # orden sea bonito, es que sea el mismo en las dos consultas.
+        ordering = ["fecha", "creado_en", "id"]
         constraints = [
             models.UniqueConstraint(
                 fields=["organizacion_id", "origen", "identificador_origen"],
