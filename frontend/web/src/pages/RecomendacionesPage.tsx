@@ -1,17 +1,18 @@
-import { formatearMonto, type Recomendacion } from '@ojoalgasto/shared';
+import { formatearAhorro, type Recomendacion } from '@ojoalgasto/shared';
 import { Lightbulb } from 'lucide-react';
-import { useRef } from 'react';
+import { useId, useRef, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
+import { PanelExplicacion } from '../components/recomendaciones/PanelExplicacion';
 import EmptyState from '../components/subscriptions/EmptyState';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia } from '../components/ui/Insignia';
 import { useToast } from '../context/ToastContext';
-import { useRecomendaciones, type EstadoDescarte } from '../hooks/useRecomendaciones';
+import { useRecomendaciones, type EstadoDescarte, type EstadoExplicacion } from '../hooks/useRecomendaciones';
 import styles from './RecomendacionesPage.module.css';
 
 export function RecomendacionesPage() {
-  const { estado, descartes, descartar, recargar } = useRecomendaciones();
+  const { estado, descartes, descartar, explicaciones, cargarExplicacion, recargar } = useRecomendaciones();
   const toast = useToast();
   // Al retirar una tarjeta su botón desaparece: el foco vuelve a la lista
   // en vez de perderse en el documento.
@@ -48,7 +49,9 @@ export function RecomendacionesPage() {
                 key={item.id}
                 item={item}
                 descarte={descartes[item.id]}
+                explicacion={explicaciones[item.id]}
                 onDescartar={() => noMeInteresa(item)}
+                onPedirExplicacion={cargarExplicacion}
               />
             ))}
           </ul>
@@ -85,19 +88,40 @@ function SinRecomendaciones({ disponible, motivo }: { disponible: boolean; motiv
 interface TarjetaRecomendacionProps {
   item: Recomendacion;
   descarte: EstadoDescarte | undefined;
+  /** Sin entrada: todavía no se pidió. */
+  explicacion: EstadoExplicacion | undefined;
   onDescartar: () => void;
+  onPedirExplicacion: (id: string) => void;
 }
 
-function TarjetaRecomendacion({ item, descarte, onDescartar }: TarjetaRecomendacionProps) {
+function TarjetaRecomendacion({ item, descarte, explicacion, onDescartar, onPedirExplicacion }: TarjetaRecomendacionProps) {
   const titulo = item.nombre || 'Recomendación de ahorro';
+  const idPanelExplicacion = useId();
+  const [explicacionAbierta, setExplicacionAbierta] = useState(false);
+  // CH-22: sin monto o sin moneda no hay ahorro que mostrar. Un 0 que manda la API sí se muestra.
+  const ahorroEnTexto = formatearAhorro(item.ahorro_estimado, item.moneda);
+
+  const pedirExplicacion = () => onPedirExplicacion(item.id);
+
+  const alternarExplicacion = () => {
+    const seAbre = !explicacionAbierta;
+    setExplicacionAbierta(seAbre);
+    // Se pide la primera vez que se abre, o de nuevo si la vez anterior falló.
+    if (seAbre && (explicacion === undefined || explicacion.tipo === 'error')) pedirExplicacion();
+  };
+
   return (
     <li className={`tile ${styles.tarjeta}`}>
       <div className={styles.tarjetaContenido}>
         <h2 className={styles.nombreSuscripcion}>{titulo}</h2>
         {item.motivo && <p className={styles.motivo}>{item.motivo}</p>}
-        {typeof item.ahorro_estimado === 'number' && item.moneda && (
+        {ahorroEnTexto !== null ? (
           <Insignia tono="verde" className={styles.ahorro}>
-            Ahorro estimado: {formatearMonto(item.ahorro_estimado, item.moneda)}
+            Ahorro estimado: {ahorroEnTexto}
+          </Insignia>
+        ) : (
+          <Insignia tono="neutro" className={styles.ahorro}>
+            Ahorro estimado no disponible
           </Insignia>
         )}
         {/* CH-32: si falla, la recomendación se queda y el botón sirve para reintentar. */}
@@ -116,6 +140,16 @@ function TarjetaRecomendacion({ item, descarte, onDescartar }: TarjetaRecomendac
           </BotonEnlace>
         )}
         <Boton
+          variante="secundario"
+          tamano="s"
+          onClick={alternarExplicacion}
+          aria-expanded={explicacionAbierta}
+          aria-controls={explicacionAbierta ? idPanelExplicacion : undefined}
+          aria-label={`${explicacionAbierta ? 'Ocultar' : 'Ver'} explicación: ${titulo}`}
+        >
+          {explicacionAbierta ? 'Ocultar explicación' : 'Ver explicación'}
+        </Boton>
+        <Boton
           variante="sutil"
           tamano="s"
           cargando={descarte?.tipo === 'enviando'}
@@ -125,6 +159,8 @@ function TarjetaRecomendacion({ item, descarte, onDescartar }: TarjetaRecomendac
           No me interesa
         </Boton>
       </div>
+
+      {explicacionAbierta && <PanelExplicacion idPanel={idPanelExplicacion} estado={explicacion} alReintentar={pedirExplicacion} />}
     </li>
   );
 }
