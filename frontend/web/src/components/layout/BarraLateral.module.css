@@ -67,12 +67,12 @@
 }
 
 .activo {
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .activo .itemIcono {
   background: var(--acento-suave);
-  color: var(--acento);
+  color: var(--acento-texto);
   box-shadow: inset 0 0 0 1px rgba(255, 138, 61, 0.35);
 }
 
@@ -94,7 +94,7 @@
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.02em;
-  color: var(--acento);
+  color: var(--acento-texto);
   text-align: center;
   transform: rotate(-6deg);
   opacity: 0.9;

@@ -44,7 +44,7 @@
 
 .pie a {
   font-weight: 700;
-  color: var(--acento);
+  color: var(--acento-texto);
   text-decoration: none;
 }
 

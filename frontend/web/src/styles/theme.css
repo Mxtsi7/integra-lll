@@ -23,15 +23,18 @@
   --vidrio-borde-fuerte: rgba(255, 255, 255, 0.18);
   --superficie-solida: #141a2b;
 
-  /* Texto */
+  /* Texto. Todo color que se usa como letra llega a 4,5:1 sobre el fondo y
+     los tiles en los dos temas (CH-24); lo comprueba theme.test.ts. */
   --tinta: #f3f5f9;
   --tinta-2: #a9b0c2;
-  --tinta-3: #6f7891;
+  --tinta-3: #7d86a2;
 
-  /* Marca y acciones */
+  /* Marca y acciones. --acento es el relleno (botones, burbujas, barras);
+     para letra naranja va --acento-texto, que en claro es más oscuro. */
   --acento: #ff8a3d;
   --acento-hover: #ffa05c;
   --acento-tinta: #1a0d05;
+  --acento-texto: #ff8a3d;
   --acento-suave: rgba(255, 138, 61, 0.16);
 
   /* Familias de color de los tiles */
@@ -39,13 +42,14 @@
   --verde-suave: rgba(61, 220, 151, 0.14);
   --turquesa: #2ed3c4;
   --turquesa-suave: rgba(46, 211, 196, 0.14);
-  --morado: #9b7bff;
+  --morado: #9f80ff;
   --morado-suave: rgba(155, 123, 255, 0.16);
   --azul: #5b9bff;
   --azul-suave: rgba(91, 155, 255, 0.14);
 
   /* La fuga: suscripciones fantasma, cobros encima, destructivo */
   --coral: #ff6b6b;
+  --coral-tinta: #1a0606;
   --coral-suave: rgba(255, 107, 107, 0.14);
 
   --foco: #ffb27a;
@@ -84,28 +88,36 @@
   --vidrio-borde-fuerte: rgba(15, 23, 42, 0.16);
   --superficie-solida: #ffffff;
 
+  /* CH-24: en claro varios colores no llegaban a 4,5:1 como letra (el
+     naranjo 3,0, el turquesa 3,2, el verde 3,6, --tinta-3 3,0). Se
+     oscurecieron lo justo; los -suave siguen siendo los mismos tintes. */
   --tinta: #111827;
   --tinta-2: #525c70;
-  --tinta-3: #8a93a8;
+  --tinta-3: #646c7e;
 
   --acento: #e5731f;
   --acento-hover: #cc6417;
-  --acento-tinta: #ffffff;
+  /* Letra oscura sobre el naranjo, como en el tema oscuro: blanco daba 3,1. */
+  --acento-tinta: #1a0d05;
+  --acento-texto: #a25013;
   --acento-suave: rgba(229, 115, 31, 0.14);
 
-  --verde: #15966a;
+  --verde: #107452;
   --verde-suave: rgba(21, 150, 106, 0.12);
-  --turquesa: #0f9f94;
+  --turquesa: #0b736b;
   --turquesa-suave: rgba(15, 159, 148, 0.12);
-  --morado: #6d4fe0;
+  --morado: #694bdf;
   --morado-suave: rgba(109, 79, 224, 0.12);
-  --azul: #2f6fe0;
+  --azul: #2061d3;
   --azul-suave: rgba(47, 111, 224, 0.12);
 
-  --coral: #d64545;
+  --coral: #c02a2a;
+  /* Sobre el coral más oscuro, letra blanca (la oscura daba 3,6). */
+  --coral-tinta: #ffffff;
   --coral-suave: rgba(214, 69, 69, 0.12);
 
-  --foco: #e5731f;
+  /* El borde de foco también necesita 3:1 contra el fondo: el naranjo daba 2,7. */
+  --foco: #a25013;
   --sombra-tile: 0 20px 40px -28px rgba(15, 23, 42, 0.35);
   --sombra-flotante: 0 40px 80px -30px rgba(15, 23, 42, 0.45);
 }
@@ -160,7 +172,7 @@ p {
 }
 
 a {
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 button,
