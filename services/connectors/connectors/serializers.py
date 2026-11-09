@@ -21,7 +21,7 @@ from rest_framework import serializers
 from shared.cifrado import CampoSecretoSerializer
 
 from . import proveedores
-from .models import CuentaConectada, Importacion
+from .models import CobroCandidato, CuentaConectada, Importacion
 
 
 class CuentaConectadaSerializer(serializers.ModelSerializer):
@@ -250,3 +250,55 @@ class ArchivoRechazadoSerializer(serializers.Serializer):
         help_text="formato_no_admitido | archivo_vacio | archivo_excedido | contenido_incompatible"
     )
     archivo = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
+
+
+# ── Candidatos de cobro (S3-FE-14) ───────────────────────────────────
+
+
+class CobroCandidatoSerializer(serializers.ModelSerializer):
+    """Un cobro propuesto, tal como lo lista la vista previa (S3-CH-04).
+
+    Solo lectura entera. Un candidato no se edita desde afuera: lo escribe el
+    lector que leyó su origen, y lo único que una persona puede hacerle es
+    confirmarlo o rechazarlo, que son S3-FE-15 y S3-FE-16 y tienen sus
+    propias rutas. Un `PATCH` acá dejaría cambiar el importe de un cobro que
+    se presenta como evidencia de lo que decía la cartola.
+
+    ── El importe sale como TEXTO ───────────────────────────────────────────
+    DRF serializa `DecimalField` como cadena porque `COERCE_DECIMAL_TO_STRING`
+    viene en `True`, y acá eso NO es un detalle: en JSON un número decimal lo
+    lee el otro lado como `float` y se pierde la exactitud que se cuidó desde
+    el parser. Si alguien pone esa opción en `False`, este contrato cambia sin
+    que nadie lo note; hay una prueba que lo fija.
+    """
+
+    origen_legible = serializers.CharField(source="get_origen_display", read_only=True)
+    estado_legible = serializers.CharField(source="get_estado_display", read_only=True)
+    tipo_mensaje_legible = serializers.CharField(
+        source="get_tipo_mensaje_display", read_only=True
+    )
+
+    class Meta:
+        model = CobroCandidato
+        fields = (
+            "id",
+            "importacion",
+            "origen",
+            "origen_legible",
+            # El identificador estable que pide S3-CH-04 para que recargar no
+            # duplique: es el mismo para el mismo hecho leído dos veces.
+            "identificador_origen",
+            "servicio",
+            "servicio_texto",
+            "servicio_resultado",
+            "importe",
+            "moneda",
+            "fecha",
+            "tipo_mensaje",
+            "tipo_mensaje_legible",
+            "estado",
+            "estado_legible",
+            "evidencia",
+            "creado_en",
+        )
+        read_only_fields = fields

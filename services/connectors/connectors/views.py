@@ -1,13 +1,14 @@
 """Vistas del servicio de conectores."""
 
 import logging
+import uuid
 from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import connection, transaction
 from django.http import JsonResponse
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
@@ -19,11 +20,18 @@ from shared.bloqueo import bloquear
 from shared.tenant.base import SoloLecturaTenantViewSet
 
 from . import archivos, proveedores, revocacion
-from .models import ArchivoImportacion, AutorizacionPendiente, CuentaConectada, Importacion
+from .models import (
+    ArchivoImportacion,
+    AutorizacionPendiente,
+    CobroCandidato,
+    CuentaConectada,
+    Importacion,
+)
 from .serializers import (
     ArchivoRechazadoSerializer,
     AutorizacionIniciadaSerializer,
     CallbackAutorizacionSerializer,
+    CobroCandidatoSerializer,
     CuentaConectadaSerializer,
     ImportacionSerializer,
     IniciarAutorizacionSerializer,
@@ -645,3 +653,99 @@ class SubirArchivoView(APIView):
 
         salida = ImportacionSerializer(importacion, context={"request": request})
         return Response(salida.data, status=status.HTTP_201_CREATED)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Consulta de candidatos para la vista previa (S3-FE-14)
+# ═══════════════════════════════════════════════════════════════════
+
+
+@extend_schema(
+    summary="Listar los cobros candidatos detectados (S3-FE-14)",
+    parameters=[
+        OpenApiParameter(
+            "importacion",
+            description="Solo los de esa importación. Es lo que necesita S3-CH-06 para mostrar las filas válidas de un archivo junto a sus errores.",
+        ),
+        OpenApiParameter(
+            "origen",
+            description="`csv` o `correo`. Sin el filtro vienen los dos, que es lo que pide S3-CH-04.",
+        ),
+        OpenApiParameter(
+            "estado",
+            description="`propuesto`, `confirmado` o `rechazado`.",
+        ),
+    ],
+)
+class CobroCandidatoViewSet(SoloLecturaTenantViewSet):
+    """
+        GET /api/candidatos/            los de la organización
+        GET /api/candidatos/<id>/       uno
+
+    Lo que la vista previa muestra antes de que alguien decida: S3-CH-04 lista
+    los candidatos de los dos orígenes, S3-CH-06 muestra las filas de un
+    archivo que sí se pudieron leer, y S3-CH-09 necesita el id estable para
+    no mandar dos veces el mismo rechazo.
+
+    ── Solo lectura, y a propósito ─────────────────────────────────────────
+    Un candidato lo escribe el lector que leyó su origen. Lo único que una
+    persona le puede hacer es confirmarlo (S3-FE-15) o rechazarlo (S3-FE-16),
+    y eso va por rutas propias porque no es "editar un campo": confirmar crea
+    suscripciones y cobros. Un `PATCH` abierto acá dejaría cambiarle el
+    importe a un candidato que se presenta como evidencia de lo que decía la
+    cartola.
+
+    ── Los errores NO están acá ────────────────────────────────────────────
+    Un error de fila no es un candidato: no tiene servicio, ni importe, ni
+    fecha. Viven en `Importacion.errores` y ya se exponen en
+    `GET /api/importaciones/<id>/`, con `errores_totales` al lado porque la
+    lista se corta en `Importacion.MAXIMO_ERRORES`. Duplicarlos en una ruta
+    nueva sería dos contratos para el mismo dato.
+
+    ── El aislamiento ──────────────────────────────────────────────────────
+    `MezclaTenant` filtra por la cabecera `X-Organizacion-Id` del gateway, así
+    que un candidato de otra organización ni se encuentra: 404 y no 403, que
+    confirmaría que el id es de alguien. Es el criterio "una organización no
+    consulta resultados de otra".
+
+    Orden: cronológico por fecha de cobro, como venían en la cartola. Es
+    estable, que es lo que necesita la paginación para no repetir ni saltarse
+    filas entre páginas.
+    """
+
+    queryset = CobroCandidato.objects.all()
+    serializer_class = CobroCandidatoSerializer
+    pagination_class = CuentaConectadaPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Igual que en ImportacionViewSet: solo el listado se filtra. `retrieve`
+        # también pasa por acá, y un query param colgado haría desaparecer el
+        # recurso con un 404.
+        if self.action != "list":
+            return qs
+
+        importacion = self.request.query_params.get("importacion")
+        if importacion:
+            # Se valida la forma del UUID acá: dejarlo pasar al ORM da un 500
+            # por un parámetro que escribió el cliente, y eso es un 400.
+            try:
+                qs = qs.filter(importacion_id=uuid.UUID(importacion))
+            except (ValueError, AttributeError, TypeError):
+                raise ValidationError({"importacion": "Debe ser un UUID."}) from None
+
+        origen = self.request.query_params.get("origen")
+        if origen:
+            validos = CobroCandidato.Origen.values
+            if origen not in validos:
+                raise ValidationError({"origen": f"Debe ser uno de: {', '.join(validos)}."})
+            qs = qs.filter(origen=origen)
+
+        estado = self.request.query_params.get("estado")
+        if estado:
+            validos = CobroCandidato.Estado.values
+            if estado not in validos:
+                raise ValidationError({"estado": f"Debe ser uno de: {', '.join(validos)}."})
+            qs = qs.filter(estado=estado)
+
+        return qs
