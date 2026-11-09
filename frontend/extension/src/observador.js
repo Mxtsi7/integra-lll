@@ -7,8 +7,8 @@ export async function observar(api) {
   if (configuracion?.consentimiento) {
     const ventana = await api.windows.getLastFocused();
     const [pestana] = ventana.focused ? await api.tabs.query({ active: true, windowId: ventana.id }) : [];
-    dominio = !pestana?.incognito ? dominioAutorizado(pestana?.url, configuracion.dominios) : null;
-    estado = 'sin_dominio_autorizado';
+    dominio = pestana?.status !== 'loading' && !pestana?.incognito ? dominioAutorizado(pestana?.url, configuracion.dominios) : null;
+    estado = pestana?.status === 'loading' ? 'navegando' : 'sin_dominio_autorizado';
     if (dominio) {
       const tienePermiso = await api.permissions.contains({ origins: [`https://${dominio}/*`] });
       estado = tienePermiso ? 'activo' : 'sin_permiso';
