@@ -314,3 +314,12 @@ class CandidatoYaConfirmadoSerializer(serializers.Serializer):
 
     codigo = serializers.CharField(help_text="candidato_ya_confirmado")
     detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
+
+
+class ConfirmacionRechazadaSerializer(serializers.Serializer):
+    """La forma del 409 cuando un candidato no se puede confirmar."""
+
+    codigo = serializers.CharField(
+        help_text="candidato_rechazado | servicio_sin_resolver | tipo_sin_regla"
+    )
+    detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")

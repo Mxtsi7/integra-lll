@@ -1024,3 +1024,57 @@ class CobroCandidato(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.servicio or self.servicio_texto}: {self.importe} {self.moneda}"
+
+
+class OutboxEvento(ModeloTenant):
+    """Un evento durable que todavía no se publicó (S3-FE-15).
+
+    ── Por qué existe ──────────────────────────────────────────────────────
+    Confirmar un candidato tiene que crear o actualizar una suscripción y, si
+    corresponde, un cobro. Esas tablas viven en `subscriptions` y este
+    servicio no conoce su esquema (ADR-002). O sea que la confirmación cruza
+    una frontera de servicio, y una transacción no cruza fronteras.
+
+    Lo que sí se puede hacer en una sola transacción es dejar **el candidato
+    confirmado y el evento que lo cuenta**, los dos o ninguno. Eso es este
+    outbox, y es el criterio "confirmar es atómico": después de un commit no
+    existe un candidato confirmado sin su evento, ni un evento sin su
+    candidato. Si la transacción revienta, no queda nada a medias.
+
+    ── Es el MISMO sobre que el de subscriptions ───────────────────────────
+    Los campos son los de `subscription_event_outbox` (MX-21), uno por uno y a
+    propósito: el consumidor que lo drene ya sabe leer ese sobre, y copiarlo
+    distinto obligaría a escribir un segundo lector para decir lo mismo.
+
+    ── Lo que este servicio NO hace todavía ────────────────────────────────
+    Publicar. No hay publicador en connectors, así que las filas se acumulan
+    acá, durables, hasta que exista el que las drene. Nada se pierde y nada se
+    inventa: no se finge que la suscripción ya está creada.
+    """
+
+    evento = models.CharField(max_length=40)
+    version = models.PositiveSmallIntegerField(default=1)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+    correlation_id = models.UUIDField()
+    datos = models.JSONField()
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    siguiente_intento = models.DateTimeField(default=timezone.now)
+    ultimo_error = models.CharField(max_length=100, blank=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "connectors_event_outbox"
+        # Igual que el de subscriptions: cronológico y con `id` de desempate,
+        # para que drenarlo por páginas no repita ni se salte filas.
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(
+                fields=["publicado_en", "siguiente_intento"],
+                name="con_outbox_pending_idx",
+            ),
+        ]
+        verbose_name = "Evento pendiente"
+        verbose_name_plural = "Eventos pendientes"
+
+    def __str__(self) -> str:
+        return f"{self.evento}.v{self.version} ({'publicado' if self.publicado_en else 'pendiente'})"

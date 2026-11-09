@@ -125,7 +125,8 @@ comprueba que sigue en `null`, y que la importación no cambió de estado.
   esta tarjeta lo pide, así que quedó para cuando el frontend lo necesite.
 - **Un motivo del rechazo.** No se agregó una columna que nadie escribe.
   Cuando se necesite es una migración de un campo.
-- **S3-FE-15**, confirmar, que es la otra mitad y la que sí crea movimientos.
+- **S3-FE-15**, confirmar, ya está: es la otra mitad y la que sí mueve plata.
+  Ver [21-confirmar-candidatos-s3-fe-15.md](21-confirmar-candidatos-s3-fe-15.md).
 
 ## Cómo probarlo
 
