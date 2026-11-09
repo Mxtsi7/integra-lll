@@ -12,6 +12,8 @@ PUBLICADA = ("connectors", "0003_autorizacion_y_revocacion")
 DE_ESTA_PR = ("borrado", "0001_initial")
 # FE-07 (#120): tampoco publicada cuando se escribió esta prueba.
 DE_FE07 = ("connectors", "0004_archivo_importacion")
+# S3-FE-10: la tabla de candidatos, todavía sin publicar.
+DE_S3_FE10 = ("connectors", "0005_cobro_candidato")
 
 
 @pytest.mark.django_db(transaction=True)
@@ -44,7 +46,8 @@ def test_migraciones_publicadas_conservan_datos(origen, claves):
         # además la publicada que le sigue. Ninguna publicada cambia.
         executor = MigrationExecutor(connection)
         plan = [(migracion.app_label, migracion.name) for migracion, _ in executor.migration_plan(destino)]
-        esperado = [DE_ESTA_PR, DE_FE07] if origen == PUBLICADA[1] else [PUBLICADA, DE_ESTA_PR, DE_FE07]
+        sin_publicar = [DE_ESTA_PR, DE_FE07, DE_S3_FE10]
+        esperado = sin_publicar if origen == PUBLICADA[1] else [PUBLICADA] + sin_publicar
         assert sorted(plan) == sorted(esperado)
         executor.migrate(destino)
 

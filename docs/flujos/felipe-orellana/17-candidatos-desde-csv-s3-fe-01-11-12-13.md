@@ -55,8 +55,8 @@ csv_candidatos.leer(contenido, separador=…, sha256=…, organizacion_id=…)
 ResultadoLectura{ candidatos, errores, filas_totales }
    │
    ▼
-(pendiente, S3-FE-10) la tarea que mueve Importacion a `completada`,
-   vuelca errores en Importacion.errores y cuenta candidatos_detectados
+S3-FE-10: la tarea que guarda los candidatos, vuelca los errores en
+   Importacion.errores y mueve la Importacion a `completada`
 ```
 
 Los dos datos que vienen de FE-07 y que hay que pasarle sí o sí son el
@@ -184,11 +184,12 @@ que revisar **esta regla**, no solo la tabla de monedas.
 Y el peso chileno no tiene centavos: `1500,50` en CLP se rechaza en vez de
 redondearse.
 
-## Lo que falta
+## Quién lo usa, y lo que falta
 
-**S3-FE-10** es el cable: `SubirArchivoView` ya guarda el archivo y esto ya
-sabe leerlo, pero nadie los une todavía ni mueve la `Importacion` a
-`completada` con sus candidatos y sus errores.
+**S3-FE-10** es el cable: `procesar_importacion` toma el archivo que
+guardó la subida, lo pasa por acá y deja los candidatos en
+`CobroCandidato` (ver
+[18-procesar-la-importacion-s3-fe-10.md](18-procesar-la-importacion-s3-fe-10.md)).
 
 Después vienen **S3-FE-14** (exponer candidatos y errores para la vista
 previa), **S3-FE-15 y S3-FE-16** (confirmar y rechazar) y **S3-FE-17**

@@ -1,5 +1,6 @@
 """Vistas del servicio de conectores."""
 
+import logging
 from datetime import datetime, time, timedelta
 
 from django.conf import settings
@@ -28,6 +29,9 @@ from .serializers import (
     IniciarAutorizacionSerializer,
     SubidaArchivoSerializer,
 )
+from .tasks import procesar_importacion
+
+log = logging.getLogger(__name__)
 
 
 def salud(request):
@@ -488,6 +492,27 @@ class ImportacionViewSet(SoloLecturaTenantViewSet):
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _encolar_procesamiento(importacion_id: str) -> None:
+    """Manda la importación al worker, y no se cae si el broker no está.
+
+    Corre después del commit, cuando la respuesta 201 ya es un hecho: si acá
+    se lanzara una excepción, la persona vería un 500 por una importación que
+    SÍ se creó, y volvería a subir el mismo archivo.
+
+    Una tarea que no se pudo encolar no se pierde: la importación queda
+    `pendiente` y `rescatar_importaciones_estancadas` la vuelve a encolar.
+    Por eso esto se registra y se sigue, en vez de reintentar acá mismo.
+    """
+    try:
+        procesar_importacion.delay(importacion_id)
+    except Exception:  # noqa: BLE001 - cualquier fallo del broker cae acá
+        log.exception(
+            "no se pudo encolar el procesamiento de la importación %s; "
+            "queda pendiente para el rescate",
+            importacion_id,
+        )
+
+
 @extend_schema(
     request=SubidaArchivoSerializer,
     responses={
@@ -607,6 +632,15 @@ class SubirArchivoView(APIView):
                 sha256=validado.sha256,
                 contenido=contenido,
                 vence_en=ahora + retencion,
+            )
+            # ── El trabajo se encola DESPUÉS del commit (S3-FE-10) ─────────
+            # `on_commit` y no un `.delay()` suelto: adentro de la
+            # transacción, el worker puede recibir el mensaje antes de que la
+            # fila exista para él, darla por inexistente y descartarla; la
+            # importación se quedaría `pendiente` hasta el rescate. Con
+            # `on_commit` el mensaje sale cuando la fila ya está visible.
+            transaction.on_commit(
+                lambda: _encolar_procesamiento(str(importacion.id))
             )
 
         salida = ImportacionSerializer(importacion, context={"request": request})
