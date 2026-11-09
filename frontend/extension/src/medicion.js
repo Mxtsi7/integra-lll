@@ -7,7 +7,12 @@ export function avanzarMedicion(anterior, observacion) {
   const { observadoEn, sesionId, dominio, estado, suscripcionId = null } = observacion;
   if (!Number.isFinite(observadoEn)) throw new Error('Instante inválido');
   if (anterior?.sesionId !== sesionId) anterior = undefined;
-  const sesiones = [...(anterior?.sesiones ?? [])];
+  // Idle se informa tras el umbral: también puede afectar tramos ya cerrados.
+  const corte = observadoEn - UMBRAL_INACTIVIDAD_MS;
+  const sesiones = (anterior?.sesiones ?? []).flatMap(sesion => {
+    const fin = estado === 'inactivo' ? Math.min(sesion.fin, corte) : sesion.fin;
+    return fin > sesion.inicio ? [{ ...sesion, fin, duracionMs: fin - sesion.inicio }] : [];
+  });
   let tramo = anterior?.tramo ?? null;
   if (tramo) {
     const transcurrido = observadoEn - tramo.confirmadoHasta;

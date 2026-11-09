@@ -14,7 +14,7 @@
 }
 
 .enlaceDerecha a {
-  color: var(--acento);
+  color: var(--acento-texto);
   font-weight: 700;
   text-decoration: none;
 }
@@ -41,7 +41,7 @@
 }
 
 .terminos a {
-  color: var(--acento);
+  color: var(--acento-texto);
   font-weight: 700;
   text-decoration: none;
 }
@@ -54,7 +54,7 @@
   padding: 12px 14px;
   border-radius: var(--radio-m);
   background: var(--acento-suave);
-  color: var(--acento);
+  color: var(--acento-texto);
   font-size: 13.5px;
 }
 

@@ -51,3 +51,25 @@ test('asocia dominios exactos a UUID explícitos y rechaza ambigüedad', () => {
     assert.throws(() => leerAsociaciones(entrada, ['www.example.com']));
   }
 });
+
+test('idle recorta también tramos cerrados dentro del minuto sin entrada', () => {
+  let medicion;
+  for (const instante of [0, 30000]) medicion = avanzarMedicion(medicion, activo(instante));
+  medicion = avanzarMedicion(medicion, { ...activo(40000), estado: 'sin_dominio_autorizado', dominio: null });
+  medicion = avanzarMedicion(medicion, { ...activo(60000), estado: 'inactivo', dominio: null });
+  assert.deepEqual(resumirMinutos(medicion), {});
+  assert.deepEqual(medicion.sesiones, []);
+});
+
+test('idle preserva actividad anterior al corte y recorta sesiones posteriores', () => {
+  let medicion;
+  for (const instante of [0, 30000]) medicion = avanzarMedicion(medicion, activo(instante));
+  medicion = avanzarMedicion(medicion, { ...activo(50000), estado: 'sin_foco', dominio: null });
+  medicion = avanzarMedicion(medicion, activo(60000));
+  medicion = avanzarMedicion(medicion, { ...activo(90000), estado: 'sin_dominio_autorizado', dominio: null });
+  medicion = avanzarMedicion(medicion, { ...activo(100000), estado: 'inactivo', dominio: null });
+  assert.equal(resumirMinutos(medicion)['example.com'], 40000 / 60000);
+  assert.equal(medicion.sesiones.length, 1);
+  assert.equal(medicion.sesiones[0].fin, 40000);
+  assert.equal(medicion.sesiones[0].duracionMs, 40000);
+});
