@@ -298,7 +298,19 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
             "tipo_mensaje_legible",
             "estado",
             "estado_legible",
+            # Quién decidió y cuándo (S3-FE-16). `null` mientras está
+            # `propuesto`; una vez decidido no se mueve, aunque lleguen más
+            # peticiones.
+            "decidido_en",
+            "decidido_por",
             "evidencia",
             "creado_en",
         )
         read_only_fields = fields
+
+
+class CandidatoYaConfirmadoSerializer(serializers.Serializer):
+    """La forma del 409 al intentar rechazar un candidato ya confirmado."""
+
+    codigo = serializers.CharField(help_text="candidato_ya_confirmado")
+    detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")

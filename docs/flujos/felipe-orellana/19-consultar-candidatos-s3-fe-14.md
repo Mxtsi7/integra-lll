@@ -68,7 +68,7 @@ con un 404 inexplicable. Es el mismo cuidado que ya tenía `ImportacionViewSet`.
 
 ### Lo que sale: el candidato
 
-17 campos, listados explícitos en el serializer:
+19 campos, listados explícitos en el serializer:
 
 | Campo | Qué es |
 |---|---|
@@ -84,6 +84,8 @@ con un 404 inexplicable. Es el mismo cuidado que ya tenía `ImportacionViewSet`.
 | `fecha` | la del cobro |
 | `tipo_mensaje`, `tipo_mensaje_legible` | `cobro_realizado`, `aviso_de_cobro` o `pago_fallido` |
 | `estado`, `estado_legible` | `propuesto` al nacer |
+| `decidido_en` | cuándo se confirmó o rechazó; `null` mientras está `propuesto` (S3-FE-16) |
+| `decidido_por` | quién decidió; `""` mientras está `propuesto` |
 | `evidencia` | `{"fila": "3", "descripcion_original": "PAYPAL *SPOTIFY"}` |
 | `creado_en` | cuándo se detectó |
 
@@ -143,7 +145,8 @@ entre consultas. El desempate va por `creado_en`.
   lista trae solo `csv`. La ruta ya los soporta: es la misma tabla y el mismo
   contrato, y por eso una prueba crea uno de correo a mano para comprobar que
   el filtro `origen=correo` funciona antes de que haya un lector.
-- **Confirmar y rechazar**: S3-FE-15 y S3-FE-16.
+- **Confirmar**: S3-FE-15. **Rechazar** ya está, en su propia ruta: ver
+  [20-rechazar-candidatos-s3-fe-16.md](20-rechazar-candidatos-s3-fe-16.md).
 - **No duplicar entre archivos**: S3-FE-17, que usa el
   `identificador_origen` que esta ruta ya expone.
 

@@ -10,6 +10,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -23,6 +24,7 @@ from . import archivos, proveedores, revocacion
 from .models import (
     ArchivoImportacion,
     AutorizacionPendiente,
+    CandidatoYaConfirmado,
     CobroCandidato,
     CuentaConectada,
     Importacion,
@@ -31,6 +33,7 @@ from .serializers import (
     ArchivoRechazadoSerializer,
     AutorizacionIniciadaSerializer,
     CallbackAutorizacionSerializer,
+    CandidatoYaConfirmadoSerializer,
     CobroCandidatoSerializer,
     CuentaConectadaSerializer,
     ImportacionSerializer,
@@ -749,3 +752,46 @@ class CobroCandidatoViewSet(SoloLecturaTenantViewSet):
             qs = qs.filter(estado=estado)
 
         return qs
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: CobroCandidatoSerializer,
+            409: CandidatoYaConfirmadoSerializer,
+        },
+        summary="Rechazar un cobro candidato (S3-FE-16)",
+    )
+    @action(detail=True, methods=["post"], url_path="rechazar")
+    def rechazar(self, request, pk=None):
+        """
+            POST /api/candidatos/<id>/rechazar/
+            → 200 con el candidato en `rechazado`
+
+        Descarta la propuesta. **No crea ni toca ninguna suscripción ni
+        ningún cobro**: esas tablas viven en `subscriptions` y este servicio
+        no las conoce (ADR-002). Tampoco publica un evento ni marca la
+        importación como confirmada.
+
+        ── Volver a rechazar da 200, no un error ───────────────────────────
+        Es idempotente: la segunda petición devuelve el mismo candidato, con
+        la MISMA `decidido_en` que dejó la primera. Es lo que necesita
+        S3-CH-09 para no tener que cuidarse de los dobles envíos, y el
+        criterio "rechazar nuevamente tiene resultado definido".
+
+        ── Y un confirmado no se rechaza ───────────────────────────────────
+        409 con `codigo: candidato_ya_confirmado`. Ese candidato ya creó
+        suscripciones y cobros (S3-FE-15); deshacerlos es otra operación y no
+        un efecto de este endpoint.
+
+        El cuerpo se ignora: no hay nada que mandar. Se pide el usuario de la
+        cabecera porque queda guardado quién decidió.
+        """
+        candidato = self.get_object()
+        try:
+            candidato.rechazar(por=_usuario_de(request))
+        except CandidatoYaConfirmado as exc:
+            return Response(
+                {"codigo": "candidato_ya_confirmado", "detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(self.get_serializer(candidato).data, status=status.HTTP_200_OK)
