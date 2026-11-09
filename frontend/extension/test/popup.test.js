@@ -234,3 +234,17 @@ test('una retirada lenta no desmarca ni borra una selección posterior', async (
   await vaciarCola();
   assert.deepEqual(almacen.configuracion.dominios, ['nuevo.com']);
 });
+
+test('retirar sustituye mensajes de preparación y autorización confirmadas', async () => {
+  await cargar();
+  await document.querySelector('#dominios').input();
+  assert.match(document.querySelector('#estado').textContent, /Revisa/);
+  await retirar();
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+  document.querySelector('#dominios').value = 'example.com';
+  document.querySelector('#consentimiento').checked = true;
+  await aceptar();
+  assert.match(document.querySelector('#estado').textContent, /Dominios autorizados/);
+  await retirar();
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+});

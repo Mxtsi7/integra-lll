@@ -84,3 +84,11 @@ No cerrar S3-MX-09/10 por estas pruebas automatizadas. Adjuntar navegador/versi�
 commit probado, pasos, resultado real y evidencia visual o registro del recorrido
 1–7, además de las validaciones anteriores. Una carga descomprimida informada para
 un HEAD anterior no demuestra el recorrido interactivo de esta corrección.
+
+## Retirada — corrección de revisión del 9 de noviembre de 2026
+
+Al confirmar la retirada, el panel sustituye el mensaje anterior por
+«Consentimiento retirado. Sesión borrada.». Se conserva la comprobación de
+generación para no sobrescribir una selección posterior. Regresión de preparación
+y autorización activas: fallaba antes y pasa tras el cambio; suite 17/17.
+El recorrido interactivo completo y las validaciones de consentimiento siguen pendientes.

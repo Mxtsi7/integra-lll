@@ -79,6 +79,7 @@ document.querySelector('#retirar').addEventListener('click', async () => {
     if (actual !== generacion) return;
     if (!respuesta?.ok) throw new Error('No se pudo retirar');
     document.querySelector('#consentimiento').checked = false;
+    estado.textContent = 'Consentimiento retirado. Sesión borrada.';
     await mostrarEstado(actual);
   } catch {
     if (actual === generacion) estado.textContent = 'No se pudo completar la retirada. Deshabilita la extensión y vuelve a intentarlo.';
