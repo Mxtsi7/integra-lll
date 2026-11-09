@@ -353,7 +353,7 @@
 }
 
 .proximoServicioTexto:hover .proximoNombre {
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .proximoNombre {

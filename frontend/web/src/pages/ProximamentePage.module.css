@@ -16,13 +16,13 @@
   margin-bottom: 6px;
   border-radius: 14px;
   background: var(--acento-suave);
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .estado {
   font-size: 13px;
   font-weight: 800;
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .que {
