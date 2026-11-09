@@ -235,3 +235,12 @@ PostgreSQL o acuerdo humano. Registro de recepción a completar antes de cerrar:
 
 No cerrar S3-MX-01 por haber añadido esta tabla. La validación debe referirse al
 commit corregido; una propuesta de Maxi no sustituye la aceptación del receptor.
+
+### Verificación nativa Windows — 9 de noviembre de 2026
+
+Comprobado en Windows con Python 3.12.16: un entorno virtual limpio, instalación
+de tzdata 2026.6 mediante los comandos anteriores y ejecución con su python.exe
+aprueba 10/10 comprobaciones. Sin tzdata el intérprete base reproduce los tres
+errores ZoneInfoNotFoundError de America/Santiago. Se verifica la preparación del
+entorno, las fixtures y cálculos; no valida HTTP, adaptador, concurrencia ni
+sustituye los acuerdos pendientes de Victor/Chris.
