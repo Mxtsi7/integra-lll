@@ -117,24 +117,64 @@ def latido():
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _cerrada_por_otro(importacion: Importacion, codigo: str) -> dict:
+    """Lo que se devuelve cuando el cierre lo gano otra corrida."""
+    importacion.refresh_from_db()
+    log.info(
+        "importación %s ya la cerró otra corrida (%s); %s no se publica",
+        importacion.pk,
+        importacion.estado,
+        codigo,
+    )
+    return {
+        "importacion": str(importacion.pk),
+        "estado": importacion.estado,
+        "repetida": True,
+    }
+
+
 def _terminar_mal(importacion: Importacion, codigo: str, mensaje: str) -> dict:
     """Deja la importación `fallida` con un único error que explica por qué.
+
+    ── El motivo y el estado terminal se escriben JUNTOS ───────────────────
+    Y condicionados al estado que esta instancia cree vigente, con el CAS en
+    el WHERE. Antes eran dos pasos —guardar el motivo y después mover el
+    estado— y eso dejaba pisar un cierre ajeno: el rescate marcaba
+    `procesamiento_interrumpido` y el worker que seguía vivo le escribía
+    encima su propio motivo sobre una importación que ya no era suya. Lo
+    encontró la revisión de #147.
+
+    Si el CAS no gana, acá no se toca nada: ni el estado, ni los errores.
 
     Los errores se reemplazan en vez de sumarse: si esto es un reintento, los
     de la corrida anterior ya no describen el estado actual, y dejarlos haría
     que `errores_totales` creciera en cada pasada.
-
-    OJO: escribe el motivo ANTES de mover el estado, así que solo la puede
-    llamar quien ya tiene la importación reclamada —`procesar_importacion`
-    después de su `avanzar_a(procesando)`—. El rescate NO la usa para cerrar
-    una estancada: ahí el worker original puede estar vivo, y hay que
-    reclamar la transición primero (ver `rescatar_importaciones_estancadas`).
     """
+    desde = importacion.estado
+    if Importacion.Estado.FALLIDA not in Importacion.TRANSICIONES.get(desde, set()):
+        # Terminal, o un estado del que no se puede fallar: no hay nada que
+        # cerrar y pisarlo seria justamente el error que esto evita.
+        return _cerrada_por_otro(importacion, codigo)
+
     importacion.errores = []
     importacion.errores_totales = 0
     importacion.anotar_error(codigo, mensaje)
-    importacion.save(update_fields=["errores", "errores_totales", "actualizado_en"])
-    importacion.avanzar_a(Importacion.Estado.FALLIDA)
+    ahora = timezone.now()
+
+    with transaction.atomic():
+        cambiadas = Importacion.objects.filter(pk=importacion.pk, estado=desde).update(
+            estado=Importacion.Estado.FALLIDA,
+            terminada_en=ahora,
+            actualizado_en=ahora,
+            errores=importacion.errores,
+            errores_totales=importacion.errores_totales,
+        )
+
+    if not cambiadas:
+        return _cerrada_por_otro(importacion, codigo)
+
+    importacion.estado = Importacion.Estado.FALLIDA
+    importacion.terminada_en = ahora
     log.warning("importación %s fallida: %s", importacion.pk, codigo)
     return {"importacion": str(importacion.pk), "estado": importacion.estado, "codigo": codigo}
 
@@ -236,43 +276,67 @@ def procesar_importacion(importacion_id: str) -> dict:
         CobroCandidato.desde_candidato(candidato, importacion=importacion)
         for candidato in resultado.candidatos
     ]
+
+    # Los errores se arman en memoria con `anotar_error`, que es quien sabe
+    # cuántos se guardan (`MAXIMO_ERRORES`) y cuántos se cuentan.
+    importacion.errores = []
+    importacion.errores_totales = 0
+    for error in resultado.errores:
+        importacion.anotar_error(error.codigo, error.mensaje, fila=error.fila)
+
+    ahora = timezone.now()
+    # ── Todo junto, o nada ──────────────────────────────────────────────
+    # El cierre se RECLAMA primero, con el CAS en el WHERE, y dentro de la
+    # misma transacción que inserta los candidatos. Dos cosas a la vez:
+    #
+    #   · si otra corrida ya cerró la importación —el rescate, típicamente—
+    #     el UPDATE afecta 0 filas y acá no se escribe nada: ni candidatos,
+    #     ni contadores, ni errores, ni estado. Antes el worker tardío
+    #     publicaba igual y dejaba una terminal mentirosa: FALLIDA con 2
+    #     candidatos, `errores=[]` y el motivo del rescate borrado. Lo
+    #     encontró la revisión de #147.
+    #   · y el UPDATE deja la fila bloqueada hasta el commit, así que nadie
+    #     se mete entre el cierre y la inserción.
+    #
+    # `filas_totales` se vuelve a fijar porque la subida lo estimó contando
+    # líneas no vacías y el lector sabe el número de verdad: una glosa con un
+    # salto de línea entre comillas ocupa dos líneas y una sola fila.
     with transaction.atomic():
-        # `ignore_conflicts`: la unicidad de (organización, origen,
-        # identificador) es lo que hace idempotente a esta tarea. Un reintento
-        # choca con sus propias filas y no las duplica.
-        CobroCandidato.objects.bulk_create(filas, ignore_conflicts=True)
-        # Se cuenta con una consulta y no con el largo de `filas`:
-        # `bulk_create` con `ignore_conflicts` no dice cuántas insertó de
-        # verdad, y lo que la persona tiene que ver es cuántos candidatos
-        # existen, no cuántos se intentaron.
-        guardados = CobroCandidato.objects.filter(importacion=importacion).count()
-
-        importacion.errores = []
-        importacion.errores_totales = 0
-        for error in resultado.errores:
-            importacion.anotar_error(error.codigo, error.mensaje, fila=error.fila)
-
-        # `filas_totales` se vuelve a fijar porque la subida lo estimó contando
-        # líneas no vacías y el lector sabe el número de verdad: una glosa con
-        # un salto de línea entre comillas ocupa dos líneas y una sola fila.
-        importacion.filas_totales = resultado.filas_totales
-        importacion.filas_procesadas = resultado.filas_totales
-        importacion.candidatos_detectados = guardados
-        importacion.save(
-            update_fields=[
-                "errores",
-                "errores_totales",
-                "filas_totales",
-                "filas_procesadas",
-                "candidatos_detectados",
-                "actualizado_en",
-            ]
+        cerrada = Importacion.objects.filter(
+            pk=importacion.pk, estado=Importacion.Estado.PROCESANDO
+        ).update(
+            estado=Importacion.Estado.COMPLETADA,
+            terminada_en=ahora,
+            actualizado_en=ahora,
+            errores=importacion.errores,
+            errores_totales=importacion.errores_totales,
+            filas_totales=resultado.filas_totales,
+            filas_procesadas=resultado.filas_totales,
+            candidatos_detectados=len(filas),
         )
+        if cerrada:
+            # `ignore_conflicts`: la unicidad de (organización, origen,
+            # identificador) es lo que hace idempotente a esta tarea. Un
+            # reintento choca con sus propias filas y no las duplica.
+            CobroCandidato.objects.bulk_create(filas, ignore_conflicts=True)
+            # Y se cuenta de verdad: `bulk_create` con `ignore_conflicts` no
+            # dice cuántas insertó, y en un reintento las de la corrida
+            # anterior ya estaban. Lo que la persona tiene que ver es cuántos
+            # candidatos EXISTEN, no cuántos se intentaron.
+            guardados = CobroCandidato.objects.filter(importacion=importacion).count()
+            if guardados != len(filas):
+                Importacion.objects.filter(pk=importacion.pk).update(
+                    candidatos_detectados=guardados
+                )
 
-    # Al final, y fuera de la transacción: quien haga polling y vea
-    # `completada` tiene que encontrar los números ya escritos. Al revés
-    # vería un estado terminal con cero candidatos por un instante.
-    importacion.avanzar_a(Importacion.Estado.COMPLETADA)
+    if not cerrada:
+        return _cerrada_por_otro(importacion, "completada")
+
+    importacion.estado = Importacion.Estado.COMPLETADA
+    importacion.terminada_en = ahora
+    importacion.filas_totales = resultado.filas_totales
+    importacion.filas_procesadas = resultado.filas_totales
+    importacion.candidatos_detectados = guardados
 
     log.info(
         "importación %s completada: %s candidatos, %s errores de %s filas",
@@ -319,24 +383,16 @@ def rescatar_importaciones_estancadas() -> dict:
         estado=Importacion.Estado.PROCESANDO,
         actualizado_en__lte=ahora - limite,
     )[:LOTE_DE_RESCATE]:
-        # ── Primero se reclama la transición, después se escribe el motivo ──
-        # Al revés —como hace `_terminar_mal`— se le pisarían los errores a
-        # una importación que justo terminó bien: el worker que la tenía pudo
-        # estar vivo y cerrándola en este instante. La guarda de `avanzar_a`
-        # va en el WHERE, así que si devuelve False ganó él y acá no se toca
-        # nada. Perder un rescate es barato; corromper el resultado de una
-        # importación que sí terminó, no.
-        if not importacion.avanzar_a(Importacion.Estado.FALLIDA):
-            log.info("importación %s ya la cerró su worker; no se rescata", importacion.pk)
-            continue
-        importacion.errores = []
-        importacion.errores_totales = 0
-        importacion.anotar_error(
+        # `_terminar_mal` escribe el motivo y el estado JUNTOS, con el CAS
+        # en el WHERE, así que si el worker original está vivo y la cierra
+        # primero, acá no se toca nada. Perder un rescate es barato;
+        # corromper el resultado de una importación que sí terminó, no.
+        if _terminar_mal(
+            importacion,
             PROCESAMIENTO_INTERRUMPIDO,
             "El procesamiento se interrumpió y no terminó. Vuelve a subir el archivo.",
-        )
-        importacion.save(update_fields=["errores", "errores_totales", "actualizado_en"])
-        log.warning("importación %s rescatada como fallida: se quedó procesando", importacion.pk)
+        ).get("repetida"):
+            continue
         estancadas += 1
 
     if pendientes or estancadas:

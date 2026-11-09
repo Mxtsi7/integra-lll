@@ -21,7 +21,7 @@ Los dos criterios de la tarjeta:
 | El encolado | `connectors/views.py` → `_encolar_procesamiento` |
 | Donde quedan los candidatos | `connectors/models.py` → `CobroCandidato` |
 | La migración | `connectors/migrations/0005_cobro_candidato.py` |
-| Las pruebas | `services/connectors/tests/test_procesar_importacion.py`, 30 |
+| Las pruebas | `services/connectors/tests/test_procesar_importacion.py`, 33 |
 
 ## El flujo: de dónde vienen los datos
 
@@ -135,6 +135,29 @@ fila, y la tabla tiene esa unicidad; el `bulk_create` va con
 filas, no el doble. Lo mismo con los errores: se reemplazan en vez de
 sumarse, o `errores_totales` crecería en cada pasada.
 
+**El resultado se publica entero o no se publica.** El cierre se *reclama*
+primero, con el estado esperado en el `WHERE`, y dentro de la misma
+transacción que inserta los candidatos. Si otra corrida ya cerró la
+importación —el rescate, típicamente—, el `UPDATE` afecta 0 filas y no se
+escribe nada: ni candidatos, ni contadores, ni errores, ni estado.
+
+Esto lo encontró la revisión de #147 y era un error real. Antes el worker
+publicaba su resultado sin preguntar y después intentaba mover el estado:
+
+```
+rescate: la cierra FALLIDA · procesamiento_interrumpido
+worker:  sigue vivo, escribe 2 candidatos, contadores y errores=[]
+queda:   FALLIDA, 2 candidatos, errores_totales=0
+```
+
+Una terminal mentirosa, y terminal significa que no se corrige nunca más. El
+mismo cuidado va en `_terminar_mal`, que escribe el motivo y el estado en una
+sola operación condicionada, y por eso el rescate puede volver a usarla.
+
+El `UPDATE` condicionado también **bloquea la fila** hasta el commit, así que
+en PostgreSQL nadie se mete entre el cierre y la inserción: el que llega
+segundo reevalúa el `WHERE` con la fila ya cambiada y se encuentra 0 filas.
+
 **Ningún estado se queda sin final.** El broker es Redis y Redis no es
 durable: si el worker se cae con la tarea tomada, el mensaje se pierde. Sin
 nada más, esa importación se queda `pendiente` o `procesando` para siempre, y
@@ -192,7 +215,7 @@ está.
 cd services/connectors && python -m pytest tests/test_procesar_importacion.py -q
 ```
 
-30 pruebas. La primera sube un CSV por el endpoint real con Celery en modo
+33 pruebas. La primera sube un CSV por el endpoint real con Celery en modo
 síncrono y comprueba que lo que queda en la base salió del archivo que se
 subió: sin eso, "llega al parser real" no se puede afirmar.
 
@@ -207,6 +230,11 @@ prueba que pasa igual con el error puesto no prueba nada:
 - la de la carrera entre el rescate y el worker vivo encontró un error de
   verdad: el rescate escribía el motivo antes de reclamar la transición, y
   con eso le borraba los errores reales a una importación que terminó bien.
+- y la revisión de #147 encontró **la misma carrera al revés**, que estas
+  pruebas no cubrían: el worker tardío publicando sobre un cierre ajeno. Hay
+  dos pruebas nuevas que paran el parser a mitad, corren el rescate de verdad
+  y comprueban que el worker no toca nada al volver — una por el camino bueno
+  y otra por el de error de archivo.
 
 Lo que estas pruebas NO cubren es PostgreSQL: acá corren en SQLite. Dos cosas
 solo se ven allá —`BinaryField` devuelve `memoryview` y no `bytes`, y
