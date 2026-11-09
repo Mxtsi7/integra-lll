@@ -8,6 +8,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 EJEMPLOS = json.loads((Path(__file__).parents[1] / "uso-recolectores-v1.ejemplos.json").read_text())
+MILISEGUNDO = timedelta(milliseconds=1)
 
 
 def instante(texto):
@@ -22,7 +23,7 @@ def dia_local(evento):
 def interseccion_ms(inicio, fin, tramo):
     desde = max(inicio, instante(tramo["inicio"]))
     hasta = min(fin, instante(tramo["fin"]))
-    return max(0, int((hasta - desde).total_seconds() * 1000))
+    return max(0, (hasta - desde) // MILISEGUNDO)
 
 
 def duracion_union_ms(tramos):
@@ -33,10 +34,18 @@ def duracion_union_ms(tramos):
             unidos[-1] = (unidos[-1][0], max(unidos[-1][1], fin))
         else:
             unidos.append((inicio, fin))
-    return sum(int((fin - inicio).total_seconds() * 1000) for inicio, fin in unidos)
+    return sum((fin - inicio) // MILISEGUNDO for inicio, fin in unidos)
 
 
 class EjemplosContratoUso(unittest.TestCase):
+    def test_interseccion_conserva_exactamente_1001_milisegundos(self):
+        tramo = {"inicio": "2026-11-08T12:00:00.000Z", "fin": "2026-11-08T12:00:01.001Z"}
+        self.assertEqual(interseccion_ms(instante(tramo["inicio"]), instante(tramo["fin"]), tramo), 1001)
+
+    def test_union_conserva_exactamente_1001_milisegundos(self):
+        tramo = {"inicio": "2026-11-08T12:00:00.000Z", "fin": "2026-11-08T12:00:01.001Z"}
+        self.assertEqual(duracion_union_ms([tramo]), 1001)
+
     def test_android_y_navegador_comparten_significado_y_destino(self):
         android, navegador = (EJEMPLOS[origen] for origen in ("android", "navegador"))
         self.assertEqual(android["suscripcion_id"], navegador["suscripcion_id"])
@@ -57,7 +66,7 @@ class EjemplosContratoUso(unittest.TestCase):
             inicio, fin = (instante(evento[campo]) for campo in ("inicio", "fin"))
             self.assertLess(inicio, fin)
             self.assertGreaterEqual(evento["duracion_ms"], 0)
-            self.assertLessEqual(evento["duracion_ms"], (fin - inicio).total_seconds() * 1000)
+            self.assertLessEqual(evento["duracion_ms"], (fin - inicio) // MILISEGUNDO)
             ultimo_instante = fin - timedelta(microseconds=1)
             ultimo_dia = ultimo_instante.astimezone(ZoneInfo(evento["zona_horaria"])).date()
             self.assertEqual(dia_local(evento), ultimo_dia)
