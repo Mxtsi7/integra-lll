@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { formatearFechaHora, formatearFechaLarga, formatearMesAnio, formatearMonto, formatearTotales, nombresDiasSemana } from './formato';
+import { formatearAhorro, formatearFechaHora, formatearFechaLarga, formatearMesAnio, formatearMonto, formatearTotales, nombresDiasSemana } from './formato';
 
 it('identifica cada divisa y conserva sus decimales de presentación', () => {
   expect(formatearTotales([{ moneda: 'CLP', total: 10000 }, { moneda: 'EUR', total: 4.99 }]))
@@ -55,5 +55,30 @@ describe('nombresDiasSemana', () => {
       'domingo',
     ]);
     expect(nombresDiasSemana('short')).toHaveLength(7);
+  });
+});
+
+describe('formatearAhorro (CH-22)', () => {
+  it('da formato al ahorro con su moneda, igual que el monto', () => {
+    expect(formatearAhorro(5000, 'CLP')).toBe(formatearMonto(5000, 'CLP'));
+    expect(formatearAhorro(4.5, 'USD')).toBe(formatearMonto(4.5, 'USD'));
+  });
+
+  it('un cero que viene de la API es un dato, no un dato faltante', () => {
+    expect(formatearAhorro(0, 'CLP')).toBe(formatearMonto(0, 'CLP'));
+  });
+
+  const casosSinDato: [string, number | null | undefined, string | null | undefined][] = [
+    ['sin monto', undefined, 'CLP'],
+    ['monto nulo', null, 'CLP'],
+    ['monto que no es un número', Number.NaN, 'CLP'],
+    ['monto infinito', Number.POSITIVE_INFINITY, 'CLP'],
+    ['sin moneda', 5000, undefined],
+    ['moneda nula', 5000, null],
+    ['moneda vacía', 5000, ''],
+    ['moneda que no es un código válido', 5000, 'pesos'],
+  ];
+  it.each(casosSinDato)('%s: devuelve null y no inventa una moneda ni un cero', (_descripcion, ahorro, moneda) => {
+    expect(formatearAhorro(ahorro, moneda)).toBeNull();
   });
 });

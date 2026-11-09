@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0e1a" />
+    <!-- CH-24: el tema guardado se pone antes de pintar. Si esperara al JS de
+         la app, quien eligió el claro vería un instante el oscuro al recargar.
+         La clave es CLAVE_TEMA de src/hooks/useTema.ts. -->
+    <script>
+      try {
+        var tema = localStorage.getItem('oag-tema');
+        if (tema === 'claro' || tema === 'oscuro') document.documentElement.dataset.tema = tema;
+      } catch (e) {}
+    </script>
     <title>Ojo al Gasto</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

@@ -34,6 +34,7 @@ test('editar selección conserva la sesión de medición y retira permisos sobra
   const api = {
     storage: { session: {
       get: async () => structuredClone(almacen), set: async valores => Object.assign(almacen, valores),
+      remove: async clave => { delete almacen[clave]; },
     } },
     permissions: {
       contains: async () => true,
@@ -41,7 +42,10 @@ test('editar selección conserva la sesión de medición y retira permisos sobra
       remove: async permisos => { retirados = permisos.origins; },
     },
   };
-  await crearControlador(api).guardar({ dominios: ['nuevo.com'], consentimiento: true });
+  const controlador = crearControlador(api);
+  const intentoId = crypto.randomUUID();
+  await controlador.iniciarAutorizacion(intentoId, ['nuevo.com']);
+  await controlador.guardar({ consentimiento: true }, intentoId);
   assert.deepEqual(retirados, ['https://anterior.com/*']);
   assert.equal(almacen.configuracion.sesionId, 'sesion-original');
   assert.notEqual(almacen.configuracion.id, 'A');

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 
 export type Tema = 'claro' | 'oscuro';
 
-const CLAVE = 'oag-tema';
+/** Dónde se guarda el tema. index.html lo lee igual antes de pintar (CH-24). */
+export const CLAVE_TEMA = 'oag-tema';
 
 /**
  * El tema guardado por el usuario. Si nunca eligió, oscuro: la interfaz está
@@ -10,7 +11,7 @@ const CLAVE = 'oag-tema';
  */
 function leerTemaInicial(): Tema {
   try {
-    const guardado = localStorage.getItem(CLAVE);
+    const guardado = localStorage.getItem(CLAVE_TEMA);
     if (guardado === 'claro' || guardado === 'oscuro') return guardado;
   } catch {
     // localStorage no disponible (p. ej. modo privado): usamos el valor por defecto
@@ -20,6 +21,11 @@ function leerTemaInicial(): Tema {
 
 export function aplicarTema(tema: Tema) {
   document.documentElement.dataset.tema = tema;
+  // La barra del navegador en el teléfono toma el color del fondo del tema
+  // (antes quedaba siempre oscura). Se lee del CSS para no repetir el valor.
+  const fondo = getComputedStyle(document.documentElement).getPropertyValue('--fondo').trim();
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (meta && fondo) meta.content = fondo;
 }
 
 // Llamar UNA vez en main.tsx, antes de render, para que todas las
@@ -34,7 +40,7 @@ export function useTema() {
   useEffect(() => {
     aplicarTema(tema);
     try {
-      localStorage.setItem(CLAVE, tema);
+      localStorage.setItem(CLAVE_TEMA, tema);
     } catch {
       // Sin localStorage el tema sigue aplicado, solo no se recuerda al recargar
     }

@@ -174,3 +174,124 @@ describe('descartar (CH-32, VI-18)', () => {
     expect(result.current.estado).toMatchObject({ items: [A] });
   });
 });
+
+describe('explicación (CH-22, MX-25)', () => {
+  const DE_NETFLIX = { id: 'rec-a', nombre: 'Netflix' };
+  const DE_SPOTIFY = { id: 'rec-b', nombre: 'Spotify' };
+  // La forma real de MX-25 (ExplicacionSerializer).
+  const EXPLICACION_DE_NETFLIX = {
+    id: 'rec-a',
+    suscripcion_id: 'sub-a',
+    explicacion: 'Pagas dos planes parecidos. Es una estimación, no un ahorro confirmado.',
+    fuente: 'reglas',
+    estado: 'disponible',
+    motivo: 'Pagas dos planes parecidos.',
+    ahorro_estimado: 5000,
+    moneda: 'CLP',
+    base_calculo: 'el plan más barato',
+    evidencia: null,
+    uso: 'no_evaluado',
+    advertencia_uso: 'La consolidación se basa en solapamiento; no afirma bajo uso.',
+  };
+
+  async function montarCon(items: unknown[]) {
+    vi.mocked(pedir).mockResolvedValueOnce({ results: items });
+    const hook = montarHook();
+    await waitFor(() => expect(hook.result.current.estado.tipo).toBe('listo'));
+    return hook;
+  }
+
+  it('pide GET .../explicar/ y la guarda cuando llega, sin tocar la lista', async () => {
+    let responder: (respuesta: unknown) => void = () => {};
+    const { result } = await montarCon([DE_NETFLIX, DE_SPOTIFY]);
+    vi.mocked(pedir).mockReturnValueOnce(new Promise((resolver) => (responder = resolver)));
+
+    let carga!: Promise<unknown>;
+    act(() => {
+      carga = result.current.cargarExplicacion('rec-a');
+    });
+    expect(pedir).toHaveBeenLastCalledWith('/recomendaciones/rec-a/explicar/');
+    expect(result.current.explicaciones['rec-a']).toEqual({ tipo: 'cargando' });
+
+    await act(async () => {
+      responder(EXPLICACION_DE_NETFLIX);
+      await carga;
+    });
+    expect(result.current.explicaciones['rec-a']).toEqual({ tipo: 'listo', explicacion: EXPLICACION_DE_NETFLIX });
+    expect(result.current.explicaciones['rec-b']).toBeUndefined();
+    expect(result.current.estado).toMatchObject({ items: [DE_NETFLIX, DE_SPOTIFY] });
+  });
+
+  it('dos pedidos en el mismo instante mandan una sola petición', async () => {
+    const { result } = await montarCon([DE_NETFLIX]);
+    vi.mocked(pedir).mockResolvedValue(EXPLICACION_DE_NETFLIX);
+    await act(async () => {
+      await Promise.all([result.current.cargarExplicacion('rec-a'), result.current.cargarExplicacion('rec-a')]);
+    });
+    const pedidos = vi.mocked(pedir).mock.calls.filter(([ruta]) => String(ruta).endsWith('/explicar/'));
+    expect(pedidos).toHaveLength(1);
+  });
+
+  it('si falla queda el error y se puede volver a pedir', async () => {
+    const { result } = await montarCon([DE_NETFLIX]);
+    vi.mocked(pedir).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await act(async () => {
+      await result.current.cargarExplicacion('rec-a');
+    });
+    expect(result.current.explicaciones['rec-a']).toEqual({
+      tipo: 'error',
+      mensaje: 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
+    });
+
+    vi.mocked(pedir).mockResolvedValueOnce(EXPLICACION_DE_NETFLIX);
+    await act(async () => {
+      await result.current.cargarExplicacion('rec-a');
+    });
+    expect(result.current.explicaciones['rec-a']).toEqual({ tipo: 'listo', explicacion: EXPLICACION_DE_NETFLIX });
+  });
+
+  it.each([
+    [404, 'Esta recomendación ya no está disponible. Vuelve a cargar la lista.'],
+    [500, 'No pudimos cargar la explicación. Intenta de nuevo.'],
+  ])('un %i se explica sin inventar una explicación', async (status, mensaje) => {
+    const { ErrorDeApi } = await import('../../../shared/src/api/cliente');
+    const { result } = await montarCon([DE_NETFLIX]);
+    vi.mocked(pedir).mockRejectedValueOnce(new ErrorDeApi('Error del servicio.', status));
+    await act(async () => {
+      await result.current.cargarExplicacion('rec-a');
+    });
+    expect(result.current.explicaciones['rec-a']).toEqual({ tipo: 'error', mensaje });
+  });
+
+  it('una explicación que llega después de recargar la lista no se aplica', async () => {
+    const { result } = await montarCon([DE_NETFLIX]);
+    let explicacionVieja: (respuesta: unknown) => void = () => {};
+    vi.mocked(pedir)
+      .mockReturnValueOnce(new Promise((resolver) => (explicacionVieja = resolver))) // explicar
+      .mockResolvedValueOnce({ results: [DE_NETFLIX] }); // recargar
+    act(() => {
+      void result.current.cargarExplicacion('rec-a');
+    });
+    await act(async () => {
+      await result.current.recargar();
+    });
+    await act(async () => explicacionVieja(EXPLICACION_DE_NETFLIX));
+    expect(result.current.explicaciones).toEqual({});
+  });
+
+  it('descartar la recomendación borra su explicación', async () => {
+    const { result } = await montarCon([DE_NETFLIX, DE_SPOTIFY]);
+    vi.mocked(pedir)
+      .mockResolvedValueOnce(EXPLICACION_DE_NETFLIX)
+      .mockResolvedValueOnce({ recomendacion_id: 'rec-a', vigente_hasta: null, descartado: true });
+    await act(async () => {
+      await result.current.cargarExplicacion('rec-a');
+    });
+    expect(result.current.explicaciones['rec-a']).toMatchObject({ tipo: 'listo' });
+
+    await act(async () => {
+      await result.current.descartar('rec-a');
+    });
+    expect(result.current.explicaciones['rec-a']).toBeUndefined();
+  });
+});
