@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   descartarRecomendacion,
   ErrorDeApi,
+  explicarRecomendacion,
   getRecomendaciones,
+  type ExplicacionRecomendacion,
   type ListaRecomendaciones,
   type Recomendacion,
 } from "@ojoalgasto/shared";
@@ -17,10 +19,11 @@ import { RecomendacionesPage } from "./RecomendacionesPage";
 // Solo se simula la red; la página, el hook y los componentes son reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getRecomendaciones: vi.fn(), descartarRecomendacion: vi.fn() };
+  return { ...real, getRecomendaciones: vi.fn(), descartarRecomendacion: vi.fn(), explicarRecomendacion: vi.fn() };
 });
 const getRecomendacionesMock = vi.mocked(getRecomendaciones);
 const descartarMock = vi.mocked(descartarRecomendacion);
+const explicarMock = vi.mocked(explicarRecomendacion);
 
 // La forma real de VI-17 (RecomendacionConsolidacionSerializer).
 const NETFLIX: Recomendacion = {
@@ -80,6 +83,7 @@ beforeEach(() => {
   localStorage.clear();
   getRecomendacionesMock.mockReset();
   descartarMock.mockReset();
+  explicarMock.mockReset();
 });
 
 afterEach(() => {
@@ -188,5 +192,165 @@ describe("No me interesa (CH-32)", () => {
     await noMeInteresa("Netflix");
     expect(screen.getByRole("heading", { name: "No tienes recomendaciones por ahora" })).toBeInTheDocument();
     expect(screen.queryByText(/Ahorro/)).not.toBeInTheDocument();
+  });
+});
+
+// La forma real de MX-25 (ExplicacionSerializer).
+const EXPLICACION_NETFLIX: ExplicacionRecomendacion = {
+  id: NETFLIX.id,
+  suscripcion_id: "s01",
+  explicacion:
+    "Tienes dos planes de streaming con el mismo catálogo. Ahorro estimado: 5000.00 CLP. Base de cálculo: el plan más barato. Es una estimación, no un ahorro confirmado.",
+  fuente: "reglas",
+  estado: "disponible",
+  motivo: NETFLIX.motivo ?? null,
+  ahorro_estimado: 5000,
+  moneda: "CLP",
+  base_calculo: "el plan más barato",
+  evidencia: null,
+  uso: "no_evaluado",
+  advertencia_uso: "La consolidación se basa en solapamiento; no afirma bajo uso ni calcula un puntaje de actividad.",
+};
+const SIN_DATOS_SUFICIENTES: ExplicacionRecomendacion = {
+  ...EXPLICACION_NETFLIX,
+  explicacion:
+    "Esta recomendación no tiene motivo, base de cálculo o evidencia suficientes para justificar una estimación de ahorro. Revisa la información de origen.",
+  estado: "datos_insuficientes",
+  motivo: null,
+  ahorro_estimado: null,
+  base_calculo: null,
+};
+const MENSAJE_SIN_RED = "No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.";
+
+/** El botón que abre o cierra la explicación de una tarjeta, se llame como se llame en ese momento. */
+const botonExplicacion = (nombre: string) =>
+  within(tarjeta(nombre)).getByRole("button", { name: new RegExp(`explicación: ${nombre}$`) });
+const alternarExplicacion = (nombre: string) => act(async () => fireEvent.click(botonExplicacion(nombre)));
+const panelDe = (nombre: string) => document.getElementById(botonExplicacion(nombre).getAttribute("aria-controls")!)!;
+
+describe("Motivo, ahorro y explicación (CH-22)", () => {
+  it("el ahorro es el de la API con su moneda; un dato faltante no se disfraza de cero ni de pesos", async () => {
+    const sinMonto: Recomendacion = { id: "r-sin-monto", nombre: "Sin monto", motivo: "Sin cifra." };
+    const enCero: Recomendacion = { id: "r-en-cero", nombre: "En cero", ahorro_estimado: 0, moneda: "CLP" };
+    const sinMoneda: Recomendacion = { id: "r-sin-moneda", nombre: "Sin moneda", ahorro_estimado: 3000 };
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX, ICLOUD, sinMonto, enCero, sinMoneda]));
+    await montar();
+
+    expect(within(tarjeta("Netflix")).getByText("Ahorro estimado: $5.000")).toBeInTheDocument();
+    expect(within(tarjeta("iCloud")).getByText("Ahorro estimado: US$4,50")).toBeInTheDocument();
+    expect(within(tarjeta("En cero")).getByText("Ahorro estimado: $0")).toBeInTheDocument();
+    for (const nombre of ["Sin monto", "Sin moneda"]) {
+      expect(within(tarjeta(nombre)).getByText("Ahorro estimado no disponible")).toBeInTheDocument();
+      expect(tarjeta(nombre)).not.toHaveTextContent("$");
+    }
+  });
+
+  it("pide la explicación solo al abrirla y la muestra tal como la arma el backend", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX, ICLOUD]));
+    explicarMock.mockResolvedValue(EXPLICACION_NETFLIX);
+    await montar();
+    expect(explicarMock).not.toHaveBeenCalled();
+    expect(botonExplicacion("Netflix")).toHaveAttribute("aria-expanded", "false");
+
+    await alternarExplicacion("Netflix");
+    expect(explicarMock).toHaveBeenCalledTimes(1);
+    expect(explicarMock).toHaveBeenCalledWith(NETFLIX.id);
+    expect(botonExplicacion("Netflix")).toHaveAttribute("aria-expanded", "true");
+    expect(botonExplicacion("Netflix")).toHaveAccessibleName("Ocultar explicación: Netflix");
+    expect(within(panelDe("Netflix")).getByText(EXPLICACION_NETFLIX.explicacion)).toBeInTheDocument();
+    expect(within(panelDe("Netflix")).getByText(EXPLICACION_NETFLIX.advertencia_uso)).toBeInTheDocument();
+    // La otra tarjeta sigue cerrada.
+    expect(botonExplicacion("iCloud")).toHaveAttribute("aria-expanded", "false");
+
+    // Ocultar y volver a abrir muestra la misma, sin pedirla otra vez.
+    await alternarExplicacion("Netflix");
+    expect(screen.queryByText(EXPLICACION_NETFLIX.explicacion)).not.toBeInTheDocument();
+    await alternarExplicacion("Netflix");
+    expect(screen.getByText(EXPLICACION_NETFLIX.explicacion)).toBeInTheDocument();
+    expect(explicarMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("mientras llega dice que está cargando, sin texto de explicación", async () => {
+    const respuesta = diferida<ExplicacionRecomendacion>();
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockReturnValue(respuesta.promesa);
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    expect(within(panelDe("Netflix")).getByRole("status")).toHaveTextContent("Cargando explicación…");
+
+    await act(async () => respuesta.resolver(EXPLICACION_NETFLIX));
+    expect(within(panelDe("Netflix")).queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText(EXPLICACION_NETFLIX.explicacion)).toBeInTheDocument();
+  });
+
+  it("sin datos suficientes muestra solo el texto del backend, sin advertencia ni cifras propias", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockResolvedValue(SIN_DATOS_SUFICIENTES);
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    expect(panelDe("Netflix").textContent).toBe(SIN_DATOS_SUFICIENTES.explicacion);
+  });
+
+  it("una explicación sin texto no se rellena con otra: se dice que no hay", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockResolvedValue({ ...EXPLICACION_NETFLIX, explicacion: "   " });
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    expect(panelDe("Netflix").textContent).toBe("No hay una explicación disponible para esta recomendación.");
+  });
+
+  it("si falla por la red deja el error en el panel y Reintentar la vuelve a pedir", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(EXPLICACION_NETFLIX);
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    expect(within(panelDe("Netflix")).getByRole("alert")).toHaveTextContent(MENSAJE_SIN_RED);
+    expect(screen.queryByText(EXPLICACION_NETFLIX.explicacion)).not.toBeInTheDocument();
+
+    await act(async () => fireEvent.click(within(panelDe("Netflix")).getByRole("button", { name: "Reintentar" })));
+    expect(screen.getByText(EXPLICACION_NETFLIX.explicacion)).toBeInTheDocument();
+    expect(within(tarjeta("Netflix")).queryByRole("alert")).not.toBeInTheDocument();
+    expect(explicarMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tras un error, cerrar y volver a abrir la pide de nuevo", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(EXPLICACION_NETFLIX);
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    await alternarExplicacion("Netflix");
+    await alternarExplicacion("Netflix");
+    expect(screen.getByText(EXPLICACION_NETFLIX.explicacion)).toBeInTheDocument();
+    expect(explicarMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("un 404 dice que ya no está disponible y la tarjeta se queda como estaba", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX]));
+    explicarMock.mockRejectedValue(new ErrorDeApi("Recomendación no encontrada.", 404));
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    expect(within(panelDe("Netflix")).getByRole("alert")).toHaveTextContent(
+      "Esta recomendación ya no está disponible. Vuelve a cargar la lista.",
+    );
+    expect(within(tarjeta("Netflix")).getByText(NETFLIX.motivo!)).toBeInTheDocument();
+    expect(within(tarjeta("Netflix")).getByText("Ahorro estimado: $5.000")).toBeInTheDocument();
+  });
+
+  it("al descartar una recomendación con la explicación abierta se retira completa", async () => {
+    getRecomendacionesMock.mockResolvedValue(lista([NETFLIX, ICLOUD]));
+    explicarMock.mockResolvedValue(EXPLICACION_NETFLIX);
+    descartarMock.mockResolvedValue(CONFIRMACION);
+    await montar();
+
+    await alternarExplicacion("Netflix");
+    await noMeInteresa("Netflix");
+    expect(screen.queryByRole("heading", { name: "Netflix", level: 2 })).not.toBeInTheDocument();
+    expect(screen.queryByText(EXPLICACION_NETFLIX.explicacion)).not.toBeInTheDocument();
   });
 });

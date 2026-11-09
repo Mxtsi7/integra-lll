@@ -11,7 +11,7 @@
 }
 
 .volver:hover {
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 .mensaje {
@@ -133,7 +133,7 @@
 .datoNota {
   font-size: 12.5px;
   font-weight: 700;
-  color: var(--acento);
+  color: var(--acento-texto);
 }
 
 @media (max-width: 560px) {
