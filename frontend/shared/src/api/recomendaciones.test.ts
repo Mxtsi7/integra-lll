@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pedir } from './cliente';
-import { descartarRecomendacion, getRecomendaciones } from './recomendaciones';
+import { descartarRecomendacion, explicarRecomendacion, getRecomendaciones } from './recomendaciones';
 
 vi.mock('./cliente', () => ({ pedir: vi.fn() }));
 
@@ -43,5 +43,29 @@ describe('descartarRecomendacion (CH-32, VI-18)', () => {
     vi.mocked(pedir).mockResolvedValue({});
     await descartarRecomendacion('a/b?c');
     expect(pedir).toHaveBeenCalledWith('/recomendaciones/a%2Fb%3Fc/dismiss/', { method: 'POST' });
+  });
+});
+
+describe('explicarRecomendacion (CH-22, MX-25)', () => {
+  beforeEach(() => {
+    vi.mocked(pedir).mockReset();
+  });
+
+  it('manda GET /recomendaciones/<id>/explicar/ y devuelve la explicación tal cual', async () => {
+    const explicacion = { id: 'r1', suscripcion_id: 's1', explicacion: 'Texto que arma el backend.', estado: 'disponible' };
+    vi.mocked(pedir).mockResolvedValue(explicacion);
+    await expect(explicarRecomendacion('r1')).resolves.toEqual(explicacion);
+    expect(pedir).toHaveBeenCalledWith('/recomendaciones/r1/explicar/');
+  });
+
+  it('codifica el id para que no rompa la ruta', async () => {
+    vi.mocked(pedir).mockResolvedValue({});
+    await explicarRecomendacion('a/b?c');
+    expect(pedir).toHaveBeenCalledWith('/recomendaciones/a%2Fb%3Fc/explicar/');
+  });
+
+  it('propaga el error de la API sin tragárselo', async () => {
+    vi.mocked(pedir).mockRejectedValue(new Error('boom'));
+    await expect(explicarRecomendacion('r1')).rejects.toThrow('boom');
   });
 });
