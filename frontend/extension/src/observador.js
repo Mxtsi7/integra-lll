@@ -16,7 +16,7 @@ async function leerActividad(api, dominios) {
   return tienePermiso ? { dominio, estado: 'activo' } : { dominio: null, estado: 'sin_permiso' };
 }
 
-export async function observar(api, { estado: pausa, observadoEn = Date.now() } = {}) {
+export async function observar(api, { estado: pausa, observadoEn, esVigente = () => true } = {}) {
   const { configuracion } = await api.storage.session.get('configuracion');
   let dominio = null;
   let estado = 'sin_consentimiento';
@@ -29,9 +29,12 @@ export async function observar(api, { estado: pausa, observadoEn = Date.now() } 
     dominio = null;
     estado = 'sin_consentimiento';
   }
-  await api.storage.session.set({ observacion: { dominio, estado, observadoEn } });
+  if (!esVigente()) return;
+  const instante = pausa ? observadoEn ?? Date.now() : Date.now();
+  await api.storage.session.set({ observacion: { dominio, estado, observadoEn: instante } });
 }
 
-export async function registrarError(api, observadoEn = Date.now()) {
+export async function registrarError(api, observadoEn = Date.now(), esVigente = () => true) {
+  if (!esVigente()) return;
   await api.storage.session.set({ observacion: { dominio: null, estado: 'error_de_consulta', observadoEn } });
 }

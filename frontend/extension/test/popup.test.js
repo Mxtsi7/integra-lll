@@ -391,3 +391,125 @@ test('cargar la pestaña activa de otra ventana no pausa la ventana enfocada', a
   assert.equal(almacen.observacion.dominio, 'example.com');
 });
 
+
+test('una reconsulta superada no atribuye B a la hora anterior de A al reanudar', async () => {
+  const { api, almacen } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  let liberar;
+  try {
+    document.querySelector('#dominios').value = 'example.com\notro.com';
+    await aceptar();
+    await vaciarCola();
+    let dominio = 'example.com';
+    let avisar;
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    let primera = true;
+    api.tabs.query = async () => {
+      if (primera) { primera = false; avisar(); await espera; }
+      return [{ active: true, url: `https://${dominio}` }];
+    };
+    const observaciones = [];
+    api.storage.onChanged.addListener(cambios => { if (cambios.observacion) observaciones.push(cambios.observacion.newValue); });
+    instante = 1000;
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.windows.onFocusChanged.emitir(-1);
+    instante = 9000;
+    api.windows.onFocusChanged.emitir(1);
+    instante = 11000;
+    dominio = 'otro.com';
+    api.tabs.onActivated.emitir({});
+    liberar();
+    await vaciarCola();
+    assert.ok(!observaciones.some(o => o.dominio === 'otro.com' && o.observadoEn < 11000));
+    assert.ok(observaciones.some(o => o.estado === 'sin_foco' && o.observadoEn === 2000));
+    assert.equal(almacen.observacion.dominio, 'otro.com');
+    assert.equal(almacen.observacion.observadoEn, 11000);
+    instante = 13000;
+    api.windows.onFocusChanged.emitir(-1);
+    await vaciarCola();
+
+  } finally { liberar?.(); Date.now = reloj; }
+});
+
+test('idle recibido durante una lectura pendiente conserva el corte de la pausa real', async () => {
+  const { api, almacen } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  let liberar;
+  try {
+    await aceptar();
+    await vaciarCola();
+    for (const t of [30000, 60000]) { instante = t; api.tabs.onActivated.emitir({}); await vaciarCola(); }
+    let avisar;
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    let actividad = 'active';
+    api.idle.queryState = async () => { avisar(); await espera; return actividad; };
+    const observaciones = [];
+    api.storage.onChanged.addListener(cambios => { if (cambios.observacion) observaciones.push(cambios.observacion.newValue); });
+    instante = 61000;
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 62000;
+    actividad = 'idle';
+    api.idle.onStateChanged.emitir('idle');
+    liberar();
+    await vaciarCola();
+    assert.deepEqual(observaciones.map(o => [o.estado, o.observadoEn]), [['inactivo', 62000]]);
+
+  } finally { liberar?.(); Date.now = reloj; }
+});
+
+
+test('una lectura no superada fecha su resultado al completarse, sin retroceder al evento', async () => {
+  const { api, almacen } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  const reloj = Date.now;
+  let instante = 1000;
+  Date.now = () => instante;
+  let liberar;
+  try {
+    let avisar;
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    api.tabs.query = async () => { avisar(); await espera; return [{ active: true, url: 'https://example.com' }]; };
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 5000;
+    liberar();
+    await vaciarCola();
+    assert.equal(almacen.observacion.observadoEn, 5000);
+  } finally { liberar?.(); Date.now = reloj; }
+});
+
+test('un error de lectura superada no se publica después de una pausa recibida', async () => {
+  const { api } = await cargar();
+  await aceptar();
+  await vaciarCola();
+  const reloj = Date.now;
+  let instante = 1000;
+  Date.now = () => instante;
+  let liberar;
+  try {
+    let avisar;
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    api.tabs.query = async () => { avisar(); await espera; throw new Error('lectura antigua fallida'); };
+    const estados = [];
+    api.storage.onChanged.addListener(cambios => { if (cambios.observacion) estados.push(cambios.observacion.newValue); });
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.windows.onFocusChanged.emitir(-1);
+    liberar();
+    await vaciarCola();
+    assert.deepEqual(estados.map(o => [o.estado, o.observadoEn]), [['sin_foco', 2000]]);
+  } finally { liberar?.(); Date.now = reloj; }
+});
