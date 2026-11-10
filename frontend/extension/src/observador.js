@@ -17,7 +17,7 @@ async function leerActividad(api, dominios) {
   return tienePermiso ? { dominio, estado: 'activo' } : { dominio: null, estado: 'sin_permiso' };
 }
 
-export async function observar(api, { estado: pausa, observadoEn = Date.now() } = {}) {
+export async function observar(api, { estado: pausa, observadoEn, esVigente = () => true } = {}) {
   const { configuracion } = await api.storage.session.get('configuracion');
   let dominio = null;
   let estado = 'sin_consentimiento';
@@ -30,16 +30,19 @@ export async function observar(api, { estado: pausa, observadoEn = Date.now() } 
     dominio = null;
     estado = 'sin_consentimiento';
   }
-  const observacion = { dominio, estado, observadoEn, sesionId: vigente?.sesionId ?? vigente?.id,
-    suscripcionId: dominio ? vigente?.asociaciones?.[dominio] ?? null : null };
   const { medicion: anterior } = await api.storage.session.get('medicion');
+  if (!esVigente()) return;
+  const instante = pausa ? observadoEn ?? Date.now() : Date.now();
+  const observacion = { dominio, estado, observadoEn: instante, sesionId: vigente?.sesionId ?? vigente?.id,
+    suscripcionId: dominio ? vigente?.asociaciones?.[dominio] ?? null : null };
   const medicion = avanzarMedicion(anterior, observacion);
   if (medicion.limiteAlcanzado) observacion.estado = 'limite_de_sesion';
   await api.storage.session.set({ observacion, medicion });
 }
 
-export async function registrarError(api, observadoEn = Date.now()) {
+export async function registrarError(api, observadoEn = Date.now(), esVigente = () => true) {
   const { medicion: anterior } = await api.storage.session.get('medicion');
+  if (!esVigente()) return;
   const observacion = { dominio: null, estado: 'error_de_consulta', observadoEn, sesionId: anterior?.sesionId };
   await api.storage.session.set({ observacion, medicion: avanzarMedicion(anterior, observacion) });
 }

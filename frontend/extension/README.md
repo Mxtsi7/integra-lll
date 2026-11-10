@@ -189,3 +189,23 @@ Verificación ampliada: 39 pruebas de extensión. La integración alterna ventan
 Suite completa final: 1038/1038 (268 shared, 581 web, 146 móvil, 4 desktop, 39 extensión), tipos y build web aprobados. En el primer intento fallaron dos casos existentes de PerfilPage.test.tsx: guarda con PATCH (timeout 5000 ms) y Cancelar (no encontró Editar nombre). El segundo intento de la suite completa pasó sin cambios en web; se registra la incidencia y no se modifica ese alcance.
 
 
+## Observaciones pendientes — corrección del 10 de noviembre de 2026
+
+Una pausa explícita conserva el estado y el instante recibidos. Una reconsulta
+solo publica si ninguna actualización posterior la superó; se fecha al completar
+las lecturas, no al evento que la encoló. Esto se comprueba otra vez tras leer la
+medición al registrar un error. Descartar una lectura no reconstruye actividad
+histórica ni rellena intervalos que no se pudieron observar.
+
+Regresiones: A → pausa → reanudación A → B con cola ocupada asigna B a [11000,13000),
+solo 2000 ms; idle en 62000 conserva corte en 2000, sin retroceder al evento de
+reconsulta de 61000; lectura vigente iniciada en 1000 y completada en 5000 se fecha
+en 5000. Errores superados se descartan, también si esperan la medición: se conserva
+el tramo válido [0,2000). La regresión original de 12 s menos 7 s de pausa sigue
+produciendo 5 s. No se cambian permisos, contratos HTTP ni política de retención.
+Las cinco regresiones fallaban contra el código anterior y pasan tras corregirlo.
+
+popup.test.js termina en un único salto de línea. Comprobación de espacios con
+Git y EOF sin errores. La extensión tiene 31 pruebas en #150 y 44 en #151.
+
+Verificación final: frontend completo 1043/1043 con VITEST_MAX_THREADS=1, VITEST_MIN_THREADS=1, VITEST_MAX_FORKS=1 y VITEST_MIN_FORKS=1; sin modificar configuración del repositorio. Dos intentos paralelos anteriores tuvieron fallos en RutaPrivada, AlertasPage, SuscripcionDetallePage, CalendarioPage e ImportacionPage.sesion, timeouts y un worker terminado; se registran junto a errores de memoria del entorno. Tipos y build web aprobados. Recorrido real final Chrome/Edge pendiente: se verificaron cargas de copias de trabajo y permisos, pero Chrome desactivó la extensión al recargar y la sesión posterior perdió su permiso temporal. No cerrar tarjetas ni declarar validación interactiva completa.
