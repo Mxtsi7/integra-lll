@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from shared.bloqueo import bloquear
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from . import archivos, proveedores, revocacion
+from . import archivos, confirmacion, proveedores, revocacion
 from .models import (
     ArchivoImportacion,
     AutorizacionPendiente,
@@ -34,6 +34,7 @@ from .serializers import (
     AutorizacionIniciadaSerializer,
     CallbackAutorizacionSerializer,
     CandidatoYaConfirmadoSerializer,
+    ConfirmacionRechazadaSerializer,
     CobroCandidatoSerializer,
     CuentaConectadaSerializer,
     ImportacionSerializer,
@@ -792,6 +793,54 @@ class CobroCandidatoViewSet(SoloLecturaTenantViewSet):
         except CandidatoYaConfirmado as exc:
             return Response(
                 {"codigo": "candidato_ya_confirmado", "detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(self.get_serializer(candidato).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: CobroCandidatoSerializer,
+            409: ConfirmacionRechazadaSerializer,
+        },
+        summary="Confirmar un cobro candidato (S3-FE-15)",
+    )
+    @action(detail=True, methods=["post"], url_path="confirmar")
+    def confirmar(self, request, pk=None):
+        """
+            POST /api/candidatos/<id>/confirmar/
+            → 200 con el candidato en `confirmado`
+
+        El "sí". Es lo único de todo este camino que mueve plata, y por eso es
+        la operación más cuidada: en UNA transacción deja el candidato
+        confirmado y la orden de crear la suscripción —y el cobro, si
+        corresponde—. Los dos o ninguno.
+
+        ── Lo que todavía no pasa, dicho claro ─────────────────────────────
+        La suscripción NO queda creada al responder este 200. Vive en
+        `subscriptions`, y este servicio no conoce su esquema (ADR-002): lo
+        que queda es una orden durable en el outbox, esperando a quien la
+        drene. Nada se pierde y nada se inventa.
+
+        ── Volver a confirmar da 200 y no duplica ──────────────────────────
+        Idempotente: la segunda petición devuelve el mismo candidato, con la
+        misma `decidido_en`, y **no** agrega otra orden. Es el criterio de
+        S3-CH-08: repetir la acción no crea cobros dobles.
+
+        ── Por qué puede dar 409 ───────────────────────────────────────────
+            candidato_rechazado      ya se descartó (S3-FE-16)
+            servicio_sin_resolver    no se reconoció el proveedor, y una
+                                     suscripción con el nombre de la glosa
+                                     del banco no es un dato
+
+        El cuerpo se ignora: no hay nada que mandar.
+        """
+        candidato = self.get_object()
+        try:
+            confirmacion.confirmar(candidato, por=_usuario_de(request))
+        except confirmacion.ConfirmacionRechazada as exc:
+            return Response(
+                {"codigo": exc.codigo, "detail": exc.mensaje},
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(self.get_serializer(candidato).data, status=status.HTTP_200_OK)

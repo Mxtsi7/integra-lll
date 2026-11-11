@@ -277,6 +277,35 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
     tipo_mensaje_legible = serializers.CharField(
         source="get_tipo_mensaje_display", read_only=True
     )
+    aplicacion = serializers.SerializerMethodField(
+        help_text=(
+            "Si lo confirmado ya existe en Suscripciones. `null` mientras el "
+            "candidato no está confirmado; `pendiente` cuando lo está: la "
+            "orden de crear quedó guardada, pero todavía NO hay suscripción "
+            "ni cobro creados."
+        )
+    )
+
+    # ── «Confirmado» no es «aplicado» ───────────────────────────────────
+    # Confirmar deja el candidato confirmado y una orden durable en el
+    # outbox, los dos o ninguno. Lo que NO hace es crear la suscripción ni el
+    # cobro: eso pasa en `subscriptions`, cuando alguien publique y consuma
+    # esa orden, y hoy no hay ni publicador ni consumidor.
+    #
+    # Sin este campo la interfaz solo ve `estado="confirmado"` y no tiene
+    # cómo saber que del otro lado todavía no existe nada: mostraría como
+    # hecho algo que está en cola. Lo pidieron las dos revisiones de #159.
+    #
+    # Hoy vale `pendiente` para todo confirmado, y es la verdad: ninguna
+    # orden se ha aplicado nunca. El valor `aplicada` llega con el
+    # consumidor, que es quien puede afirmarlo; inventarlo acá sería dar por
+    # creada una suscripción que nadie creó.
+    APLICACION_PENDIENTE = "pendiente"
+
+    def get_aplicacion(self, candidato) -> str | None:
+        if candidato.estado == CobroCandidato.Estado.CONFIRMADO:
+            return self.APLICACION_PENDIENTE
+        return None
 
     class Meta:
         model = CobroCandidato
@@ -303,6 +332,7 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
             # peticiones.
             "decidido_en",
             "decidido_por",
+            "aplicacion",
             "evidencia",
             "creado_en",
         )
@@ -313,4 +343,13 @@ class CandidatoYaConfirmadoSerializer(serializers.Serializer):
     """La forma del 409 al intentar rechazar un candidato ya confirmado."""
 
     codigo = serializers.CharField(help_text="candidato_ya_confirmado")
+    detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
+
+
+class ConfirmacionRechazadaSerializer(serializers.Serializer):
+    """La forma del 409 cuando un candidato no se puede confirmar."""
+
+    codigo = serializers.CharField(
+        help_text="candidato_rechazado | servicio_sin_resolver | tipo_sin_regla"
+    )
     detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
