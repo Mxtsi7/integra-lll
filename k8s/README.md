@@ -65,6 +65,11 @@ servicio donde no está.
 SOLO_ENSAYAR=1 ./k8s/desplegar-satelite.sh notifications   # valida y no cambia nada
 ```
 
+El guion del satélite apunta el núcleo solo después de ver al consumidor
+conectado. Lo espera consultando sus logs cada `PAUSA_CONSUMIDOR` segundos (3
+por omisión) durante `PLAZO_CONSUMIDOR` segundos como máximo (120). Si el plazo
+vence, aborta y el núcleo queda como estaba.
+
 **Cómo se hablan.** Dentro de un namespace basta el nombre corto del Service
 (`postgres`). Desde otro hay que calificarlo: `postgres.student-forellana`.
 `satelite.py` reescribe esas direcciones al copiar la configuración, y agrega

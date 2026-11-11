@@ -5,6 +5,10 @@
 #     SOLO_APLICAR=1 ./k8s/desplegar-satelite.sh notifications  # solo aplica
 #     SOLO_ENSAYAR=1 ./k8s/desplegar-satelite.sh notifications  # valida contra el servidor y no cambia nada
 #
+# Cuánto se espera a que el consumidor conecte, antes de apuntar el núcleo:
+#     PLAZO_CONSUMIDOR=120   segundos en total (entero, mayor que cero)
+#     PAUSA_CONSUMIDOR=3     segundos entre consultas (mayor que cero)
+#
 # Requisitos: Python 3, kubectl con permiso de escritura en LOS DOS namespaces
 # (el dueño del satélite lo da con el `rolebinding` que este guion imprime si
 # falta), y el núcleo ya desplegado en la misma versión.
@@ -28,6 +32,22 @@ case "$SERVICIO" in
      echo "(connectors y analytics todavía no tienen manifiestos: ver k8s/tandas/perfiles.yaml)" >&2
      exit 1 ;;
 esac
+
+# ── Cuánto se espera al consumidor ──────────────────────────────────────────
+# Se validan acá, antes de la primera orden al cluster: descubrir a mitad del
+# despliegue que el plazo no es un número dejaría los secretos copiados y el
+# servicio aplicado, sin saber si el consumidor conectó.
+PLAZO_CONSUMIDOR="${PLAZO_CONSUMIDOR-120}"   # segundos, en total
+PAUSA_CONSUMIDOR="${PAUSA_CONSUMIDOR-3}"     # segundos entre consultas
+if ! [[ "$PLAZO_CONSUMIDOR" =~ ^[1-9][0-9]*$ ]]; then
+  echo "PLAZO_CONSUMIDOR tiene que ser un número entero de segundos mayor que cero." >&2
+  exit 1
+fi
+# Una pausa de cero es el defecto que esto corrige: consultar sin esperar.
+if ! [[ "$PAUSA_CONSUMIDOR" =~ ^([0-9]+)(\.[0-9]+)?$ ]] || [[ "$PAUSA_CONSUMIDOR" =~ ^[0.]+$ ]]; then
+  echo "PAUSA_CONSUMIDOR tiene que ser un número de segundos mayor que cero." >&2
+  exit 1
+fi
 
 PYTHON=""
 for candidato in python3 python; do
@@ -141,16 +161,32 @@ kubectl rollout status "deployment/$SERVICIO" -n "$NS_SATELITE" --timeout=300s
 echo "── esperando al consumidor ──"
 # La salud HTTP no prueba que el consumidor esté conectado al broker del
 # núcleo: es otro contenedor y otra conexión. Se espera su propia línea.
+#
+# ── Pausa explícita y plazo total ───────────────────────────────────────────
+# Antes la "pausa" entre consultas era un
+# `kubectl wait --for=condition=Ready --timeout=10s`. Pero el timeout de
+# `wait` es un máximo, no una pausa: después del rollout el pod YA está
+# Ready, `wait` vuelve al instante, y los treinta intentos se agotaban en
+# centésimas, antes de que el consumidor terminara de abrir RabbitMQ y
+# declarar su topología. Un despliegue bueno abortaba con «no llegó a
+# escuchar». Lo encontró la revisión de #164, que lo midió: 0,042 s.
+#
+# Ahora se duerme PAUSA_CONSUMIDOR entre consultas y se abandona al pasar
+# PLAZO_CONSUMIDOR en total. Si el plazo vence, el núcleo no se toca.
 escuchando=0
-for _ in $(seq 1 30); do
+vence=$(( $(date +%s) + PLAZO_CONSUMIDOR ))
+while :; do
   if kubectl logs "deployment/$SERVICIO" -n "$NS_SATELITE" -c consumidor --tail=50 2>/dev/null | grep -q "Escuchando "; then
     escuchando=1
     break
   fi
-  kubectl wait --for=condition=Ready pod -l "app=$SERVICIO,componente=api" -n "$NS_SATELITE" --timeout=10s >/dev/null 2>&1 || true
+  if [ "$(date +%s)" -ge "$vence" ]; then
+    break
+  fi
+  sleep "$PAUSA_CONSUMIDOR"
 done
 if [ "$escuchando" != "1" ]; then
-  echo "El consumidor no llegó a escuchar. El núcleo NO se apunta al satélite." >&2
+  echo "El consumidor no llegó a escuchar en ${PLAZO_CONSUMIDOR}s. El núcleo NO se apunta al satélite." >&2
   echo "Revisar: kubectl logs deployment/$SERVICIO -n $NS_SATELITE -c consumidor" >&2
   exit 1
 fi
