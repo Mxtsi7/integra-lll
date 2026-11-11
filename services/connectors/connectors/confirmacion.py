@@ -190,8 +190,21 @@ def confirmar(candidato: CobroCandidato, *, por: str = "", cuando=None) -> bool:
     # `refresh_from_db` de abajo moría con TransactionManagementError. Lo
     # encontró la prueba de la carrera, no la revisión.
     if not cambiadas:
-        # Otra corrida ganó. No se escribe la orden: la escribió ella.
+        # Otra petición decidió primero. QUÉ decidió no se supone: se lee.
+        #
+        # Antes esto devolvía `False` siempre, dando por hecho que la otra era
+        # una confirmación. Pero la que ganó puede ser un RECHAZO, y entonces
+        # la vista respondía 200 con el candidato en `rechazado` y ninguna
+        # orden: un "confirmado" que no confirmó nada. Reproducido con dos
+        # conexiones a PostgreSQL por las dos revisiones de #159.
         candidato.refresh_from_db()
+        if candidato.estado == CobroCandidato.Estado.RECHAZADO:
+            raise ConfirmacionRechazada(
+                CANDIDATO_RECHAZADO,
+                "El candidato se rechazó mientras se confirmaba: para "
+                "confirmarlo hay que volver a importar el archivo.",
+            )
+        # Ganó otra confirmación: la orden la escribió ella, una sola vez.
         return False
 
     return True

@@ -7,7 +7,13 @@ from rest_framework.response import Response
 from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView
 from . import proveedores
-from .models import ArchivoImportacion, AutorizacionPendiente, CuentaConectada, Importacion
+from .models import (
+    ArchivoImportacion,
+    AutorizacionPendiente,
+    CuentaConectada,
+    Importacion,
+    OutboxEvento,
+)
 from .revocacion import revocar_y_desconectar
 
 logger = logging.getLogger(__name__)
@@ -34,7 +40,29 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
     # ArchivoImportacion (FE-07) va explícito y antes que su importación: son
     # cartolas, y depender de la cascada de Importacion haría que un archivo de
     # OTRA organización colgado de una importación propia se borrara sin aviso.
-    modelos = (AutorizacionPendiente, ArchivoImportacion, Importacion, CuentaConectada)
+    #
+    # OutboxEvento (S3-FE-15) va explícito y primero. No tiene clave foránea a
+    # nada —es un sobre, a propósito— así que NINGUNA cascada lo alcanza: al
+    # limpiar, el candidato se borraba con su importación y su orden quedaba
+    # atrás con el importe, la glosa de la cartola y quién confirmó, después
+    # de un 204 que anunciaba la organización limpia. Lo encontraron las dos
+    # revisiones de #159.
+    #
+    # Regla que deja esto: una tabla tenant nueva se registra acá en la misma
+    # PR que la crea. `test_toda_tabla_tenant_tiene_quien_la_borre` lo exige.
+    #
+    # La coordinación con una confirmación simultánea ya la da el contrato
+    # común: toda escritura por HTTP toma el bloqueo de la organización en
+    # modo compartido (`EscrituraOrganizacionMiddleware`) y la limpieza lo
+    # toma exclusivo. O la confirmación confirma antes y su orden se borra
+    # acá, o espera y recibe 410. No hay una orden que nazca después.
+    modelos = (
+        OutboxEvento,
+        AutorizacionPendiente,
+        ArchivoImportacion,
+        Importacion,
+        CuentaConectada,
+    )
 
     def _tenant_inconsistente(self, organizacion_id):
         return (

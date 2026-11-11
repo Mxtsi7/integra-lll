@@ -147,7 +147,8 @@ suponer que un CLP viene sin decimales.
 
 | Código HTTP | `codigo` | Cuándo |
 |---|---|---|
-| `409` | `candidato_rechazado` | ya se descartó (S3-FE-16) |
+| `409` | `candidato_rechazado` | ya se descartó (S3-FE-16), **o se rechazó mientras se confirmaba** |
+| `410` | `organizacion_eliminada` | la organización ya se limpió: no nace una orden después del borrado |
 | `409` | `servicio_sin_resolver` | no se reconoció el proveedor |
 | `409` | `tipo_sin_regla` | no debería pasar; ver arriba |
 | `404` | — | el candidato es de otra organización, o no existe |
@@ -176,11 +177,50 @@ inutilizable: el `refresh_from_db` siguiente moría con
 `TransactionManagementError`. Lo encontró la prueba de la carrera, antes de
 que lo encontrara una revisión.
 
+### «Confirmado» no es «aplicado»: el campo `aplicacion`
+
+La respuesta de confirmar y la lista de candidatos traen `aplicacion`:
+
+| Valor | Qué significa |
+|---|---|
+| `null` | el candidato no está confirmado |
+| `pendiente` | está confirmado y la orden quedó guardada, pero **todavía no hay suscripción ni cobro creados** |
+
+Hoy todo confirmado dice `pendiente`, y es la verdad: no hay publicador ni
+consumidor, así que ninguna orden se ha aplicado nunca. La interfaz tiene que
+mostrarlo así y no como «listo». El valor `aplicada` no existe todavía a
+propósito: lo agrega quien implemente el consumidor, que es el único que
+puede afirmarlo.
+
+### Dos cosas que corrigió la revisión de #159
+
+**Perder la carrera no es haber confirmado.** Si otra petición decide antes,
+el `UPDATE` condicionado afecta 0 filas. Antes eso se leía siempre como «otro
+confirmó» y se respondía 200; pero la que ganó puede ser un rechazo, y
+entonces salía un 200 con el candidato en `rechazado` y ninguna orden. Ahora
+se relee y se decide según lo que hay: si ganó otra confirmación, 200 e
+idempotente; si ganó un rechazo, `409 candidato_rechazado`. Está probado con
+dos conexiones a PostgreSQL en los dos órdenes
+(`test_carrera_confirmar_rechazar_postgres.py`).
+
+**La limpieza de la organización se lleva el outbox.** `OutboxEvento` no
+tiene claves foráneas —es un sobre— así que ninguna cascada lo alcanzaba: al
+eliminar una organización se borraba el candidato y su orden quedaba atrás,
+con el importe, la glosa y quién confirmó. Ahora está en la lista de
+`LimpiezaConnectorsView`, y una prueba exige que toda tabla con
+`organizacion_id` tenga quién la borre. Regla que deja: **una tabla tenant
+nueva se registra en la limpieza en la misma PR que la crea.**
+
 ## Lo que falta
 
 - **El publicador** y el consumidor en `subscriptions`. Es la pieza que hace
   que la suscripción exista de verdad, y es de otra tarjeta: necesita que
   Víctor valide el contrato de arriba y declare el enlace de la cola.
+  **Mientras no exista, S3-FE-15 no está cerrada**: lo entregado es la mitad
+  local —candidato confirmado y orden durable, los dos o ninguno—, no la
+  suscripción creada. Cuando se haga, el publicador tiene que escribir bajo
+  `escritura_organizacion` (el mismo bloqueo que toma la limpieza) y pasar
+  `aplicacion` a `aplicada` solo con el ACK del consumidor.
 - **Asignar el proveedor a mano**, para los candidatos que hoy dan
   `servicio_sin_resolver`.
 - **Confirmar varios de una vez.** Hoy es una petición por candidato, igual
