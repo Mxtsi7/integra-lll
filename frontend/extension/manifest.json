@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "minimum_chrome_version": "120",
   "incognito": "not_allowed",
-  "permissions": ["storage"],
+  "permissions": ["storage", "idle"],
   "optional_host_permissions": ["https://*/*"],
   "background": { "service_worker": "src/background.js", "type": "module" },
   "action": { "default_popup": "popup.html" }

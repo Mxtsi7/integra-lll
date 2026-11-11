@@ -32,6 +32,7 @@ export function navegador() {
       query: async ({ windowId } = {}) => [{ url: (windowId ?? ventanaActiva) === 1 ? 'https://example.com/?privado=1' : 'https://no-autorizado.com', active: true }],
     },
     windows: { onFocusChanged: evento(), getLastFocused: async () => ({ id: ventanaActiva, focused: true }) },
+    idle: { onStateChanged: evento(), setDetectionInterval: () => {}, queryState: async () => 'active' },
     runtime: {
       id: 'extension-prueba', onMessage: evento(), onStartup: evento(), onInstalled: evento(),
       sendMessage: mensaje => new Promise((resolve, reject) => {

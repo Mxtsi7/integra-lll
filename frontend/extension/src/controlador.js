@@ -3,6 +3,7 @@ import { normalizarDominio } from './dominio.js';
 
 export function crearControlador(api) {
   let cola = Promise.resolve();
+  let revision = 0;
   function validarDominios(dominios) {
     if (!Array.isArray(dominios) || !dominios.length || dominios.length > 20 ||
         dominios.some(dominio => normalizarDominio(dominio) !== dominio)) {
@@ -24,10 +25,19 @@ export function crearControlador(api) {
     return pendiente;
   }
   return {
-    actualizar: () => encolar(async () => {
-      try { await observar(api); }
-      catch { await registrarError(api); }
-    }),
+    actualizar: (senal = {}) => {
+      const actual = ++revision;
+      // Las pausas son hechos recibidos; una reconsulta solo vale si sigue vigente.
+      const pausa = senal.estado ? { estado: senal.estado, observadoEn: Date.now() } : null;
+      const esVigente = () => pausa !== null || actual === revision;
+      return encolar(async () => {
+        if (!esVigente()) return;
+        try { await observar(api, { ...pausa, esVigente }); }
+        catch {
+          if (esVigente()) await registrarError(api, pausa?.observadoEn ?? Date.now(), esVigente);
+        }
+      });
+    },
     iniciarAutorizacion: (id, dominios) => encolar(async () => {
       validarDominios(dominios);
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Intento inválido');

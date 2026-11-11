@@ -43,6 +43,19 @@ Referencias: [permisos](https://developer.chrome.com/docs/extensions/reference/a
 [pestañas](https://developer.chrome.com/docs/extensions/reference/api/tabs),
 [ciclo de vida](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
 
+## Foco e inactividad — S3-MX-11 y S3-MX-12
+
+El permiso `idle` detecta inactividad o pantalla bloqueada. Umbral de esta entrega:
+60 segundos sin entrada; es una decisión técnica local, no un plazo de retención.
+`windows.onFocusChanged` suspende la observación si ninguna ventana tiene foco.
+Al recuperar foco o actividad se consulta de nuevo la pestaña activa; el tramo
+anterior no se considera actividad durante el hueco. No se usa `setInterval`
+para mantener vivo el worker. El cómputo de minutos corresponde a S3-MX-13.
+Prueba manual pendiente: autorizar dominio, cambiar a otra aplicación → `sin_foco`;
+volver → `activo`; esperar 60 s sin entrada → `inactivo`; bloquear pantalla → `bloqueado`;
+volver a interactuar → se reevalúa dominio. Estos estados no significan uso cero.
+API: [idle](https://developer.chrome.com/docs/extensions/reference/api/idle).
+
 ## Correcciones de la revisión #149
 
 La autorización usa un ID de intento guardado por el worker en `storage.session`.
@@ -93,6 +106,15 @@ generación para no sobrescribir una selección posterior. Regresión de prepara
 y autorización activas: fallaba antes y pasa tras el cambio; suite 17/17.
 El recorrido interactivo completo y las validaciones de consentimiento siguen pendientes.
 
+## Pausas pendientes — corrección de revisión
+
+Foco e idle conservan la pausa y su instante al recibir el evento, antes de esperar
+la cola. Recuperar actividad reconsulta la pestaña. Una consulta iniciada antes de
+la pausa no desplaza su instante al finalizar. Precedencia: bloqueo, ausencia de
+foco, inactividad, dominio. Los eventos de bloqueo conservan su estado aunque no
+haya foco. Regresiones de consulta pendiente, pausa de 7 s e idle/bloqueo: 23/23.
+Pruebas con módulos reales y dobles de API; recorrido interactivo pendiente.
+
 ## Navegación y pausas — revisión del plan del 9 de noviembre de 2026
 
 Reevaluar la pestaña activa no depende de que Chrome incluya la URL en el evento.
@@ -112,5 +134,26 @@ la ventana con suficiente certeza. No se acredita el recorrido completo, ni la
 versión final corregida en Chrome, ni ejecución en Edge. Estas comprobaciones
 siguen pendientes, al igual que los acuerdos de consentimiento de Victor/Chris.
 
-Verificación ampliada: 20 pruebas de extensión aprobadas.
+Verificación ampliada: 27 pruebas de extensión, incluidas pausas explícitas sin consultar pestañas ni ventanas. La base #149 corregida se incorpora antes de esta entrega.
 
+
+## Observaciones pendientes — corrección del 10 de noviembre de 2026
+
+Una pausa explícita conserva el estado y el instante recibidos. Una reconsulta
+solo publica si ninguna actualización posterior la superó; se fecha al completar
+las lecturas, no al evento que la encoló. Esto se comprueba otra vez tras leer la
+medición al registrar un error. Descartar una lectura no reconstruye actividad
+histórica ni rellena intervalos que no se pudieron observar.
+
+Regresiones: A → pausa → reanudación A → B con cola ocupada asigna B a [11000,13000),
+solo 2000 ms; idle en 62000 conserva corte en 2000, sin retroceder al evento de
+reconsulta de 61000; lectura vigente iniciada en 1000 y completada en 5000 se fecha
+en 5000. Errores superados se descartan, también si esperan la medición: se conserva
+el tramo válido [0,2000). La regresión original de 12 s menos 7 s de pausa sigue
+produciendo 5 s. No se cambian permisos, contratos HTTP ni política de retención.
+Las cinco regresiones fallaban contra el código anterior y pasan tras corregirlo.
+
+popup.test.js termina en un único salto de línea. Comprobación de espacios con
+Git y EOF sin errores. La extensión tiene 31 pruebas en #150 y 44 en #151.
+
+Verificación final: frontend completo 1043/1043 con VITEST_MAX_THREADS=1, VITEST_MIN_THREADS=1, VITEST_MAX_FORKS=1 y VITEST_MIN_FORKS=1; sin modificar configuración del repositorio. Dos intentos paralelos anteriores tuvieron fallos en RutaPrivada, AlertasPage, SuscripcionDetallePage, CalendarioPage e ImportacionPage.sesion, timeouts y un worker terminado; se registran junto a errores de memoria del entorno. Tipos y build web aprobados. Recorrido real final Chrome/Edge pendiente: se verificaron cargas de copias de trabajo y permisos, pero Chrome desactivó la extensión al recargar y la sesión posterior perdió su permiso temporal. No cerrar tarjetas ni declarar validación interactiva completa.
