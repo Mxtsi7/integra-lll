@@ -43,7 +43,7 @@ export const KeyboardAvoidingView = React.forwardRef<HTMLDivElement, any>(
 KeyboardAvoidingView.displayName = 'KeyboardAvoidingView';
 
 export const Text = React.forwardRef<HTMLSpanElement, any>(
-  ({ testID, children, style, accessibilityRole, ...props }, ref) => (
+  ({ testID, children, style, accessibilityRole, numberOfLines, ellipsizeMode, ...props }, ref) => (
     <span
       data-testid={testID}
       role={accessibilityRole}
@@ -116,6 +116,67 @@ export const ScrollView = React.forwardRef<HTMLDivElement, any>(
   )
 );
 ScrollView.displayName = 'ScrollView';
+
+export const FlatList = React.forwardRef<HTMLDivElement, any>(
+  (
+    {
+      testID,
+      data,
+      renderItem,
+      keyExtractor,
+      ListHeaderComponent,
+      ListFooterComponent,
+      ListEmptyComponent,
+      contentContainerStyle,
+      style,
+      accessibilityRole,
+      initialNumToRender,
+      maxToRenderPerBatch,
+      windowSize,
+      ...props
+    },
+    ref
+  ) => {
+    const items = data ?? [];
+    return (
+      <div
+        data-testid={testID}
+        role={accessibilityRole ?? 'list'}
+        style={
+          typeof style === 'object' || typeof contentContainerStyle === 'object'
+            ? { ...style, ...contentContainerStyle }
+            : undefined
+        }
+        ref={ref}
+        {...props}
+      >
+        {ListHeaderComponent
+          ? typeof ListHeaderComponent === 'function'
+            ? React.createElement(ListHeaderComponent)
+            : ListHeaderComponent
+          : null}
+        {items.length === 0 && ListEmptyComponent
+          ? typeof ListEmptyComponent === 'function'
+            ? React.createElement(ListEmptyComponent)
+            : ListEmptyComponent
+          : items.map((item: any, index: number) => {
+              const key = keyExtractor ? keyExtractor(item, index) : item?.id ?? item?.key ?? index;
+              return (
+                <React.Fragment key={key}>
+                  {renderItem({ item, index, separators: {} })}
+                </React.Fragment>
+              );
+            })}
+        {ListFooterComponent
+          ? typeof ListFooterComponent === 'function'
+            ? React.createElement(ListFooterComponent)
+            : ListFooterComponent
+          : null}
+      </div>
+    );
+  }
+);
+FlatList.displayName = 'FlatList';
 
 export const ActivityIndicator = ({ testID }: { testID?: string }) => (
   <div data-testid={testID}>Cargando…</div>
@@ -287,4 +348,5 @@ export default {
   Image,
   Keyboard,
   TextInput,
+  FlatList,
 };

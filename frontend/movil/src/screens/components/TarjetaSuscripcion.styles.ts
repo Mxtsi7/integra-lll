@@ -1,0 +1,118 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  tarjeta: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#334155',
+    minHeight: 88,
+    justifyContent: 'center',
+  },
+  headerFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  identificador: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 8,
+  },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  avatarTexto: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  infoColumna: {
+    flex: 1,
+    minWidth: 0,
+  },
+  nombreTexto: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+    flexShrink: 1,
+  },
+  categoriaTexto: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textTransform: 'capitalize',
+    marginTop: 2,
+    flexShrink: 1,
+  },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+  },
+  badgeTexto: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  cuerpoFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
+  },
+  bloqueMonto: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+    flexShrink: 0,
+    marginRight: 12,
+  },
+  montoTexto: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  frecuenciaTexto: {
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  bloqueDetalle: {
+    flex: 1,
+    alignItems: 'flex-end',
+    minWidth: 0,
+  },
+  cobroTexto: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  cobroAlerta: {
+    color: '#fbbf24',
+    fontWeight: '600',
+  },
+  usoTexto: {
+    fontSize: 11,
+    color: '#38bdf8',
+    marginTop: 2,
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+});
