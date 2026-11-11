@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { conMayuscula, formatearFechaLarga, formatearMesAnio } from '@ojoalgasto/shared';
 import { ContenidoConEstado } from '../../../components/estados';
@@ -19,16 +19,14 @@ export interface CalendarioContenidoProps {
 }
 
 export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProps) {
-  // Permitimos actualizar 'hoy' con setHoy para recalcular la fecha actual
   const [hoy, setHoy] = useState(() => hoyInicial ?? isoDeFecha(new Date()));
   const [mes, setMes] = useState(() => mesDeFecha(hoy));
   const [diaPedido, setDiaPedido] = useState(hoy);
   const { estado, cargar } = useCobrosDelMes(mes, api);
 
-  // Obtiene la fecha real vigente (o hoyInicial si es una prueba)
   const obtenerHoyActual = useCallback(() => hoyInicial ?? isoDeFecha(new Date()), [hoyInicial]);
 
-  // Actualiza "hoy" automáticamente cuando la pantalla recupera el foco o se reanuda la app
+  // 1. Refresca "hoy" al cambiar de pestaña
   useFocusEffect(
     useCallback(() => {
       const hoyActual = obtenerHoyActual();
@@ -36,7 +34,20 @@ export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProp
     }, [obtenerHoyActual])
   );
 
-  // Al presionar "Hoy", vuelve a calcular la fecha del reloj al instante
+  // 2. Refresca "hoy" al reanudar la app desde segundo plano (AppState)
+  useEffect(() => {
+    const suscripcion = AppState?.addEventListener?.('change', (siguienteEstado) => {
+      if (siguienteEstado === 'active') {
+        const hoyActual = obtenerHoyActual();
+        setHoy(hoyActual);
+      }
+    });
+    return () => {
+      suscripcion?.remove?.();
+    };
+  }, [obtenerHoyActual]);
+
+  // 3. Botón "Hoy"
   const manejarIrAHoy = () => {
     const hoyActual = obtenerHoyActual();
     setHoy(hoyActual);
@@ -44,7 +55,6 @@ export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProp
     setMes(mesDeFecha(hoyActual));
   };
 
-  // Al cambiar de mes el día pedido puede quedar en otro mes: se usa hoy si es de este mes, o el día 1.
   const diaElegido = [diaPedido, hoy].find((dia) => esDelMes(dia, mes)) ?? primerDiaDelMes(mes);
   const { anio, mes: indiceMes } = partesDeMes(mes);
 
@@ -78,7 +88,6 @@ export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProp
             <ListaCobros cobros={cobrosDelDia(cobros, diaElegido)} textoVacio="No hay cobros este día." />
 
             <Text style={styles.subtitulo}>Agenda del mes</Text>
-            {/* Un total por moneda: no se suman monedas distintas. */}
             <Text testID="totales-mes" style={styles.totales}>
               {totalesPorMoneda(cobros)
                 .map(({ moneda, total }) => `${moneda} ${formatearImporte(total, moneda)}`)

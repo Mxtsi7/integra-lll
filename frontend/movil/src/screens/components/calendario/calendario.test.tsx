@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { CobroCalendario } from '@ojoalgasto/shared';
 import { CalendarioContenido } from './CalendarioContenido';
 import { esDelMes, isoDeFecha, semanasDelMes, sumarMeses } from './fechas';
 import { cobrosDelDia, contarPorDia, formatearImporte, totalesPorMoneda } from './reglasCalendario';
 import type { ApiCalendario } from './useCobrosDelMes';
 import { NavigationContainer } from '@react-navigation/native';
-// Simulación para que useFocusEffect funcione en los tests sin NavigationContainer
+import * as RN from 'react-native';
+
+// Asegura que AppState exista como objeto en la simulación de pruebas
+const AppState = RN.AppState || ((RN as any).AppState = { addEventListener: () => ({ remove: () => {} }) });// Simulación para que useFocusEffect funcione en los tests sin NavigationContainer
 vi.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback: () => void) => {
     React.useEffect(() => {
@@ -153,3 +156,25 @@ describe('Calendario móvil (AN-07)', () => {
     expect(await screen.findByTestId('cuadricula-mes')).toBeTruthy();
   });
 });
+it('actualiza la fecha de hoy al reanudar la app desde segundo plano (AppState)', async () => {
+    let callbackAppState: ((estado: string) => void) | undefined;
+
+    const spy = vi.spyOn(AppState, 'addEventListener').mockImplementation((_evento: any, callback: any) => {
+      callbackAppState = callback;
+      return { remove: vi.fn() } as any;
+    });
+
+    const { rerender } = render(<CalendarioContenido hoyInicial="2026-11-30" />);
+
+    // Simulamos cambio de fecha envuelto en act
+    await act(async () => {
+      rerender(<CalendarioContenido hoyInicial="2026-12-01" />);
+    });
+
+    // Simulamos la reactivación de la app (segundo plano -> activa)
+    await act(async () => {
+      callbackAppState?.('active');
+    });
+
+    spy.mockRestore();
+  });
