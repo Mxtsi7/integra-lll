@@ -18,6 +18,23 @@ export function formatearMonto(monto: number, moneda: Moneda = 'CLP'): string {
   }).format(monto);
 }
 
+/**
+ * El ahorro estimado que manda la API, listo para mostrar: (5000, 'CLP') → "$5.000".
+ * Devuelve null si falta el monto o la moneda, o si no se le puede dar formato
+ * (monto que no es un número, moneda que no es un código válido). Quien lo
+ * muestra dice que no hay dato, en vez de inventar una moneda o un cero.
+ * Un 0 que sí viene de la API es un dato y se muestra: "$0".
+ */
+export function formatearAhorro(ahorro: number | null | undefined, moneda: string | null | undefined): string | null {
+  if (typeof ahorro !== 'number' || !Number.isFinite(ahorro) || !moneda) return null;
+  try {
+    return formatearMonto(ahorro, moneda);
+  } catch (error) {
+    if (error instanceof RangeError) return null; // Intl rechaza un código de moneda inválido
+    throw error;
+  }
+}
+
 /** Una cifra identificada por divisa; no inventa una moneda para la lista vacía. */
 export function formatearTotales(totales: { moneda: Moneda; total: number }[]): string {
   return totales.map(({ moneda, total }) => `${moneda} ${formatearMonto(total, moneda)}`).join(' · ') || 'Sin cobros';

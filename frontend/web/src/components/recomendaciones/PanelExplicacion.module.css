@@ -1,0 +1,37 @@
+/* Explicación de una recomendación (CH-22). Colores del tema: se lee igual en claro y en oscuro. */
+
+/* La tarjeta es una fila que parte en líneas: el panel ocupa una línea entera. */
+.panel {
+  display: flex;
+  flex: 1 1 100%;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
+.texto {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tinta);
+}
+
+.mensaje,
+.sinDatos,
+.aviso {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tinta-2);
+}
+
+.aviso {
+  font-size: 13px;
+}
+
+.error {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--coral);
+}

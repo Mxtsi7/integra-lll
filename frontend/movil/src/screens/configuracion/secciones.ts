@@ -1,22 +1,22 @@
+import type { ConfiguracionStackParamList } from '../../navigation/types';
+import type { NavButtonProps } from '../components/NavButton';
+
 // AN-04 · Secciones de la pantalla Configuración.
 // Punto de extensión: para agregar una opción (p. ej. SE-32, preferencias de notificación),
 // se añade un item a una sección. Un item SIN `destino` se muestra deshabilitado.
 
-export type DestinoConfiguracion =
-  | 'Perfil'
-  | 'CuentasConectadas'
-  | 'Planes'
-  | 'Alertas'
-  | 'AutorizacionCorreo'
-  | 'RestriccionesPremium'
-  | 'EliminarCuenta';
+/**
+ * Destinos válidos dentro del stack de configuración, derivados automáticamente
+ * de la definición canónica en ConfiguracionStackParamList.
+ */
+export type DestinoConfiguracion = Exclude<keyof ConfiguracionStackParamList, 'ConfiguracionScreen'>;
 
 export interface ItemConfiguracion {
   testID: string;
   titulo: string;
   /** Pantalla a la que lleva. Sin destino, el item queda deshabilitado ("próximamente"). */
   destino?: DestinoConfiguracion;
-  variante?: 'primary' | 'secondary';
+  variante?: NavButtonProps['variant'];
 }
 
 export interface SeccionConfiguracion {

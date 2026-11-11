@@ -2,11 +2,13 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { CompositeScreenProps } from '@react-navigation/native';
+import type { RegisterResponse } from '@ojoalgasto/shared';
 
 // ── 1. Flujo Público (Stack Acceso) ──────────────────────────────────
 export type AuthStackParamList = {
   Login: undefined;
   Registro: { codigoOrganizacion?: string } | undefined;
+  CuentaCreada?: Pick<RegisterResponse, 'nombre' | 'email'>;
   RecuperarContrasena: undefined;
   VerificarCorreo: { token?: string } | undefined;
 };
