@@ -88,6 +88,8 @@ test('pausas conservadas no consultan pestañas ni reconstruyen el estado final'
   api.windows.getLastFocused = async () => { throw new Error('una pausa ya trae su señal'); };
   for (const estado of ['sin_foco', 'inactivo', 'bloqueado']) {
     await observar(api, { estado, observadoEn: 1234 });
-    assert.deepEqual(almacen.observacion, { dominio: null, estado, observadoEn: 1234 });
+    assert.equal(almacen.observacion.dominio, null);
+    assert.equal(almacen.observacion.estado, estado);
+    assert.equal(almacen.observacion.observadoEn, 1234);
   }
 });

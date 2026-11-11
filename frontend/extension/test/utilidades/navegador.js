@@ -33,6 +33,7 @@ export function navegador() {
     },
     windows: { onFocusChanged: evento(), getLastFocused: async () => ({ id: ventanaActiva, focused: true }) },
     idle: { onStateChanged: evento(), setDetectionInterval: () => {}, queryState: async () => 'active' },
+    alarms: { onAlarm: evento(), get: async () => null, create: async () => {} },
     runtime: {
       id: 'extension-prueba', onMessage: evento(), onStartup: evento(), onInstalled: evento(),
       sendMessage: mensaje => new Promise((resolve, reject) => {

@@ -308,6 +308,52 @@ test('conserva la pausa y su instante aunque la cola espere siete segundos', asy
   } finally { liberar(); Date.now = reloj; }
 });
 
+test('el motor integrado excluye siete segundos sin foco y conserva la asociación al editar', async () => {
+  const { api, almacen } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  const id = '21e0cc35-c621-42f0-81c2-59d68cfb899e';
+  try {
+    document.querySelector('#asociaciones').value = `example.com=${id}`;
+    await aceptar();
+    await vaciarCola();
+    const sesionId = almacen.configuracion.sesionId;
+    const consultar = api.tabs.query;
+    let liberar, avisar;
+    const espera = new Promise(resolve => { liberar = resolve; });
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    instante = 1000;
+    api.tabs.query = async consulta => { avisar(); await espera; return consultar(consulta); };
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.windows.onFocusChanged.emitir(-1);
+    instante = 9000;
+    api.windows.onFocusChanged.emitir(1);
+    liberar();
+    await vaciarCola();
+    instante = 12000;
+    api.alarms.onAlarm.emitir({ name: 'observar-uso' });
+    await vaciarCola();
+    const ms = almacen.medicion.sesiones.reduce((total, s) => total + s.duracionMs, 0) +
+      almacen.medicion.tramo.confirmadoHasta - almacen.medicion.tramo.inicio;
+    assert.equal(ms, 5000, '12 s de recorrido menos 7 s sin foco');
+    assert.equal(almacen.configuracion.asociaciones['example.com'], id);
+    assert.equal(almacen.medicion.tramo.suscripcionId, id);
+    instante = 13000;
+    document.querySelector('#asociaciones').value = 'example.com=31e0cc35-c621-42f0-81c2-59d68cfb899e';
+    await document.querySelector('#asociaciones').input();
+    await document.querySelector('#configuracion').submit({ preventDefault() {} });
+    await vaciarCola();
+    assert.equal(almacen.configuracion.sesionId, sesionId);
+    assert.equal(almacen.medicion.sesiones.at(-1).suscripcionId, id);
+    assert.equal(almacen.medicion.tramo.suscripcionId, '31e0cc35-c621-42f0-81c2-59d68cfb899e');
+    assert.equal(almacen.medicion.tramo.inicio, 13000);
+    assert.deepEqual(JSON.parse(document.querySelector('#minutos').textContent), { 'example.com': 0.1 });
+  } finally { Date.now = reloj; }
+});
+
 test('conserva idle y bloqueo recibidos durante una consulta pendiente', async () => {
   const { api } = await cargar();
   await aceptar();
@@ -343,6 +389,29 @@ test('conserva idle y bloqueo recibidos durante una consulta pendiente', async (
   } finally { liberar(); Date.now = reloj; }
 });
 
+test('un error real del worker corta el tramo antes de recuperar actividad', async () => {
+  const { api, almacen } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  try {
+    await aceptar();
+    await vaciarCola();
+    const consultar = api.tabs.query;
+    instante = 20000;
+    api.tabs.query = async () => { throw new Error('consulta fallida'); };
+    api.alarms.onAlarm.emitir({ name: 'observar-uso' });
+    await vaciarCola();
+    assert.equal(almacen.observacion.estado, 'error_de_consulta');
+    assert.equal(almacen.medicion.tramo, null);
+    instante = 30000;
+    api.tabs.query = consultar;
+    api.alarms.onAlarm.emitir({ name: 'observar-uso' });
+    await vaciarCola();
+    assert.deepEqual(JSON.parse(document.querySelector('#minutos').textContent), {});
+  } finally { Date.now = reloj; }
+});
+
 test('navegar sin URL en el evento deja de mostrar A antes de terminar la carga de B', async () => {
   const { api, almacen } = await cargar();
   await aceptar();
@@ -360,6 +429,28 @@ test('navegar sin URL en el evento deja de mostrar A antes de terminar la carga 
   assert.equal(almacen.observacion.dominio, 'example.com');
   assert.match(textoCaptura(), /activo example.com/);
   assert.deepEqual([...almacen.configuracion.dominios], ['example.com']);
+});
+
+test('los tramos no se solapan al pausar, reanudar y alternar entre ventanas', async () => {
+  const { api, almacen, enfocar } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  try {
+    await aceptar();
+    await vaciarCola();
+    for (const [t, ventana] of [[2000, -1], [9000, 1], [12000, 2], [16000, 1], [19000, -1]]) {
+      instante = t;
+      if (ventana === -1) api.windows.onFocusChanged.emitir(-1);
+      else enfocar(ventana);
+      await vaciarCola();
+    }
+    const sesiones = almacen.medicion.sesiones;
+    assert.deepEqual(sesiones.map(s => [s.inicio, s.fin]), [[0, 2000], [9000, 12000], [16000, 19000]]);
+    for (let i = 1; i < sesiones.length; i++) assert.ok(sesiones[i - 1].fin <= sesiones[i].inicio);
+    assert.equal(sesiones.reduce((ms, s) => ms + s.duracionMs, 0), 8000);
+    assert.equal(almacen.medicion.tramo, null);
+  } finally { Date.now = reloj; }
 });
 
 test('loading con URL anterior no conserva A y un commit sin URL tampoco lo reactiva', async () => {
@@ -432,7 +523,11 @@ test('una reconsulta superada no atribuye B a la hora anterior de A al reanudar'
     instante = 13000;
     api.windows.onFocusChanged.emitir(-1);
     await vaciarCola();
-
+    // El consumidor real de #151 no puede convertir la reconsulta de las 9 s en 4 s para B.
+    {
+      assert.deepEqual(almacen.medicion.sesiones.map(s => [s.dominio, s.inicio, s.fin]),
+        [['example.com', 0, 2000], ['otro.com', 11000, 13000]]);
+    }
   } finally { liberar?.(); Date.now = reloj; }
 });
 
@@ -462,10 +557,12 @@ test('idle recibido durante una lectura pendiente conserva el corte de la pausa 
     liberar();
     await vaciarCola();
     assert.deepEqual(observaciones.map(o => [o.estado, o.observadoEn]), [['inactivo', 62000]]);
-
+    {
+      assert.deepEqual(almacen.medicion.sesiones.map(s => [s.inicio, s.fin]), [[0, 2000]]);
+      assert.equal(almacen.medicion.tramo, null);
+    }
   } finally { liberar?.(); Date.now = reloj; }
 });
-
 
 test('una lectura no superada fecha su resultado al completarse, sin retroceder al evento', async () => {
   const { api, almacen } = await cargar();
@@ -511,5 +608,38 @@ test('un error de lectura superada no se publica después de una pausa recibida'
     liberar();
     await vaciarCola();
     assert.deepEqual(estados.map(o => [o.estado, o.observadoEn]), [['sin_foco', 2000]]);
+  } finally { liberar?.(); Date.now = reloj; }
+});
+
+test('un error superado mientras lee la medición no borra tiempo previo a la pausa', async () => {
+  const { api, almacen } = await cargar();
+  const reloj = Date.now;
+  let instante = 0;
+  Date.now = () => instante;
+  let liberar;
+  try {
+    await aceptar();
+    await vaciarCola();
+    const consultar = api.storage.session.get;
+    let avisar;
+    const esperando = new Promise(resolve => { avisar = resolve; });
+    const espera = new Promise(resolve => { liberar = resolve; });
+    let primera = true;
+    api.storage.session.get = async clave => {
+      if (clave === 'medicion' && primera) { primera = false; avisar(); await espera; }
+      return consultar(clave);
+    };
+    api.tabs.query = async () => { throw new Error('consulta fallida'); };
+    const estados = [];
+    api.storage.onChanged.addListener(cambios => { if (cambios.observacion) estados.push(cambios.observacion.newValue); });
+    instante = 1000;
+    api.tabs.onActivated.emitir({});
+    await esperando;
+    instante = 2000;
+    api.windows.onFocusChanged.emitir(-1);
+    liberar();
+    await vaciarCola();
+    assert.deepEqual(estados.map(o => [o.estado, o.observadoEn]), [['sin_foco', 2000]]);
+    assert.deepEqual(almacen.medicion.sesiones.map(s => [s.inicio, s.fin]), [[0, 2000]]);
   } finally { liberar?.(); Date.now = reloj; }
 });

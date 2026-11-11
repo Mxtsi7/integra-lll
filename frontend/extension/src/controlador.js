@@ -1,5 +1,5 @@
 import { observar, registrarError } from './observador.js';
-import { normalizarDominio } from './dominio.js';
+import { normalizarDominio, leerAsociaciones } from './dominio.js';
 
 export function crearControlador(api) {
   let cola = Promise.resolve();
@@ -38,10 +38,11 @@ export function crearControlador(api) {
         }
       });
     },
-    iniciarAutorizacion: (id, dominios) => encolar(async () => {
+    iniciarAutorizacion: (id, dominios, asociaciones = {}) => encolar(async () => {
       validarDominios(dominios);
       if (typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Intento inválido');
-      await api.storage.session.set({ autorizacion: { id, dominios } });
+      const validadas = leerAsociaciones(Object.entries(asociaciones).map(([dominio, suscripcion]) => `${dominio}=${suscripcion}`).join('\n'), dominios);
+      await api.storage.session.set({ autorizacion: { id, dominios, asociaciones: validadas } });
     }),
     cancelarAutorizacion: id => encolar(async () => {
       const { autorizacion } = await api.storage.session.get('autorizacion');
@@ -66,7 +67,7 @@ export function crearControlador(api) {
       const { configuracion: anterior } = await api.storage.session.get('configuracion');
       await api.storage.session.set({ configuracion: {
         id: crypto.randomUUID(), sesionId: anterior?.sesionId ?? anterior?.id ?? crypto.randomUUID(),
-        consentimiento: true, dominios, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),
+        consentimiento: true, dominios, asociaciones: autorizacion.asociaciones, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),
       } });
       await api.storage.session.remove('autorizacion');
       await limpiarPermisosSobrantes();

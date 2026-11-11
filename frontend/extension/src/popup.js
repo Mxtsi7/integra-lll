@@ -1,4 +1,5 @@
-import { normalizarDominio } from './dominio.js';
+import { normalizarDominio, leerAsociaciones } from './dominio.js';
+import { resumirMinutos } from './medicion.js';
 
 const estado = document.querySelector('#estado');
 const captura = document.querySelector('#observacion');
@@ -6,15 +7,19 @@ const autorizar = document.querySelector('#autorizar');
 let generacion = 0;
 let preparacion = null;
 let revisionObservacion = 0;
+let revisionMedicion = 0;
 autorizar.disabled = true;
 function mostrarObservacion(observacion) {
   captura.textContent = `${observacion?.estado ?? 'sin_consentimiento'} ${observacion?.dominio ?? ''}`.trim();
 }
 async function mostrarEstado(generacionEsperada = generacion) {
   const revisionInicial = revisionObservacion;
-  const { configuracion, observacion } = await chrome.storage.session.get(['configuracion', 'observacion']);
+  const revisionInicialMedicion = revisionMedicion;
+  const { configuracion, observacion, medicion } = await chrome.storage.session.get(['configuracion', 'observacion', 'medicion']);
   if (generacionEsperada !== generacion) return;
   document.querySelector('#dominios').value = configuracion?.dominios.join('\n') ?? '';
+  document.querySelector('#asociaciones').value = Object.entries(configuracion?.asociaciones ?? {}).map(([dominio, id]) => `${dominio}=${id}`).join('\n');
+  if (revisionInicialMedicion === revisionMedicion) document.querySelector('#minutos').textContent = JSON.stringify(resumirMinutos(medicion), null, 2);
   if (revisionInicial === revisionObservacion) mostrarObservacion(observacion);
 }
 // Registrar al editar deja el gesto de Autorizar disponible para la petición nativa.
@@ -30,7 +35,8 @@ async function prepararAutorizacion() {
   }
   const intentoId = crypto.randomUUID();
   try {
-    const registrado = await chrome.runtime.sendMessage({ tipo: 'iniciar_autorizacion', intentoId, dominios });
+    const asociaciones = leerAsociaciones(document.querySelector('#asociaciones').value, dominios);
+    const registrado = await chrome.runtime.sendMessage({ tipo: 'iniciar_autorizacion', intentoId, dominios, asociaciones });
     if (actual !== generacion) {
       await chrome.runtime.sendMessage({ tipo: 'cancelar_autorizacion', intentoId });
       return;
@@ -44,6 +50,7 @@ async function prepararAutorizacion() {
   }
 }
 document.querySelector('#dominios').addEventListener('input', prepararAutorizacion);
+document.querySelector('#asociaciones').addEventListener('input', prepararAutorizacion);
 document.querySelector('#consentimiento').addEventListener('change', prepararAutorizacion);
 
 document.querySelector('#configuracion').addEventListener('submit', async evento => {
@@ -87,8 +94,14 @@ document.querySelector('#retirar').addEventListener('click', async () => {
 });
 // Suscribir antes de leer el snapshot para no perder cambios mientras se abre el panel.
 chrome.storage.onChanged.addListener((cambios, area) => {
-  if (area !== 'session' || !Object.hasOwn(cambios, 'observacion')) return;
-  ++revisionObservacion;
-  mostrarObservacion(cambios.observacion.newValue);
+  if (area !== 'session') return;
+  if (Object.hasOwn(cambios, 'observacion')) {
+    ++revisionObservacion;
+    mostrarObservacion(cambios.observacion.newValue);
+  }
+  if (Object.hasOwn(cambios, 'medicion')) {
+    ++revisionMedicion;
+    document.querySelector('#minutos').textContent = JSON.stringify(resumirMinutos(cambios.medicion.newValue), null, 2);
+  }
 });
 mostrarEstado().catch(() => { estado.textContent = 'No se pudo leer el estado de la sesión.'; });

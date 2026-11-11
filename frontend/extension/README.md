@@ -115,6 +115,55 @@ foco, inactividad, dominio. Los eventos de bloqueo conservan su estado aunque no
 haya foco. Regresiones de consulta pendiente, pausa de 7 s e idle/bloqueo: 23/23.
 Pruebas con módulos reales y dobles de API; recorrido interactivo pendiente.
 
+## Sesiones y asociación — S3-MX-13 y S3-MX-14
+
+El panel muestra minutos de esta sesión, calculados en milisegundos y sin redondear
+cada tramo. Cada cambio de dominio, foco o actividad cierra el tramo previo.
+Una alarma de 30 s confirma el avance y permite recuperar el estado al reiniciar
+el worker. Un hueco mayor a 45 s o reloj hacia atrás corta en la última observación:
+no se cuentan sueño del equipo ni huecos desconocidos como uso. Al detectar `idle`,
+se descuenta su umbral de 60 s del tramo abierto. La resolución depende de eventos
+del navegador, no demuestra atención humana ni reproduce estadísticas de Android.
+
+Intervalos UTC con origen y fin; el total se muestra por dominio para toda la sesión,
+sin agrupar por día local. Conservar intervalos evita perder cruces de medianoche;
+la agrupación local corresponde al contrato de Analytics. Máximo 500 tramos cerrados:
+al alcanzar el límite se detiene el cómputo y se muestra `limite_de_sesion`, sin truncar
+datos silenciosamente. Retirar y luego aceptar borra esta medición temporal;
+editar dominios conserva la sesión y cierra el tramo si cambia su asociación.
+Los permisos de hosts eliminados se retiran al actualizar la selección.
+No es la cola durable de S3-MX-16 ni un acuse de sincronización de S3-MX-19.
+
+Asociaciones opcionales, una por línea: `example.com=UUID-de-suscripcion`.
+Hostname en minúsculas, sin punto final; **no** se eliminan `www` ni subdominios.
+Cada subdominio necesita su autorización y asociación explícita. Se rechazan UUID
+inválidos, hosts no autorizados y duplicados. No se infiere proveedor por semejanza.
+Sin asociación puede verse actividad local, pero no debe convertirse en evento de
+una suscripción. El futuro envío autenticado debe validar pertenencia en servidor;
+este editor local no prueba que el UUID sea propio. S3-MX-15 añadirá selección real.
+
+Prueba manual pendiente: autorizar dos dominios, permanecer 35 s en uno, cambiar al
+otro, perder foco y regresar; contrastar tiempos con reloj, excluir el hueco. Dejar
+60 s sin interacción y comprobar descuento, reiniciar worker, recargar extensión,
+verificar que solo este último borra la sesión. Revisar asociaciones en storage.session.
+
+
+## Integración de la base y revisión de sesiones
+
+Se conservan los intentos de autorización, la retirada segura, el panel vivo y las
+pausas con instante de la base corregida. Las asociaciones se validan y quedan
+vinculadas al intento antes de habilitar Autorizar; editar conserva la sesión.
+El panel actualiza los minutos sin reabrirse. Un error de consulta también corta
+el motor en la última confirmación, sin contar el hueco al recuperar.
+El descuento idle recorta tanto el tramo abierto como las sesiones cerradas que
+se superponen a su umbral: cambiar automáticamente de dominio no conserva uso
+inactivo. Suite integrada: 34/34; incluye 12 s de recorrido menos 7 s sin foco
+= 5 s, cambio de asociación sin mezclar destinos y los errores reales del worker.
+Son dobles de API/DOM. Chrome 156 headless no permitió abrir el panel de la
+extensión (ERR_BLOCKED_BY_CLIENT); no se acredita recorrido interactivo real.
+Persisten los acuerdos de Victor/Chris y las tareas posteriores de selección real,
+cola durable y sincronización. No se añade envío HTTP ni historial persistente.
+
 ## Navegación y pausas — revisión del plan del 9 de noviembre de 2026
 
 Reevaluar la pestaña activa no depende de que Chrome incluya la URL en el evento.
@@ -134,7 +183,10 @@ la ventana con suficiente certeza. No se acredita el recorrido completo, ni la
 versión final corregida en Chrome, ni ejecución en Edge. Estas comprobaciones
 siguen pendientes, al igual que los acuerdos de consentimiento de Victor/Chris.
 
-Verificación ampliada: 27 pruebas de extensión, incluidas pausas explícitas sin consultar pestañas ni ventanas. La base #149 corregida se incorpora antes de esta entrega.
+Verificación ampliada: 39 pruebas de extensión. La integración alterna ventanas y pausas y obtiene tramos [0,2000), [9000,12000), [16000,19000), total 8000 ms, sin solapamiento ni tiempo suspendido. Las pausas explícitas no consultan pestañas. Mantener secuencia #149 → #150 → #151.
+
+
+Suite completa final: 1038/1038 (268 shared, 581 web, 146 móvil, 4 desktop, 39 extensión), tipos y build web aprobados. En el primer intento fallaron dos casos existentes de PerfilPage.test.tsx: guarda con PATCH (timeout 5000 ms) y Cancelar (no encontró Editar nombre). El segundo intento de la suite completa pasó sin cambios en web; se registra la incidencia y no se modifica ese alcance.
 
 
 ## Observaciones pendientes — corrección del 10 de noviembre de 2026
