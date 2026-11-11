@@ -1,112 +1,304 @@
 {
   "contrato": "uso-recolectores",
   "version": 1,
-  "descripcion": "Fixtures del contrato de ingesta de uso y cobertura v1 (S3-VI-01). Un mismo recolector de Windows observa la misma suscripción durante tres días consecutivos: uso activo, cero observado y pausa sin medición. Los acuses corresponden al POST del primer evento, reenviado y conflictuado. Las fechas son coherentes con America/Santiago en horario de verano (UTC-3): el día local 2026-11-09 cierra a las 2026-11-10T03:00:00Z.",
+  "ruta_canonica": "/api/suscripciones/{suscripcion_id}/uso/recolector/",
+  "descripcion": "Fixtures del contrato canónico v1 (S3-VI-01 / S3-MX-01). Sustituye la propuesta previa de la PR #148. La suscripción se resuelve en la ruta y el cuerpo no lleva usuario_id, organizacion_id ni suscripcion_id. Solo el objeto evento viaja como cuerpo HTTP.",
   "eventos_uso": [
     {
-      "nombre": "uso_positivo",
-      "descripcion": "Día medido con uso real: dos tramos (42 + 53 minutos) que suman duracion_ms y cobertura del día completo.",
-      "payload": {
+      "nombre": "android",
+      "descripcion": "Recolector Android con actividad positiva de 30 s dentro de una ventana observada de 2 min.",
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
         "version": 1,
-        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
-        "recolector_id": "recolector-windows-8f14",
-        "origen": "cliente_windows",
-        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
-        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
-        "fecha": "2026-11-09",
-        "estado": "con_uso",
-        "duracion_ms": 5700000,
+        "event_id": "22222222-2222-4222-8222-222222222222",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 30000,
         "tramos_actividad": [
-          {"inicio": "2026-11-09T12:10:00Z", "fin": "2026-11-09T12:52:00Z"},
-          {"inicio": "2026-11-09T18:05:00Z", "fin": "2026-11-09T18:58:00Z"}
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
         ],
-        "cobertura": {"desde": "2026-11-09", "hasta": "2026-11-09"},
-        "ocurrido_en": "2026-11-10T03:00:00Z"
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo"
       }
     },
     {
-      "nombre": "cero_observado",
-      "descripcion": "Día medido SIN uso: cero real (FE-29 puede afirmar bajo uso), no falta de dato. Acredita cobertura del día.",
-      "payload": {
+      "nombre": "navegador",
+      "descripcion": "Recolector de navegador con cero observado durante 2 min: se midió y no hubo actividad. Es un cero real, no ausencia de medición.",
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
         "version": 1,
-        "event_id": "8c1d5a9e-7b2f-4e83-a6d4-1f90c2b3e4f5",
-        "recolector_id": "recolector-windows-8f14",
-        "origen": "cliente_windows",
-        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
-        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
-        "fecha": "2026-11-10",
-        "estado": "cero_observado",
+        "event_id": "44444444-4444-4444-8444-444444444444",
+        "recolector_id": "55555555-5555-4555-8555-555555555555",
+        "origen": "navegador",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
         "duracion_ms": 0,
         "tramos_actividad": [],
-        "cobertura": {"desde": "2026-11-10", "hasta": "2026-11-10"},
-        "ocurrido_en": "2026-11-11T03:00:00Z"
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo"
       }
     },
     {
-      "nombre": "sin_medicion",
-      "descripcion": "Día en pausa/sin medición: no hubo dato ni cobertura. Jamás puede interpretarse como uso cero.",
-      "payload": {
+      "nombre": "medianoche",
+      "descripcion": "Evento del día local 2026-11-09 en America/Santiago: fin coincide exactamente con la medianoche local siguiente (2026-11-10T03:00:00Z). El tramo termina en el límite semiabierto de la ventana.",
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
         "version": 1,
-        "event_id": "9d2e6b0f-8c3a-4f94-b7e5-2a01d3c4f5a6",
-        "recolector_id": "recolector-windows-8f14",
-        "origen": "cliente_windows",
-        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
-        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
-        "fecha": "2026-11-11",
-        "estado": "sin_medicion",
+        "event_id": "66666666-6666-4666-8666-666666666666",
+        "recolector_id": "77777777-7777-4777-8777-777777777777",
+        "origen": "android",
+        "inicio": "2026-11-09T03:00:00Z",
+        "fin": "2026-11-10T03:00:00Z",
+        "duracion_ms": 30000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-10T02:59:30Z", "fin": "2026-11-10T03:00:00Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "parcial",
+        "estado": "activo"
+      }
+    },
+    {
+      "nombre": "precision_30s_mas_30s",
+      "descripcion": "Dos tramos de 30 s separados por un hueco: duracion_ms conserva los 60 s exactos y la cobertura de la ventana es parcial por el hueco.",
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
+        "version": 1,
+        "event_id": "88888888-8888-4888-8888-888888888888",
+        "recolector_id": "99999999-9999-4999-8999-999999999999",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 60000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"},
+          {"inicio": "2026-11-09T12:01:00Z", "fin": "2026-11-09T12:01:30Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "parcial",
+        "estado": "activo"
+      }
+    },
+    {
+      "nombre": "pausa_conocida",
+      "descripcion": "Pausa conocida en la ventana: sin_medicion, estado pausado, duración 0 y sin tramos. No se fabrica una pausa a partir de la falta de conexión.",
+      "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+      "evento": {
+        "version": 1,
+        "event_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "recolector_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        "origen": "navegador",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
         "duracion_ms": 0,
         "tramos_actividad": [],
-        "cobertura": null,
-        "ocurrido_en": "2026-11-12T03:00:00Z"
-      }
-    }
-  ],
-  "intervalos_cobertura": [
-    {
-      "nombre": "backfill_tras_reconexion",
-      "descripcion": "El recolector re-sincronizó y acredita que el uso del 5 al 8 de noviembre llegó COMPLETO (inclusive).",
-      "payload": {
-        "version": 1,
-        "event_id": "5a4b3c2d-1e6f-4a7b-8c9d-0e1f2a3b4c5d",
-        "recolector_id": "recolector-windows-8f14",
-        "origen": "cliente_windows",
-        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
-        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
-        "desde": "2026-11-05",
-        "hasta": "2026-11-08",
-        "ocurrido_en": "2026-11-12T15:30:00Z"
+        "zona_horaria": "America/Santiago",
+        "cobertura": "sin_medicion",
+        "estado": "pausado"
       }
     }
   ],
   "acuses": [
     {
       "nombre": "aceptado_201",
-      "descripcion": "Primera recepción del evento de uso activo.",
+      "descripcion": "Primera recepción del evento Android en la ruta de su suscripción.",
       "estado_http": 201,
       "cuerpo": {
-        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "event_id": "22222222-2222-4222-8222-222222222222",
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
         "estado": "aceptado",
-        "detalle": "Evento de uso registrado por primera vez."
+        "recibido_en": "2026-11-09T12:02:01Z"
       }
     },
     {
       "nombre": "duplicado_200",
-      "descripcion": "Reenvío del mismo event_id tras un reintento: se confirma recepción sin repetir el efecto.",
+      "descripcion": "Reenvío del mismo event_id, destino y cuerpo normalizado: se confirma sin repetir el efecto y se conserva recibido_en.",
       "estado_http": 200,
       "cuerpo": {
-        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "event_id": "22222222-2222-4222-8222-222222222222",
+        "suscripcion_id": "11111111-1111-4111-8111-111111111111",
         "estado": "duplicado",
-        "detalle": "Evento ya procesado: no se repite el efecto."
+        "recibido_en": "2026-11-09T12:02:01Z"
       }
     },
     {
       "nombre": "conflicto_409",
-      "descripcion": "Mismo event_id con un payload distinto: se rechaza sin sobrescribir lo registrado.",
+      "descripcion": "Mismo event_id con otro destino autorizado o un cuerpo distinto: se rechaza sin sobrescribir lo registrado.",
       "estado_http": 409,
       "cuerpo": {
-        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
-        "codigo": "conflicto_idempotencia",
-        "detalle": "event_id ya registrado con un payload distinto; no se sobrescribe."
+        "codigo": "event_id_conflictivo",
+        "mensaje": "El identificador ya fue aceptado con otro contenido o destino."
+      }
+    }
+  ],
+  "simultaneidad": [
+    {
+      "nombre": "misma_ventana_120s",
+      "descripcion": "Android y navegador observan simultáneamente los mismos 2 min: la suscripción acredita 120 s, no 240 s.",
+      "tramos": [
+        {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:02:00Z"},
+        {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:02:00Z"}
+      ],
+      "suma_por_fuente_ms": 240000,
+      "union_esperada_ms": 120000
+    },
+    {
+      "nombre": "solape_parcial_180s",
+      "descripcion": "Dos ventanas de 2 min desplazadas 1 min: la unión es 3 min, no la suma de 4 min.",
+      "tramos": [
+        {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:02:00Z"},
+        {"inicio": "2026-11-09T12:01:00Z", "fin": "2026-11-09T12:03:00Z"}
+      ],
+      "suma_por_fuente_ms": 240000,
+      "union_esperada_ms": 180000
+    },
+    {
+      "nombre": "solape_cincuenta_s",
+      "descripcion": "Dos tramos de 30 s con 10 s de solape: la unión exacta es 50 s, no 60 s ni min(suma, ventana).",
+      "tramos": [
+        {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"},
+        {"inicio": "2026-11-09T12:00:20Z", "fin": "2026-11-09T12:00:50Z"}
+      ],
+      "suma_por_fuente_ms": 60000,
+      "union_esperada_ms": 50000
+    }
+  ],
+  "cobertura": [
+    {
+      "nombre": "dia_completo_sin_huecos",
+      "descripcion": "La unión de ventanas de cobertura completa cubre todo el día local 2026-11-09 en America/Santiago.",
+      "ventanas": [
+        {"inicio": "2026-11-09T03:00:00Z", "fin": "2026-11-10T03:00:00Z"}
+      ],
+      "acredita_dia_completo": true
+    },
+    {
+      "nombre": "huecos_no_acreditan_dia",
+      "descripcion": "El mínimo inicio y el máximo fin abarcan 24 h, pero hay un hueco de 2 h sin observación: no se acredita el día completo.",
+      "ventanas": [
+        {"inicio": "2026-11-09T03:00:00Z", "fin": "2026-11-09T07:00:00Z"},
+        {"inicio": "2026-11-09T09:00:00Z", "fin": "2026-11-10T03:00:00Z"}
+      ],
+      "huecos": [
+        {"inicio": "2026-11-09T07:00:00Z", "fin": "2026-11-09T09:00:00Z"}
+      ],
+      "acredita_dia_completo": false
+    }
+  ],
+  "casos_invalidos": [
+    {
+      "nombre": "usuario_id_en_cuerpo",
+      "descripcion": "La identidad se resuelve desde la sesión; el cuerpo no acepta usuario_id.",
+      "nivel": "esquema",
+      "evento": {
+        "version": 1,
+        "event_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 30000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo",
+        "usuario_id": "5b3a1c2d-4e6f-4a8b-9c0d-1e2f3a4b5c6d"
+      }
+    },
+    {
+      "nombre": "destino_ajeno",
+      "descripcion": "La suscripción de la ruta no pertenece a la sesión: 404 sin revelar si el event_id existe.",
+      "nivel": "autorizacion",
+      "suscripcion_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "suscripciones_de_la_sesion": [
+        "11111111-1111-4111-8111-111111111111"
+      ],
+      "estado_http": 404
+    },
+    {
+      "nombre": "duracion_inconsistente",
+      "descripcion": "duracion_ms no coincide con la suma de los tramos; no se inventa una distribución.",
+      "nivel": "semantica",
+      "evento": {
+        "version": 1,
+        "event_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 60000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo"
+      }
+    },
+    {
+      "nombre": "tramo_fuera_de_ventana",
+      "descripcion": "Un tramo empieza antes de inicio: la ventana semiabierta [inicio, fin) no lo contiene.",
+      "nivel": "semantica",
+      "evento": {
+        "version": 1,
+        "event_id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 30000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T11:59:50Z", "fin": "2026-11-09T12:00:20Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "completa",
+        "estado": "activo"
+      }
+    },
+    {
+      "nombre": "zona_invalida",
+      "descripcion": "Una cadena no vacía no demuestra que la zona IANA exista; el backend la valida.",
+      "nivel": "semantica",
+      "evento": {
+        "version": 1,
+        "event_id": "11112222-3333-4444-8555-666677778888",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-09T12:02:00Z",
+        "duracion_ms": 30000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
+        ],
+        "zona_horaria": "Marte/Olympus",
+        "cobertura": "completa",
+        "estado": "activo"
+      }
+    },
+    {
+      "nombre": "cruce_de_dia_local",
+      "descripcion": "La ventana cruza la medianoche local: el emisor debe dividirla en eventos con event_id propio.",
+      "nivel": "semantica",
+      "evento": {
+        "version": 1,
+        "event_id": "99998888-7777-4666-8555-444433332222",
+        "recolector_id": "33333333-3333-4333-8333-333333333333",
+        "origen": "android",
+        "inicio": "2026-11-09T12:00:00Z",
+        "fin": "2026-11-10T12:00:00Z",
+        "duracion_ms": 30000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
+        ],
+        "zona_horaria": "America/Santiago",
+        "cobertura": "parcial",
+        "estado": "activo"
       }
     }
   ]

@@ -51,12 +51,14 @@ export type { AuthSchemas } from './contratos/auth.generated';
 export type {
   AcuseUso,
   CodigoErrorUso,
-  CoberturaDiaria,
   CoverageIntervalPayload,
-  EstadoAcuseUso,
-  EstadoUso,
   ErrorUso,
+  EstadoCobertura,
+  EstadoRecolector,
+  OrigenRecolector,
+  PendienteUso,
   TramoActividad,
   UsageEventPayload,
+  UTCDateTime,
+  UUID,
 } from './contracts/uso-recolectores.dto';
-export { RUTA_INGESTA_COBERTURA, RUTA_INGESTA_USO } from './contracts/uso-recolectores.dto';

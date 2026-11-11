@@ -1,185 +1,389 @@
-# S3-VI-01 — Contrato de eventos de uso y cobertura de recolectores (v1)
+# S3-VI-01 — Contrato canónico de uso y cobertura de recolectores (v1)
 
-**Fecha:** 2026-11-11 · **Responsables:** Victor Gonzales (receptor, Analytics)
-y Maximiliano Sáez (productor, recolectores).
-**Estado:** acuerdo aceptado por ambas partes; este documento lo formaliza en
-el repo y es la fuente de verdad escrita.
-Tarjetas: **S3-VI-01** y **S3-MX-01** (tablero Sprint 3). Este contrato no
-implementa nada: fija lo que el recolector de Maxi envía y lo que el receptor
-de Victor acepta, para que las dos tarjetas se integren sin sorpresas.
+**Fecha:** 2026-11-11 · **Responsables:** Maximiliano Sáez (productor y
+recepción) y Víctor Gonzales (consolidación, consumidores y Analytics).
+**Estado:** contrato único acordado por Maxi y Víctor. **Sustituye la propuesta
+previa de la PR #148**, que queda como antecedente histórico y no como fuente
+de verdad. Tarjetas: **S3-MX-01** y **S3-VI-01**.
 
-## Contexto y alcance
+Este documento no implementa el endpoint: fija qué envía el recolector, qué
+acepta el receptor y qué evidencia falta para cerrar cada tarjeta.
 
-Los recolectores observan el uso REAL de las suscripciones desde los
-dispositivos del usuario: el cliente Windows ([ADR-008](../arquitectura/ADR-008-cliente-windows.md)),
-la extensión del navegador y las APIs externas que resuelva Connectors.
-Analytics proyecta ese uso (FE-28) y puntúa el bajo uso (FE-29), y ya dejó
-escrito que **la antigüedad de una suscripción no es cobertura**: sin un rango
-acreditado la respuesta es `sin_datos`, no un cero inventado
-(`CoberturaUso` y `registrar_cobertura` en
-[analytics/uso.py](../../services/analytics/analytics/uso.py)).
+## 1. Sustitución de la PR #148
 
-Este contrato define cómo llega ese dato por HTTP: qué envía el recolector,
-cuándo acredita cobertura y qué responde el receptor. Convive con el
-[catálogo de eventos](../../shared/events/catalogo.md): el evento
-`uso.registrado` de Connectors (vía RabbitMQ) queda para las APIs externas;
-el push HTTP es la vía de los recolectores de dispositivo. Un mismo hecho no
-viaja por las dos vías, y su `event_id` es único sin importar cuál se usó.
+La PR #148 se cerró sin fusionar. Sus reglas de precisión, tramos, cobertura e
+idempotencia se conservan aquí; su vocabulario anterior (`fecha`,
+`estado: con_uso | cero_observado | sin_medicion`, `cobertura: {desde, hasta}`,
+`detalle`) queda reemplazado por el contrato de este documento.
 
-## Vocabulario oficial
+| Punto | PR #148 (sustituida) | Contrato canónico v1 |
+|---|---|---|
+| Ruta | `POST /api/suscripciones/{suscripcion_id}/uso/recolector/` (propuesta) | La misma ruta, confirmada. |
+| Identidad | `usuario_id`/`organizacion_id` fuera del cuerpo | Igual: se resuelven desde la sesión. |
+| Destino | `suscripcion_id` en la ruta | Igual: el cuerpo no repite la suscripción. |
+| Ventana | `fecha` del día local | `inicio` y `fin` UTC de la ventana observada. |
+| Actividad | `tramos_actividad` en UTC | Igual, con `duracion_ms` entero y tramos reales obligatorios. |
+| Cobertura | `{desde, hasta}` o `null` | `completa` / `parcial` / `sin_medicion`. |
+| Estado | `con_uso` / `cero_observado` / `sin_medicion` | `activo` / `pausado` / `sin_permiso` / `revocado`. |
+| Acuse | `{event_id, suscripcion_id, estado, recibido_en}` | Igual: 201 `aceptado` y 200 `duplicado`. |
+| Conflicto | `409 event_id_conflictivo` | Igual, con `ErrorUso.codigo = event_id_conflictivo`. |
+| Simultaneidad | Unión temporal de tramos | Igual: la métrica es la unión, no la suma por recolector. |
 
-| Campo | Qué significa |
+Quedan resueltos en este único contrato: la **ruta** de ingesta con la
+suscripción en la URL; los **campos** del cuerpo y la exclusión de identidad y
+destino; el **acuse** 201/200 con `event_id`, `suscripcion_id`, `estado` y
+`recibido_en`; la **idempotencia** por identidad + `recolector_id` + `event_id`
+con 409 ante conflicto; y la **simultaneidad** resuelta por unión temporal de
+tramos, no por suma de recolectores.
+
+La base inspeccionada para esta consolidación es el commit
+`c3efaa705d4721d3b7e0fedb7acf5a83465ae629`, archivo
+`docs/contratos/uso-recolectores-v1.md`. Los esquemas y DTOs de este documento
+son su formalización, no una promesa de que la integración ya esté desplegada.
+
+## 2. Responsabilidades
+
+| Responsable | Entrega |
 |---|---|
-| `event_id` | UUID del hecho. Nace una vez y sobrevive a los reintentos: es la llave de idempotencia. |
-| `version` | Versión del contrato. Hoy, siempre `1`. |
-| `recolector_id` | Identifica la instancia que mide (ej. `recolector-windows-8f14`). Minúsculas, dígitos, `-` y `_`. |
-| `origen` | Código del origen que mide: `cliente_windows`, `extension_navegador`, `api_externa`. No es texto libre: código registrado; uno nuevo exige bump de versión. |
-| `organizacion_id` | El tenant. Obligatorio, como en todo el sistema. |
-| `suscripcion_id` | UUID de la suscripción observada. Debe existir en la organización: el recolector no inventa suscripciones. |
-| `fecha` | El día local del usuario (`YYYY-MM-DD`, America/Santiago) al que pertenece el uso. |
-| `estado` | Resultado de la medición de ese día: `con_uso`, `cero_observado` o `sin_medicion`. |
-| `duracion_ms` | Uso total del día, en milisegundos enteros. Es la suma de los tramos. |
-| `tramos_actividad` | Segmentos `{inicio, fin}` en UTC con `Z`: cuándo hubo actividad. Un array por día. |
-| `cobertura` | `{desde, hasta}` de días (inclusive) que el recolector midió COMPLETO, o `null`. |
-| `ocurrido_en` | Instante UTC en que el recolector generó el evento (cierre del día local). |
-| `desde` / `hasta` | Rango inclusivo de días del `CoverageIntervalPayload`. |
+| Maxi | Recolectores y S3-MX-26 a S3-MX-31: recepción autenticada, validaciones, pertenencia, idempotencia, persistencia y cobertura. |
+| Víctor | Consolidación y validación receptora del contrato en S3-VI-01; publicación fiable, consumidores, agregados, puntajes e IA. |
+| Ambos | Acordar campos, semántica, errores y compatibilidad; probar las mismas fixtures contra la recepción real. |
 
-El `estado` manda sobre el resto:
+Subir este documento no completa las tareas de implementación. La recepción no
+se atribuye exclusivamente a Víctor.
 
-| `estado` | Cuándo | `duracion_ms` | `tramos_actividad` | `cobertura` |
-|---|---|---|---|---|
-| `con_uso` | Hubo uso medible | `> 0` | uno o más | rango acreditado o `null` |
-| `cero_observado` | Se midió y no hubo nada | `0` | vacío | rango acreditado o `null` |
-| `sin_medicion` | Pausa, permiso revocado, offline | `0` | vacío | siempre `null` |
+## 3. Una representación común
 
-## Endpoints HTTP
+Se conserva el vocabulario español: `origen`, `inicio`, `fin`, `duracion_ms`,
+`tramos_actividad`, `zona_horaria`, `cobertura` y `estado`. Los nombres
+TypeScript `UsageEventPayload` y `CoverageIntervalPayload` son nombres de tipos;
+no introducen otro formato de red.
 
-Autenticación JWT del usuario dueño del dispositivo ([ADR-004](../arquitectura/ADR-004-autenticacion.md)),
-por el gateway. El gateway valida e inyecta `X-Usuario-Id` / `X-Organizacion-Id`;
-el receptor los cruza con el payload (RF-26): el `organizacion_id` del cuerpo
-debe coincidir con la identidad de la sesión, o es `403 tenant_invalido`.
-Un recolector nunca manda cabeceras de identidad propias. El gateway asigna
-`X-Correlation-ID` a cada petición y el receptor lo devuelve en la respuesta.
+Decisiones de este contrato:
+
+- Milisegundos enteros para conservar fracciones de minuto. Los segundos se
+  calculan como `duracion_ms / 1000` para presentación o adaptación explícita.
+- Tramos reales obligatorios para resolver solapamientos, en vez de intentar
+  deducirlos de una duración total.
+- `recolector_id` separa dispositivos del mismo origen.
+- `usuario_id` y organización se resuelven desde la autenticación. No se aceptan
+  del cuerpo del recolector.
+- La suscripción va en la ruta. Cada pendiente local conserva juntos destino y
+  cuerpo inmutables.
+- La cobertura se transmite dentro del evento v1. `CoverageIntervalPayload` es
+  una proyección interna derivada; **no** se propone una segunda API
+  independiente de cobertura.
+
+### Ruta canónica
+
+```http
+POST /api/suscripciones/{suscripcion_id}/uso/recolector/
+```
+
+Bearer de sesión. Un objeto por petición. El servidor valida pertenencia y
+consentimiento antes de consultar duplicados. El `401` lo responde el gateway
+antes de llegar al receptor y sigue el contrato de renovación existente.
 
 | Método y ruta | Cuerpo | Respuestas |
 |---|---|---|
-| `POST /api/analitica/ingesta/uso/` | `UsageEventPayload` | 201 · 200 · 400 · 403 · 404 · 409 |
-| `POST /api/analitica/ingesta/cobertura/` | `CoverageIntervalPayload` | 201 · 200 · 400 · 403 · 404 · 409 |
+| `POST /api/suscripciones/{suscripcion_id}/uso/recolector/` | `UsageEventPayload` | 201 · 200 · 400 · 401 · 403 · 404 · 409 · 429 · 5xx |
 
-No va bajo `/api/usos/` (eso es de subscriptions: los registros que el usuario
-escribe a mano). Esta ingesta vive en Analytics, dueño del agregado y de la
-cobertura, y usa el prefijo `/api/analitica/` que el gateway ya enruta. El
-`401` (token ausente o vencido) lo responde el gateway antes de llegar al
-receptor; no forma parte de este contrato.
+No va bajo `/api/analitica/ingesta/uso/` ni bajo `/api/usos/`. El envío por lote
+queda para v2.
 
-## Idempotencia y respuestas
+## 4. Archivos del contrato
 
-`event_id` nace una vez por hecho y se conserva en cada reintento. El
-receptor deduplica por `(organizacion_id, event_id)` y responde:
+| Ruta | Contenido |
+|---|---|
+| `docs/contratos/uso-recolectores-v1.md` | Reglas de negocio, HTTP, decisiones y aceptación. |
+| `docs/contratos/uso-recolectores-v1.schema.json` | JSON Schema draft 2020-12 de la sección 5. |
+| `docs/contratos/uso-recolectores-v1.ejemplos.json` | Fixtures válidas, acuses y casos negativos. |
+| `frontend/shared/src/contracts/uso-recolectores.dto.ts` | DTOs TypeScript de la sección 6. |
+| `docs/contratos/tests/test_uso_recolectores_v1.py` | Regresión con `pytest` y `jsonschema`. |
 
-| HTTP | Cuerpo | Cuándo |
+Backend y frontend consumen el mismo contrato; no se mantienen reglas
+divergentes copiadas en varios archivos.
+
+## 5. JSON Schema
+
+El archivo [uso-recolectores-v1.schema.json](uso-recolectores-v1.schema.json)
+tiene la raíz apuntando a `#/$defs/UsageEventPayload`; la proyección interna se
+valida con `#/$defs/CoverageIntervalPayload`. El validador elegido comprueba
+`format` de forma efectiva.
+
+Puntos fijados por el esquema:
+
+- `version` es `1`.
+- `event_id`, `recolector_id` y `coverage_id` son UUID v4.
+- `inicio`, `fin` y los extremos de cada tramo son UTC con sufijo `Z` y hasta
+  tres decimales de segundo.
+- `origen` es `android` o `navegador`.
+- `cobertura` es `completa`, `parcial` o `sin_medicion`.
+- `estado` es `activo`, `pausado`, `sin_permiso` o `revocado`.
+- `duracion_ms` es entero entre `0` y `9007199254740991`.
+- El cuerpo no admite campos adicionales: `usuario_id`, `organizacion_id` y
+  `suscripcion_id` se rechazan si aparecen.
+
+JSON Schema **no** reemplaza las comparaciones temporales, pertenencia,
+consentimiento, concurrencia ni las reglas de cobertura de la sección 7.
+
+## 6. DTOs TypeScript
+
+Los DTOs viven en
+[frontend/shared/src/contracts/uso-recolectores.dto.ts](../../frontend/shared/src/contracts/uso-recolectores.dto.ts)
+y se exportan desde `frontend/shared/src/index.ts`:
+
+`UUID`, `UTCDateTime`, `OrigenRecolector`, `EstadoRecolector`,
+`EstadoCobertura`, `TramoActividad`, `UsageEventPayload`, `PendienteUso`,
+`CoverageIntervalPayload`, `AcuseUso`, `CodigoErrorUso` y `ErrorUso`.
+
+Los alias documentan el significado; no validan cadenas en ejecución. El
+servidor aplica el esquema y las validaciones semánticas. `PendienteUso`
+conserva juntos el destino y el cuerpo inmutable. `CoverageIntervalPayload` es
+solo backend/interno.
+
+`ErrorUso` usa `codigo` y `mensaje`. Los códigos son:
+
+- `evento_invalido`
+- `version_no_soportada`
+- `detalle_actividad_invalido`
+- `intervalo_cruza_dia_local`
+- `event_id_conflictivo`
+- `consentimiento_requerido`
+
+La envoltura propuesta debe adaptarse al formato común de errores vigente antes
+de fijarla. Los códigos HTTP de autenticación, recurso ausente y limitación
+pueden conservar la respuesta común del proyecto.
+
+## 7. Reglas de validación y negocio
+
+### 7.1 Identidad, consentimiento y privacidad
+
+1. Autenticar y resolver usuario y organización desde la sesión. Verificar
+   pertenencia de la suscripción y consentimiento vigente.
+2. Rechazar campos desconocidos. No aceptar `user_id` ni `usuario_id` enviados
+   por el cliente como identidad.
+3. No enviar URLs, dominios, títulos de ventana, paquetes, correos, tokens en el
+   cuerpo ni listas de apps. Resolver la asociación con la suscripción antes del
+   envío.
+4. UUID v4 para eventos e instalación. La instalación es un identificador
+   aleatorio, no un identificador físico.
+5. Un destino ajeno responde `404` sin revelar si el identificador del evento
+   existe.
+
+### 7.2 Tiempo y duración
+
+1. Instantes válidos UTC con `Z`; ventana semiabierta `[inicio, fin)` y
+   `inicio < fin`.
+2. Zona IANA válida y común para el informe de esa suscripción. Validarla en
+   backend: una cadena no vacía no demuestra que exista.
+3. Cada evento cabe en un día local; `fin` puede coincidir con la medianoche
+   siguiente. Dividir usando límites locales y cambios de horario, no sumando
+   siempre 24 horas.
+4. Tramos positivos, ordenados, sin solapamientos internos y contenidos en la
+   ventana.
+5. `duracion_ms` coincide exactamente con la suma de los tramos y no supera la
+   ventana. Lista vacía implica duración cero. Rechazar inconsistencias; no
+   inventar distribución.
+6. Cuerpo máximo propuesto: 4 KiB de JSON UTF-8, medidos en recepción antes de
+   persistir. Dividir ventanas grandes antes de encolarlas y asignar IDs propios;
+   no truncar tramos.
+7. `pausado`, `sin_permiso` y `revocado` no informan actividad positiva. Una
+   revocación se comunica mediante control de consentimiento; no se exige seguir
+   enviando telemetría tras revocar.
+
+### 7.3 Idempotencia y concurrencia
+
+Clave lógica: identidad autenticada —incluyendo el ámbito de tenant aplicable—
++ `recolector_id` + `event_id`. La suscripción **no** forma parte de la clave:
+se conserva como destino vinculado e inmutable.
+
+| Caso | Respuesta | Efecto |
 |---|---|---|
-| `201` | `AcuseUso` `estado=aceptado` | Primera vez que el evento se procesa. |
-| `200` | `AcuseUso` `estado=duplicado` | Mismo `event_id` ya procesado: se confirma sin repetir el efecto. |
-| `409` | `ErrorUso` `codigo=conflicto_idempotencia` | Mismo `event_id` con un payload DISTINTO. No se sobrescribe. |
-| `400` | `ErrorUso` `codigo=payload_invalido` | No pasa el esquema o las reglas cruzadas (ver abajo). |
-| `403` | `ErrorUso` `codigo=tenant_invalido` | El `organizacion_id` no coincide con la sesión. |
-| `404` | `ErrorUso` `codigo=suscripcion_desconocida` | Analytics no tiene esa suscripción en ese tenant. |
+| Primera aceptación | `201`, acuse `aceptado` | Un registro y efectos aplicados una vez. |
+| Misma clave, destino y todos los campos normalizados iguales | `200`, acuse `duplicado` | Sin nuevos efectos; conservar `recibido_en` original. |
+| Misma clave con otro cuerpo o destino también autorizado | `409 event_id_conflictivo` | Sin efectos nuevos; requiere resolución. |
+| Destino ajeno | `404` | No revelar si el identificador del evento existe. |
 
-`ErrorUso.event_id` va solo cuando el receptor alcanzó a leerlo del cuerpo;
-un JSON que no parsea responde sin él.
+Comparar todos los campos tipados del cuerpo y el destino; no comparar texto
+JSON por orden o espacios. Autenticar y autorizar antes de consultar duplicados.
+Resolver carreras con restricción única y transacción/bloqueo pertinentes. No
+clasificar cualquier `IntegrityError` como duplicado: comprobar qué restricción
+falló y volver a comparar el registro autorizado.
 
-## Reglas de negocio
+Persistir fuente exacta, cobertura y el trabajo durable necesario para
+proyección/publicación sin dejar una aceptación huérfana. Usar el mecanismo
+fiable existente o acordar su extensión con Víctor; no prometer entrega
+exactamente una vez por RabbitMQ. Consumidores y proyecciones también deben
+soportar redelivery sin repetir efectos.
 
-1. **La cobertura se acredita, no se deduce.** Que lleguen tres eventos de
-   octubre no prueba que octubre esté completo. Solo acredita quien midió:
-   `cobertura` no nula en `con_uso`/`cero_observado` acredita los días
-   `desde…hasta` (inclusive) como completos, y el endpoint de cobertura
-   existe para rangos mayores (backfills, re-sincronizaciones). Analytics
-   funde tramos que se tocan y nunca encoge lo acreditado
-   (`registrar_cobertura`).
-2. **Cero observado ≠ sin medición.** `cero_observado` con cobertura es un
-   cero REAL: FE-29 puede afirmar bajo uso sobre él (`uso_cero_real`).
-   `sin_medicion` es ausencia de dato y jamás se lee como cero: mantiene la
-   clasificación en `sin_datos`.
-3. **`duracion_ms` es la suma de los tramos.** Cada tramo cumple
-   `inicio < fin` y cae dentro del día local `fecha`. El esquema valida la
-   forma; la suma y la pertenencia al día las valida el receptor
-   (`400 payload_invalido` si difieren). No se aceptan floats ni negativos.
-4. **`fecha` es el día local del usuario.** Los tramos van en UTC con `Z`.
-   Un día de cambio de horario puede durar 23 o 25 horas: por eso
-   `duracion_ms` admite hasta 90 000 000 (25 h) y el array hasta 1500 tramos.
-5. **Un evento por (recolector, suscripción, día).** Se emite al cierre del
-   día local. Se aceptan fechas pasadas (backfill) en cualquier orden: el
-   receptor recalcula desde los registros, no suma sobre lo que había.
-6. **El receptor no crea suscripciones.** `404 suscripcion_desconocida`: el
-   recolector solo reporta suscripciones existentes en la organización.
-7. **Campos adicionales se ignoran** si no se conocen. Quitar un campo,
-   cambiar su tipo o su semántica exige `version: 2` y aviso previo: es un
-   contrato entre dos servicios, un cambio acá rompe al otro lado.
-8. **Sin secretos ni contenido.** IDs y tiempos de uso, nada más: ni títulos
-   de ventanas, ni URLs, ni contenido de sesiones. Los logs de fallo
-   conservan IDs y motivo, sin cuerpos.
+El cliente retira solo el pendiente cuyo ID y destino coinciden con el acuse.
+Timeout, red caída, `429` o `5xx` conservan ID y cuerpo con espera acotada y
+`Retry-After` cuando corresponda. Los errores de validación o conflicto no se
+reintentan automáticamente.
 
-## Casos borde
+### 7.4 Cero observado, datos faltantes y fuentes simultáneas
 
-- **Reintento tras 5xx:** reenviar el mismo `event_id` con el mismo payload.
-  Da `200 duplicado` (o `201` si el primero nunca llegó a procesarse). Nunca
-  genera un segundo efecto.
-- **Reloj del recolector desviado:** tramos fuera del día `fecha` →
-  `400 payload_invalido`. El receptor no "corrige" horas a ciegas.
-- **Día partido por cambio de mes:** el evento pertenece entero a su
-  `fecha`; el agregado mensual lo resuelve el receptor con la semántica de
-  VI-10 (un día de otro mes se registra y avisa que no suma a las horas del
-  mes en curso). El payload no se parte.
-- **Pausa y reanudación:** los días sin medición van como `sin_medicion`
-  (si el recolector alcanzó a emitirlos). Al reanudar, la cobertura parte
-  de la reanudación: no se acredita hacia atrás lo que no se midió.
-- **Backfill tras reconexión:** llegan los eventos de los días recuperados
-  y un `CoverageIntervalPayload` que acredita el rango completo entregado.
-- **Dos recolectores sobre la misma suscripción:** v1 asume un recolector
-  activo por (organización, suscripción). Si en la práctica conviven dos
-  orígenes, la fusión de sus mediciones queda para v2; hoy cada hecho es un
-  evento distinto y la deduplicación es por `event_id`.
-- **Lotes:** v1 envía un evento por petición. El envío por lote queda para
-  v2 si el volumen lo justifica.
+| Evidencia | Interpretación |
+|---|---|
+| Cobertura completa de una ventana, estado activo, tramos vacíos | Cero observado solamente en esa ventana. |
+| Cobertura parcial y ninguna actividad recibida | Cero en lo efectivamente observado; no inferir cero en los huecos. |
+| Sin medición, pausa, pérdida de permiso o desaparición del recolector | Ausencia de medición; uso real desconocido. |
+| Actividad positiva de 30 segundos y proyección entera de 0 minutos | Hay uso positivo; no es uso cero. |
+| Última sincronización reciente sin intervalos acreditados | No demuestra cobertura. |
 
-## Definición verificable y ejemplos
+La desinstalación puede no enviar un último evento. No extender cobertura
+después del último intervalo confirmado ni confundir silencio con una pausa
+conocida. IA y puntajes deben conservar incertidumbre; los umbrales y políticas
+de recomendaciones quedan a cargo de sus tareas, sin inventar valores aquí.
 
-- Esquema JSON (draft 2020-12): [uso-recolectores-v1.schema.json](uso-recolectores-v1.schema.json).
-  La raíz valida un `UsageEventPayload`; `CoverageIntervalPayload`, `AcuseUso`
-  y `ErrorUso` viven en `$defs`.
-- Fixtures con los casos válidos (uso positivo, cero observado,
-  pausado/sin medición, backfill y los tres acuses):
-  [uso-recolectores-v1.ejemplos.json](uso-recolectores-v1.ejemplos.json).
-- DTOs de TypeScript compartidos con web, móvil y el cliente Windows:
-  [frontend/shared/src/contracts/uso-recolectores.dto.ts](../../frontend/shared/src/contracts/uso-recolectores.dto.ts).
+Para uso de una suscripción, unir los tramos reales entre fuentes antes de
+sumar. Android y navegador observando simultáneamente dos minutos acreditan dos
+minutos, no cuatro. La deduplicación por ID y la unión de intervalos son
+operaciones diferentes.
 
-Regresión desde la raíz del repo (el workflow de CI la corre en cada PR):
+Para acreditar un día completo, la unión de ventanas de cobertura completa debe
+cubrirlo sin huecos. El mínimo inicio y máximo fin no rellenan huecos. Mantener
+cobertura por instalación; una fuente pausada no borra la observación válida de
+otra. Agregar por usuario/tenant y suscripción conforme a fuentes que realmente
+pueden observar ese servicio.
+
+Conservar milisegundos exactos. Si los modelos vigentes usan minutos enteros:
+proyectar el incremento del total unido con `total_ms // 60000` y mantener
+`total_ms % 60000` por día local, sin tocar uso manual ni trasladar residuos a
+otro día. Puntajes, última actividad y consultas deben usar evidencia exacta de
+actividad positiva.
+
+## 8. Ejemplos
+
+Fixture de actividad Android: destino persistido
+`11111111-1111-4111-8111-111111111111`. Solo el objeto `evento` va como cuerpo
+HTTP.
+
+```json
+{
+  "version": 1,
+  "event_id": "22222222-2222-4222-8222-222222222222",
+  "recolector_id": "33333333-3333-4333-8333-333333333333",
+  "origen": "android",
+  "inicio": "2026-11-09T12:00:00Z",
+  "fin": "2026-11-09T12:02:00Z",
+  "duracion_ms": 30000,
+  "tramos_actividad": [
+    {"inicio": "2026-11-09T12:00:00Z", "fin": "2026-11-09T12:00:30Z"}
+  ],
+  "zona_horaria": "America/Santiago",
+  "cobertura": "completa",
+  "estado": "activo"
+}
+```
+
+Fixture de cero observado durante dos minutos desde navegador:
+
+```json
+{
+  "version": 1,
+  "event_id": "44444444-4444-4444-8444-444444444444",
+  "recolector_id": "55555555-5555-4555-8555-555555555555",
+  "origen": "navegador",
+  "inicio": "2026-11-09T12:00:00Z",
+  "fin": "2026-11-09T12:02:00Z",
+  "duracion_ms": 0,
+  "tramos_actividad": [],
+  "zona_horaria": "America/Santiago",
+  "cobertura": "completa",
+  "estado": "activo"
+}
+```
+
+Para representar una pausa conocida en esa ventana: usar otro `event_id`,
+`cobertura: "sin_medicion"`, `estado: "pausado"`, duración 0 y tramos vacíos.
+No reutilizar el identificador del ejemplo anterior ni fabricar una pausa a
+partir de falta de conexión.
+
+Acuse inicial (201):
+
+```json
+{
+  "event_id": "22222222-2222-4222-8222-222222222222",
+  "suscripcion_id": "11111111-1111-4111-8111-111111111111",
+  "estado": "aceptado",
+  "recibido_en": "2026-11-09T12:02:01Z"
+}
+```
+
+Al repetir exactamente el pendiente: 200, mismos identificadores y
+`recibido_en`, con `estado: "duplicado"`. Cambiar duración, tramos o destino
+autorizado usando esa misma clave: 409.
+
+```json
+{
+  "codigo": "event_id_conflictivo",
+  "mensaje": "El identificador ya fue aceptado con otro contenido o destino."
+}
+```
+
+El archivo [uso-recolectores-v1.ejemplos.json](uso-recolectores-v1.ejemplos.json)
+contiene además los casos de medianoche, 30 s + 30 s, simultaneidad 120 s /
+180 s / 50 s, cobertura con huecos y los ejemplos negativos.
+
+## 9. Integración paso a paso
+
+1. **Recolector de Maxi:** captura tramos, divide por día local, crea IDs, guarda
+   destino y cuerpo antes de enviar. Conserva la cola asociada a la cuenta
+   original.
+2. **Recepción de Maxi:** autentica, valida permiso y consentimiento, estructura
+   y semántica; resuelve idempotencia y persiste hechos exactos y cobertura de
+   forma consistente.
+3. **Entrega a Víctor:** acordar punto de publicación y propietario del
+   outbox/mecanismo fiable para evitar que ambos publiquen el mismo hecho.
+   Registrar el mapeo a los eventos de dominio existentes.
+4. **RabbitMQ/Analytics de Víctor:** consumir con deduplicación de efectos, unir
+   tramos, proyectar incrementos y consultar cobertura. No publicar directamente
+   estos DTOs en `uso.registrado` sin revisar contrato y consumidores existentes.
+5. **Puntajes e IA de Víctor:** distinguir uso positivo, cero observado y datos
+   insuficientes; no penalizar automáticamente períodos desconocidos.
+6. **Web/móvil:** presentar esos estados y conservar precisión para las
+   decisiones; redondear solamente al mostrar.
+
+## 10. Decisiones que deben quedar registradas antes de integrar
+
+| Decisión | Propuesta o condición |
+|---|---|
+| Ruta y cuerpo por petición | Confirmar la ruta propuesta; un evento por petición. |
+| UUID y precisión temporal | Confirmar UUID de modelos y máximo de tres decimales UTC. |
+| Zona de informe | El receptor proporciona la zona común; definir cómo se cambia sin recontar historia. |
+| Límites | Confirmar 4 KiB y un día local; definir política de antigüedad y desajuste de reloj sin inventar umbrales. |
+| Identidad interna de cobertura | Confirmar tipo de IDs, persistencia de `coverage_id` y aislamiento organizacional del almacenamiento. |
+| Publicación | Acordar contrato de dominio/versionado y responsable del mecanismo fiable. |
+| Conservación | Acordar retención de claves, eventos y purga con política del proyecto; no fijar plazos sin base. |
+| Cobertura | Confirmar que cada asociación y recolector acredita solo lo que realmente observa. |
+| Errores | Alinear la envoltura propuesta con la API existente. |
+
+## 11. Evidencia para la PR
+
+- [ ] Enlazar S3-MX-01 y S3-VI-01 y describir qué se conserva/cambia respecto a #148.
+- [ ] Documentar aceptación explícita de Maxi y Víctor sobre el commit consolidado.
+- [ ] Validar fixtures de Android y navegador con el mismo esquema y las mismas reglas semánticas.
+- [ ] Incluir ejemplos negativos: usuario en cuerpo, destino ajeno, duración inconsistente, tramo fuera de ventana, zona inválida y cruce de día.
+- [ ] Conservar casos de medianoche, 30 s + 30 s, simultaneidad 120 s / 180 s / 50 s y cobertura con huecos del borrador previo.
+- [ ] Probar idempotencia concurrente en PostgreSQL y redelivery en consumidores cuando esas implementaciones estén disponibles.
+- [ ] Separar resultados de fixtures de evidencia HTTP/base de datos/RabbitMQ: este documento no certifica esas integraciones.
+- [ ] Vincular evidencia a las tarjetas, manteniendo pendientes las implementaciones que todavía falten.
+
+## 12. Regresión local
+
+Desde la raíz del repo (el workflow de CI la ejecuta en cada PR):
 
 ```sh
 python -m pip install "jsonschema[format]==4.26.0" "pytest==8.3.4"
 python -m pytest docs/contratos/tests -v
 ```
 
-La prueba valida cada fixture contra el esquema con chequeo de formatos y
-además las reglas que el esquema no puede expresar: la suma de los tramos,
-`inicio < fin`, `desde ≤ hasta` y que `sin_medicion` no acredite cobertura.
-Comprueba también el límite de 25 horas (90 000 000 ms) y muta fixtures
-válidas para comprobar que el esquema rechaza estados desconocidos,
-duraciones negativas, no enteras o sobre el límite, tramos en un cero
-observado, cobertura en un día sin medición y versiones futuras.
-
-## Recepción y cierre
-
-Lo acordado con Maxi: vocabulario (`duracion_ms`, `tramos_actividad`,
-`cobertura`, `estado`, `origen`, `recolector_id`, `event_id`), estados y su
-efecto sobre la cobertura, los dos endpoints y la semántica 201/200/409.
-Este documento es la versión escrita de ese acuerdo; la revisión del PR es
-la instancia para confirmar que no se coló ninguna diferencia.
-
-Pendiente para cerrar la integración (no de esta tarjeta): la implementación
-del productor en el recolector (S3-MX-01), el receptor en Analytics con su
-prueba del payload real contra este esquema —el mismo seguimiento que MX-21
-dejó para VI-26— y el registro de `extension_navegador` como origen si se
-agrega en el Sprint.
+La prueba valida cada fixture contra el esquema con chequeo de formatos y las
+reglas que el esquema no puede expresar: ventana semiabierta, pertenencia al
+día local, tramos ordenados y contenidos, `duracion_ms` igual a la suma, zona
+IANA existente, cobertura sin huecos y unión temporal entre fuentes. También
+comprueba el rechazo de identidad en el cuerpo y de los casos negativos de
+destino ajeno, duración inconsistente, tramo fuera de ventana, zona inválida y
+cruce de día.
