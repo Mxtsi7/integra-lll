@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { conMayuscula, formatearFechaLarga, formatearMesAnio } from '@ojoalgasto/shared';
 import { ContenidoConEstado } from '../../../components/estados';
 import { NavButton } from '../NavButton';
@@ -18,11 +19,30 @@ export interface CalendarioContenidoProps {
 }
 
 export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProps) {
-  // "Hoy" se fija al abrir la pantalla, con la fecha local del teléfono.
-  const [hoy] = useState(() => hoyInicial ?? isoDeFecha(new Date()));
+  // Permitimos actualizar 'hoy' con setHoy para recalcular la fecha actual
+  const [hoy, setHoy] = useState(() => hoyInicial ?? isoDeFecha(new Date()));
   const [mes, setMes] = useState(() => mesDeFecha(hoy));
   const [diaPedido, setDiaPedido] = useState(hoy);
   const { estado, cargar } = useCobrosDelMes(mes, api);
+
+  // Obtiene la fecha real vigente (o hoyInicial si es una prueba)
+  const obtenerHoyActual = useCallback(() => hoyInicial ?? isoDeFecha(new Date()), [hoyInicial]);
+
+  // Actualiza "hoy" automáticamente cuando la pantalla recupera el foco o se reanuda la app
+  useFocusEffect(
+    useCallback(() => {
+      const hoyActual = obtenerHoyActual();
+      setHoy(hoyActual);
+    }, [obtenerHoyActual])
+  );
+
+  // Al presionar "Hoy", vuelve a calcular la fecha del reloj al instante
+  const manejarIrAHoy = () => {
+    const hoyActual = obtenerHoyActual();
+    setHoy(hoyActual);
+    setDiaPedido(hoyActual);
+    setMes(mesDeFecha(hoyActual));
+  };
 
   // Al cambiar de mes el día pedido puede quedar en otro mes: se usa hoy si es de este mes, o el día 1.
   const diaElegido = [diaPedido, hoy].find((dia) => esDelMes(dia, mes)) ?? primerDiaDelMes(mes);
@@ -41,10 +61,7 @@ export function CalendarioContenido({ hoyInicial, api }: CalendarioContenidoProp
         testID="ir-a-hoy"
         title="Hoy"
         variant="secondary"
-        onPress={() => {
-          setDiaPedido(hoy);
-          setMes(mesDeFecha(hoy));
-        }}
+        onPress={manejarIrAHoy}
       />
 
       <ContenidoConEstado

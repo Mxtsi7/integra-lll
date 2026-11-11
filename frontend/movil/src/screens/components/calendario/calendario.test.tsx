@@ -7,7 +7,15 @@ import { CalendarioContenido } from './CalendarioContenido';
 import { esDelMes, isoDeFecha, semanasDelMes, sumarMeses } from './fechas';
 import { cobrosDelDia, contarPorDia, formatearImporte, totalesPorMoneda } from './reglasCalendario';
 import type { ApiCalendario } from './useCobrosDelMes';
-
+import { NavigationContainer } from '@react-navigation/native';
+// Simulación para que useFocusEffect funcione en los tests sin NavigationContainer
+vi.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) => {
+    React.useEffect(() => {
+      callback();
+    }, [callback]);
+  },
+}));
 const HOY = '2026-11-09';
 
 function crearCobro(id: string, fecha: string, cambios: Partial<CobroCalendario> = {}): CobroCalendario {
