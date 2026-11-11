@@ -83,7 +83,11 @@ def test_sin_un_python_que_funcione_no_se_toca_el_cluster(tmp_path):
     for herramienta in ("kubectl", "docker", "git", "openssl"):
         _doble(binarios, herramienta, f'echo "$@" >> "{marcas.as_posix()}/{herramienta}"')
 
-    entorno = {**os.environ, "PATH": str(binarios), "SOLO_APLICAR": "1", "GHCR_TOKEN": "no-se-usa"}
+    # KUBECONFIG vacío: si algo llegara a un kubectl real, no tiene cluster.
+    sin_cluster = tmp_path / "sin-cluster"
+    sin_cluster.write_text("", encoding="utf-8")
+    entorno = {**os.environ, "PATH": str(binarios), "SOLO_APLICAR": "1", "GHCR_TOKEN": "no-se-usa",
+               "KUBECONFIG": str(sin_cluster)}
     resultado = subprocess.run([BASH, str(DESPLEGAR)], capture_output=True, text=True,
                                encoding="utf-8", errors="replace", env=entorno, timeout=60)
 
@@ -133,3 +137,27 @@ def test_el_dockerfile_de_la_web_rechaza_una_url_convertida_en_ruta():
     guarda = dockerfile.index('RUN case "$VITE_API_URL" in /*|http://*|https://*) ;;')
     assert "exit 1" in dockerfile[guarda:dockerfile.index(chr(10), guarda)]
     assert dockerfile.index("ENV VITE_API_URL=") < guarda < dockerfile.index("RUN npm run build")
+
+
+# ── 5. El arnés que ejecuta el despliegue con dobles ────────────────────────
+
+def test_el_arnes_de_secretos_no_deja_alcanzable_un_python_ni_un_cluster_real():
+    """`probar-parches-secretos.sh` ejecuta `desplegar.sh` entero con dobles
+    en el PATH. Cuando el guion empezó a comprobar el intérprete, el doble de
+    `python3` falló la comprobación, el despliegue cayó al `python` de verdad
+    y este ejecutó el guion del broker con el kubectl REAL: en Windows
+    `subprocess` no ve un doble que es un guion de shell. El 11-11-2026 eso
+    suspendió los listeners del broker del cluster.
+
+    Dos barreras, y se exigen las dos: dobles para ambos nombres del
+    intérprete, y un KUBECONFIG vacío antes de ejecutar el despliegue."""
+    arnes = (RAIZ / "k8s/pruebas/probar-parches-secretos.sh").read_text(encoding="utf-8")
+    assert "for interprete in python3 python; do" in arnes
+    # El doble responde a la comprobación y no acepta nada más que el guion.
+    assert '[ "$#" = 2 ] && [ "$1" = -c ] && exit 0' in arnes
+    barrera = arnes.index('export KUBECONFIG="$TMP/sin-cluster"')
+    primera_ejecucion = arnes.index('bash "$RAIZ/k8s/desplegar.sh"')
+    assert barrera < primera_ejecucion
+    # Los candidatos del guion y los dobles del arnés tienen que ser los mismos.
+    candidatos = re.search(r"^for candidato in (.+); do$", _guion(), re.M).group(1).split()
+    assert candidatos == ["python3", "python"]
