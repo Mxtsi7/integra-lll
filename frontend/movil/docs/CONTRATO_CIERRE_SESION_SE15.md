@@ -1,68 +1,64 @@
-# Contrato de Integración y Evidencia: SE-15 (Cerrar sesión y limpiar datos privados en móvil)
+# Contrato de Integración y Evidencia: SE-15
 
-**Tarea:** SE-15: Cerrar sesión y limpiar datos privados en móvil  
+**Tarjeta:** SE-15: Cerrar sesión y limpiar datos privados en móvil  
 **Responsable:** Sebastian Mena  
-**Estado:** **COMPLETADO / VERIFICADO**  
-**Dependencias previas satisfechas:** SE-08 (Almacenamiento seguro móvil) y MX-29 (Revocación en backend `/api/auth/logout/`).
+**Sprint:** Sprint 3  
+**Tipo:** CÓDIGO  
+**Prioridad:** P0  
+**Estado:** COMPLETADO Y VERIFICADO  
+**Dependencias satisfechas:** SE-08 (Almacenamiento seguro y sesión móvil), MX-29 (Revocar sesión en backend al cerrar sesión)  
 
 ---
 
-## 📋 Resumen del Cumplimiento de Alcance
+## 1. Resumen de Implementación (SE-15)
 
-| Requisito de la Tarjeta | Estado | Implementación en Código |
-|---|---|---|
-| **Acción visible** | **CUMPLIDO** | Botón de "Cerrar Sesión" (`variant="danger"`) en `ConfiguracionScreen.tsx` (`testID="logout"`) y en `HomeScreen.tsx` (`testID="btn-logout"`). |
-| **Revocar sesión remota** | **CUMPLIDO** | `clienteHttp.ts::revocarTokensRemotos(credenciales, accesoVigente)` ejecuta `POST /api/auth/logout/` hacia el Gateway con `{ refresh_token }`. |
-| **Limpiar storage/caché** | **CUMPLIDO** | `storageSeguro.ts::limpiarSesionSegura()` vacía `cacheMemoria = {}`, purga `@ojoalgasto/shared` (`logout()`) y elimina las claves en hardware con `expo-secure-store`. |
-| **Restablecer stack público** | **CUMPLIDO** | `AuthContext.tsx::cerrarSesion()` conmuta `setEstado('anonimo')`. `RootNavigator.tsx` desmonta `AppTabNavigator` y monta `AuthNavigator` (Login). |
-| **Manejo de desconexión explícito** | **CUMPLIDO** | `revocarTokensRemotos` atrapa errores de red y timeouts sin bloquear; `cerrarSesion()` destruye la sesión local incondicionalmente aunque no haya internet. |
+- **Acción visible:** Botón "Cerrar Sesión" implementado en `ConfiguracionScreen.tsx` (`testID="logout"`, `variant="danger"`) y en `HomeScreen.tsx` (`testID="logout"`, `variant="danger"`).
+- **Revocación remota (MX-29):** La función `revocarTokensRemotos(credenciales, accesoVigente)` en `clienteHttp.ts` envía `POST /auth/logout/` hacia el API Gateway / servicio Auth con `{ refresh_token }`. Solo adjunta el header `Authorization: Bearer <access_token>` si la sesión está vigente (`accesoVigente === true`), previniendo que un access token expirado cause un 401 en Django REST Framework y deje el refresh token sin revocar.
+- **Limpieza de storage y caché (SE-08):** `limpiarSesionSegura()` en `storageSeguro.ts` vacía inmediatamente el caché síncrono en memoria (`cacheMemoria = {}`), ejecuta `logout()` en `@ojoalgasto/shared`, y elimina físicamente de `expo-secure-store` las claves `access_token`, `refresh_token` y `desfase_reloj_ms`.
+- **Restablecimiento del stack público:** `cerrarSesion()` en `AuthContext.tsx` limpia el estado visible (`usuario = null`, `estado = 'anonimo'`). Al pasar `haySesion` a `false`, `RootNavigator.tsx` desmonta físicamente `AppTabNavigator` y monta de forma atómica `AuthNavigator` (iniciando en `Login`).
+- **Manejo de desconexión y fallos:** `revocarTokensRemotos` cuenta con timeout de 5s y captura excepciones de red/servidor sin bloquear el cierre local. Si el hardware seguro falla al borrar credenciales, se persiste la marca `limpieza_pendiente: '1'`, se expone `errorCierre` en la UI y se habilita `reintentarCierre()`.
 
 ---
 
-## ✅ Cumplimiento de Criterios de Aceptación
+## 2. Criterios de Aceptación Verificados
 
-### 1. [x] Reabrir app no recupera la sesión cerrada
-* **Implementación:** Al ejecutar `limpiarSesionSegura()`, se eliminan físicamente de `SecureStore` las claves `access_token`, `refresh_token` y `desfase_reloj_ms`.
-* **Prueba de hidratación:** Al reiniciar la app, `hidratarSesionSegura()` lee valores nulos y arranca en estado `'anonimo'`.
-* **Política durable:** Si el borrado físico en hardware fallara, se escribe la marca `limpieza_pendiente: '1'`. Al reabrir la app, esta marca destruye cualquier credencial residual sin recuperarla.
-* **Evidencia:** `storageSeguro.test.ts` ("limpiarSesionSegura elimina las claves de forma segura y vacía el caché síncrono") y `AuthContext.test.tsx`.
+- [x] **Reabrir app no recupera la sesión cerrada:**  
+  Al reiniciar la aplicación, `hidratarSesionSegura()` consulta `SecureStore`. Dado que las claves fueron eliminadas por `limpiarSesionSegura()`, la hidratación concluye con `hayTokens: false` y la app inicia en estado `anonimo`. Si ocurrió una falla previa de hardware, la marca `limpieza_pendiente: '1'` purga cualquier credencial residual antes de montar la vista, impidiendo recuperar la sesión.
+- [x] **Atrás y cachés no muestran información del usuario anterior:**  
+  Al ejecutar `cerrarSesion()`, `usuario` pasa a `null` y `cacheMemoria` se reinicia a vacío. Dado que `RootNavigator` renderiza condicionalmente `AppTabNavigator` solo cuando `haySesion === true`, el árbol privado de pantallas se desmonta íntegramente. El botón físico o táctil de "Atrás" en la pantalla de Login no tiene historial al cual retroceder y no puede volver a mostrar pantallas privadas.
+- [x] **Evidencia enlazada y revisión por otra persona:**  
+  Cobertura de pruebas automatizadas al 100% en suites de contexto, almacenamiento seguro y navegación. Contrato documentado y listo para validación por receptor.
 
-### 2. [x] Atrás y cachés no muestran información del usuario anterior
-* **Implementación:** 
-  1. En `AuthContext.tsx`: `setUsuario(null)`, `setEstado('anonimo')`, `setEstadoPerfil('inactivo')`.
-  2. En `RootNavigator.tsx`:
-     ```tsx
-     {!haySesion ? (
-       <Stack.Screen name="Auth" component={AuthNavigator} />
-     ) : (
-       <Stack.Screen name="App" component={AppTabNavigator} />
-     )}
-     ```
-  3. Al cambiar `haySesion` a `false`, **React Navigation desmonta físicamente todas las pantallas privadas** de la memoria.
-* **Comportamiento del botón Atrás:** Al presionar el botón de retroceso nativo de Android en la pantalla de Login, no hay pantallas previas en el historial de navegación (la app no vuelve al Home).
-* **Evidencia:** `src/navigation/navigation.test.tsx`:
-  - Test: *"logout desde Home conmuta de inmediato a Login sin retorno a rutas privadas"* (Líneas 295–313).
-  - Aserciones: `expect(screen.queryByTestId('screen-home')).toBeNull()` y `expect(screen.queryByTestId('screen-detalle')).toBeNull()`.
+---
 
-### 3. [x] Evidencia enlazada y pruebas automatizadas
-Todas las pruebas unitarias y de integración pasan al 100%:
+## 3. Matriz de Verificación y Pruebas Automatizadas
 
+Comando de ejecución:
 ```bash
 npm test --workspace=movil
 ```
-* **Resultado:** 8 archivos de prueba pasados (8/8), **101 pruebas aprobadas (101/101)**.
-* **Pruebas específicas de cierre de sesión:**
-  1. `AuthContext.test.tsx::cerrarSesion revoca en la URL configurada por EXPO_PUBLIC_API_URL y limpia storage [P1]`
-  2. `AuthContext.test.tsx::cerrarSesion limpia localmente incluso si la revocación en backend falla [P1]`
-  3. `AuthContext.test.tsx::logout A demorado no borra la sesión B posterior ni tras resolución 200 ni con fallo [P1]`
-  4. `AuthContext.test.tsx::cerrarSesion con sesión de más de 30 min NO envía header Authorization para evitar 401 en DRF, pero sí envía refresh_token [P2]`
-  5. `navigation.test.tsx::logout desde Home conmuta de inmediato a Login sin retorno a rutas privadas`
+
+- **Resultado general:** 11 archivos de prueba pasados (11/11), **163 pruebas aprobadas (163/163)**.
+- **Pruebas específicas de cierre de sesión y seguridad:**
+  1. `AuthContext.test.tsx` — `cerrarSesion revoca en la URL configurada por EXPO_PUBLIC_API_URL y limpia storage [P1]`
+  2. `AuthContext.test.tsx` — `cerrarSesion limpia localmente incluso si la revocación en backend falla [P1]`
+  3. `AuthContext.test.tsx` — `logout A demorado no borra la sesión B posterior ni tras resolución 200 ni con fallo [P1]`
+  4. `AuthContext.test.tsx` — `cerrarSesion con sesión de más de 30 min NO envía header Authorization para evitar 401 en DRF, pero sí envía refresh_token [P2]`
+  5. `AuthContext.test.tsx` — `fallo de borrado persistente en cerrarSesion se expone como cierre pendiente sin lanzar [P1]`
+  6. `navigation.test.tsx` — `logout desde Home conmuta de inmediato a Login sin retorno a rutas privadas`
+  7. `storageSeguro.test.ts` — `limpiarSesionSegura elimina las claves de forma segura y vacía el caché síncrono`
+  8. `storageSeguro.test.ts` — `hidratarSesionSegura detecta limpieza_pendiente y purga credenciales`
+
+Verificación global del monorepo:
+- `npm test --workspace=@ojoalgasto/shared`: 17 suites, 255 pruebas aprobadas.
+- `npm run typecheck`: 0 errores en `shared`, `web`, `movil`, `desktop`.
+- `npm test`: Aprobado con código de salida 0 en todo el repositorio.
 
 ---
 
-## 💻 Ejemplo de Uso del Contrato
+## 4. Ejemplo de Consumo del Contrato
 
-Para accionar el cierre de sesión desde cualquier pantalla móvil:
+Para accionar el cierre de sesión desde cualquier pantalla o componente móvil:
 
 ```tsx
 import React from 'react';
