@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   descartarRecomendacion,
   ErrorDeApi,
+  explicarRecomendacion,
   getRecomendaciones,
+  type ExplicacionRecomendacion,
   type Recomendacion,
   type RecomendacionDescartada,
 } from '@ojoalgasto/shared';
@@ -24,6 +26,12 @@ export type EstadoRecomendaciones =
 /** Cómo va el "No me interesa" de una tarjeta (CH-32). Sin entrada: nada en curso. */
 export type EstadoDescarte = { tipo: 'enviando' } | { tipo: 'error'; mensaje: string };
 
+/** Cómo va la explicación de una tarjeta (CH-22). Sin entrada: todavía no se pidió. */
+export type EstadoExplicacion =
+  | { tipo: 'cargando' }
+  | { tipo: 'listo'; explicacion: ExplicacionRecomendacion }
+  | { tipo: 'error'; mensaje: string };
+
 type Lista = { items: Recomendacion[]; disponible: boolean; motivoSinSugerencias: string | null };
 
 /** La respuesta de VI-17 es { results, disponible, motivo_sin_sugerencias, … }; un arreglo suelto también vale. */
@@ -43,12 +51,18 @@ function leerLista(data: unknown): Lista | null {
   return null;
 }
 
+const MENSAJE_RECOMENDACION_NO_DISPONIBLE = 'Esta recomendación ya no está disponible. Vuelve a cargar la lista.';
+
 function mensajeErrorDescarte(err: unknown): string {
   if (err instanceof TypeError) return MENSAJE_SIN_RED;
-  if (err instanceof ErrorDeApi && err.status === 404) {
-    return 'Esta recomendación ya no está disponible. Vuelve a cargar la lista.';
-  }
+  if (err instanceof ErrorDeApi && err.status === 404) return MENSAJE_RECOMENDACION_NO_DISPONIBLE;
   return 'No pudimos descartarla. Intenta de nuevo.';
+}
+
+function mensajeErrorExplicacion(err: unknown): string {
+  if (err instanceof TypeError) return MENSAJE_SIN_RED;
+  if (err instanceof ErrorDeApi && err.status === 404) return MENSAJE_RECOMENDACION_NO_DISPONIBLE;
+  return 'No pudimos cargar la explicación. Intenta de nuevo.';
 }
 
 function sinClave<T>(registro: Record<string, T>, clave: string): Record<string, T> {
@@ -69,6 +83,8 @@ export function useRecomendaciones() {
 
   const [estado, setEstado] = useState<EstadoRecomendaciones>({ tipo: 'cargando' });
   const [descartes, setDescartes] = useState<Record<string, EstadoDescarte>>({});
+  // CH-22: la explicación de cada tarjeta, que se pide solo cuando se abre.
+  const [explicaciones, setExplicaciones] = useState<Record<string, EstadoExplicacion>>({});
   // Solo se muestra la última carga: si se reintenta antes de que llegue la
   // anterior, esa respuesta vieja se descarta.
   const cargaActual = useRef(0);
@@ -77,10 +93,15 @@ export function useRecomendaciones() {
   const descartadas = useRef(new Set<string>());
   // Ref y no solo estado: un doble clic vería el estado viejo y mandaría dos.
   const enviando = useRef(new Set<string>());
+  // Las explicaciones que se están pidiendo, como "carga:id". Con la carga en la
+  // clave, una petición de la lista anterior no frena la de la lista nueva.
+  const explicando = useRef(new Set<string>());
 
   const cargarRecomendaciones = useCallback(async () => {
     const esta = ++cargaActual.current;
     setEstado({ tipo: 'cargando' });
+    // Las explicaciones son de la lista anterior: con la lista nueva se piden de nuevo.
+    setExplicaciones({});
     try {
       const data = await getRecomendaciones();
       if (esta !== cargaActual.current) return;
@@ -122,12 +143,36 @@ export function useRecomendaciones() {
       descartadas.current.add(id);
       setEstado((actual) => (actual.tipo === 'listo' ? { ...actual, items: actual.items.filter((recomendacion) => recomendacion.id !== id) } : actual));
       setDescartes((actuales) => sinClave(actuales, id));
+      setExplicaciones((actuales) => sinClave(actuales, id));
       return confirmacion;
     } catch (err: unknown) {
       setDescartes((actuales) => ({ ...actuales, [id]: { tipo: 'error', mensaje: mensajeErrorDescarte(err) } }));
       return null;
     } finally {
       enviando.current.delete(id);
+    }
+  }, [sigueVigente]);
+
+  /**
+   * CH-22: pide la explicación de una recomendación (MX-25). No hace nada si ya
+   * se está pidiendo (un doble clic no manda dos) ni si la sesión cambió. Una
+   * respuesta de otra sesión o de una lista anterior no se aplica.
+   */
+  const cargarExplicacion = useCallback(async (id: string) => {
+    const carga = cargaActual.current;
+    const clave = `${carga}:${id}`;
+    if (!sigueVigente() || explicando.current.has(clave)) return;
+    explicando.current.add(clave);
+    setExplicaciones((actuales) => ({ ...actuales, [id]: { tipo: 'cargando' } }));
+    try {
+      const explicacion = await explicarRecomendacion(id);
+      if (!sigueVigente() || carga !== cargaActual.current) return;
+      setExplicaciones((actuales) => ({ ...actuales, [id]: { tipo: 'listo', explicacion } }));
+    } catch (err: unknown) {
+      if (!sigueVigente() || carga !== cargaActual.current) return;
+      setExplicaciones((actuales) => ({ ...actuales, [id]: { tipo: 'error', mensaje: mensajeErrorExplicacion(err) } }));
+    } finally {
+      explicando.current.delete(clave);
     }
   }, [sigueVigente]);
 
@@ -141,5 +186,5 @@ export function useRecomendaciones() {
     };
   }, [cargarRecomendaciones]);
 
-  return { estado, descartes, descartar, recargar: cargarRecomendaciones };
+  return { estado, descartes, descartar, explicaciones, cargarExplicacion, recargar: cargarRecomendaciones };
 }
