@@ -41,6 +41,11 @@ imagen exportada. Un PNG no se puede corregir.
 - Diseño del multi-tenancy
 - Consideraciones de seguridad
 
+### `contratos/`
+
+- Contratos verificables entre servicios: reglas, esquema JSON, ejemplos y regresión.
+- [S3-VI-01: eventos de uso y cobertura de recolectores v1](contratos/uso-recolectores-v1.md).
+
 ### `informe/`
 
 El documento de la entrega. **Un solo archivo compartido** (Google Docs u

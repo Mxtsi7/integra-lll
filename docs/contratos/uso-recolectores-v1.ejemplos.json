@@ -1,0 +1,113 @@
+{
+  "contrato": "uso-recolectores",
+  "version": 1,
+  "descripcion": "Fixtures del contrato de ingesta de uso y cobertura v1 (S3-VI-01). Un mismo recolector de Windows observa la misma suscripción durante tres días consecutivos: uso activo, cero observado y pausa sin medición. Los acuses corresponden al POST del primer evento, reenviado y conflictuado. Las fechas son coherentes con America/Santiago en horario de verano (UTC-3): el día local 2026-11-09 cierra a las 2026-11-10T03:00:00Z.",
+  "eventos_uso": [
+    {
+      "nombre": "uso_positivo",
+      "descripcion": "Día medido con uso real: dos tramos (42 + 53 minutos) que suman duracion_ms y cobertura del día completo.",
+      "payload": {
+        "version": 1,
+        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "recolector_id": "recolector-windows-8f14",
+        "origen": "cliente_windows",
+        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
+        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
+        "fecha": "2026-11-09",
+        "estado": "con_uso",
+        "duracion_ms": 5700000,
+        "tramos_actividad": [
+          {"inicio": "2026-11-09T12:10:00Z", "fin": "2026-11-09T12:52:00Z"},
+          {"inicio": "2026-11-09T18:05:00Z", "fin": "2026-11-09T18:58:00Z"}
+        ],
+        "cobertura": {"desde": "2026-11-09", "hasta": "2026-11-09"},
+        "ocurrido_en": "2026-11-10T03:00:00Z"
+      }
+    },
+    {
+      "nombre": "cero_observado",
+      "descripcion": "Día medido SIN uso: cero real (FE-29 puede afirmar bajo uso), no falta de dato. Acredita cobertura del día.",
+      "payload": {
+        "version": 1,
+        "event_id": "8c1d5a9e-7b2f-4e83-a6d4-1f90c2b3e4f5",
+        "recolector_id": "recolector-windows-8f14",
+        "origen": "cliente_windows",
+        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
+        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
+        "fecha": "2026-11-10",
+        "estado": "cero_observado",
+        "duracion_ms": 0,
+        "tramos_actividad": [],
+        "cobertura": {"desde": "2026-11-10", "hasta": "2026-11-10"},
+        "ocurrido_en": "2026-11-11T03:00:00Z"
+      }
+    },
+    {
+      "nombre": "sin_medicion",
+      "descripcion": "Día en pausa/sin medición: no hubo dato ni cobertura. Jamás puede interpretarse como uso cero.",
+      "payload": {
+        "version": 1,
+        "event_id": "9d2e6b0f-8c3a-4f94-b7e5-2a01d3c4f5a6",
+        "recolector_id": "recolector-windows-8f14",
+        "origen": "cliente_windows",
+        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
+        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
+        "fecha": "2026-11-11",
+        "estado": "sin_medicion",
+        "duracion_ms": 0,
+        "tramos_actividad": [],
+        "cobertura": null,
+        "ocurrido_en": "2026-11-12T03:00:00Z"
+      }
+    }
+  ],
+  "intervalos_cobertura": [
+    {
+      "nombre": "backfill_tras_reconexion",
+      "descripcion": "El recolector re-sincronizó y acredita que el uso del 5 al 8 de noviembre llegó COMPLETO (inclusive).",
+      "payload": {
+        "version": 1,
+        "event_id": "5a4b3c2d-1e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        "recolector_id": "recolector-windows-8f14",
+        "origen": "cliente_windows",
+        "organizacion_id": "9c214077-3b5a-4e2f-9d81-6a7b8c9d0e1f",
+        "suscripcion_id": "3f7d2b8a-1c4e-4f6a-9b2d-7e8f9a0b1c2d",
+        "desde": "2026-11-05",
+        "hasta": "2026-11-08",
+        "ocurrido_en": "2026-11-12T15:30:00Z"
+      }
+    }
+  ],
+  "acuses": [
+    {
+      "nombre": "aceptado_201",
+      "descripcion": "Primera recepción del evento de uso activo.",
+      "estado_http": 201,
+      "cuerpo": {
+        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "estado": "aceptado",
+        "detalle": "Evento de uso registrado por primera vez."
+      }
+    },
+    {
+      "nombre": "duplicado_200",
+      "descripcion": "Reenvío del mismo event_id tras un reintento: se confirma recepción sin repetir el efecto.",
+      "estado_http": 200,
+      "cuerpo": {
+        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "estado": "duplicado",
+        "detalle": "Evento ya procesado: no se repite el efecto."
+      }
+    },
+    {
+      "nombre": "conflicto_409",
+      "descripcion": "Mismo event_id con un payload distinto: se rechaza sin sobrescribir lo registrado.",
+      "estado_http": 409,
+      "cuerpo": {
+        "event_id": "7f9c24e8-3d1a-4b67-9c5e-2a8f41d90b3c",
+        "codigo": "conflicto_idempotencia",
+        "detalle": "event_id ya registrado con un payload distinto; no se sobrescribe."
+      }
+    }
+  ]
+}

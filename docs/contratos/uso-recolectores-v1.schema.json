@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "S3-VI-01: contrato de ingesta de uso y cobertura de recolectores v1",
+  "description": "La raíz valida un UsageEventPayload. CoverageIntervalPayload, AcuseUso y ErrorUso viven en $defs y se validan apuntando la raíz hacia ellos. Semántica, reglas de negocio y casos borde: uso-recolectores-v1.md.",
+  "$ref": "#/$defs/usage_event_payload",
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "instante": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "fecha": {"type": "string", "format": "date"},
+    "recolector_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"},
+    "origen": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,31}$"},
+    "estado_uso": {"enum": ["con_uso", "cero_observado", "sin_medicion"]},
+    "tramo_actividad": {
+      "type": "object",
+      "required": ["inicio", "fin"],
+      "properties": {
+        "inicio": {"$ref": "#/$defs/instante"},
+        "fin": {"$ref": "#/$defs/instante"}
+      }
+    },
+    "cobertura_diaria": {
+      "type": "object",
+      "required": ["desde", "hasta"],
+      "properties": {
+        "desde": {"$ref": "#/$defs/fecha"},
+        "hasta": {"$ref": "#/$defs/fecha"}
+      }
+    },
+    "usage_event_payload": {
+      "title": "UsageEventPayload",
+      "description": "POST /api/analitica/ingesta/uso/ — un día de uso de una suscripción, medido por un recolector.",
+      "type": "object",
+      "required": ["version", "event_id", "recolector_id", "origen", "organizacion_id", "suscripcion_id", "fecha", "estado", "duracion_ms", "tramos_actividad", "cobertura", "ocurrido_en"],
+      "properties": {
+        "version": {"const": 1, "type": "integer"},
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "recolector_id": {"$ref": "#/$defs/recolector_id"},
+        "origen": {"$ref": "#/$defs/origen"},
+        "organizacion_id": {"$ref": "#/$defs/uuid"},
+        "suscripcion_id": {"$ref": "#/$defs/uuid"},
+        "fecha": {"$ref": "#/$defs/fecha"},
+        "estado": {"$ref": "#/$defs/estado_uso"},
+        "duracion_ms": {"type": "integer", "minimum": 0, "maximum": 90000000},
+        "tramos_actividad": {"type": "array", "maxItems": 1500, "items": {"$ref": "#/$defs/tramo_actividad"}},
+        "cobertura": {"anyOf": [{"$ref": "#/$defs/cobertura_diaria"}, {"type": "null"}]},
+        "ocurrido_en": {"$ref": "#/$defs/instante"}
+      },
+      "allOf": [
+        {"if": {"properties": {"estado": {"const": "con_uso"}}},
+         "then": {"properties": {"duracion_ms": {"minimum": 1}, "tramos_actividad": {"minItems": 1}}}},
+        {"if": {"properties": {"estado": {"enum": ["cero_observado", "sin_medicion"]}}},
+         "then": {"properties": {"duracion_ms": {"maximum": 0}, "tramos_actividad": {"maxItems": 0}}}},
+        {"if": {"properties": {"estado": {"const": "sin_medicion"}}},
+         "then": {"properties": {"cobertura": {"type": "null"}}}}
+      ]
+    },
+    "coverage_interval_payload": {
+      "title": "CoverageIntervalPayload",
+      "description": "POST /api/analitica/ingesta/cobertura/ — acredita que el uso de un rango de días llegó COMPLETO.",
+      "type": "object",
+      "required": ["version", "event_id", "recolector_id", "origen", "organizacion_id", "suscripcion_id", "desde", "hasta", "ocurrido_en"],
+      "properties": {
+        "version": {"const": 1, "type": "integer"},
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "recolector_id": {"$ref": "#/$defs/recolector_id"},
+        "origen": {"$ref": "#/$defs/origen"},
+        "organizacion_id": {"$ref": "#/$defs/uuid"},
+        "suscripcion_id": {"$ref": "#/$defs/uuid"},
+        "desde": {"$ref": "#/$defs/fecha"},
+        "hasta": {"$ref": "#/$defs/fecha"},
+        "ocurrido_en": {"$ref": "#/$defs/instante"}
+      }
+    },
+    "acuse_uso": {
+      "title": "AcuseUso",
+      "description": "Cuerpo de las respuestas 201 aceptado y 200 duplicado.",
+      "type": "object",
+      "required": ["event_id", "estado", "detalle"],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/uuid"},
+        "estado": {"enum": ["aceptado", "duplicado"]},
+        "detalle": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    },
+    "error_uso": {
+      "title": "ErrorUso",
+      "description": "Cuerpo de las respuestas 400, 403, 404 y 409. event_id va solo cuando el receptor alcanzó a leerlo.",
+      "type": "object",
+      "required": ["codigo", "detalle"],
+      "properties": {
+        "event_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "codigo": {"enum": ["payload_invalido", "conflicto_idempotencia", "suscripcion_desconocida", "tenant_invalido"]},
+        "detalle": {"type": "string", "minLength": 1, "maxLength": 200}
+      }
+    }
+  }
+}

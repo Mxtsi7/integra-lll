@@ -48,3 +48,15 @@ export * from './api/verificacionCorreo';
 export * from './estadoCarga';
 export * from './api/calendario';
 export type { AuthSchemas } from './contratos/auth.generated';
+export type {
+  AcuseUso,
+  CodigoErrorUso,
+  CoberturaDiaria,
+  CoverageIntervalPayload,
+  EstadoAcuseUso,
+  EstadoUso,
+  ErrorUso,
+  TramoActividad,
+  UsageEventPayload,
+} from './contracts/uso-recolectores.dto';
+export { RUTA_INGESTA_COBERTURA, RUTA_INGESTA_USO } from './contracts/uso-recolectores.dto';
