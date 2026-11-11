@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { AuthStackParamList } from './types';
 import LoginScreen from '../screens/auth/LoginScreen';
 import RegistroScreen from '../screens/auth/RegistroScreen';
+import CuentaCreadaScreen from '../screens/auth/CuentaCreadaScreen';
 import RecuperarContrasenaScreen from '../screens/auth/RecuperarContrasenaScreen';
 import VerificarCorreoScreen from '../screens/auth/VerificarCorreoScreen';
 
@@ -27,6 +28,11 @@ export function AuthNavigator() {
         name="Registro"
         component={RegistroScreen}
         options={{ title: 'Crear Cuenta' }}
+      />
+      <Stack.Screen
+        name="CuentaCreada"
+        component={CuentaCreadaScreen}
+        options={{ title: 'Cuenta Creada', headerShown: false }}
       />
       <Stack.Screen
         name="RecuperarContrasena"
