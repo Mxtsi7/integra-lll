@@ -52,8 +52,8 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
     setTimeout(() => document.getElementById('email')?.focus());
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (evento: React.FormEvent) => {
+    evento.preventDefault();
     // Enviar una sola vez: un doble clic o Enter repetido no manda dos correos.
     if (!onSolicitarRecuperacion || isLoading) return;
 
@@ -132,8 +132,8 @@ export const RecuperarContrasenaPage: React.FC<RecuperarContrasenaProps> = ({
           placeholder="tu@correo.cl"
           icono={<Mail size={16} />}
           value={email}
-          onChange={(e) => {
-            setEmail(e.target.value);
+          onChange={(evento) => {
+            setEmail(evento.target.value);
             setErrorCorreo(null);
           }}
           error={errorCorreo ?? undefined}

@@ -5,6 +5,7 @@ import {
   configurarManejador401,
   ErrorDeApi,
   sesionDelToken,
+  type AuthResponse,
   type Usuario,
 } from '@ojoalgasto/shared';
 import {
@@ -21,7 +22,8 @@ export type EstadoAuth = 'cargando' | 'anonimo' | 'autenticado';
 
 export type EstadoPerfil = 'inactivo' | 'cargando' | 'cargado' | 'error';
 
-export type Tokens = { access_token: string; refresh_token: string };
+/** Par de tokens devueltos por el backend, derivados de la respuesta de autenticación canónica */
+export type Tokens = Pick<AuthResponse, 'access_token' | 'refresh_token'>;
 
 type AuthValue = {
   usuario: Usuario | null;

@@ -25,6 +25,8 @@ def _snapshot(suscripcion: Subscription) -> dict:
         "ciclo": suscripcion.frecuencia,
         "proximo_cobro": suscripcion.fecha_proximo_cobro.isoformat(),
         "estado": suscripcion.estado,
+        # Extensión opcional v2 que FE-18 ya admite; no inventar la fecha.
+        "fin_prueba": suscripcion.fin_prueba.isoformat() if suscripcion.fin_prueba else None,
     }
 
 

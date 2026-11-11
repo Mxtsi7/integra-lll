@@ -10,7 +10,7 @@ import { Spinner } from '../components/Spinner';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { useCobrosDelMes } from '../hooks/useCobrosDelMes';
 import { useMesEnUrl } from '../hooks/useMesEnUrl';
-import { esDelMes, isoDeFecha, mesDeFecha, partesDeMes, primerDiaDelMes } from '../utils/calendario';
+import { esDelMes, fechaATexto, mesDeFecha, partesDeMes, primerDiaDelMes } from '../utils/calendario';
 
 /**
  * Calendario de pagos.
@@ -24,7 +24,7 @@ import { esDelMes, isoDeFecha, mesDeFecha, partesDeMes, primerDiaDelMes } from '
  */
 export function CalendarioPage() {
   // "Hoy" se fija al abrir la página.
-  const [hoy] = useState(() => isoDeFecha(new Date()));
+  const [hoy] = useState(() => fechaATexto(new Date()));
   const { mes, irAMes } = useMesEnUrl(hoy);
   const { anio, mes: indiceMes } = partesDeMes(mes);
   const { estado, reintentar } = useCobrosDelMes(mes);
@@ -32,10 +32,10 @@ export function CalendarioPage() {
   // El día elegido. Si se navegó a otro mes, se muestra hoy (si es de ese
   // mes) o el día 1: el detalle siempre es de un día que está a la vista.
   const [elegido, setElegido] = useState(hoy);
-  const seleccionado = [elegido, hoy].find((d) => esDelMes(d, anio, indiceMes)) ?? primerDiaDelMes(mes);
+  const seleccionado = [elegido, hoy].find((dia) => esDelMes(dia, anio, indiceMes)) ?? primerDiaDelMes(mes);
 
   const cobros = estado.tipo === 'listo' ? estado.cobros : null;
-  const cobrosDelDia = cobros?.filter((c) => c.fecha === seleccionado) ?? null;
+  const cobrosDelDia = cobros?.filter((cobro) => cobro.fecha === seleccionado) ?? null;
 
   function irAHoy() {
     setElegido(hoy);

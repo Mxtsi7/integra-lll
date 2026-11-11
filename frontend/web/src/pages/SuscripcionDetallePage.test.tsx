@@ -9,7 +9,7 @@ import {
   getSuscripcion,
   getUsos,
   formatearFecha,
-  hoyLocalIso,
+  hoyEnTexto,
   registrarUso,
   type RegistroUso,
   type Suscripcion,
@@ -151,13 +151,13 @@ describe("Registrar minutos de uso (CH-14)", () => {
   it("un registro válido se envía una vez y se refleja una sola vez en el historial y el detalle", async () => {
     registrarUsoMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0.75 });
     await montar();
-    getUsosMock.mockResolvedValue([{ fecha: hoyLocalIso(), minutos: 45 }, ...USOS_A]);
+    getUsosMock.mockResolvedValue([{ fecha: hoyEnTexto(), minutos: 45 }, ...USOS_A]);
 
     fireEvent.change(minutos(), { target: { value: "45" } });
     await registrar();
 
     expect(registrarUsoMock).toHaveBeenCalledTimes(1);
-    expect(registrarUsoMock).toHaveBeenCalledWith("a", { minutos: 45, fecha: hoyLocalIso() });
+    expect(registrarUsoMock).toHaveBeenCalledWith("a", { minutos: 45, fecha: hoyEnTexto() });
     expect(filas()).toHaveLength(4); // la fila nueva, una sola vez
     expect(filas().filter((f) => f?.endsWith("45 min"))).toHaveLength(2); // la nueva + la del 18 oct
     expect(screen.getByText("0,75 h")).toBeInTheDocument(); // horas del mes, desde la respuesta (coma de Chile)
@@ -198,7 +198,7 @@ describe("Registrar minutos de uso (CH-14)", () => {
 
   it("un día de otro mes se registra y avisa que no suma a las horas de este mes (VI-10)", async () => {
     // Último día del mes anterior, calculado desde hoy (sin pasar por UTC).
-    const [anio, mes] = hoyLocalIso().split("-").map(Number);
+    const [anio, mes] = hoyEnTexto().split("-").map(Number);
     const fin = new Date(anio, mes - 1, 0);
     const diaMesAnterior = `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, "0")}-${String(fin.getDate()).padStart(2, "0")}`;
     registrarUsoMock.mockResolvedValue(SPOTIFY); // VI-10: las horas del mes no cambian

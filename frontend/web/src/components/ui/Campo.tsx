@@ -98,8 +98,8 @@ export function CampoContrasena({ id, disabled, ...resto }: CampoContrasenaProps
           aria-controls={idControl}
           title={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
           disabled={disabled}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setVisible((v) => !v)}
+          onMouseDown={(evento) => evento.preventDefault()}
+          onClick={() => setVisible((estabaVisible) => !estabaVisible)}
         >
           {visible ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
         </button>

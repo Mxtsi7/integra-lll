@@ -52,6 +52,7 @@ ESPACIOS = {
     "uso_mensual": 28,        # analytics · FE-28, por (tenant, suscripción, mes)
     "resumen_organizacion": 29,  # subscriptions · por organización
     "cobertura_uso": 30,      # analytics · FE-29, por (tenant, suscripción)
+    "cuota_importacion": 31,  # connectors · FE-07, por organización
 }
 
 

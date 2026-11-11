@@ -1,0 +1,82 @@
+# Aplicación explícita por tanda; nunca dentro del despliegue permanente.
+apiVersion: v1
+kind: Service
+metadata:
+  name: notifications
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  selector: { app: notifications, componente: api }
+  ports: [{ name: http, port: 8005, targetPort: 8005 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifications
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: notifications } }
+  template:
+    metadata:
+      labels: { app: notifications, componente: api, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      imagePullSecrets: [{ name: ghcr }]
+      initContainers:
+        - name: migrar
+          image: IMAGEN_NOTIFICATIONS
+          imagePullPolicy: Always
+          command: [sh, entrypoint.sh, echo, migraciones listas]
+          envFrom: &config
+            - configMapRef: { name: ojoalgasto }
+          env: &entorno
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-notifications, key: DATABASE_URL }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-rabbitmq, key: RABBITMQ_URL }
+            - { name: ESQUEMA_BD, value: notifications }
+          resources: &recursos_api
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 150m, memory: 256Mi }
+      containers:
+        - name: api
+          image: IMAGEN_NOTIFICATIONS
+          imagePullPolicy: Always
+          command: [gunicorn, 'notifications_config.wsgi:application', '--bind', '0.0.0.0:8005', '--workers', '1', '--access-logfile', '-']
+          envFrom: *config
+          env: *entorno
+          ports: [{ name: http, containerPort: 8005 }]
+          startupProbe:
+            httpGet: &salud
+              path: /health/
+              port: http
+              httpHeaders: [{ name: Host, value: notifications }]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: *salud
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: *salud
+            periodSeconds: 20
+            timeoutSeconds: 10
+          resources: *recursos_api
+        - name: consumidor
+          image: IMAGEN_NOTIFICATIONS
+          imagePullPolicy: Always
+          command: [python, '-u', manage.py, consumir_eventos]
+          envFrom: *config
+          env: *entorno
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 100m, memory: 160Mi }

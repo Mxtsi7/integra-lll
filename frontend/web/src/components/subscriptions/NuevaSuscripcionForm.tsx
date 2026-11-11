@@ -119,12 +119,12 @@ const CAMPO_DEL_ERROR: Record<keyof NuevaSuscripcionFormData, CampoSuscripcion> 
   finPrueba: "finPrueba",
 };
 
-function mismosDatos(a: NuevaSuscripcionFormData, b: NuevaSuscripcionFormData): boolean {
-  return (Object.keys(a) as (keyof NuevaSuscripcionFormData)[]).every((k) => a[k] === b[k]);
+function mismosDatos(actual: NuevaSuscripcionFormData, inicial: NuevaSuscripcionFormData): boolean {
+  return (Object.keys(actual) as (keyof NuevaSuscripcionFormData)[]).every((campo) => actual[campo] === inicial[campo]);
 }
 
 function enfocarPrimerError(errores: ErroresSuscripcion) {
-  const campo = ORDEN_CAMPOS.find((c) => errores[c]);
+  const campo = ORDEN_CAMPOS.find((nombreDeCampo) => errores[nombreDeCampo]);
   if (campo) document.getElementById(ID_CAMPO[campo])?.focus();
 }
 
@@ -145,9 +145,9 @@ export function NuevaSuscripcionForm({
   const frecuencias = datos?.frecuencias ?? [];
   // Lo que hoy se puede elegir: solo opciones activas.
   const opciones: OpcionesSuscripcion = {
-    monedas: monedas.filter((o) => o.activo).map((o) => o.codigo),
-    categorias: categorias.filter((o) => o.activo).map((o) => o.codigo),
-    frecuencias: frecuencias.map((o) => o.codigo),
+    monedas: monedas.filter((opcion) => opcion.activo).map((opcion) => opcion.codigo),
+    categorias: categorias.filter((opcion) => opcion.activo).map((opcion) => opcion.codigo),
+    frecuencias: frecuencias.map((opcion) => opcion.codigo),
   };
   const listo = !!datos && !cargando && !errorCatalogo
     && opciones.monedas.length > 0 && opciones.categorias.length > 0 && opciones.frecuencias.length > 0;
@@ -203,18 +203,18 @@ export function NuevaSuscripcionForm({
   }, [erroresCampos]);
 
   const handleChange = <K extends keyof NuevaSuscripcionFormData>(field: K, value: NuevaSuscripcionFormData[K]) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
+    setFormData((actual) => ({ ...actual, [field]: value }));
     // Al corregir un campo se borra su error.
     const campo = CAMPO_DEL_ERROR[field];
-    setErrores((prev) => {
-      if (!prev[campo]) return prev;
-      const { [campo]: _, ...resto } = prev;
+    setErrores((actuales) => {
+      if (!actuales[campo]) return actuales;
+      const { [campo]: errorQuitado, ...resto } = actuales;
       return resto;
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (evento: React.FormEvent) => {
+    evento.preventDefault();
     // Sin catálogo no hay opciones con qué validar ni enviar.
     if (!listo || isSaving) return;
 
@@ -247,7 +247,7 @@ export function NuevaSuscripcionForm({
       monto: monto.valor,
       moneda: formData.moneda,
       frecuencia: formData.frecuencia,
-      // La fecha viaja en ISO (YYYY-MM-DD), que es lo que espera la API.
+      // La fecha viaja como texto YYYY-MM-DD, que es lo que espera la API.
       fecha_proximo_cobro: formData.fechaDeCobro,
       categoria: formData.categoria,
       estado: formData.enPrueba ? "prueba" : "activo",
@@ -280,7 +280,7 @@ export function NuevaSuscripcionForm({
           type="text"
           placeholder="Netflix, Spotify, el gimnasio…"
           value={formData.nombre}
-          onChange={(e) => handleChange("nombre", e.target.value)}
+          onChange={(evento) => handleChange("nombre", evento.target.value)}
           error={errores.nombre}
           autoFocus
           required
@@ -298,7 +298,7 @@ export function NuevaSuscripcionForm({
             autoComplete="off"
             placeholder="0"
             value={formData.monto}
-            onChange={(e) => handleChange("monto", e.target.value)}
+            onChange={(evento) => handleChange("monto", evento.target.value)}
             error={errores.monto}
             required
           />
@@ -307,13 +307,13 @@ export function NuevaSuscripcionForm({
             etiqueta="Moneda"
             className={styles.moneda}
             value={formData.moneda}
-            onChange={(e) => handleChange("moneda", e.target.value)}
+            onChange={(evento) => handleChange("moneda", evento.target.value)}
             error={errores.moneda}
           >
             {!opciones.monedas.includes(formData.moneda) && <option value={formData.moneda}>Selecciona una moneda</option>}
-            {monedas.filter((o) => o.activo).map((m) => (
-              <option key={m.codigo} value={m.codigo}>
-                {m.nombre} ({m.codigo})
+            {monedas.filter((opcion) => opcion.activo).map((moneda) => (
+              <option key={moneda.codigo} value={moneda.codigo}>
+                {moneda.nombre} ({moneda.codigo})
               </option>
             ))}
           </CampoSelect>
@@ -324,13 +324,13 @@ export function NuevaSuscripcionForm({
             id={ID_CAMPO.frecuencia}
             etiqueta="Se cobra"
             value={formData.frecuencia}
-            onChange={(e) => handleChange("frecuencia", e.target.value as Frecuencia)}
+            onChange={(evento) => handleChange("frecuencia", evento.target.value as Frecuencia)}
             error={errores.frecuencia}
           >
             {!formData.frecuencia && <option value="">Selecciona frecuencia</option>}
-            {frecuencias.map((f) => (
-              <option key={f.codigo} value={f.codigo}>
-                {f.nombre}
+            {frecuencias.map((opcion) => (
+              <option key={opcion.codigo} value={opcion.codigo}>
+                {opcion.nombre}
               </option>
             ))}
           </CampoSelect>
@@ -338,13 +338,13 @@ export function NuevaSuscripcionForm({
             id={ID_CAMPO.categoria}
             etiqueta="Categoría"
             value={formData.categoria}
-            onChange={(e) => handleChange("categoria", e.target.value)}
+            onChange={(evento) => handleChange("categoria", evento.target.value)}
             error={errores.categoria}
           >
             {!opciones.categorias.includes(formData.categoria) && <option value={formData.categoria}>Selecciona una categoría</option>}
-            {categorias.filter((o) => o.activo).map((c) => (
-              <option key={c.codigo} value={c.codigo}>
-                {c.nombre}
+            {categorias.filter((opcion) => opcion.activo).map((nombreDeCampo) => (
+              <option key={nombreDeCampo.codigo} value={nombreDeCampo.codigo}>
+                {nombreDeCampo.nombre}
               </option>
             ))}
           </CampoSelect>
@@ -355,7 +355,7 @@ export function NuevaSuscripcionForm({
           etiqueta="Próximo cobro"
           type="date"
           value={formData.fechaDeCobro}
-          onChange={(e) => handleChange("fechaDeCobro", e.target.value)}
+          onChange={(evento) => handleChange("fechaDeCobro", evento.target.value)}
           error={errores.fechaProximoCobro}
           required
         />
@@ -364,7 +364,7 @@ export function NuevaSuscripcionForm({
           <input
             type="checkbox"
             checked={formData.enPrueba}
-            onChange={(e) => handleChange("enPrueba", e.target.checked)}
+            onChange={(evento) => handleChange("enPrueba", evento.target.checked)}
           />
           <span>Está en período de prueba gratis</span>
         </label>
@@ -376,7 +376,7 @@ export function NuevaSuscripcionForm({
             type="date"
             ayuda="Te avisamos antes de que empiece a cobrar."
             value={formData.finPrueba}
-            onChange={(e) => handleChange("finPrueba", e.target.value)}
+            onChange={(evento) => handleChange("finPrueba", evento.target.value)}
             error={errores.finPrueba}
             required
           />

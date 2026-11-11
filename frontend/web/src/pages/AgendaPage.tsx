@@ -9,14 +9,19 @@ import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia } from '../components/ui/Insignia';
 import { useCobrosDelMes } from '../hooks/useCobrosDelMes';
 import { useMesEnUrl } from '../hooks/useMesEnUrl';
-import { isoDeFecha, mesDeFecha, partesDeMes } from '../utils/calendario';
+import { fechaATexto, mesDeFecha, partesDeMes } from '../utils/calendario';
+
+/** Para ordenar cobros por fecha: negativo si `cobro` es de un día anterior a `otroCobro`. */
+function compararPorFecha(cobro: CobroCalendario, otroCobro: CobroCalendario): number {
+  return cobro.fecha.localeCompare(otroCobro.fecha);
+}
 
 /** Agrupa por día, en orden de fecha. Dentro del día se respeta el orden de la API (por servicio). */
 function porDia(cobros: CobroCalendario[]): { fecha: string; cobros: CobroCalendario[] }[] {
   const grupos = new Map<string, CobroCalendario[]>();
   // Las fechas "YYYY-MM-DD" se ordenan bien como texto; sort es estable.
-  for (const c of [...cobros].sort((a, b) => a.fecha.localeCompare(b.fecha))) {
-    grupos.set(c.fecha, [...(grupos.get(c.fecha) ?? []), c]);
+  for (const cobro of [...cobros].sort(compararPorFecha)) {
+    grupos.set(cobro.fecha, [...(grupos.get(cobro.fecha) ?? []), cobro]);
   }
   return [...grupos].map(([fecha, delDia]) => ({ fecha, cobros: delDia }));
 }
@@ -27,7 +32,7 @@ function porDia(cobros: CobroCalendario[]): { fecha: string; cobros: CobroCalend
  * agenda y calendario muestran exactamente los mismos cobros.
  */
 export function AgendaPage() {
-  const [hoy] = useState(() => isoDeFecha(new Date()));
+  const [hoy] = useState(() => fechaATexto(new Date()));
   const { mes, irAMes } = useMesEnUrl(hoy);
   const { anio, mes: indiceMes } = partesDeMes(mes);
   const { estado, reintentar } = useCobrosDelMes(mes);

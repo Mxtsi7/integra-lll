@@ -19,7 +19,14 @@ estado real contrastado con `main`.
 | Cómo se piden las consultas entre frontend y backend (pendiente del profe, 08-10-2026) | Explicado con un ejemplo de punta a punta | [06-consultas-frontend-backend.md](06-consultas-frontend-backend.md) |
 | **Sprint 2 · FE-06** Cifrar tokens de conectores y gestionar claves | Hecho, 32 pruebas, PR abierto | [07-cifrado-de-tokens-fe06.md](07-cifrado-de-tokens-fe06.md) |
 | **Sprint 2 · FE-12** Normalizar nombres de proveedores | Hecho, 80 pruebas | [08-normalizacion-de-proveedores-fe12.md](08-normalizacion-de-proveedores-fe12.md) |
-| **Sprint 2 · FE-17 y FE-18** Alertas de próximos cobros y avisos de fin de prueba | Hecho, 51 pruebas; FE-18 espera que el contrato traiga `fin_prueba` | [09-alertas-generadas-fe17-fe18.md](09-alertas-generadas-fe17-fe18.md) |
+| **Sprint 2 · FE-17 y FE-18** Alertas de próximos cobros y avisos de fin de prueba | Generador implementado; `fin_prueba` ya declarado; evidencia de tanda pendiente | [09-alertas-generadas-fe17-fe18.md](09-alertas-generadas-fe17-fe18.md) |
+| **Sprint 2 · FE-07** Validar y recibir archivos CSV y cartolas | Hecho, 68 pruebas | [10-subida-de-archivos-fe07.md](10-subida-de-archivos-fe07.md) |
+| **FE-24 · ingesta y tanda** | Ingesta implementada; emisión alert.due y evidencia pendientes | [11-alcance-fe24-tanda.md](11-alcance-fe24-tanda.md) |
+| **Sprint 2 · FE-01 a FE-05** Cuentas conectadas: modelo, listado, OAuth y desconexión | Hecho, 145 pruebas (más 3 que necesitan PostgreSQL) | [12-cuentas-conectadas-fe01-fe05.md](12-cuentas-conectadas-fe01-fe05.md) |
+| **Sprint 2 · FE-08** Modelar importaciones y exponer su progreso | Hecho, 48 pruebas | [13-progreso-de-importaciones-fe08.md](13-progreso-de-importaciones-fe08.md) |
+| **Sprint 2 · FE-16, FE-19, FE-20 y FE-21** Alertas: estados, listado, contador y preferencias | Hecho, 86 pruebas | [14-alertas-y-preferencias-fe16-fe21.md](14-alertas-y-preferencias-fe16-fe21.md) |
+| **Sprint 2 · FE-28 y FE-29** Uso por periodo y puntaje de bajo uso | Hecho, 130 pruebas; el consumidor de eventos todavía no está conectado | [15-uso-por-periodo-y-bajo-uso-fe28-fe29.md](15-uso-por-periodo-y-bajo-uso-fe28-fe29.md) |
+| **Sprint 2 · Pedido del profesor** Snapshot en vivo de la comparación con y sin RabbitMQ, con autoscaling | Hecho, 24 pruebas nuevas y opción 12 del menú; falta una corrida real en el cluster | [16-snapshot-comparacion-rabbitmq-y-hpa.md](16-snapshot-comparacion-rabbitmq-y-hpa.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

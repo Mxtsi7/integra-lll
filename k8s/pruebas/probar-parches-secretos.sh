@@ -13,6 +13,14 @@ printf '%s\n' "$*" >> "$ARGUMENTOS_PRUEBA"
 case "$*" in
   'get deployment/rabbitmq --ignore-not-found -o json') : ;;
   'get secret ojoalgasto-bd-'*'jsonpath={.data.DB_PASSWORD}') printf '%064d' 0 | base64 ;;
+  # El Secret del broker, para configurar-usuario-rabbitmq.sh. Va ANTES del
+  # patron general 'get secret ojoalgasto'*, que si no lo atrapa primero y
+  # devuelve vacio: el guion se niega a seguir sin usuario, como debe.
+  'get secret ojoalgasto-rabbitmq -o jsonpath={.data.RABBITMQ_USER}') printf ojoalgasto | base64 ;;
+  'get secret ojoalgasto-rabbitmq -o jsonpath={.data.RABBITMQ_PASSWORD}') printf '%064d' 0 | base64 ;;
+  # Se traga la clave que llega por la tuberia; el guion REMOTO se prueba
+  # aparte, en scripts/tests/test_configurar_usuario_rabbitmq.py.
+  'exec -i deploy/rabbitmq'*) cat >/dev/null ;;
   'get secret ojoalgasto -o jsonpath={.data.POSTGRES_PASSWORD}') printf cHJ1ZWJhLXBvc3RncmVz ;;
   'get secret ojoalgasto'*) : ;;
   'patch secret ojoalgasto'*)
@@ -52,6 +60,10 @@ fi
 grep -q 'ELIMINACION_INTERNA_SECRET' "$PARCHES_PRUEBA.json"
 grep -q 'CLAVES_CIFRADO' "$PARCHES_PRUEBA.json"
 grep -q 'DATABASE_URL' "$PARCHES_PRUEBA.json"
+# El usuario del broker no se crea solo: RABBITMQ_DEFAULT_USER/PASS no hacen
+# nada cuando el PVC ya tiene datos. Si desplegar.sh deja de invocar el guion,
+# los clientes quedan sin poder autenticarse y nadie se entera hasta el deploy.
+grep -q 'exec -i deploy/rabbitmq' "$ARGUMENTOS_PRUEBA"
 if grep -qE 'stringData|prueba-postgres' "$ARGUMENTOS_PRUEBA" "$TMP/salida"; then exit 1; fi
 while IFS= read -r archivo; do [ ! -e "$archivo" ]; done < "$PARCHES_PRUEBA"
 : > "$PARCHES_PRUEBA"

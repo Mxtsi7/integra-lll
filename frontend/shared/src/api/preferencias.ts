@@ -78,8 +78,8 @@ function copiar<K extends keyof PreferenciasEditables>(
 }
 
 /** Lo editable de una respuesta completa (sin canales_disponibles ni fechas). */
-export function preferenciasEditables(p: PreferenciasEditables): PreferenciasEditables {
+export function preferenciasEditables(preferencias: PreferenciasEditables): PreferenciasEditables {
   const editables = {} as PreferenciasEditables;
-  for (const clave of CLAVES_PREFERENCIAS) copiar(editables, p, clave);
+  for (const clave of CLAVES_PREFERENCIAS) copiar(editables, preferencias, clave);
   return editables;
 }

@@ -66,7 +66,7 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
       # Solo subscriptions tiene pruebas contra el broker; en los demás queda
       # vacía y esas pruebas se saltan solas.
-      RABBITMQ_PRUEBA_URL: ${{ matrix.servicio == 'subscriptions' && 'amqp://guest:guest@localhost:5672/' || '' }}
+      RABBITMQ_PRUEBA_URL: ${{ (matrix.servicio == 'subscriptions' || matrix.servicio == 'notifications') && 'amqp://guest:guest@localhost:5672/' || '' }}
 
     defaults:
       run:
@@ -90,6 +90,13 @@ jobs:
 
       - name: Pruebas
         run: pytest -v
+
+      - name: Imagen real de Notificaciones (migración, contrato y comando)
+        if: matrix.servicio == 'notifications'
+        working-directory: ${{ github.workspace }}
+        run: |
+          docker build -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/notifications -t notifications-prueba .
+          docker run --rm -e SECRET_KEY=solo-smoke -e DEBUG=False -e DATABASE_URL=sqlite:///:memory: notifications-prueba sh -c 'python manage.py check && python manage.py migrate --noinput && python manage.py help consumir_eventos && python manage.py help reprocesar_fallidos'
 
   # ── Código compartido: shared/cifrado ──────────────────────────────
   # No pertenece a ningún servicio, así que tiene su propio trabajo. Corre
@@ -189,6 +196,13 @@ jobs:
 
       - name: Arnés de la comparación (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-comparar-cola.sh
+
+      - name: Comparador local de tiempos (HTTP real local, sin cluster)
+        run: |
+          python -m unittest discover -s scripts/tests -p 'test_comparar*.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_estado_comparador.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_lanzador_comparador.py' -v
 
       - name: Generador externo (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-carga.sh

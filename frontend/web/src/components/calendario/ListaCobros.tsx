@@ -38,9 +38,9 @@ export function TotalesPorMoneda({ cobros, etiqueta }: { cobros: CobroCalendario
   return (
     <p className={styles.total}>
       {etiqueta}:{' '}
-      {totales.map(({ moneda, total }, i) => (
+      {totales.map(({ moneda, total }, indice) => (
         <span key={moneda}>
-          {i > 0 && ' y '}
+          {indice > 0 && ' y '}
           <strong>{formatearMonto(total, moneda)}</strong>
         </span>
       ))}

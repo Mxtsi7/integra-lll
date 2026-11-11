@@ -59,8 +59,8 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
     setTimeout(() => document.getElementById(id)?.focus());
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (evento: React.FormEvent) => {
+    evento.preventDefault();
     if (!onSubmitNewPassword || !token || isLoading) return;
 
     // Misma política que el registro y el backend (shared/validaciones.ts).
@@ -181,8 +181,8 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
           ayuda="Al menos 8 caracteres, con una letra y un número."
           icono={<Lock size={16} />}
           value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
+          onChange={(evento) => {
+            setPassword(evento.target.value);
             setErrores((actuales) => ({ ...actuales, password: undefined }));
           }}
           error={errores.password}
@@ -197,8 +197,8 @@ export const RestablecerContrasenaPage: React.FC<RestablecerContrasenaProps> = (
           placeholder="La misma de arriba"
           icono={<Lock size={16} />}
           value={confirmPassword}
-          onChange={(e) => {
-            setConfirmPassword(e.target.value);
+          onChange={(evento) => {
+            setConfirmPassword(evento.target.value);
             setErrores((actuales) => ({ ...actuales, confirmacion: undefined }));
           }}
           error={errores.confirmacion}

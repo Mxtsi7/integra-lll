@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   descartarRecomendacion,
   ErrorDeApi,
+  explicarRecomendacion,
   getRecomendaciones,
   getUsuarioActual,
   guardarTokens,
   obtenerAccessToken,
   revocarSesion,
+  type ExplicacionRecomendacion,
   type ListaRecomendaciones,
   type Recomendacion,
   type RecomendacionDescartada,
@@ -29,12 +31,14 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     ...real,
     getRecomendaciones: vi.fn(),
     descartarRecomendacion: vi.fn(),
+    explicarRecomendacion: vi.fn(),
     getUsuarioActual: vi.fn(),
     revocarSesion: vi.fn(),
   };
 });
 const getRecomendacionesMock = vi.mocked(getRecomendaciones);
 const descartarMock = vi.mocked(descartarRecomendacion);
+const explicarMock = vi.mocked(explicarRecomendacion);
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 
 const PERSONA_A: Usuario = { id: "7", nombre: "Ana", correo: "ana@ejemplo.com", rol: "titular", organizacion_id: "org-a", plan: "gratuito" };
@@ -62,6 +66,20 @@ const lista = (results: Recomendacion[]): ListaRecomendaciones => ({
 });
 const CONFIRMACION_A: RecomendacionDescartada = { recomendacion_id: DE_A.id, vigente_hasta: "2026-11-28T12:00:00Z", descartado: true };
 const AVISO_DESCARTE = "Listo, dejamos de mostrarte esa recomendación.";
+const EXPLICACION_DE_A: ExplicacionRecomendacion = {
+  id: DE_A.id,
+  suscripcion_id: "s-a",
+  explicacion: "Explicación privada de A. Es una estimación, no un ahorro confirmado.",
+  fuente: "reglas",
+  estado: "disponible",
+  motivo: DE_A.motivo ?? null,
+  ahorro_estimado: 5000,
+  moneda: "CLP",
+  base_calculo: "el plan más barato",
+  evidencia: null,
+  uso: "no_evaluado",
+  advertencia_uso: "La consolidación se basa en solapamiento; no afirma bajo uso.",
+};
 
 /** Un JWT con los claims que pone el servicio auth. La firma da igual: el front no la verifica. */
 function token(claims: { user_id: number; organizacion_id: string; sid: string; jti: string }): string {
@@ -134,6 +152,7 @@ beforeEach(() => {
   getUsuarioActualMock.mockReset().mockImplementation(async () => (obtenerAccessToken() === TOKEN_B ? PERSONA_B : PERSONA_A));
   getRecomendacionesMock.mockReset().mockImplementation(async () => lista(obtenerAccessToken() === TOKEN_B ? [DE_B] : [DE_A]));
   descartarMock.mockReset();
+  explicarMock.mockReset();
   vi.mocked(revocarSesion).mockReset().mockResolvedValue(true);
 });
 
@@ -275,6 +294,21 @@ describe("Recomendaciones al cambiar de sesión (revisión de #128)", () => {
 
     await act(async () => descarteA.resolver(CONFIRMACION_A));
     expect(screen.queryByText(AVISO_DESCARTE)).not.toBeInTheDocument();
+  });
+
+  it("una explicación de A que llega tarde no aparece en la tarjeta de B", async () => {
+    const explicacionA = diferida<ExplicacionRecomendacion>();
+    explicarMock.mockReturnValue(explicacionA.promesa);
+    await montar();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Ver explicación: Servicio privado de A" })));
+
+    await otraPestanaGuarda(TOKEN_B);
+    await act(async () => explicacionA.resolver(EXPLICACION_DE_A));
+
+    expect(tarjeta("Servicio de B")).toBeInTheDocument();
+    expect(screen.queryByText(EXPLICACION_DE_A.explicacion)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ver explicación: Servicio de B" })).toHaveAttribute("aria-expanded", "false");
+    expect(explicarMock).toHaveBeenCalledTimes(1); // solo la de A: por B no se pidió nada
   });
 
   it("un refresh del token de A en otra pestaña no recarga ni vacía la página", async () => {
