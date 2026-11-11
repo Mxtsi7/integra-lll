@@ -43,6 +43,39 @@ parchear_secreto() (
   kubectl patch secret ojoalgasto --type=merge --patch-file "$PARCHE" >/dev/null
 )
 
+# ── Servicios repartidos en el namespace de otro integrante ─────────────────
+# k8s/reparto.env dice dónde vive cada uno (ver k8s/README.md). Acá solo se
+# usa para que el gateway y Auth del núcleo los busquen ahí; desplegarlos es
+# trabajo de k8s/desplegar-satelite.sh.
+#
+# El archivo no se ejecuta: se lee, y solo admite el alfabeto de un namespace.
+leer_reparto() {
+  sed -n "s/^$1=\([a-z0-9-]*\)[[:space:]]*\$/\1/p" k8s/reparto.env | tail -n 1
+}
+NS_NOTIFICATIONS="$(leer_reparto NS_NOTIFICATIONS)"
+URL_NOTIFICATIONS="http://notifications:8005"
+DESTINOS_ELIMINACION="subscriptions"
+if [ -n "$NS_NOTIFICATIONS" ]; then
+  URL_NOTIFICATIONS="http://notifications.$NS_NOTIFICATIONS:8005"
+  # Un servicio que guarda datos de una organización tiene que estar en la
+  # lista de borrado, o al eliminar la organización sus filas quedan huérfanas.
+  DESTINOS_ELIMINACION="subscriptions,notifications"
+fi
+
+# Sustituye imágenes, host público y el reparto. Todo manifiesto que se aplica
+# pasa por acá: aplicar uno en crudo devolvería el gateway a la dirección
+# corta de un servicio que ya no vive en este namespace.
+renderizar() {
+  sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \
+      -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
+      -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \
+      -e "s|IMAGEN_WEB|$IMAGEN_WEB|g" \
+      -e "s|ojoalgasto-forellana.dev.censei.cl|$HOST_PUBLICO|g" \
+      -e "s|^\(  URL_NOTIFICATIONS:\) .*\$|\1 $URL_NOTIFICATIONS|" \
+      -e "s|^\(  ELIMINACION_DESTINOS:\) .*\$|\1 $DESTINOS_ELIMINACION|" \
+      "$1"
+}
+
 IMAGEN_AUTH="$REGISTRO/ojoalgasto-auth:$ETIQUETA"
 IMAGEN_SUBSCRIPTIONS="$REGISTRO/ojoalgasto-subscriptions:$ETIQUETA"
 IMAGEN_GATEWAY="$REGISTRO/ojoalgasto-gateway:$ETIQUETA"
@@ -145,7 +178,7 @@ fi
 bash k8s/configurar-usuario-rabbitmq.sh
 
 # Preparar Postgres antes de las migraciones de dominio.
-kubectl apply -f k8s/00-configuracion.yaml
+renderizar k8s/00-configuracion.yaml | kubectl apply -f -
 kubectl apply -f k8s/01-postgres.yaml
 kubectl rollout status statefulset/postgres --timeout=300s
 bash k8s/configurar-usuarios-bd.sh
@@ -168,12 +201,7 @@ for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml \
     SIN_POLITICAS=1
     continue
   fi
-  sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \
-      -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
-      -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \
-      -e "s|IMAGEN_WEB|$IMAGEN_WEB|g" \
-      -e "s|ojoalgasto-forellana.dev.censei.cl|$HOST_PUBLICO|g" \
-      "$f" | kubectl apply -f -
+  renderizar "$f" | kubectl apply -f -
 done
 
 echo "── esperando a que todo quede arriba ──"
