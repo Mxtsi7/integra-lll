@@ -47,11 +47,20 @@ export function useCuentas(api: ApiCuentas = API_REAL) {
 
       try {
         const cuentas = await api.getCuentasConectadas();
-        if (miCarga !== numeroDeCarga.current) return;
+        if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
         setEstado({ tipo: 'listo', datos: cuentas });
       } catch {
-        if (miCarga !== numeroDeCarga.current || enSegundoPlano) return;
-        setEstado({ tipo: 'error' });
+        if (!sigueMontado.current) return;
+
+        // Invariante para corregir el bloqueo:
+        // Si la reconciliación falla o la consulta fue superada, NUNCA debemos dejar
+        // la pantalla congelada en 'cargando'. Si no hay datos visibles, pasa a 'error'.
+        setEstado((actual) => {
+          if (miCarga !== numeroDeCarga.current || enSegundoPlano) {
+            return actual.tipo === 'cargando' ? { tipo: 'error' } : actual;
+          }
+          return { tipo: 'error' };
+        });
       }
     },
     [api],
