@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     CallbackAutorizacionView,
+    CobroCandidatoViewSet,
     CuentaConectadaViewSet,
     ImportacionViewSet,
     IniciarAutorizacionView,
@@ -17,6 +18,15 @@ router.register(r"conectores", CuentaConectadaViewSet, basename="cuenta-conectad
 # "importaciones", en español, por lo mismo: el gateway reenvía la ruta
 # intacta y un nombre en inglés moriría en un 404 invisible desde afuera.
 router.register(r"importaciones", ImportacionViewSet, basename="importacion")
+# S3-FE-14: los candidatos que la vista previa muestra antes de confirmar.
+# Ruta propia y no anidada bajo `importaciones/`: S3-CH-04 lista los de los
+# DOS orígenes juntos, y los de correo no vienen de una importación de
+# archivo. Colgarlos de `importaciones/<id>/candidatos/` obligaría a pedirlos
+# archivo por archivo y dejaría los de correo sin dónde vivir.
+#
+# OJO: el gateway enruta por prefijo, así que esta ruta necesita su entrada en
+# `RUTAS` (gateway/config/settings.py) o desde afuera es un 404.
+router.register(r"candidatos", CobroCandidatoViewSet, basename="cobro-candidato")
 
 # ── El orden importa ─────────────────────────────────────────────────
 # El router arma la ruta de detalle como `conectores/<pk>/`, y el lookup por

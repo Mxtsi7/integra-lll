@@ -212,9 +212,11 @@ Deployment en `k8s/` (está en la lista de `k8s/tandas/perfiles.yaml`), y sin
 `connectors-worker` la importación se queda `pendiente`. En
 `docker-compose.yml` el worker sí existe y el circuito corre completo.
 
-**Falta la vista previa**: S3-FE-14 expone estos candidatos y estos errores,
-S3-FE-15 y S3-FE-16 los confirman o los rechazan, y S3-FE-17 los deduplica
-entre archivos, que es para lo que existe la unicidad de la tabla.
+**La vista previa ya los expone**: S3-FE-14 los lista en
+`GET /api/candidatos/` (ver
+[19-consultar-candidatos-s3-fe-14.md](19-consultar-candidatos-s3-fe-14.md)).
+Faltan S3-FE-15 y S3-FE-16, que los confirman o los rechazan, y S3-FE-17, que
+los deduplica entre archivos: para eso existe la unicidad de la tabla.
 
 **El PDF sigue sin lector.** Se admite al subir desde FE-07 y acá termina en
 `formato_sin_lector`. Es honesto, pero es una puerta que promete algo que no
