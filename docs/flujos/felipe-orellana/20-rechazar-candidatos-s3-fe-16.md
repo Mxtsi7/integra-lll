@@ -88,9 +88,15 @@ si nadie la hubiera visto nunca.
 
 **Rechazar de nuevo da 200, no un error.** Y la segunda petición no reescribe
 la auditoría: `decidido_en` y `decidido_por` son los de la primera. La
-decisión es la primera, no la última petición que llegó. Es lo que le permite
-a S3-CH-09 reintentar sin cuidarse de los dobles envíos, que es literalmente
-el nombre de esa tarjeta.
+decisión es la primera, no la última petición que llegó.
+
+**Qué cubre eso y qué no.** La idempotencia protege el resultado *en el
+servidor*: si la respuesta se pierde o la red falla, S3-CH-09 puede reintentar
+sin miedo a duplicar la decisión ni a pisar la auditoría. **No reemplaza lo
+que esa tarjeta pide en la interfaz**: deshabilitar la acción mientras la
+solicitud está pendiente, para que un doble clic no genere dos solicitudes
+concurrentes. El servidor aguanta el doble envío; evitarlo es trabajo del
+cliente, y se comprueba en S3-CH-09, no acá.
 
 La guarda va en el `WHERE` y no en memoria: dos peticiones simultáneas sobre
 la misma fila leen las dos `propuesto`, y sin el filtro las dos escribirían su
