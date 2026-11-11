@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,7 +26,8 @@ import {
   MENSAJE_ERROR_RED,
 } from '../../services/clienteHttp';
 import { NavButton } from '../components/NavButton';
-import type { AuthScreenProps } from '../../navigation/types';
+import type { AuthScreenProps, AuthStackParamList } from '../../navigation/types';
+import { CuentaCreadaView } from './CuentaCreadaScreen';
 import styles from './RegistroScreen.styles';
 
 export interface RegistroFormProps {
@@ -486,17 +488,18 @@ export function RegistroForm({
 export interface RegistroScreenPropsContainer {
   navigation?: AuthScreenProps<'Registro'>['navigation'];
   route?: Partial<AuthScreenProps<'Registro'>['route']> & {
-    params?: {
-      codigoOrganizacion?: string | null;
-      [key: string]: unknown;
-    };
+    params?: AuthStackParamList['Registro'];
   };
   /** Función para inyectar cliente de registro en pruebas (por defecto shared register) */
   onRegisterApi?: (payload: RegisterPayload) => Promise<RegisterResponse>;
   /** Callback ejecutado tras crear exitosamente la cuenta (desbloquea SE-13) */
   onRegistroExitoso?: (respuesta: RegisterResponse) => void;
+  /** Callback opcional al continuar desde la pantalla de cuenta creada hacia Login */
+  onContinuarLogin?: () => void;
+  /** Permite forzar el estado de cuenta creada en pruebas de interfaz */
+  cuentaCreadaInicial?: RegisterResponse | null;
   /** Código de organización opcional si el flujo lo incluye */
-  codigoOrganizacion?: string | null;
+  codigoOrganizacion?: RegisterPayload['codigoOrganizacion'];
   /** Sobrescribe onSubmit para pruebas personalizadas o arnés de navegación */
   onSubmit?: (datos: DatosRegistro) => void | Promise<void>;
   /** Permite forzar el estado cargando en pruebas de interfaz */
@@ -508,14 +511,17 @@ export interface RegistroScreenPropsContainer {
 }
 
 /**
- * Contenedor de pantalla conectado a React Navigation y al backend de Auth (SE-11 / SE-12).
- * Conecta con register de @ojoalgasto/shared, mapea errores de DRF y previene envíos duplicados.
+ * Contenedor de pantalla conectado a React Navigation y al backend de Auth (SE-11 / SE-12 / SE-13).
+ * Conecta con register de @ojoalgasto/shared, mapea errores de DRF, previene envíos duplicados
+ * y despliega la confirmación de cuenta creada para continuar a Login sin sesiones ficticias.
  */
 export default function RegistroScreen({
   navigation,
   route,
   onRegisterApi = register,
   onRegistroExitoso,
+  onContinuarLogin,
+  cuentaCreadaInicial,
   codigoOrganizacion,
   onSubmit: propOnSubmit,
   cargando: propCargando,
@@ -525,6 +531,10 @@ export default function RegistroScreen({
   const [cargandoInterno, setCargandoInterno] = useState(false);
   const [erroresServidor, setErroresServidor] = useState<ErroresRegistro>({});
   const [errorGeneralInterno, setErrorGeneralInterno] = useState<string | null>(null);
+  const [cuentaCreadaInterna, setCuentaCreadaInterna] = useState<RegisterResponse | null>(null);
+
+  const cuentaCreada =
+    cuentaCreadaInicial !== undefined ? cuentaCreadaInicial : cuentaCreadaInterna;
 
   // Candado síncrono para evitar dobles envíos concurrentes antes de que React renderice el nuevo estado
   const peticionEnVueloRef = useRef(false);
@@ -548,6 +558,31 @@ export default function RegistroScreen({
       return copia;
     });
   };
+
+  const handleContinuarLogin = () => {
+    setCuentaCreadaInterna(null);
+    if (onContinuarLogin) {
+      onContinuarLogin();
+    } else {
+      navigation?.navigate('Login');
+    }
+  };
+
+  const handleVolverLogin = () => {
+    setCuentaCreadaInterna(null);
+    navigation?.navigate('Login');
+  };
+
+  // Criterio de aceptación SE-13: Atrás no reenvía el formulario ni duplica registro
+  // Intercepta el botón físico de Android mientras la cuenta creada esté visible
+  useEffect(() => {
+    if (!cuentaCreada) return;
+    const suscripcion = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleVolverLogin();
+      return true; // Previene el retroceso al formulario para no duplicar peticiones
+    });
+    return () => suscripcion.remove();
+  }, [cuentaCreada, navigation]);
 
   const handleRegistro = async (datos: DatosRegistro) => {
     // Criterio de aceptación SE-12: Registro válido crea cuenta una sola vez
@@ -590,11 +625,11 @@ export default function RegistroScreen({
 
       if (!isMountedRef.current) return;
 
-      // Éxito: notificar al callback (desbloquea SE-13) o continuar a Login
+      // Criterio de aceptación SE-13: Solo respuesta exitosa muestra cuenta creada
+      setCuentaCreadaInterna(respuesta);
+
       if (onRegistroExitoso) {
         onRegistroExitoso(respuesta);
-      } else {
-        navigation?.navigate('Login');
       }
     } catch (err: unknown) {
       if (!isMountedRef.current) return;
@@ -628,6 +663,18 @@ export default function RegistroScreen({
       }
     }
   };
+
+  // Criterio de aceptación SE-13: Mostrar cuenta creada y continuar a Login móvil
+  if (cuentaCreada) {
+    return (
+      <CuentaCreadaView
+        testID="pantalla-cuenta-creada"
+        cuenta={cuentaCreada}
+        onContinuarLogin={handleContinuarLogin}
+        onVolver={handleVolverLogin}
+      />
+    );
+  }
 
   return (
     <RegistroForm
