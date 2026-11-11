@@ -2,9 +2,6 @@ import React from 'react';
 import { Text, View, ScrollView } from 'react-native';
 import styles from './ScreenPlaceholder.styles';
 
-type ActionButtonProps = {
-  children?: React.ReactNode;
-};
 
 export function ScreenPlaceholder({
   testID,

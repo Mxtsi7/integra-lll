@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { type Usuario, configurarTokenStorage } from '@ojoalgasto/shared';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  type Usuario,
+  configurarTokenStorage,
+  guardarTokens,
+  obtenerAccessToken,
+  pedir,
+} from '@ojoalgasto/shared';
 import { App } from '../../App';
 
 const almacen: Record<string, string> = {};
@@ -26,6 +32,25 @@ const USUARIO: Usuario = {
   plan: 'gratuito',
 };
 
+const MOCK_SUSCRIPCIONES_API = {
+  count: 1,
+  next: null,
+  previous: null,
+  results: [
+    {
+      id: '1',
+      nombre: 'Netflix',
+      monto: '9990.00',
+      moneda: 'CLP',
+      frecuencia: 'mensual',
+      fecha_proximo_cobro: '2026-10-05',
+      categoria: 'streaming',
+      estado: 'activo',
+      horas_uso_mes: '18.00',
+    },
+  ],
+};
+
 beforeEach(() => {
   for (const k of Object.keys(almacen)) delete almacen[k];
   configurarTokenStorage({
@@ -37,6 +62,22 @@ beforeEach(() => {
       delete almacen[k];
     },
   });
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/suscripciones/')) {
+        return new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ detail: 'Ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    })
+  );
 });
 
 afterEach(() => {
@@ -180,6 +221,14 @@ describe('Navegación Móvil (SE-06)', () => {
             })
           );
         }
+        if (url.includes('/suscripciones/')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
         return Promise.reject(new Error(`URL no manejada en mock: ${url}`));
       });
       vi.stubGlobal('fetch', fetchMock);
@@ -311,5 +360,120 @@ describe('Navegación Móvil (SE-06)', () => {
       expect(screen.queryByTestId('screen-home')).toBeNull();
       expect(screen.queryByTestId('screen-detalle')).toBeNull();
     });
+
+    describe('Volver a Login cuando la sesión móvil no sea válida (SE-16)', () => {
+      it('Criterio 1: Refresh válido ante un 401 mantiene la sesión y permanece en la pantalla privada', async () => {
+        const tokenOriginal = jwtValido();
+        const tokenNuevo = jwtValido(Math.floor(Date.now() / 1000) + 7200);
+        guardarTokens({ access_token: tokenOriginal, refresh_token: 'refresh-valido' });
+
+        const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+          if (typeof url === 'string' && url.includes('/auth/refresh/')) {
+            return new Response(
+              JSON.stringify({
+                access_token: tokenNuevo,
+                refresh_token: 'refresh-rotado-456',
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } }
+            );
+          }
+          const auth = (init?.headers as Record<string, string>)?.Authorization;
+          if (auth === `Bearer ${tokenNuevo}`) {
+            return new Response(JSON.stringify({ resultado: 'ok' }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({ detail: 'Token expirado' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(<App initialEstado="autenticado" initialUsuario={USUARIO} />);
+        expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+        // Ejecutar petición protegida que sufre 401 pero se renueva con éxito
+        let resultado: unknown;
+        await act(async () => {
+          resultado = await pedir('/suscripciones/');
+        });
+
+        expect(resultado).toEqual({ resultado: 'ok' });
+        // Se mantiene en la pantalla privada y no vuelve a Login
+        expect(screen.getByTestId('screen-home')).toBeTruthy();
+        expect(screen.queryByTestId('screen-login')).toBeNull();
+        expect(obtenerAccessToken()).toBe(tokenNuevo);
+      });
+
+      it('Criterio 2: Refresh inválido ante un 401 limpia tokens y conmuta a Login una sola vez', async () => {
+        const tokenExpirado = jwtValido();
+        guardarTokens({ access_token: tokenExpirado, refresh_token: 'refresh-invalido' });
+
+        const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+          if (typeof url === 'string' && url.includes('/auth/refresh/')) {
+            return new Response(JSON.stringify({ detail: 'Refresh token inválido o revocado' }), {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify({ detail: 'Token inválido' }), {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(<App initialEstado="autenticado" initialUsuario={USUARIO} />);
+        expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+        // Petición protegida con refresh rechazado
+        await act(async () => {
+          try {
+            await pedir('/suscripciones/');
+          } catch {
+            // ErrorDeApi esperado
+          }
+        });
+
+        // La navegación desmonta las rutas privadas y muestra Login
+        expect(await screen.findByTestId('screen-login')).toBeTruthy();
+        expect(screen.queryByTestId('screen-home')).toBeNull();
+        expect(screen.queryByTestId('screen-detalle')).toBeNull();
+        expect(obtenerAccessToken()).toBeNull();
+      });
+
+      it('Diferenciación: Error 403 Forbidden o error de red NO cierra la sesión ni vuelve a Login', async () => {
+        const tokenValido = jwtValido();
+        guardarTokens({ access_token: tokenValido, refresh_token: 'refresh-123' });
+
+        // Simular respuesta 403 Forbidden
+        const fetchMock = vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ detail: 'No tienes permisos para este recurso' }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(<App initialEstado="autenticado" initialUsuario={USUARIO} />);
+        expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+        await act(async () => {
+          try {
+            await pedir('/admin-zona/');
+          } catch {
+            // ErrorDeApi esperado con 403
+          }
+        });
+
+        // La sesión y la pantalla Home se mantienen intactas
+        expect(screen.getByTestId('screen-home')).toBeTruthy();
+        expect(screen.queryByTestId('screen-login')).toBeNull();
+        expect(obtenerAccessToken()).toBe(tokenValido);
+      });
+    });
   });
 });
+
