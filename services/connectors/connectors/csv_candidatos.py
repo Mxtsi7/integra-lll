@@ -42,6 +42,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import threading
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -59,6 +60,7 @@ from .candidatos import ORIGEN_CSV, Candidato, EstadoCandidato, TipoMensaje
 FALTAN_COLUMNAS = "faltan_columnas"
 CABECERA_VACIA = "cabecera_vacia"
 CABECERA_ILEGIBLE = "cabecera_ilegible"
+CSV_ILEGIBLE = "csv_ilegible"
 ORDEN_FECHA_INCONSISTENTE = "orden_fecha_inconsistente"
 
 FILA_INCOMPLETA = "fila_incompleta"
@@ -164,10 +166,15 @@ ORDEN_MDY = "mdy"
 IMPORTE_MAXIMO = Decimal("999999999999.99")
 
 # Ninguna glosa de cartola se acerca a esto; una celda así es un archivo roto
-# o un texto pegado en la columna equivocada. Queda muy por debajo del tope
-# del lector de CSV (131.072 caracteres), para que el límite sea UNO y sea
-# nuestro: sin franja intermedia donde decida el lector con su propio error.
+# o un texto pegado en la columna equivocada. Es el ÚNICO límite de largo: el
+# tope propio del lector de CSV se levanta mientras se lee (ver `leer`), así
+# que quien decide es esta constante y no el punto donde se rinde `csv`.
 LARGO_MAXIMO_CELDA = 1000
+
+# El tope de `csv` es estado global del proceso. Se cambia solo mientras se
+# lee un archivo, y de a uno: sin el candado, un hilo que termina le
+# devolvería el tope chico a otro que todavía está a mitad de su celda.
+_CANDADO_DEL_LECTOR = threading.Lock()
 
 # Fecha ISO, completa: `2026-10-02`, sola o con la hora que le pegan algunos
 # bancos (`T` o espacio, segundos y fracción opcionales, zona opcional). El
@@ -669,8 +676,6 @@ def leer(
     contradictorio. Todo lo demás sale como `ErrorFila`.
     """
     texto = decodificar(contenido)
-    lector = csv.reader(io.StringIO(texto, newline=""), delimiter=separador)
-
     # ── El número de fila sale del lector, no de un contador propio ─────
     # `lector.line_num` cuenta líneas del ARCHIVO. Un `enumerate` sobre las
     # filas devueltas se corre en cuanto una glosa trae un salto de línea
@@ -678,28 +683,45 @@ def leer(
     # adelante todos los números apuntarían una línea más arriba. El número
     # tiene que ser el que la persona ve en su planilla, o no sirve de nada.
     #
-    # ── Y el lector puede rendirse en UNA fila ──────────────────────────
+    # ── El registro se lee ENTERO, o no se lee el archivo ───────────────
     # `csv` lanza `csv.Error` cuando una celda pasa de 131.072 caracteres.
-    # Recorrerlo con un `for` dejaba salir esa excepción: la tarea moría, la
-    # importación esperaba al rescate y las filas buenas se perdían con la
-    # mala. Comprobado contra el lector de verdad: lanza en esa línea, y la
-    # llamada siguiente lee bien la que viene, con `line_num` correcto. Así
-    # que la fila ilegible se anota (`None`) y se sigue.
-    filas: list[tuple[int, list[str] | None]] = []
-    while True:
+    # La primera corrección atrapaba ese error y seguía con la línea
+    # siguiente. Estaba mal: después del error el lector retoma en la línea
+    # FÍSICA que viene, y si la celda venía entre comillas con saltos de
+    # línea, esa línea es texto de la misma celda. Una glosa gigante que
+    # contenía `2026-10-02;Inventado;8888` dejaba guardado un cobro de 8.888
+    # que la cartola nunca tuvo. Lo encontró la tercera revisión de #147.
+    #
+    # Lo que se hace ahora es no provocar el error: el tope del lector se
+    # sube al largo del texto —ninguna celda puede ser más larga que el
+    # archivo, y el archivo ya pasó su propio límite de tamaño— y así cada
+    # registro llega completo, con sus comillas y sus saltos respetados. La
+    # celda demasiado larga se rechaza después, en su fila, con nuestro
+    # límite. Comprobado contra el lector de verdad: con el tope subido la
+    # celda gigante es UN registro y el siguiente empieza donde corresponde.
+    #
+    # Si aun así `csv` falla, es por otra cosa, y ya no se sabe dónde termina
+    # el registro: no se sigue leyendo a ciegas. Es un error del archivo.
+    filas: list[tuple[int, list[str]]] = []
+    with _CANDADO_DEL_LECTOR:
+        tope_anterior = csv.field_size_limit(max(len(texto) + 1, csv.field_size_limit()))
         try:
-            fila_leida = next(lector)
-        except StopIteration:
-            break
-        except csv.Error:
-            filas.append((lector.line_num, None))
-            continue
-        filas.append((lector.line_num, fila_leida))
+            lector = csv.reader(io.StringIO(texto, newline=""), delimiter=separador)
+            try:
+                for fila_leida in lector:
+                    filas.append((lector.line_num, fila_leida))
+            except csv.Error:
+                raise CsvInvalido(
+                    CSV_ILEGIBLE,
+                    f"El archivo no se puede leer como CSV cerca de la línea {lector.line_num}.",
+                ) from None
+        finally:
+            csv.field_size_limit(tope_anterior)
     if not filas:
         raise CsvInvalido(CABECERA_VACIA, "El archivo no tiene filas.")
 
     cabecera = filas[0][1]
-    if cabecera is None or any(len(c) > LARGO_MAXIMO_CELDA for c in cabecera):
+    if any(len(c) > LARGO_MAXIMO_CELDA for c in cabecera):
         # Sin cabecera no se sabe qué es cada columna: no hay filas que rescatar.
         raise CsvInvalido(
             CABECERA_ILEGIBLE,
@@ -709,27 +731,29 @@ def leer(
     posiciones = mapear_columnas(cabecera)
     # Hasta dónde llega la cabecera, sin contar separadores de adorno al final.
     ancho = max((i + 1 for i, c in enumerate(cabecera) if c.strip()), default=0)
-    cuerpo = [
-        (numero, fila) for numero, fila in filas[1:]
-        if fila is None or any(c.strip() for c in fila)
-    ]
+    cuerpo = [(numero, fila) for numero, fila in filas[1:] if any(c.strip() for c in fila)]
 
+    # ── Solo vota una fila bien armada ──────────────────────────────────
+    # El orden día/mes se deduce mirando las fechas del archivo. Una fila con
+    # columnas de más, con una celda desmedida o a la que le faltan columnas
+    # se va a rechazar igual, y además no se sabe qué hay en cada posición:
+    # lo que está donde va la fecha puede no ser la fecha. Dejarla votar le
+    # daba a una fila rota el poder de contradecir a la única buena y botar
+    # el archivo entero con `orden_fecha_inconsistente`.
+    #
+    # El corte es la ESTRUCTURA, no la validez completa: una fila bien armada
+    # con el monto ilegible sí vota, porque su columna de fecha es de fiar y
+    # es evidencia legítima del formato del archivo.
     indice_fecha = posiciones[CAMPO_FECHA]
     orden = orden_fecha or detectar_orden_fecha(
-        fila[indice_fecha] for _, fila in cuerpo if fila is not None and indice_fecha < len(fila)
+        fila[indice_fecha] for _, fila in cuerpo
+        if _defecto_de_estructura(fila, posiciones, ancho) is None
     )
 
     candidatos: list[Candidato] = []
     errores: list[ErrorFila] = []
 
     for numero, fila in cuerpo:
-        if fila is None:
-            errores.append(ErrorFila(
-                fila=numero,
-                codigo=CELDA_DEMASIADO_LARGA,
-                mensaje=f"Una celda de la fila pasa de {LARGO_MAXIMO_CELDA} caracteres y no se pudo leer.",
-            ))
-            continue
         try:
             candidatos.append(
                 _candidato_de_fila(
@@ -754,6 +778,47 @@ def leer(
     )
 
 
+def _defecto_de_estructura(
+    fila: Sequence[str], posiciones: Mapping[str, int], ancho: int
+) -> "_ErrorDeCampo | None":
+    """Por qué esta fila no se puede leer como una fila, o `None` si se puede.
+
+    Son los tres rechazos que no dependen del contenido de ningún campo sino
+    de la forma de la fila. Están juntos porque los usan dos lugares que
+    tienen que estar de acuerdo: `_candidato_de_fila`, que rechaza la fila, y
+    `leer`, que no la deja votar por el orden de fecha.
+    """
+    # Una fila más corta que la cabecera no se completa con vacíos en silencio:
+    # significa que el archivo se cortó o que la glosa traía el separador sin
+    # comillas, y adivinar cuál columna falta sería inventar datos.
+    if len(fila) < max(posiciones[c] for c in CAMPOS_OBLIGATORIOS) + 1:
+        return _ErrorDeCampo(
+            FILA_INCOMPLETA,
+            f"La fila tiene {len(fila)} columnas y no alcanza para las obligatorias.",
+        )
+
+    # Lo simétrico: una fila MÁS larga que la cabecera tampoco se recorta en
+    # silencio. Casi siempre es un monto con coma decimal o una glosa con el
+    # separador, sin comillas: `USD,1234,56` bajo moneda y monto guardaba
+    # 1.234,00 USD y cero errores. Cuál celda sobra no se puede saber, así
+    # que la fila se rechaza. Los separadores de adorno al final —celdas
+    # vacías— no traen datos y se dejan pasar.
+    if any(c.strip() for c in fila[ancho:]):
+        return _ErrorDeCampo(
+            COLUMNAS_SOBRANTES,
+            f"La fila tiene {len(fila)} columnas y la cabecera {ancho}. Si un monto o una "
+            "descripción trae el separador del archivo, tiene que ir entre comillas.",
+        )
+
+    largo = max((len(c) for c in fila), default=0)
+    if largo > LARGO_MAXIMO_CELDA:
+        return _ErrorDeCampo(
+            CELDA_DEMASIADO_LARGA,
+            f"Una celda de la fila tiene {largo} caracteres; el máximo es {LARGO_MAXIMO_CELDA}.",
+        )
+    return None
+
+
 def _candidato_de_fila(
     fila: Sequence[str],
     *,
@@ -771,34 +836,9 @@ def _candidato_de_fila(
             return ""
         return (fila[indice] or "").strip()
 
-    # Una fila más corta que la cabecera no se completa con vacíos en silencio:
-    # significa que el archivo se cortó o que la glosa traía el separador sin
-    # comillas, y adivinar cuál columna falta sería inventar datos.
-    if len(fila) < max(posiciones[c] for c in CAMPOS_OBLIGATORIOS) + 1:
-        raise _ErrorDeCampo(
-            FILA_INCOMPLETA,
-            f"La fila tiene {len(fila)} columnas y no alcanza para las obligatorias.",
-        )
-
-    # Lo simétrico: una fila MÁS larga que la cabecera tampoco se recorta en
-    # silencio. Casi siempre es un monto con coma decimal o una glosa con el
-    # separador, sin comillas: `USD,1234,56` bajo moneda y monto guardaba
-    # 1.234,00 USD y cero errores. Cuál celda sobra no se puede saber, así
-    # que la fila se rechaza. Los separadores de adorno al final —celdas
-    # vacías— no traen datos y se dejan pasar.
-    if any(c.strip() for c in fila[ancho:]):
-        raise _ErrorDeCampo(
-            COLUMNAS_SOBRANTES,
-            f"La fila tiene {len(fila)} columnas y la cabecera {ancho}. Si un monto o una "
-            "descripción trae el separador del archivo, tiene que ir entre comillas.",
-        )
-
-    largo = max((len(c) for c in fila), default=0)
-    if largo > LARGO_MAXIMO_CELDA:
-        raise _ErrorDeCampo(
-            CELDA_DEMASIADO_LARGA,
-            f"Una celda de la fila tiene {largo} caracteres; el máximo es {LARGO_MAXIMO_CELDA}.",
-        )
+    defecto = _defecto_de_estructura(fila, posiciones, ancho)
+    if defecto is not None:
+        raise defecto
 
     descripcion = celda(CAMPO_DESCRIPCION)
     if not descripcion:

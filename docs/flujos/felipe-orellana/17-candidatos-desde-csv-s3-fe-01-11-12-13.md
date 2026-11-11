@@ -117,6 +117,7 @@ Son estables; el frontend decide por ellos.
 | `faltan_columnas` | falta `fecha`, `descripcion` o `monto` |
 | `cabecera_vacia` | la primera fila no tiene encabezados |
 | `cabecera_ilegible` | una celda de la primera fila pasa de 1.000 caracteres: sin cabecera no se sabe qué es cada columna |
+| `csv_ilegible` | el lector de CSV falló y no se sabe dónde termina el registro: no se sigue leyendo a ciegas |
 | `orden_fecha_inconsistente` | hay filas que solo se explican como día/mes y otras solo como mes/día |
 
 **De una fila** (`ErrorFila{ fila, codigo, mensaje }`, las otras filas siguen):
@@ -125,10 +126,10 @@ Son estables; el frontend decide por ellos.
 |---|---|
 | `fila_incompleta` | menos columnas que las obligatorias |
 | `columnas_sobrantes` | más columnas que la cabecera: casi siempre un monto con coma decimal o una glosa con el separador, sin comillas. Los separadores de adorno al final (celdas vacías) no cuentan |
-| `celda_demasiado_larga` | una celda pasa de 1.000 caracteres |
+| `celda_demasiado_larga` | una celda pasa de 1.000 caracteres. El registro se lee entero aunque venga entre comillas con saltos de línea: lo de adentro de la celda nunca se toma por otra fila |
 | `descripcion_vacia` | no se sabe a quién se le pagó |
 | `fecha_invalida` | no se entiende, o no existe (`31/02`). El texto se valida entero: `2026-10-02basura` y `13//10//2026` no son fechas |
-| `fecha_ambigua` | puede ser día/mes o mes/día y nada lo aclara |
+| `fecha_ambigua` | puede ser día/mes o mes/día y nada lo aclara. El orden se deduce solo de filas bien armadas: una fila rechazada por `fila_incompleta`, `columnas_sobrantes` o `celda_demasiado_larga` no vota |
 | `importe_invalido` | no se entiende, o lleva más decimales de los que admite la moneda |
 | `importe_cero` | una línea en cero no es un cobro |
 | `importe_fuera_de_rango` | mayor que 999.999.999.999,99, que es lo que cabe en la columna |
