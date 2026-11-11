@@ -1,8 +1,18 @@
 # Despliegue en Kubernetes
 
 Seguridad D-11: antes de migrar, leer [aislamiento de red y secretos](../docs/seguridad-d11.md).
-El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`.
-Hace falta un CNI con NetworkPolicy y un `GHCR_TOKEN` de lectura explícito.
+El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`
+**si la cuenta puede crear NetworkPolicy**. Hace falta un CNI que las haga
+cumplir y un `GHCR_TOKEN` de lectura explícito.
+
+> **En el cluster del ramo hoy NO hay ninguna política de red aplicada.** El
+> rol de estudiante solo da lectura sobre `networkpolicies` (verificado el
+> 10-11-2026 con `kubectl auth can-i` y con `kubectl get networkpolicy`, que
+> devuelve vacío). `desplegar.sh` lo detecta, salta `40-red.yaml` y lo avisa al
+> terminar. Mientras siga así, cualquier pod del cluster que conozca el nombre
+> de un Service interno puede hablarle directo, sin pasar por el gateway: el
+> aislamiento que describe `docs/seguridad-d11.md` está escrito y probado, pero
+> no desplegado.
 La contraseña histórica de PostgreSQL requiere la rotación indicada abajo;
 la PR por sí sola no la invalida.
 
@@ -154,9 +164,16 @@ Ninguno reemplaza a los de nadie: conviven.
 
 ## Reglas del cluster del ramo
 
-No se pueden consultar (`kubectl get resourcequota` y `get ingressclass` dan
-`Forbidden`): se descubren chocando. Quedan acá para que nadie las vuelva a
-pelear.
+Durante semanas no se pudieron consultar y se descubrieron chocando. Desde
+noviembre la cuota y el LimitRange **sí se leen** (`kubectl get resourcequota`,
+`kubectl get limitrange -o yaml`); lo demás sigue quedando acá para que nadie
+lo vuelva a pelear.
+
+Cuota de `student-forellana` al 10-11-2026: **12 pods**, 2 CPU y 2752 Mi en
+límites, 1 CPU y 1152 Mi en solicitudes, 3 PVC, 10 Services. Por contenedor:
+mínimo 25m / 64Mi, **máximo 500m / 512Mi**. No todos los namespaces tienen la
+misma: el de otro integrante mostró 2 Gi de memoria en límites y 1 Gi en
+solicitudes. Revisar la propia antes de calcular.
 
 | Regla | Consecuencia |
 |---|---|

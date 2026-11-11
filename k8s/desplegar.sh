@@ -4,9 +4,27 @@
 #     ./k8s/desplegar.sh                 # construye, publica y aplica
 #     SOLO_APLICAR=1 ./k8s/desplegar.sh  # solo aplica (no reconstruye)
 #
-# Requisitos: python3, docker, kubectl con el contexto del ramo, y sesión en el
-# registro (docker login ghcr.io).
+# Requisitos: Python 3, docker, kubectl con el contexto del ramo, y sesión en
+# el registro (docker login ghcr.io).
 set -euo pipefail
+
+# ── Un Python que de verdad funcione ─────────────────────────────────────────
+# En Windows `python3` suele ser el alias de la Microsoft Store: existe en el
+# PATH, pero no ejecuta nada; imprime "Python was not found" y sale con error.
+# Se prueba cada candidato EJECUTANDOLO, no solo con `command -v`, y se resuelve
+# antes de construir o tocar el cluster: descubrirlo a mitad del despliegue
+# deja los pasos anteriores aplicados y los siguientes no.
+PYTHON=""
+for candidato in python3 python; do
+  if command -v "$candidato" >/dev/null 2>&1 && "$candidato" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+    PYTHON="$candidato"
+    break
+  fi
+done
+if [ -z "$PYTHON" ]; then
+  echo "No hay un Python 3 que funcione (se probaron python3 y python). No se despliega." >&2
+  exit 1
+fi
 
 REGISTRO="${REGISTRO:-ghcr.io/felipeorellanacaro}"
 ETIQUETA="${ETIQUETA:-$(git rev-parse --short HEAD)}"
@@ -117,7 +135,7 @@ if ! kubectl get secret ojoalgasto-rabbitmq >/dev/null 2>&1; then
 fi
 # Verificar/drenar el broker ANTES de reemplazarlo o reiniciar sus consumidores.
 # Si falla, no se aplica el manifiesto ni se prosigue con la migración.
-python3 k8s/actualizar-rabbitmq.py
+"$PYTHON" k8s/actualizar-rabbitmq.py
 # El usuario del broker NO lo crean RABBITMQ_DEFAULT_USER/PASS cuando ya hay
 # datos en el PVC: solo actuan en el primer arranque. Sin esto los clientes
 # quedan sin poder autenticarse. Ver el encabezado del guion.
@@ -129,9 +147,24 @@ kubectl apply -f k8s/01-postgres.yaml
 kubectl rollout status statefulset/postgres --timeout=300s
 bash k8s/configurar-usuarios-bd.sh
 
+# ── Las politicas de red solo se aplican si el cluster lo permite ────────────
+# En el cluster del ramo la cuenta de estudiante NO puede crear NetworkPolicy
+# (el rol solo da lectura), y `kubectl apply -f k8s/40-red.yaml` responde
+# Forbidden. Con `set -e` eso cortaba el guion despues de aplicar todo lo
+# demas y antes de esperar los rollouts: el despliegue quedaba hecho, pero el
+# guion terminaba en error y sin comprobar nada.
+#
+# `can-i` sale con 1 cuando la respuesta es "no"; por eso el `|| true`.
+PUEDE_POLITICAS="$(kubectl auth can-i create networkpolicies.networking.k8s.io 2>/dev/null || true)"
+SIN_POLITICAS=0
+
 for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml \
          k8s/10-auth.yaml k8s/11-subscriptions.yaml k8s/12-gateway.yaml \
          k8s/13-web.yaml k8s/20-ingress.yaml k8s/30-autoescalado.yaml k8s/40-red.yaml; do
+  if [ "$f" = "k8s/40-red.yaml" ] && [ "$PUEDE_POLITICAS" != "yes" ]; then
+    SIN_POLITICAS=1
+    continue
+  fi
   sed -e "s|IMAGEN_AUTH|$IMAGEN_AUTH|g" \
       -e "s|IMAGEN_SUBSCRIPTIONS|$IMAGEN_SUBSCRIPTIONS|g" \
       -e "s|IMAGEN_GATEWAY|$IMAGEN_GATEWAY|g" \
@@ -156,5 +189,13 @@ done
 
 echo
 kubectl get pods -o wide
+if [ "$SIN_POLITICAS" = "1" ]; then
+  echo
+  echo "ATENCIÓN: k8s/40-red.yaml NO se aplicó: esta cuenta no puede crear NetworkPolicy." >&2
+  echo "  Los servicios quedan SIN aislamiento de red: cualquier pod del cluster que" >&2
+  echo "  conozca el nombre puede hablarles directo, sin pasar por el gateway." >&2
+  echo "  Comprobar con: kubectl get networkpolicy" >&2
+fi
+
 echo
 echo "Listo: https://$HOST_PUBLICO"
