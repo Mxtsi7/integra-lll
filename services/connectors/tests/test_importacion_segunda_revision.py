@@ -140,3 +140,42 @@ def test_la_celda_gigante_no_deja_la_importacion_esperando_al_rescate():
     ]
     # El error se guarda con la importación: no puede arrastrar la celda.
     assert len(importacion.errores[0]["mensaje"]) < 300
+
+
+# ── Tercera revisión de #147 ────────────────────────────────────────────────
+
+
+def test_el_texto_de_una_glosa_gigante_no_llega_a_la_base_como_cobro():
+    """La glosa venía entre comillas, con saltos de línea, y adentro traía una
+    línea con forma de cobro. La corrección anterior seguía leyendo desde ahí
+    y guardaba `Inventado` por 8.888, un cobro que la cartola nunca tuvo."""
+    glosa = "N" * 131_073 + chr(10) + "2026-10-02;Inventado;8888" + chr(10) + "fin"
+    importacion = procesar(
+        "fecha;descripcion;monto",
+        "2026-10-01;NETFLIX.COM;9990",
+        '2026-10-02;"' + glosa + '";4990',
+        "2026-10-03;SPOTIFY;4990",
+    )
+    assert importacion.estado == Importacion.Estado.COMPLETADA
+    assert [fila[0] for fila in guardados(importacion)] == ["NETFLIX.COM", "SPOTIFY"]
+    assert not CobroCandidato.objects.filter(importe=Decimal("8888")).exists()
+    assert not CobroCandidato.objects.filter(servicio_texto__icontains="Inventado").exists()
+    # Tres registros, no cinco: las líneas de adentro de la celda no cuentan.
+    assert importacion.filas_totales == 3
+    assert [e["codigo"] for e in importacion.errores] == [csv_candidatos.CELDA_DEMASIADO_LARGA]
+
+
+def test_una_fila_mal_armada_no_bota_el_archivo_por_el_orden_de_fecha():
+    """Antes: FALLIDA con `orden_fecha_inconsistente` y cero filas, porque la
+    fila con una columna de más votaba por día/mes antes de rechazarse."""
+    importacion = procesar(
+        "fecha;descripcion;monto",
+        "13/04/2026;SPOTIFY;4990;sobrante",
+        "04/13/2026;NETFLIX.COM;9990",
+    )
+    assert importacion.estado == Importacion.Estado.COMPLETADA
+    assert guardados(importacion) == [("NETFLIX.COM", Decimal("9990.00"), "CLP", date(2026, 4, 13))]
+    assert [(e["fila"], e["codigo"]) for e in importacion.errores] == [
+        (2, csv_candidatos.COLUMNAS_SOBRANTES)
+    ]
+
