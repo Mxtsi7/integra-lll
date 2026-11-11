@@ -2,14 +2,45 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { AuthError } from '@ojoalgasto/shared';
+import { BackHandler } from 'react-native';
+import { AuthError, obtenerAccessToken } from '@ojoalgasto/shared';
 import RegistroScreen, {
   RegistroForm,
   type RegistroScreenPropsContainer,
 } from './RegistroScreen';
 import { MENSAJE_ERROR_RED } from '../../services/clienteHttp';
 
-describe('Pantalla Móvil Registro (SE-11)', () => {
+describe('Pantalla Móvil Registro (SE-11 / SE-12 / SE-13)', () => {
+  function llenarFormularioValido({
+    nombre = 'Sebastian Mena',
+    correo = 'seba@ojoalgasto.cl',
+    password = 'PasswordSegura123',
+    confirmacion = 'PasswordSegura123',
+    marcarConsentimiento = true,
+  }: {
+    nombre?: string;
+    correo?: string;
+    password?: string;
+    confirmacion?: string;
+    marcarConsentimiento?: boolean;
+  } = {}) {
+    fireEvent.change(screen.getByTestId('input-nombre'), {
+      target: { value: nombre },
+    });
+    fireEvent.change(screen.getByTestId('input-correo'), {
+      target: { value: correo },
+    });
+    fireEvent.change(screen.getByTestId('input-password'), {
+      target: { value: password },
+    });
+    fireEvent.change(screen.getByTestId('input-confirmacion'), {
+      target: { value: confirmacion },
+    });
+    if (marcarConsentimiento) {
+      fireEvent.click(screen.getByTestId('checkbox-acepta-datos'));
+    }
+  }
+
   describe('Maquetación, controles y accesibilidad básica', () => {
     it('renderiza encabezados, campos obligatorios, checkbox y botones de acción', () => {
       render(<RegistroForm />);
@@ -398,36 +429,6 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
   });
 
   describe('Conectar Registro móvil y validaciones del servidor (SE-12)', () => {
-    function llenarFormularioValido({
-      nombre = 'Sebastian Mena',
-      correo = 'seba@ojoalgasto.cl',
-      password = 'PasswordSegura123',
-      confirmacion = 'PasswordSegura123',
-      marcarConsentimiento = true,
-    }: {
-      nombre?: string;
-      correo?: string;
-      password?: string;
-      confirmacion?: string;
-      marcarConsentimiento?: boolean;
-    } = {}) {
-      fireEvent.change(screen.getByTestId('input-nombre'), {
-        target: { value: nombre },
-      });
-      fireEvent.change(screen.getByTestId('input-correo'), {
-        target: { value: correo },
-      });
-      fireEvent.change(screen.getByTestId('input-password'), {
-        target: { value: password },
-      });
-      fireEvent.change(screen.getByTestId('input-confirmacion'), {
-        target: { value: confirmacion },
-      });
-      if (marcarConsentimiento) {
-        fireEvent.click(screen.getByTestId('checkbox-acepta-datos'));
-      }
-    }
-
     describe('Criterio de Aceptación: Registro válido crea cuenta una sola vez', () => {
       it('envía los datos limpios a la API con mapeo de campos (email y acepta_datos)', async () => {
         const onRegisterApi = vi.fn().mockResolvedValue({
@@ -472,7 +473,7 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
         });
       });
 
-      it('navega a Login por defecto tras registro exitoso si no se proveyó callback', async () => {
+      it('tras registro exitoso muestra confirmación de cuenta creada y permite continuar a Login', async () => {
         const onRegisterApi = vi.fn().mockResolvedValue({
           id: 'usr-456',
           email: 'nuevo@ojoalgasto.cl',
@@ -500,6 +501,17 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
         });
 
         expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+        // SE-13: Muestra la confirmación de cuenta creada
+        expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+        expect(screen.getByTestId('cuenta-creada-nombre').textContent).toContain('Nuevo Usuario');
+        expect(screen.getByTestId('cuenta-creada-email').textContent).toBe('nuevo@ojoalgasto.cl');
+
+        // Al presionar Continuar a Iniciar Sesión, navega a Login
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('btn-continuar-login'));
+        });
+
         expect(navigation?.navigate).toHaveBeenCalledWith('Login');
       });
 
@@ -854,4 +866,222 @@ describe('Pantalla Móvil Registro (SE-11)', () => {
       });
     });
   });
+
+  describe('Mostrar cuenta creada y continuar a Login móvil (SE-13)', () => {
+    const RESPUESTA_EXITOSA = {
+      id: 'usr-se13-test',
+      email: 'seba.mena@ojoalgasto.cl',
+      nombre: 'Sebastian Mena',
+    };
+
+    it('Criterio 1: Solo respuesta exitosa muestra cuenta creada con nombre y correo', async () => {
+      const onRegisterApi = vi.fn().mockResolvedValue(RESPUESTA_EXITOSA);
+      const onRegistroExitoso = vi.fn();
+
+      render(
+        <RegistroScreen
+          onRegisterApi={onRegisterApi}
+          onRegistroExitoso={onRegistroExitoso}
+        />
+      );
+
+      llenarFormularioValido({
+        nombre: 'Sebastian Mena',
+        correo: 'seba.mena@ojoalgasto.cl',
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+      expect(onRegistroExitoso).toHaveBeenCalledWith(RESPUESTA_EXITOSA);
+      expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+      expect(screen.getByTestId('cuenta-creada-nombre').textContent).toContain('Sebastian Mena');
+      expect(screen.getByTestId('cuenta-creada-email').textContent).toBe('seba.mena@ojoalgasto.cl');
+      // El formulario de registro se desmonta
+      expect(screen.queryByTestId('registro-submit')).toBeNull();
+    });
+
+    it('Criterio 1: Rechazo API 400 por correo en uso NO muestra cuenta creada', async () => {
+      const onRegisterApi = vi.fn().mockRejectedValue(
+        new AuthError('Correo duplicado', 400, {
+          campos: { email: ['Este correo ya está en uso.'] },
+        })
+      );
+
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+      llenarFormularioValido({ correo: 'duplicado@ojoalgasto.cl' });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.queryByTestId('pantalla-cuenta-creada')).toBeNull();
+      expect(screen.getByTestId('input-correo')).toBeTruthy();
+      expect(screen.getByTestId('error-correo').textContent).toBe('Este correo ya está en uso.');
+    });
+
+    it('Criterio 1: Rechazo API 500 o error de red NO muestra cuenta creada', async () => {
+      const onRegisterApi = vi.fn().mockRejectedValue(new Error('Network error'));
+
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.queryByTestId('pantalla-cuenta-creada')).toBeNull();
+      expect(screen.getByTestId('registro-submit')).toBeTruthy();
+      expect(screen.getByTestId('registro-error-general')).toBeTruthy();
+    });
+
+    it('Criterio 1: Fallo de validación local (campos incompletos) NO invoca API ni muestra cuenta creada', async () => {
+      const onRegisterApi = vi.fn();
+
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(onRegisterApi).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('pantalla-cuenta-creada')).toBeNull();
+      expect(screen.getByTestId('error-nombre')).toBeTruthy();
+    });
+
+    it('Criterio 2: Al presionar "Continuar a Iniciar Sesión" navega a Login sin reenviar formulario', async () => {
+      const onRegisterApi = vi.fn().mockResolvedValue(RESPUESTA_EXITOSA);
+      const navigation = {
+        navigate: vi.fn(),
+        goBack: vi.fn(),
+      } as unknown as RegistroScreenPropsContainer['navigation'];
+
+      render(
+        <RegistroScreen
+          navigation={navigation}
+          onRegisterApi={onRegisterApi}
+        />
+      );
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+      // Pulsar Continuar a Iniciar Sesión
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-continuar-login'));
+      });
+
+      expect(navigation?.navigate).toHaveBeenCalledWith('Login');
+      // No debe reenviar la llamada a la API
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+    });
+
+    it('Criterio 2: Al presionar "Volver" desde la confirmación navega a Login sin duplicar registro', async () => {
+      const onRegisterApi = vi.fn().mockResolvedValue(RESPUESTA_EXITOSA);
+      const navigation = {
+        navigate: vi.fn(),
+        goBack: vi.fn(),
+      } as unknown as RegistroScreenPropsContainer['navigation'];
+
+      render(
+        <RegistroScreen
+          navigation={navigation}
+          onRegisterApi={onRegisterApi}
+        />
+      );
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+      // Pulsar Volver
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-volver-login'));
+      });
+
+      expect(navigation?.navigate).toHaveBeenCalledWith('Login');
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+    });
+
+    it('Criterio 2: Retroceso físico de Android (BackHandler) redirige a Login sin reenviar el formulario ni duplicar registro', async () => {
+      const listeners: Array<() => boolean> = [];
+      const addEventListenerSpy = vi
+        .spyOn(BackHandler, 'addEventListener')
+        .mockImplementation(((evento: string, handler: () => boolean) => {
+          if (evento === 'hardwareBackPress') {
+            listeners.push(handler);
+          }
+          return {
+            remove: vi.fn(() => {
+              const idx = listeners.indexOf(handler);
+              if (idx >= 0) listeners.splice(idx, 1);
+            }),
+          };
+        }) as any);
+
+      const onRegisterApi = vi.fn().mockResolvedValue(RESPUESTA_EXITOSA);
+      const navigation = {
+        navigate: vi.fn(),
+        goBack: vi.fn(),
+      } as unknown as RegistroScreenPropsContainer['navigation'];
+
+      render(
+        <RegistroScreen
+          navigation={navigation}
+          onRegisterApi={onRegisterApi}
+        />
+      );
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+      expect(listeners.length).toBeGreaterThan(0);
+
+      // Simular botón físico atrás de Android
+      let handled = false;
+      await act(async () => {
+        handled = listeners[listeners.length - 1]();
+      });
+
+      expect(handled).toBe(true);
+      expect(navigation?.navigate).toHaveBeenCalledWith('Login');
+      expect(onRegisterApi).toHaveBeenCalledTimes(1);
+
+      addEventListenerSpy.mockRestore();
+    });
+
+    it('Criterio de Aceptación: No crea sesión ficticia tras register() (tokens nulos en auth)', async () => {
+      const onRegisterApi = vi.fn().mockResolvedValue(RESPUESTA_EXITOSA);
+
+      render(<RegistroScreen onRegisterApi={onRegisterApi} />);
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('registro-submit'));
+      });
+
+      expect(screen.getByTestId('pantalla-cuenta-creada')).toBeTruthy();
+      // Verificación de contrato: register no emite tokens y no se crea sesión ficticia
+      expect(obtenerAccessToken()).toBeNull();
+    });
+  });
 });
+

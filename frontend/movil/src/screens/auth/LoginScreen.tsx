@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { login, AuthError } from '@ojoalgasto/shared';
+import { login, AuthError, type LoginPayload } from '@ojoalgasto/shared';
 import { useAuth } from '../../../context/AuthContext';
 import { esErrorDeRed, adaptarErrorRed } from '../../services/clienteHttp';
 import { NavButton } from '../components/NavButton';
@@ -33,7 +33,7 @@ export interface LoginFormProps {
   /** Reintenta la limpieza durable del cierre */
   onReintentarCierre?: () => void;
   /** Callback al solicitar envío de credenciales válidas */
-  onSubmit?: (credenciales: { correo: string; password: string }) => void | Promise<void>;
+  onSubmit?: (credenciales: LoginPayload) => void | Promise<void>;
   /** Navegación a pantalla de registro */
   onNavigateRegistro?: () => void;
   /** Navegación a pantalla de recuperación de contraseña */
@@ -275,7 +275,7 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = async (credenciales: { correo: string; password: string }) => {
+  const handleLogin = async (credenciales: LoginPayload) => {
     if (loading || errorCierre) {
       return; // Evita cualquier llamada HTTP si hay limpieza pendiente o está cargando
     }
@@ -284,7 +284,7 @@ export default function LoginScreen({ navigation }: AuthScreenProps<'Login'>) {
     setError(null);
 
     try {
-      const res = await login({ correo: credenciales.correo, password: credenciales.password });
+      const res = await login(credenciales);
       await iniciarSesion({ access_token: res.access_token, refresh_token: res.refresh_token });
     } catch (err: unknown) {
       if (err instanceof AuthError && err.status === 401) {
