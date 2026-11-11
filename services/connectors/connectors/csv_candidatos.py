@@ -58,13 +58,17 @@ from .candidatos import ORIGEN_CSV, Candidato, EstadoCandidato, TipoMensaje
 
 FALTAN_COLUMNAS = "faltan_columnas"
 CABECERA_VACIA = "cabecera_vacia"
+CABECERA_ILEGIBLE = "cabecera_ilegible"
 ORDEN_FECHA_INCONSISTENTE = "orden_fecha_inconsistente"
 
 FILA_INCOMPLETA = "fila_incompleta"
+COLUMNAS_SOBRANTES = "columnas_sobrantes"
+CELDA_DEMASIADO_LARGA = "celda_demasiado_larga"
 FECHA_INVALIDA = "fecha_invalida"
 FECHA_AMBIGUA = "fecha_ambigua"
 IMPORTE_INVALIDO = "importe_invalido"
 IMPORTE_CERO = "importe_cero"
+IMPORTE_FUERA_DE_RANGO = "importe_fuera_de_rango"
 MONEDA_AMBIGUA = "moneda_ambigua"
 MONEDA_DESCONOCIDA = "moneda_desconocida"
 MONEDA_NO_INDICADA = "moneda_no_indicada"
@@ -150,7 +154,33 @@ SIMBOLO_AMBIGUO = "$"
 ORDEN_DMY = "dmy"
 ORDEN_MDY = "mdy"
 
-_SEPARADORES_FECHA = re.compile(r"[/\-.]")
+# ── Límites que tienen que coincidir con donde se guarda ─────────────────────
+# El lector no importa Django, así que estos números viven acá y una prueba
+# los compara con el modelo. Lo que el lector deja pasar y la base rechaza no
+# se pierde solo: el `bulk_create` revierte el lote entero y se lleva las
+# filas buenas. Lo encontró la segunda revisión de #147.
+#
+# La columna `importe` es NUMERIC(14, 2): doce dígitos enteros y dos decimales.
+IMPORTE_MAXIMO = Decimal("999999999999.99")
+
+# Ninguna glosa de cartola se acerca a esto; una celda así es un archivo roto
+# o un texto pegado en la columna equivocada. Queda muy por debajo del tope
+# del lector de CSV (131.072 caracteres), para que el límite sea UNO y sea
+# nuestro: sin franja intermedia donde decida el lector con su propio error.
+LARGO_MAXIMO_CELDA = 1000
+
+# Fecha ISO, completa: `2026-10-02`, sola o con la hora que le pegan algunos
+# bancos (`T` o espacio, segundos y fracción opcionales, zona opcional). El
+# `$` del final es la corrección: antes se miraban los primeros diez
+# caracteres y `2026-10-02basura` pasaba por 2 de octubre.
+_FECHA_ISO = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})"
+    r"(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$"
+)
+# Día y mes con separador, en cualquier orden: uno o dos dígitos, EL MISMO
+# separador las dos veces (`\2`) y un año de dos o de cuatro dígitos. Nada
+# antes y nada después. `13//10//2026` y `13/10-2026` no son fechas.
+_FECHA_CON_SEPARADOR = re.compile(r"^(\d{1,2})([/\-.])(\d{1,2})\2(\d{2}|\d{4})$")
 _ESPACIOS = re.compile(r"\s+")
 
 # ── La gramática del monto ───────────────────────────────────────────
@@ -338,19 +368,16 @@ def _partes_fecha(valor: str) -> tuple[int, int, int] | None:
 
     No decide qué es día y qué es mes: solo parte el texto. Una fecha ISO
     (`2026-04-03`, año primero) devuelve None porque no hay nada que decidir.
+
+    Reconoce el texto ENTERO o no reconoce nada. Antes partía por los
+    separadores y descartaba los trozos vacíos, así que `13//10//2026` salía
+    como una fecha válida, votaba por día/mes en la inferencia y, junto a una
+    fila legítima en el otro orden, botaba el archivo completo.
     """
-    texto = (valor or "").strip()
-    if not texto:
+    forma = _FECHA_CON_SEPARADOR.match((valor or "").strip())
+    if forma is None:
         return None
-    partes = [p for p in _SEPARADORES_FECHA.split(texto) if p]
-    if len(partes) != 3 or not all(p.isdigit() for p in partes):
-        return None
-    if len(partes[0]) == 4:
-        return None  # ISO: el año va primero, no hay ambigüedad
-    try:
-        return int(partes[0]), int(partes[1]), int(partes[2])
-    except ValueError:
-        return None
+    return int(forma[1]), int(forma[3]), int(forma[4])
 
 
 def _normalizar_anio(anio: int) -> int:
@@ -365,12 +392,19 @@ def convertir_fecha(valor: str, orden: str | None) -> date:
         raise _ErrorDeCampo(FECHA_INVALIDA, "La fecha está vacía.")
 
     # ISO primero: es el único formato que no necesita saber nada del archivo.
-    try:
-        return date.fromisoformat(texto[:10])
-    except ValueError:
-        pass
-    # Formatos con hora pegada, que exporta más de un banco.
-    for patron in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%d de %B de %Y"):
+    # Se reconoce el texto completo, con la hora pegada si la trae, y la hora
+    # también tiene que existir: `T25:00:00` no es un adorno que se ignora.
+    iso = _FECHA_ISO.match(texto)
+    if iso is not None:
+        hora, minuto, segundo = (int(iso[i]) if iso[i] else 0 for i in (4, 5, 6))
+        if hora > 23 or minuto > 59 or segundo > 59:
+            raise _ErrorDeCampo(FECHA_INVALIDA, f"La fecha {texto!r} trae una hora que no existe.")
+        try:
+            return date(int(iso[1]), int(iso[2]), int(iso[3]))
+        except ValueError:
+            raise _ErrorDeCampo(FECHA_INVALIDA, f"La fecha {texto!r} no existe.") from None
+    # `strptime` ya exige que el patrón consuma el texto entero.
+    for patron in ("%Y/%m/%d", "%d de %B de %Y"):
         try:
             return datetime.strptime(texto, patron).date()
         except ValueError:
@@ -585,6 +619,14 @@ def convertir_importe(valor: str, moneda: str) -> Decimal:
             f"{moneda} no admite {len(decimales)} decimales"
             + (f": {texto!r} no puede tener centavos." if admitidos == 0 else "."),
         )
+    if importe > IMPORTE_MAXIMO:
+        # Con el texto recortado: un monto de cuarenta dígitos no aporta nada
+        # entero, y el mensaje se guarda con la importación.
+        visto = texto if len(texto) <= 40 else texto[:40] + "…"
+        raise _ErrorDeCampo(
+            IMPORTE_FUERA_DE_RANGO,
+            f"El monto {visto!r} es mayor que el máximo que se puede guardar ({IMPORTE_MAXIMO}).",
+        )
     if importe == 0:
         # Una línea en cero no es un cobro. No es un error del archivo, pero
         # tampoco es un candidato: se informa para que se vea que se descartó.
@@ -635,28 +677,66 @@ def leer(
     # entre comillas: csv junta esas dos líneas en una sola fila, y de ahí en
     # adelante todos los números apuntarían una línea más arriba. El número
     # tiene que ser el que la persona ve en su planilla, o no sirve de nada.
-    filas = [(lector.line_num, fila) for fila in lector]
+    #
+    # ── Y el lector puede rendirse en UNA fila ──────────────────────────
+    # `csv` lanza `csv.Error` cuando una celda pasa de 131.072 caracteres.
+    # Recorrerlo con un `for` dejaba salir esa excepción: la tarea moría, la
+    # importación esperaba al rescate y las filas buenas se perdían con la
+    # mala. Comprobado contra el lector de verdad: lanza en esa línea, y la
+    # llamada siguiente lee bien la que viene, con `line_num` correcto. Así
+    # que la fila ilegible se anota (`None`) y se sigue.
+    filas: list[tuple[int, list[str] | None]] = []
+    while True:
+        try:
+            fila_leida = next(lector)
+        except StopIteration:
+            break
+        except csv.Error:
+            filas.append((lector.line_num, None))
+            continue
+        filas.append((lector.line_num, fila_leida))
     if not filas:
         raise CsvInvalido(CABECERA_VACIA, "El archivo no tiene filas.")
 
-    posiciones = mapear_columnas(filas[0][1])
-    cuerpo = [(numero, fila) for numero, fila in filas[1:] if any(c.strip() for c in fila)]
+    cabecera = filas[0][1]
+    if cabecera is None or any(len(c) > LARGO_MAXIMO_CELDA for c in cabecera):
+        # Sin cabecera no se sabe qué es cada columna: no hay filas que rescatar.
+        raise CsvInvalido(
+            CABECERA_ILEGIBLE,
+            f"La primera fila no se puede leer como cabecera: una de sus celdas pasa de "
+            f"{LARGO_MAXIMO_CELDA} caracteres.",
+        )
+    posiciones = mapear_columnas(cabecera)
+    # Hasta dónde llega la cabecera, sin contar separadores de adorno al final.
+    ancho = max((i + 1 for i, c in enumerate(cabecera) if c.strip()), default=0)
+    cuerpo = [
+        (numero, fila) for numero, fila in filas[1:]
+        if fila is None or any(c.strip() for c in fila)
+    ]
 
     indice_fecha = posiciones[CAMPO_FECHA]
     orden = orden_fecha or detectar_orden_fecha(
-        fila[indice_fecha] for _, fila in cuerpo if indice_fecha < len(fila)
+        fila[indice_fecha] for _, fila in cuerpo if fila is not None and indice_fecha < len(fila)
     )
 
     candidatos: list[Candidato] = []
     errores: list[ErrorFila] = []
 
     for numero, fila in cuerpo:
+        if fila is None:
+            errores.append(ErrorFila(
+                fila=numero,
+                codigo=CELDA_DEMASIADO_LARGA,
+                mensaje=f"Una celda de la fila pasa de {LARGO_MAXIMO_CELDA} caracteres y no se pudo leer.",
+            ))
+            continue
         try:
             candidatos.append(
                 _candidato_de_fila(
                     fila,
                     numero=numero,
                     posiciones=posiciones,
+                    ancho=ancho,
                     organizacion_id=organizacion_id,
                     sha256=sha256,
                     orden=orden,
@@ -679,6 +759,7 @@ def _candidato_de_fila(
     *,
     numero: int,
     posiciones: Mapping[str, int],
+    ancho: int,
     organizacion_id: str,
     sha256: str,
     orden: str | None,
@@ -697,6 +778,26 @@ def _candidato_de_fila(
         raise _ErrorDeCampo(
             FILA_INCOMPLETA,
             f"La fila tiene {len(fila)} columnas y no alcanza para las obligatorias.",
+        )
+
+    # Lo simétrico: una fila MÁS larga que la cabecera tampoco se recorta en
+    # silencio. Casi siempre es un monto con coma decimal o una glosa con el
+    # separador, sin comillas: `USD,1234,56` bajo moneda y monto guardaba
+    # 1.234,00 USD y cero errores. Cuál celda sobra no se puede saber, así
+    # que la fila se rechaza. Los separadores de adorno al final —celdas
+    # vacías— no traen datos y se dejan pasar.
+    if any(c.strip() for c in fila[ancho:]):
+        raise _ErrorDeCampo(
+            COLUMNAS_SOBRANTES,
+            f"La fila tiene {len(fila)} columnas y la cabecera {ancho}. Si un monto o una "
+            "descripción trae el separador del archivo, tiene que ir entre comillas.",
+        )
+
+    largo = max((len(c) for c in fila), default=0)
+    if largo > LARGO_MAXIMO_CELDA:
+        raise _ErrorDeCampo(
+            CELDA_DEMASIADO_LARGA,
+            f"Una celda de la fila tiene {largo} caracteres; el máximo es {LARGO_MAXIMO_CELDA}.",
         )
 
     descripcion = celda(CAMPO_DESCRIPCION)
