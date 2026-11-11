@@ -18,6 +18,8 @@
 - **Componente de Tarjeta Móvil ([`TarjetaSuscripcionMovil.tsx`](file:///home/sebamena/Documentos/GitHub/integra-lll/frontend/movil/src/screens/home/TarjetaSuscripcionMovil.tsx)):**
   - Muestra nombre, categoría, avatar con inicial, monto y divisa (`formatearMonto`), frecuencia y próximo cobro (`formatearFecha`).
   - Badge accesible con colores de estado contrastantes: `activo` (Activa), `prueba` (Prueba), `fantasma` (Sin uso), `por_confirmar` (Por confirmar), `cancelado` (Cancelada).
+- **Consumo de suscripciones reales vía API (sin datos falsos hardcodeados):**
+  - `HomeScreen` consume directamente `getSuscripciones()` de `@ojoalgasto/shared`. Se eliminó cualquier array o mock estático en código de producción; la pantalla inicializa en estado `cargando`, realiza la petición al backend y conmuta a `listo` con los datos reales, o a `error` con reintento si la red falla.
 - **Integración con AN-28 (`ContenidoConEstado`):**
   - La pantalla maneja limpiamente los estados `cargando` (`Loading` con progressbar), `error` (`NetworkError` con alerta y reintento), `vacio` (`EmptyState` con acción directa para crear suscripción) y `listo` (`FlatList` con optimizaciones de rendimiento y accesibilidad).
 - **Cero duplicación de tipos y sin lógica de dominio redundante:**

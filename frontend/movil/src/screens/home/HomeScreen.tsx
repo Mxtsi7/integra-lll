@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import {
   formatearTotales,
   gastosPorMoneda,
+  getSuscripciones,
   type EstadoCarga,
   type Suscripcion,
   type Usuario,
@@ -13,53 +14,6 @@ import { NavButton } from '../components/NavButton';
 import type { HomeScreenProps } from '../../navigation/types';
 import { styles } from './HomeScreen.styles';
 import { TarjetaSuscripcionMovil } from './TarjetaSuscripcionMovil';
-
-export const SUSCRIPCIONES_HOME_DEFAULT: Suscripcion[] = [
-  {
-    id: '1',
-    nombre: 'Netflix',
-    monto: 9990,
-    moneda: 'CLP',
-    frecuencia: 'mensual',
-    fecha_proximo_cobro: '2026-10-05',
-    categoria: 'streaming',
-    estado: 'activo',
-    horas_uso_mes: 18,
-  },
-  {
-    id: '2',
-    nombre: 'Spotify',
-    monto: 4990,
-    moneda: 'CLP',
-    frecuencia: 'mensual',
-    fecha_proximo_cobro: '2026-09-28',
-    categoria: 'musica',
-    estado: 'activo',
-    horas_uso_mes: 40,
-  },
-  {
-    id: '3',
-    nombre: 'Gimnasio',
-    monto: 25000,
-    moneda: 'CLP',
-    frecuencia: 'mensual',
-    fecha_proximo_cobro: '2026-10-01',
-    categoria: 'salud',
-    estado: 'fantasma',
-    horas_uso_mes: 0,
-  },
-  {
-    id: '4',
-    nombre: 'iCloud',
-    monto: 1290,
-    moneda: 'CLP',
-    frecuencia: 'mensual',
-    fecha_proximo_cobro: '2026-10-12',
-    categoria: 'nube',
-    estado: 'activo',
-    horas_uso_mes: 5,
-  },
-];
 
 export interface HomeViewProps {
   estado: EstadoCarga<Suscripcion[]>;
@@ -191,7 +145,7 @@ export interface HomeScreenPropsContainer {
 export default function HomeScreen({
   navigation,
   estadoInicial,
-  onCargarSuscripciones,
+  onCargarSuscripciones = getSuscripciones,
   usuario,
   onLogout,
 }: (HomeScreenProps<'HomeScreen'> & HomeScreenPropsContainer) | HomeScreenPropsContainer) {
@@ -209,21 +163,26 @@ export default function HomeScreen({
   const ejecutarLogout = onLogout !== undefined ? onLogout : authCerrarSesion;
 
   const [estado, setEstado] = useState<EstadoCarga<Suscripcion[]>>(
-    estadoInicial ?? { tipo: 'listo', datos: SUSCRIPCIONES_HOME_DEFAULT }
+    estadoInicial ?? { tipo: 'cargando' }
   );
 
-  const manejarReintento = async () => {
-    if (onCargarSuscripciones) {
-      setEstado({ tipo: 'cargando' });
-      try {
-        const datos = await onCargarSuscripciones();
-        setEstado({ tipo: 'listo', datos });
-      } catch {
-        setEstado({ tipo: 'error' });
-      }
-    } else {
-      setEstado({ tipo: 'listo', datos: SUSCRIPCIONES_HOME_DEFAULT });
+  const cargarDatos = useCallback(async () => {
+    try {
+      const datos = await onCargarSuscripciones();
+      setEstado({ tipo: 'listo', datos });
+    } catch {
+      setEstado({ tipo: 'error' });
     }
+  }, [onCargarSuscripciones]);
+
+  useEffect(() => {
+    if (estadoInicial) return;
+    void cargarDatos();
+  }, [estadoInicial, cargarDatos]);
+
+  const manejarReintento = async () => {
+    setEstado({ tipo: 'cargando' });
+    await cargarDatos();
   };
 
   const manejarSuscripcionPress = (suscripcion: Suscripcion) => {

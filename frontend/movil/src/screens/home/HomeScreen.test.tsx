@@ -2,10 +2,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import HomeScreen, {
-  HomeView,
-  SUSCRIPCIONES_HOME_DEFAULT,
-} from './HomeScreen';
+import HomeScreen, { HomeView } from './HomeScreen';
 import type { Suscripcion, Usuario } from '@ojoalgasto/shared';
 
 const MOCK_USUARIO: Usuario = {
@@ -239,6 +236,21 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
   });
 
   describe('Componente Contenedor HomeScreen', () => {
+    it('carga suscripciones automáticamente al montarse consumiendo la API', async () => {
+      const onCargarSuscripciones = vi
+        .fn()
+        .mockResolvedValueOnce(MOCK_SUSCRIPCIONES);
+
+      render(<HomeScreen onCargarSuscripciones={onCargarSuscripciones} />);
+
+      // Inicialmente muestra estado cargando
+      expect(screen.getByRole('progressbar')).toBeTruthy();
+
+      // Al resolver, carga las suscripciones reales
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+      expect(onCargarSuscripciones).toHaveBeenCalledTimes(1);
+    });
+
     it('navega a SuscripcionDetalle con id al presionar una suscripción', () => {
       const navigateMock = vi.fn();
       const navigation = { navigate: navigateMock };
@@ -246,7 +258,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
       render(
         <HomeScreen
           navigation={navigation as any}
-          estadoInicial={{ tipo: 'listo', datos: SUSCRIPCIONES_HOME_DEFAULT }}
+          estadoInicial={{ tipo: 'listo', datos: MOCK_SUSCRIPCIONES }}
         />
       );
 
@@ -261,7 +273,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
       render(
         <HomeScreen
           navigation={navigation as any}
-          estadoInicial={{ tipo: 'listo', datos: SUSCRIPCIONES_HOME_DEFAULT }}
+          estadoInicial={{ tipo: 'listo', datos: MOCK_SUSCRIPCIONES }}
         />
       );
 

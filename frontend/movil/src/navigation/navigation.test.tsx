@@ -32,6 +32,25 @@ const USUARIO: Usuario = {
   plan: 'gratuito',
 };
 
+const MOCK_SUSCRIPCIONES_API = {
+  count: 1,
+  next: null,
+  previous: null,
+  results: [
+    {
+      id: '1',
+      nombre: 'Netflix',
+      monto: '9990.00',
+      moneda: 'CLP',
+      frecuencia: 'mensual',
+      fecha_proximo_cobro: '2026-10-05',
+      categoria: 'streaming',
+      estado: 'activo',
+      horas_uso_mes: '18.00',
+    },
+  ],
+};
+
 beforeEach(() => {
   for (const k of Object.keys(almacen)) delete almacen[k];
   configurarTokenStorage({
@@ -43,6 +62,22 @@ beforeEach(() => {
       delete almacen[k];
     },
   });
+
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/suscripciones/')) {
+        return new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ detail: 'Ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    })
+  );
 });
 
 afterEach(() => {
@@ -181,6 +216,14 @@ describe('Navegación Móvil (SE-06)', () => {
         if (url.includes('/usuarios/me/')) {
           return Promise.resolve(
             new Response(JSON.stringify(USUARIO_INTEGRANTE), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
+        if (url.includes('/suscripciones/')) {
+          return Promise.resolve(
+            new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
               status: 200,
               headers: { 'Content-Type': 'application/json' },
             })
