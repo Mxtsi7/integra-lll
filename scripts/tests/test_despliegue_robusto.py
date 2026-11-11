@@ -7,7 +7,10 @@ Tres defectos del guion, los tres descubiertos chocando contra el cluster:
    que comprueba que el rechazo se conoce ANTES de suspender los listeners);
 2. `python3` en Windows es el alias de la Microsoft Store y no ejecuta nada;
 3. `40-red.yaml` responde Forbidden con la cuenta de estudiante y cortaba el
-   guion después de aplicar todo lo demás.
+   guion después de aplicar todo lo demás;
+4. Git Bash convertía `VITE_API_URL=/api` en `C:/Program Files/Git/api` y la
+   web compilaba apuntando a esa dirección. La imagen `0e70d60` salió así: si
+   aquel despliegue hubiera terminado, la web habría quedado sin API.
 """
 import os
 from pathlib import Path
@@ -107,3 +110,26 @@ def test_las_politicas_de_red_se_consultan_antes_de_aplicarlas():
     aviso = guion.index("NO se aplicó: esta cuenta no puede crear NetworkPolicy")
     assert aviso > aplicar
     assert "SIN aislamiento de red" in guion
+
+
+# ── 4. La URL de la API que se compila en la web ────────────────────────────
+
+def test_la_construccion_de_la_web_no_deja_que_git_bash_convierta_la_url():
+    """Comprobado construyendo la imagen de verdad en Windows: sin la variable
+    el JavaScript compilado trae `??"C:/Program Files/Git/api"`, y con ella
+    `??"/api"`."""
+    lineas = [l.strip() for l in _guion().splitlines()
+              if "Dockerfile.web" in l and not l.lstrip().startswith("#")]
+    assert len(lineas) == 1, lineas
+    assert lineas[0].startswith("MSYS_NO_PATHCONV=1 docker build "), lineas[0]
+    assert '--build-arg "VITE_API_URL=/api"' in lineas[0]
+
+
+def test_el_dockerfile_de_la_web_rechaza_una_url_convertida_en_ruta():
+    """La variable del guion no protege a quien construye a mano. El
+    Dockerfile valida el valor antes de compilar, y tiene que hacerlo ANTES:
+    después, la compilación ya terminó bien con la URL mala adentro."""
+    dockerfile = (RAIZ / "k8s/Dockerfile.web").read_text(encoding="utf-8")
+    guarda = dockerfile.index('RUN case "$VITE_API_URL" in /*|http://*|https://*) ;;')
+    assert "exit 1" in dockerfile[guarda:dockerfile.index(chr(10), guarda)]
+    assert dockerfile.index("ENV VITE_API_URL=") < guarda < dockerfile.index("RUN npm run build")

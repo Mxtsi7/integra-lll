@@ -53,7 +53,10 @@ if [ "${SOLO_APLICAR:-0}" != "1" ]; then
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/auth          -t "$IMAGEN_AUTH" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/subscriptions -t "$IMAGEN_SUBSCRIPTIONS" .
   docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=gateway                -t "$IMAGEN_GATEWAY" .
-  docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
+  # MSYS_NO_PATHCONV: sin esto Git Bash convierte `/api` en
+  # `C:/Program Files/Git/api` y la web compila apuntando a esa "URL". El
+  # Dockerfile ademas lo rechaza, por si alguien construye a mano.
+  MSYS_NO_PATHCONV=1 docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
 
   echo "── publicando ──"
   for i in "$IMAGEN_AUTH" "$IMAGEN_SUBSCRIPTIONS" "$IMAGEN_GATEWAY" "$IMAGEN_WEB"; do
