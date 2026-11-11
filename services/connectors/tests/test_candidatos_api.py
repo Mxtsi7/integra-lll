@@ -348,6 +348,10 @@ def test_los_campos_expuestos_son_exactamente_estos(cliente):
         "tipo_mensaje_legible",
         "estado",
         "estado_legible",
+        "decidido_en",
+        "decidido_por",
+        # S3-FE-15: si lo confirmado ya existe en Suscripciones.
+        "aplicacion",
         "evidencia",
         "creado_en",
     }

@@ -470,5 +470,29 @@ def test_candidatos_sin_sesion_es_401_y_no_reenvia(upstream):
     assert not upstream.llamadas
 
 
+def test_rechazar_un_candidato_llega_a_connectors_como_post(upstream):
+    """S3-FE-16 cuelga de la misma entrada de `RUTAS`, pero el método importa.
+
+    Es la única ruta de candidatos que escribe. Si el gateway la reenviara
+    como GET, el servicio contestaría 405 y el rechazo se perdería en
+    silencio desde el punto de vista del frontend.
+    """
+    candidato = str(uuid.uuid4())
+
+    respuesta = cliente.post(
+        f"/api/candidatos/{candidato}/rechazar/",
+        data="{}",
+        content_type="application/json",
+        **con_token(token()),
+    )
+
+    assert respuesta.status_code == 200
+    llamada = upstream.llamadas[-1]
+    assert llamada["metodo"] == "POST"
+    assert llamada["url"] == (
+        settings.SERVICIOS["connectors"] + f"/api/candidatos/{candidato}/rechazar/"
+    )
+
+
 def test_candidatos_no_es_una_ruta_publica():
     assert "/api/candidatos/" not in settings.RUTAS_PUBLICAS

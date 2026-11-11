@@ -746,6 +746,17 @@ class ArchivoImportacion(ModeloTenant):
         return f"{self.importacion_id}: {self.formato} de {self.tamano} bytes"
 
 
+class CandidatoYaConfirmado(ValueError):
+    """No se rechaza lo que ya creó suscripciones y cobros (S3-FE-16).
+
+    Confirmar un candidato no es cambiarle un campo: crea o actualiza
+    suscripciones y cobros de verdad (S3-FE-15). Dejar que un rechazo
+    posterior lo mueva a `rechazado` daría un candidato que dice "no" con
+    movimientos creados a partir de él. Deshacer eso es otra operación, con su
+    propia tarjeta, y no un efecto de este endpoint.
+    """
+
+
 class CobroCandidato(ModeloTenant):
     """Un cobro propuesto, ya guardado (S3-FE-10, y S3-FE-09 lo reutiliza).
 
@@ -874,6 +885,31 @@ class CobroCandidato(ModeloTenant):
         verbose_name="Estado",
     )
 
+    # ── quién decidió, y cuándo ──────────────────────────────────────
+    # La trazabilidad que pide S3-FE-16: un candidato rechazado sin saber
+    # quién ni cuándo no se puede auditar, y es la clase de dato que después
+    # no se puede reconstruir. Los usa también S3-FE-15 al confirmar.
+
+    decidido_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Confirmado o rechazado el",
+        help_text=(
+            "NULL mientras está `propuesto`. No se mueve si se vuelve a "
+            "rechazar: la decisión es la primera, no la última petición."
+        ),
+    )
+    decidido_por = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="Quién decidió",
+        help_text=(
+            "El valor crudo de `X-Usuario-Id` que inyecta el gateway. El id "
+            "vive en el esquema de `auth` y acá no se interpreta (ADR-002)."
+        ),
+    )
+
     evidencia = models.JSONField(
         default=dict,
         blank=True,
@@ -883,6 +919,56 @@ class CobroCandidato(ModeloTenant):
             "en CSV, el número de fila y la glosa original."
         ),
     )
+
+    def rechazar(self, *, por: str = "", cuando=None) -> bool:
+        """Lo marca `rechazado`. `True` si cambió algo (S3-FE-16).
+
+        ── No crea ni toca nada de plata ───────────────────────────────────
+        Lo único que hace es mover el estado de ESTA fila. No hay suscripción
+        ni cobro de por medio: esas tablas viven en `subscriptions` y este
+        servicio no las conoce (ADR-002). Tampoco se publica un evento ni se
+        marca la importación como confirmada.
+
+        ── Rechazar de nuevo no es un error ────────────────────────────────
+        Devuelve `False` y **no mueve** `decidido_en` ni `decidido_por`: la
+        decisión es la primera, no la última petición que llegó. Es lo que
+        necesita S3-CH-09 para no tener que cuidarse de los dobles envíos, y
+        el criterio "rechazar nuevamente tiene resultado definido".
+
+        ── El candidato no se borra ────────────────────────────────────────
+        Queda `rechazado` y sigue consultable. Borrarlo perdería la
+        trazabilidad y, peor, haría que S3-FE-17 lo volviera a proponer la
+        próxima vez que se lea el mismo archivo.
+
+        La guarda va en el WHERE, no en memoria: dos peticiones simultáneas
+        sobre la misma fila leen las dos `propuesto`, y sin el filtro las dos
+        escribirían su propia fecha de decisión.
+        """
+        if self.estado == self.Estado.CONFIRMADO:
+            raise CandidatoYaConfirmado(
+                "El candidato ya está confirmado: deshacer sus suscripciones y "
+                "cobros no es parte de rechazarlo."
+            )
+        ahora = cuando or timezone.now()
+        cambiadas = (
+            type(self)
+            .objects.filter(pk=self.pk, estado=self.Estado.PROPUESTO)
+            .update(
+                estado=self.Estado.RECHAZADO,
+                decidido_en=ahora,
+                decidido_por=por,
+                actualizado_en=ahora,
+            )
+        )
+        self.refresh_from_db()
+        if self.estado == self.Estado.CONFIRMADO:
+            # Otra petición lo confirmó entre la comprobación de arriba y el
+            # UPDATE. No se rechaza, y el llamador se entera igual que si
+            # hubiera llegado tarde desde el principio.
+            raise CandidatoYaConfirmado(
+                "El candidato se confirmó mientras se procesaba el rechazo."
+            )
+        return bool(cambiadas)
 
     @classmethod
     def desde_candidato(cls, candidato, *, importacion: Importacion) -> "CobroCandidato":
@@ -938,3 +1024,57 @@ class CobroCandidato(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.servicio or self.servicio_texto}: {self.importe} {self.moneda}"
+
+
+class OutboxEvento(ModeloTenant):
+    """Un evento durable que todavía no se publicó (S3-FE-15).
+
+    ── Por qué existe ──────────────────────────────────────────────────────
+    Confirmar un candidato tiene que crear o actualizar una suscripción y, si
+    corresponde, un cobro. Esas tablas viven en `subscriptions` y este
+    servicio no conoce su esquema (ADR-002). O sea que la confirmación cruza
+    una frontera de servicio, y una transacción no cruza fronteras.
+
+    Lo que sí se puede hacer en una sola transacción es dejar **el candidato
+    confirmado y el evento que lo cuenta**, los dos o ninguno. Eso es este
+    outbox, y es el criterio "confirmar es atómico": después de un commit no
+    existe un candidato confirmado sin su evento, ni un evento sin su
+    candidato. Si la transacción revienta, no queda nada a medias.
+
+    ── Es el MISMO sobre que el de subscriptions ───────────────────────────
+    Los campos son los de `subscription_event_outbox` (MX-21), uno por uno y a
+    propósito: el consumidor que lo drene ya sabe leer ese sobre, y copiarlo
+    distinto obligaría a escribir un segundo lector para decir lo mismo.
+
+    ── Lo que este servicio NO hace todavía ────────────────────────────────
+    Publicar. No hay publicador en connectors, así que las filas se acumulan
+    acá, durables, hasta que exista el que las drene. Nada se pierde y nada se
+    inventa: no se finge que la suscripción ya está creada.
+    """
+
+    evento = models.CharField(max_length=40)
+    version = models.PositiveSmallIntegerField(default=1)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+    correlation_id = models.UUIDField()
+    datos = models.JSONField()
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    siguiente_intento = models.DateTimeField(default=timezone.now)
+    ultimo_error = models.CharField(max_length=100, blank=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "connectors_event_outbox"
+        # Igual que el de subscriptions: cronológico y con `id` de desempate,
+        # para que drenarlo por páginas no repita ni se salte filas.
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(
+                fields=["publicado_en", "siguiente_intento"],
+                name="con_outbox_pending_idx",
+            ),
+        ]
+        verbose_name = "Evento pendiente"
+        verbose_name_plural = "Eventos pendientes"
+
+    def __str__(self) -> str:
+        return f"{self.evento}.v{self.version} ({'publicado' if self.publicado_en else 'pendiente'})"
