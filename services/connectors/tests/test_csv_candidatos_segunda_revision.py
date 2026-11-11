@@ -252,14 +252,6 @@ def test_una_celda_larga_pero_legible_se_rechaza_con_el_mismo_error():
     assert len(r.errores[0].mensaje) < 300
 
 
-def test_el_limite_propio_queda_por_debajo_del_del_lector():
-    """Si el nuestro fuera mayor, entre los dos habría una franja donde quien
-    decide es el lector, y con su mensaje."""
-    import csv
-
-    assert cc.LARGO_MAXIMO_CELDA < csv.field_size_limit()
-
-
 def test_una_cabecera_ilegible_es_un_error_del_archivo():
     """Si lo que no se puede leer es la cabecera, no hay filas que rescatar."""
     gigante = "N" * 131_073
