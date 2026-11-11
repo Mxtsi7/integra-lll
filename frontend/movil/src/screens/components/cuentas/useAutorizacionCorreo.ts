@@ -34,11 +34,15 @@ export function useAutorizacionCorreo(
   const [estado, setEstado] = useState<EstadoAutorizacion>({ tipo: 'inactiva' });
   const estaEnCurso = useRef(false); // candado contra doble toque
   const sigueMontado = useRef(true);
+  // Identifica el intento vigente. Al salir de la pantalla sube, y la respuesta de un intento
+  // abandonado deja de ser vigente: así no abre el navegador cuando la persona ya se fue.
+  const numeroDeIntento = useRef(0);
 
   useEffect(() => {
     sigueMontado.current = true;
     return () => {
       sigueMontado.current = false;
+      numeroDeIntento.current += 1;
     };
   }, []);
 
@@ -46,14 +50,19 @@ export function useAutorizacionCorreo(
     async (proveedor: ProveedorCorreo) => {
       if (estaEnCurso.current) return;
       estaEnCurso.current = true;
+      numeroDeIntento.current += 1;
+      const miIntento = numeroDeIntento.current;
+      const esIntentoVigente = () => sigueMontado.current && miIntento === numeroDeIntento.current;
       setEstado({ tipo: 'iniciando', proveedor });
 
       const terminar = (nuevoEstado: EstadoAutorizacion) => {
-        if (sigueMontado.current) setEstado(nuevoEstado);
+        if (esIntentoVigente()) setEstado(nuevoEstado);
       };
 
       try {
         const autorizacion = await api.iniciarAutorizacionCorreo(proveedor);
+        // Si la persona salió de la pantalla mientras esperaba, esta respuesta ya no le sirve.
+        if (!esIntentoVigente()) return;
         // No se confía en la URL que llega: debe ser https y del dominio del proveedor pedido.
         if (!esUrlAutorizacionValida(proveedor, autorizacion.url_autorizacion)) {
           terminar({ tipo: 'error', mensaje: MENSAJES_AUTORIZACION.urlInsegura });

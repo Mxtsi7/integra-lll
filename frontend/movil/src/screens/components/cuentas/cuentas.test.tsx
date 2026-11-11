@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { CuentaConectada } from '@ojoalgasto/shared';
 import { AutorizacionCorreoContenido } from './AutorizacionCorreoContenido';
 import { CuentasContenido } from './CuentasContenido';
 import { MENSAJES_AUTORIZACION } from './useAutorizacionCorreo';
+import { MENSAJE_ERROR_DESCONEXION, useCuentas } from './useCuentas';
 
 function crearCuenta(id: string, cambios: Partial<CuentaConectada> = {}): CuentaConectada {
   return {
@@ -38,7 +39,12 @@ afterEach(() => {
 
 describe('Cuentas conectadas móvil (AN-06)', () => {
   it('desconectar pide confirmar y luego muestra el estado que devolvió el backend', async () => {
-    const api = crearApiCuentas([crearCuenta('ana')]);
+    const desconectada = crearCuenta('ana', { estado: 'desconectada', estado_legible: 'Desconectada' });
+    const api = {
+      ...crearApiCuentas(),
+      // Antes del DELETE el backend devuelve la cuenta conectada; después, ya desconectada.
+      getCuentasConectadas: vi.fn().mockResolvedValueOnce([crearCuenta('ana')]).mockResolvedValue([desconectada]),
+    };
     render(<CuentasContenido onConectar={vi.fn()} api={api} />);
     fireEvent.click(await screen.findByTestId('desconectar-ana'));
     expect(api.desconectarCuenta).not.toHaveBeenCalled();
@@ -113,7 +119,8 @@ describe('Cuentas conectadas móvil (AN-06)', () => {
     const getCuentasConectadas = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([crearCuenta('ana')]);
     render(<CuentasContenido onConectar={vi.fn()} alVolverAPantalla={alVolver} api={{ ...crearApiCuentas(), getCuentasConectadas }} />);
     await screen.findByText('Aún no conectas ninguna cuenta');
-    recargarDesdeFoco();
+    // Recargar cambia el estado fuera de un evento de usuario: se envuelve en act.
+    act(() => recargarDesdeFoco());
     expect(await screen.findByTestId('cuenta-ana')).toBeTruthy();
   });
 });
@@ -185,5 +192,176 @@ describe('Autorización de correo móvil (AN-09)', () => {
     fireEvent.click(screen.getByTestId('conectar-gmail'));
     fireEvent.click(await screen.findByTestId('ver-cuentas'));
     expect(onVerCuentas).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+/** Una promesa que se resuelve o rechaza a mano, para probar en qué orden llegan las respuestas. */
+function crearDiferido<T>() {
+  let resolver: (valor: T) => void = () => {};
+  let rechazar: (error: unknown) => void = () => {};
+  const promesa = new Promise<T>((alResolver, alRechazar) => {
+    resolver = alResolver;
+    rechazar = alRechazar;
+  });
+  return { promesa, resolver, rechazar };
+}
+
+describe('Desconectar mientras se recarga la lista (regresión de la revisión de #156)', () => {
+  const conectada = crearCuenta('ana');
+  const desconectada = crearCuenta('ana', { estado: 'desconectada', estado_legible: 'Desconectada' });
+
+  it('una recarga que llega con la cuenta aún conectada no deja la fila obsoleta ni la marca pendiente', async () => {
+    const recargaVieja = crearDiferido<CuentaConectada[]>();
+    const desconexion = crearDiferido<CuentaConectada>();
+    const getCuentasConectadas = vi
+      .fn()
+      .mockResolvedValueOnce([conectada]) // carga inicial
+      .mockReturnValueOnce(recargaVieja.promesa) // recarga al volver, durante el DELETE
+      .mockResolvedValue([desconectada]); // reconciliación final: lo que confirma el backend
+    const api = { getCuentasConectadas, desconectarCuenta: vi.fn().mockReturnValue(desconexion.promesa) };
+
+    const { result } = renderHook(() => useCuentas(api));
+    await waitFor(() => expect(result.current.estado.tipo).toBe('listo'));
+
+    let desconectando: Promise<void> = Promise.resolve();
+    act(() => {
+      desconectando = result.current.desconectar('ana');
+    });
+    act(() => {
+      void result.current.cargar();
+    });
+
+    await act(async () => {
+      recargaVieja.resolver([conectada]); // el backend aún no había procesado el DELETE
+    });
+    await act(async () => {
+      desconexion.resolver(desconectada);
+      await desconectando;
+    });
+
+    await waitFor(() => {
+      const { estado } = result.current;
+      expect(estado.tipo === 'listo' && estado.datos[0].estado).toBe('desconectada');
+    });
+    expect(result.current.idsDesconectando).toEqual([]);
+  });
+
+  it('una recarga vieja que llega DESPUÉS del DELETE no pisa el estado desconectado', async () => {
+    const recargaVieja = crearDiferido<CuentaConectada[]>();
+    const getCuentasConectadas = vi
+      .fn()
+      .mockResolvedValueOnce([conectada])
+      .mockReturnValueOnce(recargaVieja.promesa)
+      .mockResolvedValue([desconectada]);
+    const api = { getCuentasConectadas, desconectarCuenta: vi.fn().mockResolvedValue(desconectada) };
+
+    const { result } = renderHook(() => useCuentas(api));
+    await waitFor(() => expect(result.current.estado.tipo).toBe('listo'));
+
+    act(() => {
+      void result.current.cargar();
+    });
+    await act(async () => {
+      await result.current.desconectar('ana');
+    });
+    await act(async () => {
+      recargaVieja.resolver([conectada]); // llega tarde, con datos de antes del DELETE
+    });
+
+    await waitFor(() => {
+      const { estado } = result.current;
+      expect(estado.tipo === 'listo' && estado.datos[0].estado).toBe('desconectada');
+    });
+    expect(result.current.idsDesconectando).toEqual([]);
+  });
+
+  it('si el DELETE falla mientras se recarga: avisa, libera la marca y deja lo que confirma el backend', async () => {
+    const recarga = crearDiferido<CuentaConectada[]>();
+    const desconexion = crearDiferido<CuentaConectada>();
+    const getCuentasConectadas = vi
+      .fn()
+      .mockResolvedValueOnce([conectada])
+      .mockReturnValueOnce(recarga.promesa)
+      .mockResolvedValue([conectada]);
+    const api = { getCuentasConectadas, desconectarCuenta: vi.fn().mockReturnValue(desconexion.promesa) };
+
+    const { result } = renderHook(() => useCuentas(api));
+    await waitFor(() => expect(result.current.estado.tipo).toBe('listo'));
+
+    let desconectando: Promise<void> = Promise.resolve();
+    act(() => {
+      desconectando = result.current.desconectar('ana');
+    });
+    act(() => {
+      void result.current.cargar();
+    });
+    await act(async () => {
+      recarga.resolver([conectada]);
+    });
+    await act(async () => {
+      desconexion.rechazar(new Error('500'));
+      await desconectando;
+    });
+
+    await waitFor(() => expect(result.current.mensajeError).toBe(MENSAJE_ERROR_DESCONEXION));
+    expect(result.current.idsDesconectando).toEqual([]);
+    const { estado } = result.current;
+    expect(estado.tipo === 'listo' && estado.datos[0].estado).toBe('conectada');
+  });
+
+  it('un DELETE que termina cuando la pantalla ya se cerró no falla ni actualiza nada', async () => {
+    const desconexion = crearDiferido<CuentaConectada>();
+    const api = { getCuentasConectadas: vi.fn().mockResolvedValue([conectada]), desconectarCuenta: vi.fn().mockReturnValue(desconexion.promesa) };
+
+    const { result, unmount } = renderHook(() => useCuentas(api));
+    await waitFor(() => expect(result.current.estado.tipo).toBe('listo'));
+    let desconectando: Promise<void> = Promise.resolve();
+    act(() => {
+      desconectando = result.current.desconectar('ana');
+    });
+    unmount();
+    desconexion.resolver(desconectada);
+    await desconectando;
+    expect(api.getCuentasConectadas).toHaveBeenCalledTimes(1); // no pide la lista de una pantalla cerrada
+  });
+});
+
+describe('Autorización abandonada (regresión de la revisión de #156)', () => {
+  it('si la persona sale de la pantalla antes de que llegue la respuesta, no se abre el navegador', async () => {
+    const respuesta = crearDiferido<{ url_autorizacion: string; estado_oauth: string; expira_en: string }>();
+    const abrirUrl = vi.fn().mockResolvedValue(undefined);
+    const api = { iniciarAutorizacionCorreo: vi.fn().mockReturnValue(respuesta.promesa) };
+
+    const { unmount } = render(<AutorizacionCorreoContenido onVerCuentas={vi.fn()} api={api} abrirUrl={abrirUrl} />);
+    fireEvent.click(screen.getByTestId('conectar-gmail'));
+    unmount();
+    respuesta.resolver({ url_autorizacion: URL_GMAIL, estado_oauth: 'abc', expira_en: '2026-11-10T10:10:00Z' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(abrirUrl).not.toHaveBeenCalled();
+  });
+
+  it('con la pantalla abierta, abre el navegador exactamente una vez', async () => {
+    const abrirUrl = vi.fn().mockResolvedValue(undefined);
+    render(<AutorizacionCorreoContenido onVerCuentas={vi.fn()} api={crearApiAutorizacion()} abrirUrl={abrirUrl} />);
+    fireEvent.click(screen.getByTestId('conectar-gmail'));
+    await screen.findByTestId('autorizacion-esperando');
+    expect(abrirUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el intento falla se puede reintentar y el segundo abre el navegador', async () => {
+    const abrirUrl = vi.fn().mockResolvedValue(undefined);
+    const iniciarAutorizacionCorreo = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('503'))
+      .mockResolvedValue({ url_autorizacion: URL_GMAIL, estado_oauth: 'abc', expira_en: '2026-11-10T10:10:00Z' });
+    render(<AutorizacionCorreoContenido onVerCuentas={vi.fn()} api={{ iniciarAutorizacionCorreo }} abrirUrl={abrirUrl} />);
+    fireEvent.click(screen.getByTestId('conectar-gmail'));
+    await screen.findByTestId('error-autorizacion');
+    fireEvent.click(screen.getByTestId('conectar-gmail'));
+    await screen.findByTestId('autorizacion-esperando');
+    expect(abrirUrl).toHaveBeenCalledTimes(1);
   });
 });
