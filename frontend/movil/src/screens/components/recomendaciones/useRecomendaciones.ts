@@ -25,7 +25,8 @@ export type EstadoDetalle = EstadoCarga<ExplicacionRecomendacion>;
 
 /**
  * Lista de recomendaciones, detalle y descarte (AN-05, AN-21 y AN-25).
- * Una respuesta vieja (se recargó o se salió de la pantalla) se descarta comparando `numeroDeCarga`.
+ * Una respuesta vieja de lectura (se recargó o se salió de la pantalla) se descarta comparando `numeroDeCarga`.
+ * Las mutaciones (descarte) no dependen de `numeroDeCarga` para no quedar bloqueadas si se recarga en paralelo.
  */
 export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
   const [estado, setEstado] = useState<EstadoCarga<ListaLeida>>({ tipo: 'cargando' });
@@ -35,6 +36,7 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
   // El gateway responde 403 si el plan no incluye recomendaciones; no es un fallo de red.
   const [requierePremium, setRequierePremium] = useState(false);
   const numeroDeCarga = useRef(0);
+  const sigueMontado = useRef(true);
   const descartesEnCurso = useRef(new Set<string>()); // candado contra doble toque
 
   const cargar = useCallback(async () => {
@@ -47,19 +49,21 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
 
     try {
       const respuesta = await api.getRecomendaciones();
-      if (miCarga !== numeroDeCarga.current) return;
+      if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
       const lista = leerListaRecomendaciones(respuesta);
       setEstado(lista ? { tipo: 'listo', datos: lista } : { tipo: 'error' });
     } catch (error) {
-      if (miCarga !== numeroDeCarga.current) return;
+      if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
       if (error instanceof ErrorDeApi && error.status === 403) setRequierePremium(true);
       setEstado({ tipo: 'error' });
     }
   }, [api]);
 
   useEffect(() => {
+    sigueMontado.current = true;
     void cargar();
     return () => {
+      sigueMontado.current = false;
       numeroDeCarga.current += 1;
     };
   }, [cargar]);
@@ -70,10 +74,10 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
       setDetalles((actuales) => ({ ...actuales, [id]: { tipo: 'cargando' } }));
       try {
         const explicacion = await api.explicarRecomendacion(id);
-        if (miCarga !== numeroDeCarga.current) return;
+        if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
         setDetalles((actuales) => ({ ...actuales, [id]: { tipo: 'listo', datos: explicacion } }));
       } catch {
-        if (miCarga !== numeroDeCarga.current) return;
+        if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
         setDetalles((actuales) => ({ ...actuales, [id]: { tipo: 'error' } }));
       }
     },
@@ -92,27 +96,36 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
     async (id: string) => {
       if (descartesEnCurso.current.has(id)) return;
       descartesEnCurso.current.add(id);
-      setIdsDescartando((ids) => [...ids, id]);
-      setMensajeError(null);
-      const miCarga = numeroDeCarga.current;
+
+      if (sigueMontado.current) {
+        setIdsDescartando((ids) => [...ids, id]);
+        setMensajeError(null);
+      }
 
       try {
         await api.descartarRecomendacion(id);
-        if (miCarga !== numeroDeCarga.current) return;
-        setEstado((actual) =>
-          actual.tipo !== 'listo'
-            ? actual
-            : {
-                tipo: 'listo',
-                datos: { ...actual.datos, recomendaciones: actual.datos.recomendaciones.filter((item) => item.id !== id) },
-              },
-        );
+        if (sigueMontado.current) {
+          setEstado((actual) =>
+            actual.tipo !== 'listo'
+              ? actual
+              : {
+                  tipo: 'listo',
+                  datos: {
+                    ...actual.datos,
+                    recomendaciones: actual.datos.recomendaciones.filter((item) => item.id !== id),
+                  },
+                },
+          );
+        }
       } catch {
-        if (miCarga !== numeroDeCarga.current) return;
-        setMensajeError(MENSAJE_ERROR_DESCARTE);
+        if (sigueMontado.current) {
+          setMensajeError(MENSAJE_ERROR_DESCARTE);
+        }
       } finally {
         descartesEnCurso.current.delete(id);
-        if (miCarga === numeroDeCarga.current) setIdsDescartando((ids) => ids.filter((otroId) => otroId !== id));
+        if (sigueMontado.current) {
+          setIdsDescartando((ids) => ids.filter((otroId) => otroId !== id));
+        }
       }
     },
     [api],
