@@ -16,8 +16,8 @@ function montar(cambios: Partial<VerificarCorreoContenidoProps> = {}) {
     onReenviar: vi.fn().mockResolvedValue(undefined),
     ...cambios,
   };
-  render(<VerificarCorreoContenido {...props} />);
-  return props;
+  const resultado = render(<VerificarCorreoContenido {...props} />);
+  return { ...props, ...resultado };
 }
 
 afterEach(() => {
@@ -65,6 +65,71 @@ describe('Verificar correo móvil (AN-12)', () => {
     );
     await screen.findByTestId('verificacion-verificado');
     expect(onConfirmar).toHaveBeenCalledTimes(1);
+  });
+
+  it('si llega un token B mientras A sigue pendiente, la respuesta tardía de A no confirma B ni ejecuta onVerificado', async () => {
+    let resolverA!: () => void;
+    let resolverB!: () => void;
+    const onConfirmar = vi
+      .fn()
+      .mockReturnValueOnce(new Promise<void>((r) => (resolverA = r)))
+      .mockReturnValueOnce(new Promise<void>((r) => (resolverB = r)));
+    const onVerificado = vi.fn();
+
+    const { rerender } = montar({ token: 'tok-A', onConfirmar, onVerificado });
+    expect(screen.getByTestId('verificando')).toBeTruthy();
+
+    rerender(
+      <VerificarCorreoContenido
+        token="tok-B"
+        haySesion={false}
+        onIrALogin={vi.fn()}
+        onConfirmar={onConfirmar}
+        onVerificado={onVerificado}
+      />,
+    );
+
+    resolverA();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.getByTestId('verificando')).toBeTruthy();
+    expect(screen.queryByTestId('verificacion-verificado')).toBeNull();
+    expect(onVerificado).not.toHaveBeenCalled();
+
+    resolverB();
+    expect(await screen.findByTestId('verificacion-verificado')).toBeTruthy();
+    expect(onVerificado).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el token desaparece después de verificar, reinicia a enlace inválido', async () => {
+    const { rerender } = montar({ token: 'tok-1' });
+    expect(await screen.findByTestId('verificacion-verificado')).toBeTruthy();
+
+    rerender(
+      <VerificarCorreoContenido
+        token={undefined}
+        haySesion={false}
+        onIrALogin={vi.fn()}
+        onConfirmar={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('verificacion-invalido')).toBeTruthy();
+    expect(screen.queryByTestId('verificacion-verificado')).toBeNull();
+  });
+
+  it('si la pantalla se desmonta antes de que responda el backend, no ejecuta onVerificado', async () => {
+    let resolver!: () => void;
+    const onConfirmar = vi.fn().mockReturnValue(new Promise<void>((r) => (resolver = r)));
+    const onVerificado = vi.fn();
+
+    const { unmount } = montar({ token: 'tok-1', onConfirmar, onVerificado });
+    unmount();
+
+    resolver();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onVerificado).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -1,10 +1,13 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { ELIMINAR_CUENTA_DISPONIBLE, type DatosEliminacion, type ResultadoEliminacion } from '@ojoalgasto/shared';
 import { NavButton } from '../NavButton';
 import { COLORES_ELIMINAR_CUENTA as C } from './estilos';
 import { PALABRA_CONFIRMACION } from './reglasEliminacion';
 import { useEliminarCuenta } from './useEliminarCuenta';
+
+export const URL_MICROSOFT_PERSONAL = 'https://account.live.com/consent/Manage';
+export const URL_MICROSOFT_TRABAJO = 'https://myapplications.microsoft.com/';
 
 export interface EliminarCuentaContenidoProps {
   /** Se llama solo cuando el backend aceptó la eliminación. */
@@ -42,6 +45,31 @@ export function EliminarCuentaContenido({
       <Text style={styles.texto}>
         • Se elimina tu cuenta. Si quedan otras personas titulares, la organización y sus datos se conservan. Si eres la
         última persona titular, también se elimina la organización con sus suscripciones, cobros y cuentas conectadas.
+      </Text>
+      <Text testID="aviso-outlook" style={styles.texto}>
+        • Si también se elimina tu organización y tiene cuentas Outlook conectadas, se destruyen sus credenciales
+        guardadas aquí. Microsoft no revoca automáticamente ese acceso: debes retirarlo desde tu cuenta Microsoft.{' '}
+        <Text
+          accessibilityRole="link"
+          style={styles.enlace}
+          onPress={() => void Linking.openURL(URL_MICROSOFT_PERSONAL)}
+        >
+          Retirar el acceso en tu cuenta Microsoft personal
+        </Text>
+        . Para una cuenta personal, selecciona esta aplicación y retira su acceso.
+      </Text>
+      <Text style={styles.texto}>
+        Para una cuenta de trabajo o escuela, abre{' '}
+        <Text
+          accessibilityRole="link"
+          style={styles.enlace}
+          onPress={() => void Linking.openURL(URL_MICROSOFT_TRABAJO)}
+        >
+          Retirar permisos en tu cuenta de trabajo o escuela
+        </Text>
+        , busca esta aplicación y elige administrar la aplicación y revocar permisos. Si no puedes retirarlos o si el
+        permiso lo concedió tu organización, contacta a su administrador. Puedes completar el borrado aquí aunque
+        todavía no hayas retirado ese permiso en Microsoft.
       </Text>
 
       <Text style={styles.etiqueta}>Tu contraseña actual</Text>
@@ -115,6 +143,7 @@ const styles = StyleSheet.create({
   contenedor: { gap: 10 },
   advertencia: { color: C.error, fontSize: 15, fontWeight: '700' },
   texto: { color: C.tinta2, fontSize: 14 },
+  enlace: { color: C.tinta, fontWeight: '600', textDecorationLine: 'underline' },
   etiqueta: { color: C.tinta, fontSize: 14, fontWeight: '600', marginTop: 6 },
   entrada: { backgroundColor: C.superficie, color: C.tinta, borderWidth: 1, borderColor: C.borde, borderRadius: 10, padding: 12, fontSize: 16 },
   casilla: { paddingVertical: 6 },

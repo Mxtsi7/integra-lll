@@ -20,18 +20,46 @@ export interface OpcionesVerificarCorreo {
 export function useVerificarCorreo({ token, onConfirmar = confirmarCorreo, onVerificado }: OpcionesVerificarCorreo) {
   const [estado, setEstado] = useState<EstadoVerificacion>(token ? { tipo: 'verificando' } : { tipo: 'invalido' });
   const tokenYaEnviado = useRef<string | null>(null);
+  const generacion = useRef(0);
+  const sigueMontado = useRef(true);
+  const tokenActual = useRef(token);
+  const onVerificadoRef = useRef(onVerificado);
+
+  tokenActual.current = token;
+  onVerificadoRef.current = onVerificado;
+
+  useEffect(() => {
+    sigueMontado.current = true;
+    return () => {
+      sigueMontado.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!token) {
+      generacion.current += 1;
+      tokenYaEnviado.current = null;
+      setEstado({ tipo: 'invalido' });
+    }
+  }, [token]);
 
   const confirmar = useCallback(async () => {
     if (!token) return;
+    generacion.current += 1;
+    const miGeneracion = generacion.current;
+    const miToken = token;
+
     setEstado({ tipo: 'verificando' });
     try {
-      await onConfirmar(token);
+      await onConfirmar(miToken);
+      if (!sigueMontado.current || miGeneracion !== generacion.current || tokenActual.current !== miToken) return;
       setEstado({ tipo: 'verificado' });
-      onVerificado?.();
+      onVerificadoRef.current?.();
     } catch (error) {
+      if (!sigueMontado.current || miGeneracion !== generacion.current || tokenActual.current !== miToken) return;
       setEstado(estadoDesdeError(error));
     }
-  }, [token, onConfirmar, onVerificado]);
+  }, [token, onConfirmar]);
 
   useEffect(() => {
     if (!token || tokenYaEnviado.current === token) return;
