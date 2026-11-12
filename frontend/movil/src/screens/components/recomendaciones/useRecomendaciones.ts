@@ -26,7 +26,8 @@ export type EstadoDetalle = EstadoCarga<ExplicacionRecomendacion>;
 /**
  * Lista de recomendaciones, detalle y descarte (AN-05, AN-21 y AN-25).
  * Una respuesta vieja de lectura (se recargó o se salió de la pantalla) se descarta comparando `numeroDeCarga`.
- * Las mutaciones (descarte) no dependen de `numeroDeCarga` para no quedar bloqueadas si se recarga en paralelo.
+ * Las mutaciones (descarte) no dependen de `numeroDeCarga` y registran los IDs confirmados para que una
+ * lectura en curso no restaure una tarjeta ya descartada.
  */
 export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
   const [estado, setEstado] = useState<EstadoCarga<ListaLeida>>({ tipo: 'cargando' });
@@ -38,6 +39,7 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
   const numeroDeCarga = useRef(0);
   const sigueMontado = useRef(true);
   const descartesEnCurso = useRef(new Set<string>()); // candado contra doble toque
+  const descartadosConfirmados = useRef(new Set<string>()); // evita que un GET atrasado restaure tarjetas descartadas
 
   const cargar = useCallback(async () => {
     numeroDeCarga.current += 1;
@@ -51,7 +53,13 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
       const respuesta = await api.getRecomendaciones();
       if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
       const lista = leerListaRecomendaciones(respuesta);
-      setEstado(lista ? { tipo: 'listo', datos: lista } : { tipo: 'error' });
+      const listaFiltrada = lista
+        ? {
+            ...lista,
+            recomendaciones: lista.recomendaciones.filter((item) => !descartadosConfirmados.current.has(item.id)),
+          }
+        : null;
+      setEstado(listaFiltrada ? { tipo: 'listo', datos: listaFiltrada } : { tipo: 'error' });
     } catch (error) {
       if (!sigueMontado.current || miCarga !== numeroDeCarga.current) return;
       if (error instanceof ErrorDeApi && error.status === 403) setRequierePremium(true);
@@ -104,6 +112,7 @@ export function useRecomendaciones(api: ApiRecomendaciones = API_REAL) {
 
       try {
         await api.descartarRecomendacion(id);
+        descartadosConfirmados.current.add(id);
         if (sigueMontado.current) {
           setEstado((actual) =>
             actual.tipo !== 'listo'

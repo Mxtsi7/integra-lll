@@ -50,7 +50,11 @@ export function useCuentas(api: ApiCuentas = API_REAL) {
         if (miCarga !== numeroDeCarga.current) return;
         setEstado({ tipo: 'listo', datos: cuentas });
       } catch {
-        if (miCarga !== numeroDeCarga.current || enSegundoPlano) return;
+        if (miCarga !== numeroDeCarga.current) return;
+        if (enSegundoPlano) {
+          setEstado((actual) => (actual.tipo === 'cargando' ? { tipo: 'error' } : actual));
+          return;
+        }
         setEstado({ tipo: 'error' });
       }
     },
