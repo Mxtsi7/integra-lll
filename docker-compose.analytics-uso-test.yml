@@ -1,0 +1,48 @@
+# Infraestructura efímera para la prueba de integración real del pipeline de
+# uso (S3-VI-07/09/10/11/12/14).
+#
+#   docker compose -f docker-compose.analytics-uso-test.yml up -d --wait
+#   INTEGRACION_USO=1 npm run test:integracion   (desde services/analytics-uso)
+#   docker compose -f docker-compose.analytics-uso-test.yml down -v
+#
+# Los puertos no chocan con el compose de desarrollo (5432/5672): así se puede
+# correr la suite sin detener el entorno normal. Los datos viven en volúmenes
+# propios y se borran con `down -v`; la suite trunca las tablas al arrancar.
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: suscripciones_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
+    ports:
+      - "55432:5432"
+    volumes:
+      - datos_postgres_uso_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d suscripciones_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  rabbitmq-test:
+    image: rabbitmq:3.13-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: test
+      RABBITMQ_DEFAULT_PASS: test
+    ports:
+      - "55672:5672"
+    volumes:
+      - datos_rabbitmq_uso_test:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  datos_postgres_uso_test:
+  datos_rabbitmq_uso_test:

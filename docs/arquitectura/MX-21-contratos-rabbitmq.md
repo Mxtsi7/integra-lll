@@ -21,7 +21,7 @@ Se conservan nombres españoles y envoltura existente. Los nombres ingleses son 
 no se publican ambas variantes. Renombrar todo al inglés rompe el catálogo; publicar ambos duplica hechos.
 Se usa **versión 2** para los cuatro contratos de esta entrega: el snapshot requerido amplía de forma
 incompatible los datos mínimos de created/updated v1. Reutilizar v1 ocultaría ese cambio.
-Los contratos v1 del catálogo siguen vigentes; no se renombran ni eliminan. No se introduce otro exchange.
+Los contratos v1 del catálogo siguen vigentes; no se renombran ni eliminan. No se introduce otro exchange para los contratos de suscripción de esta entrega. El dominio de uso de recolectores tiene su propio exchange, registrado en la [ADR-009](ADR-009-exchange-uso.md).
 Routing explícito por versión evita entregar payloads v2 a consumidores que solo conocen v1.
 
 | Referencia del adjunto | `evento` canónico | Publica | Consume |

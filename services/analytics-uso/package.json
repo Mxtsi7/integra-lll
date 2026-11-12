@@ -1,0 +1,35 @@
+{
+  "name": "@integra/analytics-uso",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Recepción y agregación de uso de recolectores (S3-VI-07, S3-VI-09, S3-VI-10, S3-VI-11, S3-VI-12 y S3-VI-14)",
+  "main": "dist/worker.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integracion": "vitest run tests/integracion",
+    "migrar": "tsx src/migrar.ts",
+    "worker": "tsx src/worker.ts",
+    "salud": "tsx src/verificar-salud.ts",
+    "publicar:ejemplo": "tsx src/publicador/ejemplo.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.5",
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/amqplib": "^0.10.6",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
