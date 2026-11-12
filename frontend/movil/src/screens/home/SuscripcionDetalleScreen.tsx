@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import {
   costoPorHora,
@@ -325,37 +325,65 @@ export default function SuscripcionDetalleScreen({
     estadoInicial ?? { tipo: 'cargando' }
   );
 
-  const cargarDatos = useCallback(async () => {
-    if (!id) {
-      setEstado({ tipo: 'no-encontrada' });
-      return;
-    }
-    setEstado({ tipo: 'cargando' });
-    try {
-      const suscripcion = await onCargarSuscripcion(id);
-      setEstado({ tipo: 'listo', suscripcion });
-    } catch (err: unknown) {
-      if (err instanceof ErrorDeApi) {
-        if (err.status === 404) {
+  // Contador de generación e id activo para invalidar respuestas atrasadas y proteger contra desmontaje
+  const generacionRef = useRef(0);
+  const idActualRef = useRef(id);
+  idActualRef.current = id;
+
+  const cargarDatos = useCallback(
+    async (idObjetivo: string) => {
+      generacionRef.current += 1;
+      const generacionActual = generacionRef.current;
+
+      const sigueVigente = () =>
+        generacionRef.current === generacionActual && idActualRef.current === idObjetivo;
+
+      if (!idObjetivo) {
+        if (sigueVigente()) {
           setEstado({ tipo: 'no-encontrada' });
-          return;
         }
-        if (err.status === 403) {
-          setEstado({ tipo: 'no-autorizada' });
-          return;
-        }
+        return;
       }
-      setEstado({
-        tipo: 'error',
-        mensaje: 'No pudimos cargar esta suscripción. Revisa tu conexión e inténtalo de nuevo.',
-      });
-    }
-  }, [id, onCargarSuscripcion]);
+
+      if (sigueVigente()) {
+        setEstado({ tipo: 'cargando' });
+      }
+
+      try {
+        const suscripcion = await onCargarSuscripcion(idObjetivo);
+        if (!sigueVigente()) return;
+        setEstado({ tipo: 'listo', suscripcion });
+      } catch (err: unknown) {
+        if (!sigueVigente()) return;
+        if (err instanceof ErrorDeApi) {
+          if (err.status === 404) {
+            setEstado({ tipo: 'no-encontrada' });
+            return;
+          }
+          if (err.status === 403) {
+            setEstado({ tipo: 'no-autorizada' });
+            return;
+          }
+        }
+        setEstado({
+          tipo: 'error',
+          mensaje: 'No pudimos cargar esta suscripción. Revisa tu conexión e inténtalo de nuevo.',
+        });
+      }
+    },
+    [onCargarSuscripcion]
+  );
 
   useEffect(() => {
     if (estadoInicial) return;
-    void cargarDatos();
-  }, [estadoInicial, cargarDatos]);
+    void cargarDatos(id);
+
+    return () => {
+      // Al cambiar id o desmontar el componente, se avanza la generación
+      // para descartar inmediatamente cualquier respuesta pendiente en vuelo.
+      generacionRef.current += 1;
+    };
+  }, [id, estadoInicial, cargarDatos]);
 
   const manejarVolver = () => {
     if (navigation?.goBack) {
@@ -368,7 +396,7 @@ export default function SuscripcionDetalleScreen({
       id={id}
       estado={estado}
       onVolver={manejarVolver}
-      onReintentar={() => void cargarDatos()}
+      onReintentar={() => void cargarDatos(id)}
       onEditar={onEditar}
       onEliminar={onEliminar}
       onRegistrarUso={onRegistrarUso}

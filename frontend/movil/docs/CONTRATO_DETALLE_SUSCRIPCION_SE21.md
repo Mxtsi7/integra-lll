@@ -32,6 +32,11 @@
   - **404 (Suscripción inexistente / retirada):** Muestra mensaje neutro: *"No encontramos esa suscripción. Puede que haya sido eliminada."* No revela información privada ni rompe la navegación; incluye botón de retorno a la lista (`testID="go-back"`).
   - **403 (Suscripción ajena / sin permiso):** Muestra mensaje seguro: *"No tienes permiso para ver esta suscripción."* Protege la privacidad multi-organización y no revela existencia ni datos de recursos de terceros. Incluye botón de retorno a la lista (`testID="go-back"`).
   - **Fallo de red / Error 500:** Muestra componente `NetworkError` (`role="alert"`) con botón para reintentar la carga y botón para volver a la lista sin atrapar al usuario.
+- **Protección de respuestas por generación e ID activo (concurrencia y desmontaje):**
+  - Cada petición genera una nueva generación numérica (`generacionRef.current += 1`) y registra el ID vigente (`idActualRef.current`).
+  - La condición de vigencia (`sigueVigente()`) se comprueba estrictamente antes de **todas** las escrituras de estado (éxito, 404, 403 y error de red).
+  - Al cambiar `route.params.id` o desmontarse el componente, la función de limpieza de `useEffect` invalida inmediatamente la generación previa (`generacionRef.current += 1`).
+  - **Garantía contractual:** Un éxito antiguo de una suscripción previa nunca reemplaza un 403/404 de la suscripción actual, ni un fallo atrasado sobrescribe un estado exitoso vigente.
 - **Puntos de integración para tarjetas subsecuentes:**
   - **SE-24:** Botón *"Editar Suscripción"* (`testID="btn-editar-suscripcion"`) conectado a prop `onEditar(suscripcion)`.
   - **SE-26:** Botón *"Retirar Suscripción"* (`testID="btn-eliminar-suscripcion"`) con variante de peligro conectada a prop `onEliminar(suscripcion)`.
@@ -43,11 +48,11 @@
 ## 2. Criterios de Aceptación Verificados
 
 - [x] **Id correcto muestra sus datos actuales:**  
-  La pantalla renderiza la información de la suscripción consultada (nombre, monto, periodicidad, fecha de cobro descriptiva, badge de estado con texto legible, categoría, horas de uso y cálculo de costo por hora). Cubre casos especiales de suscripciones anuales, en prueba, fantasma y canceladas.
+  La pantalla renderiza la información de la suscripción consultada (monto, cobro, estado accesible, categoría, uso y cálculo de costo por hora). Cubre casos especiales de suscripciones anuales, en prueba, fantasma y canceladas.
 - [x] **Id inexistente/ajeno no rompe navegación ni revela información:**  
-  Las respuestas 404 y 403 se tratan como estados de error controlados con mensajes neutros y seguros. El usuario siempre dispone del botón `"Volver a la lista"` (`testID="go-back"`), preservando la pila de navegación intacta y evitando la exposición de datos sensibles.
+  Las respuestas 404 y 403 se tratan como estados de error controlados con mensajes neutros y seguros. El usuario siempre dispone del botón `"Volver a la lista"` (`testID="go-back"`), preservando la pila de navegación intacta y evitando la exposición de datos sensibles. Adicionalmente, el estado queda blindado contra respuestas desfasadas cuando el ID cambia en la misma instancia del componente.
 - [x] **Evidencia enlazada y revisión por otra persona; contrato validado:**  
-  Contrato formalizado con puntos de extensión documentados para SE-24, SE-26, SE-28 y SE-30. 17 pruebas unitarias y de integración pasando en `SuscripcionDetalleScreen.test.tsx` y 17 pruebas en `navigation.test.tsx`.
+  Contrato formalizado con puntos de extensión documentados para SE-24, SE-26, SE-28 y SE-30. 20 pruebas unitarias y de integración pasando en `SuscripcionDetalleScreen.test.tsx` y 17 pruebas en `navigation.test.tsx`.
 
 ---
 
@@ -61,7 +66,7 @@ npm run typecheck
 npm test --workspace=movil
 ```
 
-### Resultados en `SuscripcionDetalleScreen.test.tsx` (17/17 pasadas):
+### Resultados en `SuscripcionDetalleScreen.test.tsx` (20/20 pasadas):
 - **Criterio 1: Id correcto muestra sus datos actuales**
   - `renderiza encabezado, monto, periodicidad, próximo cobro, badge de estado y datos de uso`
   - `para suscripciones anuales calcula y muestra el equivalente mensual`
@@ -78,14 +83,17 @@ npm test --workspace=movil
   - `dispara onEliminar con la suscripción al pulsar Retirar Suscripción`
   - `dispara onRegistrarUso con la suscripción al pulsar Registrar Uso`
   - `renderiza la sección ancla de Historial y Registro de Uso (SE-30)`
-- **Componente Contenedor SuscripcionDetalleScreen**
+- **Componente Contenedor SuscripcionDetalleScreen y Concurrencia**
   - `consume onCargarSuscripcion automáticamente al montarse`
   - `mapea ErrorDeApi con status 404 a estado no-encontrada`
   - `mapea ErrorDeApi con status 403 a estado no-autorizada`
   - `navega hacia atrás con navigation.goBack() al presionar volver`
+  - `protección de concurrencia: éxito antiguo de A no reemplaza 403 de B al actualizar route.params.id`
+  - `protección de concurrencia: error antiguo de A no reemplaza éxito de B al actualizar route.params.id`
+  - `desmontaje invalida respuestas pendientes sin actualizar estado`
 
 ### Cobertura Global Móvil:
-- **15 suites de pruebas pasadas** (229 pruebas aprobadas, 0 fallos).
+- **15 suites de pruebas pasadas** (232 pruebas aprobadas, 0 fallos).
 - **TypeScript `tsc --noEmit`**: 0 errores en `@ojoalgasto/shared`, `web`, `movil` y `desktop`.
 
 ---

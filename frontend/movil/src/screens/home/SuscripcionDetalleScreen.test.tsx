@@ -428,5 +428,108 @@ describe('Detalle Móvil de Suscripción (SE-21)', () => {
       fireEvent.click(btnVolver);
       expect(goBackMock).toHaveBeenCalledTimes(1);
     });
+
+    it('protección de concurrencia: éxito antiguo de A no reemplaza 403 de B al actualizar route.params.id', async () => {
+      let resolverA: (val: Suscripcion) => void;
+      const promesaA = new Promise<Suscripcion>((resolve) => {
+        resolverA = resolve;
+      });
+
+      const onCargar = vi.fn().mockImplementation((id: string) => {
+        if (id === 'sub-A') return promesaA;
+        if (id === 'sub-B') return Promise.reject(new ErrorDeApi('Prohibido', 403));
+        return Promise.resolve(MOCK_SUSCRIPCION_ACTIVA);
+      });
+
+      // 1. Iniciar con sub-A (queda pendiente)
+      const { rerender } = render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-A' } } as any}
+          onCargarSuscripcion={onCargar}
+        />
+      );
+
+      expect(screen.getByRole('progressbar')).toBeTruthy();
+
+      // 2. Actualizar route.params.id a sub-B en la misma instancia
+      rerender(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-B' } } as any}
+          onCargarSuscripcion={onCargar}
+        />
+      );
+
+      // B responde 403: aparece "Acceso no autorizado"
+      expect(await screen.findByText('Acceso no autorizado')).toBeTruthy();
+
+      // 3. A finalmente resuelve con datos de Netflix
+      resolverA!(MOCK_SUSCRIPCION_ACTIVA);
+
+      // Esperar un ciclo y verificar que B (403) se conserva y A no sobrescribe la pantalla
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(screen.getByText('Acceso no autorizado')).toBeTruthy();
+      expect(screen.queryByText('Netflix')).toBeNull();
+    });
+
+    it('protección de concurrencia: error antiguo de A no reemplaza éxito de B al actualizar route.params.id', async () => {
+      let rechazarA: (err: unknown) => void;
+      const promesaA = new Promise<Suscripcion>((_, reject) => {
+        rechazarA = reject;
+      });
+
+      const onCargar = vi.fn().mockImplementation((id: string) => {
+        if (id === 'sub-A') return promesaA;
+        if (id === 'sub-B') return Promise.resolve(MOCK_SUSCRIPCION_ANUAL);
+        return Promise.resolve(MOCK_SUSCRIPCION_ACTIVA);
+      });
+
+      const { rerender } = render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-A' } } as any}
+          onCargarSuscripcion={onCargar}
+        />
+      );
+
+      // Cambiar a sub-B
+      rerender(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-B' } } as any}
+          onCargarSuscripcion={onCargar}
+        />
+      );
+
+      // B resuelve con Amazon Prime
+      expect(await screen.findByText('Amazon Prime')).toBeTruthy();
+
+      // A rechaza tarde con 404
+      rechazarA!(new ErrorDeApi('No encontrada', 404));
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // B permanece intacto
+      expect(screen.getByText('Amazon Prime')).toBeTruthy();
+      expect(screen.queryByText('Suscripción no encontrada')).toBeNull();
+    });
+
+    it('desmontaje invalida respuestas pendientes sin actualizar estado', async () => {
+      let resolverA: (val: Suscripcion) => void;
+      const promesaA = new Promise<Suscripcion>((resolve) => {
+        resolverA = resolve;
+      });
+
+      const onCargar = vi.fn().mockReturnValue(promesaA);
+
+      const { unmount } = render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-A' } } as any}
+          onCargarSuscripcion={onCargar}
+        />
+      );
+
+      unmount();
+
+      // Resolver después de desmontar
+      resolverA!(MOCK_SUSCRIPCION_ACTIVA);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
   });
 });
