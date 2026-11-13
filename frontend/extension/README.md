@@ -279,3 +279,31 @@ adicional no encontró defectos; no sustituye la recepción humana de las tarjet
   solicitud de permiso comprobadas con navegador headless se registran aparte
   de las regresiones con dobles; una solicitud pendiente no demuestra concesión,
   navegación consentida ni tiempos reales. No cerrar MX-09/MX-10 por la suite.
+
+
+## Corte al alternar ventanas — 13 de noviembre de 2026
+
+`windows.onFocusChanged` comunica también el ID positivo de la ventana destino.
+El controlador captura su instante al recibirlo, antes de esperar la cola.
+El observador compara ese destino con la identidad de la ventana observada y
+corta la medición antes de consultar la nueva pestaña. Ese corte se conserva
+aunque una señal posterior invalide la consulta. La lectura vigente reanuda
+al completarse; las notificaciones repetidas de la misma ventana no cortan.
+Las pausas explícitas de bloqueo/inactividad/foco mantienen su tratamiento.
+
+Las regresiones integradas usan dos ventanas con pestañas fijas, sin activación
+ni WINDOW_ID_NONE intermedio: A 0–2 s, B no autorizada 2–7 s, A 7–9 s produce
+[0,2000) y [7000,9000), 4000 ms. Se comprueba sin demora, con lectura pendiente
+desde el cambio y con lectura pendiente anterior. Si el regreso se confirma
+recién a 8000 ms, solo se reanuda desde 8000. Se conservan los controles de
+pestañas ajenas y se agregan notificaciones repetidas de la ventana enfocada.
+El panel muestra navegando durante la consulta pendiente, sin atribuirle A.
+
+Verificación local: 56/56 pruebas, sintaxis de los seis módulos y espacios.
+Las dos variantes de demora fallaban antes del arreglo. El archivo externo
+repro-pr149-f069b26-ventanas.mjs no se encontró en este checkout; sus escenarios
+se cubren en test/navegacion.test.js, con APIs y reloj simulados.
+No se ejecutó el recorrido final Chrome/Edge sobre esta corrección. Sigue
+pendiente registrar versión, permisos concedidos, ventanas, tiempos y resultado
+sobre el commit final, además de la recepción específica de consentimiento.
+El contrato #165 ya está integrado; no se solicita nuevamente su merge.

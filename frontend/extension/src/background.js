@@ -31,7 +31,8 @@ chrome.tabs.onRemoved.addListener((id, info) => actualizar({
 }));
 let ultimaActividad;
 chrome.windows.onFocusChanged.addListener(id => actualizar(id === chrome.windows.WINDOW_ID_NONE || id === -1
-  ? { estado: ultimaActividad === 'locked' ? 'bloqueado' : 'sin_foco' } : undefined));
+  ? { estado: ultimaActividad === 'locked' ? 'bloqueado' : 'sin_foco' }
+  : { transicion: { tipo: 'foco', ventanaId: id } }));
 chrome.idle.onStateChanged.addListener(actividad => {
   ultimaActividad = actividad;
   actualizar(actividad === 'active' ? undefined : { estado: actividad === 'locked' ? 'bloqueado' : 'inactivo' });

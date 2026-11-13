@@ -20,7 +20,16 @@ async function leerActividad(api, dominios) {
 
 export async function cortarTransicion(api, { tipo, pestanaId, ventanaId, observadoEn }) {
   const { observacion } = await api.storage.session.get('observacion');
-  if (!observacion || !Number.isInteger(pestanaId)) return;
+  if (!observacion) return;
+  if (tipo === 'foco') {
+    if (Number.isInteger(observacion.ventanaId) && ventanaId !== observacion.ventanaId) {
+      const estado = ['bloqueado', 'sin_foco', 'inactivo'].includes(observacion.estado)
+        ? observacion.estado : 'navegando';
+      await observar(api, { estado, observadoEn });
+    }
+    return;
+  }
+  if (!Number.isInteger(pestanaId)) return;
   if (ventanaId !== undefined && ventanaId !== observacion.ventanaId) return;
   const afectaObservada = tipo === 'activacion'
     ? ventanaId === observacion.ventanaId && pestanaId !== observacion.pestanaId

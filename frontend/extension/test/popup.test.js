@@ -100,7 +100,7 @@ test('el panel abierto actualiza A a B cuando termina una consulta de pestaña d
   enfocar(2);
   await consultando;
   await abrirPanel();
-  assert.match(textoCaptura(), /example\.com/);
+  assert.equal(textoCaptura(), 'navegando');
   liberar();
   await vaciarCola();
   assert.equal(almacen.observacion.dominio, null);
