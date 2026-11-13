@@ -100,9 +100,26 @@ identificador **espera** a que el primero confirme o revierta.
 - Si el primero confirma, el segundo descarta su copia y guarda solo lo nuevo.
 - Si el primero revierte, el segundo se queda con el cobro: no se pierde.
 
-Las dos salidas están probadas con dos conexiones a PostgreSQL en
-`test_carrera_reimportar_postgres.py`. SQLite no puede mostrarlo: bloquea la
-base entera.
+### Siempre en el mismo orden
+
+Esperar solo es seguro si todos esperan en el mismo orden. Dos cartolas pueden
+compartir **dos** cobros y traerlos al revés: la de A trae X y después Y, la
+de B trae Y y después X. Si cada worker insertara en el orden de su archivo,
+uno tomaría X y esperaría Y mientras el otro tomó Y y espera X. Es un ciclo:
+PostgreSQL mata a uno y esa importación entera se revierte, también sus
+cobros propios.
+
+Por eso los candidatos se insertan **ordenados por la llave única**, no por
+el orden del archivo. Dentro de una importación la organización y el origen
+son los mismos, así que basta el identificador. La ocurrencia ya se asignó al
+leer, en el orden del archivo, y ordenar después no la cambia. Lo encontró la
+revisión de #171; se reprodujo el bloqueo con dos conexiones antes de
+corregirlo (`deadlock detected`).
+
+Las tres salidas —el primero confirma, el primero revierte, y dos cobros
+compartidos en orden inverso— están probadas con dos conexiones a PostgreSQL
+en `test_carrera_reimportar_postgres.py`. SQLite no puede mostrarlo: bloquea
+la base entera.
 
 ## Dónde está
 
@@ -110,7 +127,7 @@ base entera.
 |---|---|
 | La huella | `connectors/csv_candidatos.py` → `huella_csv`, `_con_huella` |
 | El texto de ayuda del campo | migración `0009_identificador_es_la_huella_del_cobro` (sin cambios en la base) |
-| Las pruebas | `tests/test_duplicados_s3_fe_17.py` (22) y `tests/test_carrera_reimportar_postgres.py` (2) |
+| Las pruebas | `tests/test_duplicados_s3_fe_17.py` (22) y `tests/test_carrera_reimportar_postgres.py` (3) |
 
 Las pruebas se comprobaron rompiendo el código a propósito: volver al
 identificador por archivo, no contar la ocurrencia, no normalizar la glosa,

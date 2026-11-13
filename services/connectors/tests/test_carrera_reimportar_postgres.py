@@ -161,3 +161,69 @@ def test_si_el_primero_revierte_el_segundo_se_queda_con_el_cobro(solo_postgres, 
     del_1_de_octubre = CobroCandidato.objects.filter(fecha="2026-10-01")
     assert del_1_de_octubre.count() == 1
     assert del_1_de_octubre.get().importacion_id == segunda.pk
+
+
+# ── Dos cobros compartidos, en orden inverso (revisión de #171) ────────────
+#
+# Las dos cartolas comparten DOS cobros, X e Y, pero los traen en orden
+# contrario, y cada una trae además uno propio. Si cada worker inserta en el
+# orden de su archivo, T1 toma X y espera Y mientras T2 tomó Y y espera X: un
+# ciclo, y PostgreSQL mata a uno de los dos.
+#
+# Para forzar ese intercalado, el doble de `bulk_create` inserta fila por fila
+# (con la misma `ignore_conflicts`) y, después de la PRIMERA, espera a que el
+# otro worker haya insertado la suya. La espera tiene tope: si el otro está
+# bloqueado esperando una fila nuestra, no puede avisar, y entonces seguimos.
+# Con eso, el ciclo aparece solo si el orden de inserción lo permite.
+
+CABECERA = "fecha;descripcion;monto" + NL
+X = "2026-10-01;NETFLIX.COM;9990" + NL
+Y = "2026-10-05;SPOTIFY;4990" + NL
+PROPIO_DE_A = "2026-10-07;DROPBOX;11990" + NL
+PROPIO_DE_B = "2026-10-09;ICLOUD;990" + NL
+ARCHIVO_A = (CABECERA + X + Y + PROPIO_DE_A).encode("utf-8")
+ARCHIVO_B = (CABECERA + Y + X + PROPIO_DE_B).encode("utf-8")
+PAUSA_DEL_PRIMERO = 3.0
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dos_cobros_compartidos_en_orden_inverso_no_se_bloquean(solo_postgres, monkeypatch):
+    primera = crear_importacion(ARCHIVO_A)
+    segunda = crear_importacion(ARCHIVO_B)
+    insertaron_la_primera = {"a": threading.Event(), "b": threading.Event()}
+    otro = {"a": "b", "b": "a"}
+    real = CobroCandidato.objects.bulk_create
+
+    def de_a_una(filas, **extra):
+        yo = threading.current_thread().name
+        creadas = []
+        for posicion, fila in enumerate(filas):
+            creadas += real([fila], **extra)
+            if posicion == 0:
+                insertaron_la_primera[yo].set()
+                insertaron_la_primera[otro[yo]].wait(PAUSA_DEL_PRIMERO)
+        return creadas
+
+    monkeypatch.setattr(CobroCandidato.objects, "bulk_create", de_a_una)
+
+    hilos = [
+        Hilo("a", lambda: tasks.procesar_importacion(str(primera.pk))),
+        Hilo("b", lambda: tasks.procesar_importacion(str(segunda.pk))),
+    ]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.exigir_que_termino()
+
+    primera.refresh_from_db()
+    segunda.refresh_from_db()
+    assert (primera.estado, segunda.estado) == (Importacion.Estado.COMPLETADA, Importacion.Estado.COMPLETADA), (
+        primera.errores, segunda.errores,
+    )
+    # Cada cobro una sola vez, y los propios de cada archivo no se pierden.
+    assert sorted(str(f) for f in CobroCandidato.objects.values_list("fecha", flat=True)) == [
+        "2026-10-01", "2026-10-05", "2026-10-07", "2026-10-09",
+    ]
+    assert CobroCandidato.objects.get(fecha="2026-10-07").importacion_id == primera.pk
+    assert CobroCandidato.objects.get(fecha="2026-10-09").importacion_id == segunda.pk
+    assert primera.candidatos_detectados + segunda.candidatos_detectados == 4
