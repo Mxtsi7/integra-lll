@@ -30,8 +30,13 @@ const botonEnviar = () => screen.getByRole("button", { name: "Enviar" });
 const escribir = (texto: string) => fireEvent.change(cuadroDeLaPregunta(), { target: { value: texto } });
 
 const PREGUNTA_DE_LA_PERSONA: MensajeChat = { id: 1, autor: "persona", texto: "¿Qué suscripción reviso primero?" };
-const RESPUESTA_DEL_ASISTENTE: MensajeChat = { id: 2, autor: "asistente", texto: "Revisa el streaming.", esRespaldo: false };
-const RESPUESTA_DE_RESPALDO: MensajeChat = { id: 3, autor: "asistente", texto: "Registramos 120 minutos de uso.", esRespaldo: true };
+const RESPUESTA_DEL_ASISTENTE: MensajeChat = { id: 2, autor: "asistente", texto: "Revisa el streaming.", respaldo: null };
+const respuestaDeRespaldo = (motivo: string | null): MensajeChat => ({
+  id: 3,
+  autor: "asistente",
+  texto: "Registramos 120 minutos de uso.",
+  respaldo: { motivo },
+});
 
 afterEach(() => {
   cleanup();
@@ -151,11 +156,44 @@ describe("Mensajes y estados (S3-CH-14)", () => {
   });
 
   it("una respuesta de respaldo lo dice; la del asistente no lleva ese aviso", () => {
-    montar({ mensajes: [RESPUESTA_DEL_ASISTENTE, RESPUESTA_DE_RESPALDO] });
+    montar({ mensajes: [RESPUESTA_DEL_ASISTENTE, respuestaDeRespaldo("timeout")] });
 
     const [delAsistente, deRespaldo] = screen.getAllByRole("listitem");
     expect(delAsistente).not.toHaveTextContent("Resumen automático");
-    expect(deRespaldo).toHaveTextContent("Resumen automático con tus datos: el asistente con IA no estuvo disponible.");
+    expect(deRespaldo).toHaveTextContent("Registramos 120 minutos de uso.");
+    expect(deRespaldo).toHaveTextContent(
+      "Resumen automático. El asistente con IA tardó demasiado en responder. Puedes volver a preguntar.",
+    );
+  });
+
+  describe("el aviso de respaldo dice el motivo y qué hacer (S3-CH-17)", () => {
+    it.each([
+      ["cuota_agotada", "Ya usaste tus consultas con IA de este mes. Hasta el próximo mes recibirás este resumen automático."],
+      ["capacidad", "El asistente con IA está atendiendo muchas consultas. Vuelve a preguntar en unos minutos."],
+      ["no_configurado", "El asistente con IA no está activado en este momento. Por ahora recibirás este resumen automático."],
+    ])("con el motivo %s", (motivo, textoEsperado) => {
+      montar({ mensajes: [respuestaDeRespaldo(motivo)] });
+
+      expect(screen.getByRole("listitem")).toHaveTextContent(`Resumen automático. ${textoEsperado}`);
+    });
+
+    it.each([
+      ["sin motivo", null],
+      ["con un motivo que la web no conoce", "motivo_nuevo_del_backend"],
+    ])("%s da el aviso general, sin dejar la respuesta sin explicación", (_descripcion, motivo) => {
+      montar({ mensajes: [respuestaDeRespaldo(motivo)] });
+
+      expect(screen.getByRole("listitem")).toHaveTextContent(
+        "Resumen automático. El asistente con IA no estuvo disponible. Puedes volver a preguntar.",
+      );
+    });
+
+    it("la respuesta de respaldo no se muestra como un error: no hay alerta ni Reintentar", () => {
+      montar({ mensajes: [respuestaDeRespaldo("timeout")] });
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+    });
   });
 
   it("mientras espera la respuesta lo anuncia, bloquea otro envío y deja seguir escribiendo", () => {
@@ -202,7 +240,7 @@ describe("Mensajes y estados (S3-CH-14)", () => {
   });
 
   it("conserva los saltos de línea y no interpreta el texto como HTML", () => {
-    montar({ mensajes: [{ id: 4, autor: "asistente", texto: "Línea uno\nLínea dos <b>no es negrita</b>", esRespaldo: false }] });
+    montar({ mensajes: [{ id: 4, autor: "asistente", texto: "Línea uno\nLínea dos <b>no es negrita</b>", respaldo: null }] });
 
     const texto = screen.getByText(/Línea uno/);
     expect(texto.textContent).toBe("Línea uno\nLínea dos <b>no es negrita</b>");

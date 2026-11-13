@@ -158,7 +158,9 @@ describe("Página del asistente (S3-CH-14 y S3-CH-15)", () => {
 
     const respuesta = conversacion().getAllByRole("listitem")[1];
     expect(respuesta).toHaveTextContent(RESPUESTA_DE_RESPALDO.respuesta);
-    expect(respuesta).toHaveTextContent("Resumen automático con tus datos: el asistente con IA no estuvo disponible.");
+    expect(respuesta).toHaveTextContent(
+      "Resumen automático. Ya usaste tus consultas con IA de este mes. Hasta el próximo mes recibirás este resumen automático.",
+    );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
@@ -194,6 +196,27 @@ describe("Página del asistente (S3-CH-14 y S3-CH-15)", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("No tienes acceso al asistente financiero con tu cuenta.");
     expect(conversacion().getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("un 504 del gateway dice que tardó demasiado, sin nombrar el servicio interno, y Reintentar trae el respaldo con su motivo (S3-CH-17)", async () => {
+    consultarAsistenteMock
+      .mockRejectedValueOnce(new ErrorDeApi("El servicio analytics no respondió a tiempo", 504))
+      .mockResolvedValueOnce({ ...RESPUESTA_DE_RESPALDO, motivo: "timeout" });
+    await montar();
+    escribir("Hola");
+    await enviarConEnter();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("El asistente tardó demasiado en responder. Intenta de nuevo.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("analytics");
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reintentar" })));
+
+    // El respaldo no es un error: la alerta se va y el motivo queda junto a la respuesta.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const mensajes = conversacion().getAllByRole("listitem");
+    expect(mensajes).toHaveLength(2);
+    expect(mensajes[1]).toHaveTextContent(RESPUESTA_DE_RESPALDO.respuesta);
+    expect(mensajes[1]).toHaveTextContent("El asistente con IA tardó demasiado en responder. Puedes volver a preguntar.");
   });
 
   it("al volver a escribir tras un error, la alerta se va en cuanto sale la nueva pregunta", async () => {
