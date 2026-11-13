@@ -98,9 +98,16 @@ class AutorizacionRechazada(ErrorDeLectura):
 
 class ErrorTransitorio(ErrorDeLectura):
     """Red, tiempo agotado, cuota o una falla del proveedor. Se puede
-    reintentar más tarde (S3-FE-18) sin perder nada: no se guardó nada."""
+    reintentar más tarde (S3-FE-18) sin perder nada: no se guardó nada.
+
+    `reintentar_en` son los segundos que el proveedor pidió esperar
+    (`Retry-After`), si los dijo. S3-FE-18 decide qué hacer con ellos."""
 
     codigo = "error_transitorio"
+
+    def __init__(self, mensaje: str, *, codigo: str | None = None, reintentar_en: int | None = None):
+        super().__init__(mensaje, codigo=codigo)
+        self.reintentar_en = reintentar_en
 
 
 class ErrorDelProveedor(ErrorDeLectura):
