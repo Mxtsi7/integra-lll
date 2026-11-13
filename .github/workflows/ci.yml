@@ -309,6 +309,11 @@ jobs:
           python -m unittest discover -s scripts/tests -p 'test_metricas_comparador.py' -v
           python -m unittest discover -s scripts/tests -p 'test_lanzador_comparador.py' -v
 
+      - name: Contrato de uso de recolectores (S3-VI-01)
+        run: |
+          pip install "jsonschema[format]==4.26.0" "pytest==8.3.4"
+          python -m pytest docs/contratos/tests -v
+
       - name: Generador externo (kubectl doble, sin cluster)
         run: bash k8s/pruebas/probar-carga.sh
 
