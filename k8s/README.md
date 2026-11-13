@@ -1,8 +1,18 @@
 # Despliegue en Kubernetes
 
 Seguridad D-11: antes de migrar, leer [aislamiento de red y secretos](../docs/seguridad-d11.md).
-El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`.
-Hace falta un CNI con NetworkPolicy y un `GHCR_TOKEN` de lectura explícito.
+El despliegue configura roles PostgreSQL por esquema y aplica `40-red.yaml`
+**si la cuenta puede crear NetworkPolicy**. Hace falta un CNI que las haga
+cumplir y un `GHCR_TOKEN` de lectura explícito.
+
+> **En el cluster del ramo hoy NO hay ninguna política de red aplicada.** El
+> rol de estudiante solo da lectura sobre `networkpolicies` (verificado el
+> 10-11-2026 con `kubectl auth can-i` y con `kubectl get networkpolicy`, que
+> devuelve vacío). `desplegar.sh` lo detecta, salta `40-red.yaml` y lo avisa al
+> terminar. Mientras siga así, cualquier pod del cluster que conozca el nombre
+> de un Service interno puede hablarle directo, sin pasar por el gateway: el
+> aislamiento que describe `docs/seguridad-d11.md` está escrito y probado, pero
+> no desplegado.
 La contraseña histórica de PostgreSQL requiere la rotación indicada abajo;
 la PR por sí sola no la invalida.
 
@@ -28,8 +38,74 @@ El sistema completo corriendo en el cluster del ramo:
 | `auth-eliminaciones` | Deployment | Reintenta la limpieza durable de organizaciones e integrantes |
 | `gateway` / `subscriptions` | HorizontalPodAutoscaler | Escalan por CPU: 1→2 y 1→2 (ver `30-autoescalado.yaml`) |
 
-`connectors`, `analytics` y `notifications` **no** se despliegan: todavía no
-tienen `manage.py`. Meterlos solo agregaría tres pods en `CrashLoopBackOff`.
+`connectors` y `analytics` **no** se despliegan todavía: no tienen manifiestos
+(lo que falta está en `tandas/perfiles.yaml`). `notifications` sí, pero **no en
+este namespace**: ver la sección siguiente.
+
+## Reparto entre namespaces
+
+El núcleo usa 10 de los 12 pods de la cuota y los 2 que quedan son del
+autoescalado: los servicios que faltan no caben. Como cada integrante tiene su
+propio namespace con su propia cuota, esos servicios corren **en el namespace de
+otro integrante** y siguen usando el PostgreSQL, el RabbitMQ y el Redis de acá.
+
+| Namespace | Qué corre |
+|---|---|
+| `student-forellana` (núcleo) | Todo lo de la tabla de arriba, incluidos los datos |
+| el anotado en `reparto.env` | `notifications`: API + consumidor en un pod, y el CronJob `generar-alertas` |
+
+Quién tiene qué está escrito en [`reparto.env`](reparto.env), que leen los dos
+guiones. No es una variable de entorno a propósito: si dependiera de acordarse
+de exportarla, un despliegue del núcleo sin ella dejaría al gateway buscando el
+servicio donde no está.
+
+```bash
+./k8s/desplegar.sh                          # el núcleo, como siempre
+./k8s/desplegar-satelite.sh notifications   # el servicio, en el namespace anotado
+SOLO_ENSAYAR=1 ./k8s/desplegar-satelite.sh notifications   # valida y no cambia nada
+```
+
+El guion del satélite apunta el núcleo solo después de ver al consumidor
+conectado. Lo espera consultando sus logs cada `PAUSA_CONSUMIDOR` segundos (3
+por omisión) durante `PLAZO_CONSUMIDOR` segundos como máximo (120). Si el plazo
+vence, aborta y el núcleo queda como estaba.
+
+**Cómo se hablan.** Dentro de un namespace basta el nombre corto del Service
+(`postgres`). Desde otro hay que calificarlo: `postgres.student-forellana`.
+`satelite.py` reescribe esas direcciones al copiar la configuración, y agrega
+el nombre calificado del servicio a `ALLOWED_HOSTS` (el gateway lo llama por
+ese nombre y Django rechaza con 400 un `Host` que no conoce). En el núcleo,
+`URL_NOTIFICATIONS` pasa a ser `http://notifications.<satélite>:8005`; la usan
+el gateway para enrutar y Auth para el borrado de organizaciones.
+
+**Qué secretos cruzan.** Solo las claves que el servicio lee, nombradas una a
+una en `desplegar-satelite.sh`: la credencial de lectura del registro,
+`SECRET_KEY`, `ELIMINACION_INTERNA_SECRET`, la URL del rol `svc_notifications`
+(restringido a su esquema) y la URL del broker. **No cruzan** la clave
+administradora de PostgreSQL, el secreto de los JWT, las claves de cifrado de
+los conectores ni la cuenta de correo. Lo que cruza lo puede leer el dueño del
+namespace satélite: es un integrante del equipo, pero conviene saberlo.
+
+**Permisos.** Quien despliega necesita escribir en los dos namespaces. El dueño
+del satélite lo concede una vez, con su cuenta:
+
+```bash
+kubectl create rolebinding acceso-nucleo --clusterrole=student-workspace-admin --user=ldap:USUARIO
+```
+
+**Lo que hay que tener presente:**
+
+- Funciona porque el cluster **no** tiene políticas de red entre namespaces
+  (ver arriba). `40-red.yaml` tal como está escrito lo impediría: si algún día
+  se pueden aplicar, hay que agregarle el namespace satélite como origen
+  permitido hacia PostgreSQL, RabbitMQ y el servicio.
+- Si el satélite se cae, el núcleo sigue funcionando: `/api/alertas/` responde
+  502 o 504 y los eventos se acumulan en la cola `notifications.dominio.v2` del
+  broker (tope de 1000; al llenarse el outbox reintenta). El borrado de una
+  organización queda esperando el ACK de `notifications` hasta que vuelva.
+- El núcleo y el satélite tienen que estar en la **misma versión**: comparten
+  el contrato de eventos. Desplegar uno sin el otro es desplegar a medias.
+- La cuota del satélite es la de su dueño y puede ser menor que la de acá.
 
 ## Rotar la clave de Postgres
 
@@ -154,9 +230,16 @@ Ninguno reemplaza a los de nadie: conviven.
 
 ## Reglas del cluster del ramo
 
-No se pueden consultar (`kubectl get resourcequota` y `get ingressclass` dan
-`Forbidden`): se descubren chocando. Quedan acá para que nadie las vuelva a
-pelear.
+Durante semanas no se pudieron consultar y se descubrieron chocando. Desde
+noviembre la cuota y el LimitRange **sí se leen** (`kubectl get resourcequota`,
+`kubectl get limitrange -o yaml`); lo demás sigue quedando acá para que nadie
+lo vuelva a pelear.
+
+Cuota de `student-forellana` al 10-11-2026: **12 pods**, 2 CPU y 2752 Mi en
+límites, 1 CPU y 1152 Mi en solicitudes, 3 PVC, 10 Services. Por contenedor:
+mínimo 25m / 64Mi, **máximo 500m / 512Mi**. No todos los namespaces tienen la
+misma: el de otro integrante mostró 2 Gi de memoria en límites y 1 Gi en
+solicitudes. Revisar la propia antes de calcular.
 
 | Regla | Consecuencia |
 |---|---|
