@@ -1,4 +1,6 @@
 """Inserta hechos durables y resuelve reintentos según la clave v1."""
+from datetime import timezone
+
 from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.response import Response
@@ -13,13 +15,15 @@ def _acuse(evento, estado, codigo_http):
     return Response({
         'event_id': str(evento.event_id),
         'suscripcion_id': str(evento.suscripcion_id),
-        'recibido_en': evento.recibido_en.isoformat(),
+        'recibido_en': evento.recibido_en.astimezone(timezone.utc).isoformat(
+            timespec='milliseconds',
+        ).replace('+00:00', 'Z'),
         'estado': estado,
     }, status=codigo_http)
 
 
 def _conflicto(mensaje):
-    raise ErrorEventoUso(mensaje, 'clave_idempotencia_en_conflicto', status.HTTP_409_CONFLICT)
+    raise ErrorEventoUso(mensaje, 'event_id_conflictivo', status.HTTP_409_CONFLICT)
 
 
 @transaction.atomic
@@ -62,10 +66,10 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
             raise
         return _responder_existente(existente, destino, evento)
 
-    return _acuse(recibido, 'recibido', status.HTTP_201_CREATED)
+    return _acuse(recibido, 'aceptado', status.HTTP_201_CREATED)
 
 
 def _responder_existente(existente, destino, evento):
     if existente.suscripcion_id != destino.pk or existente.cuerpo != evento.cuerpo:
-        _conflicto('El identificador de evento ya se usó con otro cuerpo o destino.')
+        _conflicto('El identificador ya fue aceptado con otro contenido o destino.')
     return _acuse(existente, 'duplicado', status.HTTP_200_OK)

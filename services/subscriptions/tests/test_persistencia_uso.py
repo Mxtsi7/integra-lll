@@ -46,6 +46,8 @@ def test_persiste_antes_de_aceptar_y_reintento_es_idempotente(destino, evento):
     assert primera.status_code == 201
     assert repetida.status_code == 200
     assert primera.data['event_id'] == repetida.data['event_id'] == evento['event_id']
+    assert primera.data['estado'] == 'aceptado'
+    assert primera.data['recibido_en'].endswith('Z')
     assert EventoUsoRecibido.objects.count() == 1
     recibida = EventoUsoRecibido.objects.get()
     assert recibida.suscripcion_id == destino.id
@@ -56,7 +58,9 @@ def test_persiste_antes_de_aceptar_y_reintento_es_idempotente(destino, evento):
 def test_misma_clave_con_cuerpo_o_destino_distinto_es_conflicto(destino, evento):
     assert enviar(destino, evento).status_code == 201
     distinto = {**evento, 'cobertura': 'parcial'}
-    assert enviar(destino, distinto).status_code == 409
+    conflicto_cuerpo = enviar(destino, distinto)
+    assert conflicto_cuerpo.status_code == 409
+    assert conflicto_cuerpo.data['codigo'] == 'event_id_conflictivo'
     otro_destino = Subscription.objects.create(organizacion_id=destino.organizacion_id,
         nombre='Otro servicio', monto='1000', moneda='CLP', frecuencia='mensual',
         categoria='streaming', fecha_proximo_cobro='2026-11-20')
