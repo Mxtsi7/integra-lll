@@ -7,7 +7,8 @@ import pytest
 from rest_framework.test import APIClient
 
 from app.models import (
-    Cobro, EventoUsoRecibido, HallazgoCobro, Proveedor, RegistroUso, ResumenOrganizacion, Subscription,
+    Cobro, EventoUsoRecibido, HallazgoCobro, Proveedor, ProyeccionUsoRecolector,
+    RegistroUso, ResumenOrganizacion, Subscription,
     TrabajoDerivado, TransicionEstado,
 )
 from app.models import OutboxEvento, Presupuesto
@@ -92,9 +93,13 @@ def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
             event_id=uuid.uuid4(), suscripcion=propias[tenant], cuerpo={},
             fecha_local="2026-11-09",
         )
+        ProyeccionUsoRecolector.objects.create(
+            organizacion_id=tenant, usuario_id=42, suscripcion=propias[tenant],
+            fecha_local="2026-11-09", zona_horaria="America/Santiago", duracion_union_ms=30000,
+        )
     for _ in range(2):
         assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
-    for modelo in (Presupuesto, OutboxEvento, EventoUsoRecibido):
+    for modelo in (Presupuesto, OutboxEvento, EventoUsoRecibido, ProyeccionUsoRecolector):
         assert not modelo.objects.filter(organizacion_id=org).exists()
         assert modelo.objects.filter(organizacion_id=otra).count() == 1
 

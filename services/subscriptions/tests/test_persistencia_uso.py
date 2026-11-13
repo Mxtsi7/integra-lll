@@ -52,7 +52,7 @@ def test_persiste_antes_de_aceptar_y_reintento_es_idempotente(destino, evento):
     recibida = EventoUsoRecibido.objects.get()
     assert recibida.suscripcion_id == destino.id
     assert recibida.usuario_id == 42
-    assert recibida.proyeccion_pendiente
+    assert not recibida.proyeccion_pendiente
 
 
 def test_misma_clave_con_cuerpo_o_destino_distinto_es_conflicto(destino, evento):
