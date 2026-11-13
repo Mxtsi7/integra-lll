@@ -22,6 +22,16 @@ RUN npm ci
 COPY . .
 ARG VITE_API_URL
 ENV VITE_API_URL=${VITE_API_URL}
+# ── La URL se comprueba ANTES de compilar ───────────────────────────────────
+# Git Bash en Windows convierte un argumento que empieza con `/` en una ruta:
+# `--build-arg VITE_API_URL=/api` llegaba aca como
+# `C:/Program Files/Git/api`, la compilacion terminaba bien y la web quedaba
+# llamando a una direccion que no existe. Paso dos veces (la segunda, el
+# 09-11-2026) y solo se ve abriendo el JavaScript ya compilado.
+#
+# Vale una ruta que empiece con `/` o una URL http(s). Cualquier otra cosa
+# corta la construccion con el valor a la vista.
+RUN case "$VITE_API_URL" in /*|http://*|https://*) ;; *) echo "VITE_API_URL invalida: '$VITE_API_URL'. Si estas en Git Bash, antepone MSYS_NO_PATHCONV=1." >&2; exit 1 ;; esac
 RUN npm run build --workspace=web
 
 

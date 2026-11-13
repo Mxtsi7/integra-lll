@@ -5,3 +5,4 @@ Dockerfile    text eol=lf
 *.sql         text eol=lf
 *.yml         text eol=lf
 *.yaml        text eol=lf
+k8s/reparto.env text eol=lf
