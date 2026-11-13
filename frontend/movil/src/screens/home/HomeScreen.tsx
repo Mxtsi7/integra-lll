@@ -72,13 +72,16 @@ export function HomeView({
           onReintentar={onReintentar}
           esVacio={(datos) => datos.length === 0}
           vacio={{
-            titulo: 'No tienes suscripciones todavía',
+            titulo: 'Todavía no registras suscripciones',
             descripcion:
-              'Agrega tu primera suscripción para comenzar a controlar tus cobros y gastos.',
+              'Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar.',
             accion: {
-              etiqueta: 'Crear suscripción',
+              etiqueta: 'Agregar suscripción',
               onPress: onNuevaSuscripcion,
+              variante: 'primario',
+              testID: 'btn-crear-primera-suscripcion',
             },
+            testID: 'empty-state-home',
           }}
         >
           {(suscripciones) => {
