@@ -30,9 +30,10 @@ Por eso `rescatar_importaciones_estancadas` corre cada tanto:
     `procesando` hace mucho → se marca `fallida`, que es un final honesto
 
 ── Reprocesar no duplica ────────────────────────────────────────────────────
-Un candidato de CSV se identifica por `<sha256 del archivo>:<número de fila>`
-y la tabla tiene una unicidad sobre (organización, origen, identificador). Dos
-corridas de la misma importación escriben las mismas filas, no el doble.
+Un candidato de CSV se identifica por la huella de su cobro (S3-FE-17) y la
+tabla tiene una unicidad sobre (organización, origen, identificador). Dos
+corridas de la misma importación escriben las mismas filas, no el doble; y
+otra exportación con el mismo cobro tampoco lo vuelve a proponer.
 """
 
 import logging

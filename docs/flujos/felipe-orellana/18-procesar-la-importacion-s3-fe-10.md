@@ -94,7 +94,7 @@ S3-FE-01 era justamente que los dos orígenes produzcan lo mismo.
 |---|---|
 | `importacion` | de qué lectura salió (CASCADE: sin ella no significa nada) |
 | `origen` | `csv` o `correo` |
-| `identificador_origen` | en CSV, `<sha256>:<número de fila>` |
+| `identificador_origen` | en CSV, la huella del cobro ([S3-FE-17](22-evitar-duplicados-s3-fe-17.md)); el archivo y la fila quedan en `evidencia` |
 | `servicio` | NULL cuando no se pudo resolver sin inventar |
 | `servicio_texto` | la glosa tal cual venía, siempre |
 | `servicio_resultado` | `reconocido`, `ambiguo` o `desconocido` |

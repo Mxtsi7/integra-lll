@@ -99,11 +99,11 @@ class Candidato:
 
     origen: str
     #: Identifica la fuente **dentro** de su origen, y tiene que ser estable:
-    #: el mismo archivo leído dos veces produce el mismo identificador para la
-    #: misma fila. Es lo que le permite a S3-FE-17 saber que ya vio esto.
-    #: En CSV es `<sha256 del archivo>:<número de fila>`; en correo, el
-    #: Message-ID. No se usa el nombre del archivo: dos archivos distintos
-    #: pueden llamarse igual y el mismo archivo puede renombrarse.
+    #: el mismo hecho leído dos veces produce el mismo identificador. Es lo
+    #: que le permite a S3-FE-17 saber que ya vio esto. En CSV es la huella
+    #: del cobro (`csv_candidatos.huella_csv`), que coincide también entre
+    #: dos exportaciones que se traslapan; en correo, el Message-ID. El
+    #: archivo y la fila exactos quedan en `evidencia`.
     identificador_origen: str
 
     organizacion_id: str

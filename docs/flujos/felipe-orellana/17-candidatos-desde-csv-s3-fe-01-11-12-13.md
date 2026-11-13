@@ -91,7 +91,7 @@ creación de suscripciones— nadie tiene que preguntar de dónde vino.
 | Campo | Qué es |
 |---|---|
 | `origen` | `csv` o `correo` |
-| `identificador_origen` | en CSV, `<sha256 del archivo>:<número de fila>`; en correo, el Message-ID |
+| `identificador_origen` | en CSV, la huella del cobro (`csv:` + sha256 de fecha, importe, moneda, glosa y ocurrencia; ver [S3-FE-17](22-evitar-duplicados-s3-fe-17.md)); en correo, el Message-ID |
 | `organizacion_id` | de quién es |
 | `servicio` | nombre canónico del proveedor, o `None` si no se pudo resolver sin inventar |
 | `servicio_texto` | la glosa tal cual venía. **Siempre**, aunque se haya reconocido |
