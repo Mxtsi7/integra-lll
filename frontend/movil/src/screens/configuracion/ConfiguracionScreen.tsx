@@ -18,6 +18,7 @@ export default function ConfiguracionScreen({
     AutorizacionCorreo: () => navigation.navigate('AutorizacionCorreo'),
     RestriccionesPremium: () => navigation.navigate('RestriccionesPremium'),
     EliminarCuenta: () => navigation.navigate('EliminarCuenta'),
+    UsoRecolectores: () => navigation.navigate('UsoRecolectores'),
   };
 
   return (
