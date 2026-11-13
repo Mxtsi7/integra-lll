@@ -74,6 +74,7 @@ def test_sin_control_de_consentimiento_no_se_acepta(suscripcion, evento):
 
 def test_sin_receptor_durable_no_devuelve_aceptacion(suscripcion, evento, settings):
     settings.USO_VERIFICAR_CONSENTIMIENTO = lambda **contexto: True
+    settings.USO_PERSISTIR_EVENTO = None
     respuesta = enviar(suscripcion, evento)
     assert respuesta.status_code == 503
     assert respuesta.data['codigo'] == 'recepcion_no_disponible'
