@@ -19,6 +19,7 @@ export const CLAVES_SEGURAS = {
   ACCESS_TOKEN: 'access_token',
   REFRESH_TOKEN: 'refresh_token',
   DESFASE_RELOJ: 'desfase_reloj_ms',
+  ASOCIACIONES_PAQUETES_USO: 'asociaciones_paquetes_uso',
   LIMPIEZA_PENDIENTE: 'limpieza_pendiente',
 } as const;
 
@@ -247,6 +248,7 @@ export async function hidratarSesionSegura(): Promise<{
           backendActual.deleteItemAsync(CLAVES_SEGURAS.ACCESS_TOKEN),
           backendActual.deleteItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN),
           backendActual.deleteItemAsync(CLAVES_SEGURAS.DESFASE_RELOJ).catch(() => {}),
+          backendActual.deleteItemAsync(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO),
         ]);
         credencialesEliminadas = true;
       } catch {
@@ -349,9 +351,10 @@ export async function guardarTokensSeguros(tokens: {
       const p1 = encolarDelete(CLAVES_SEGURAS.ACCESS_TOKEN, genRollback);
       const p2 = encolarDelete(CLAVES_SEGURAS.REFRESH_TOKEN, genRollback);
       const p3 = encolarDelete(CLAVES_SEGURAS.DESFASE_RELOJ, genRollback);
+      const p4 = encolarDelete(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO, genRollback);
 
       try {
-        await Promise.all([p1, p2, p3]);
+        await Promise.all([p1, p2, p3, p4]);
       } catch (rollbackErr) {
         console.warn('[StorageSeguro] Error durante rollback en SecureStore:', rollbackErr);
       } finally {
@@ -388,6 +391,7 @@ export async function limpiarSesionSegura(): Promise<void> {
     // 1. Limpieza inmediata e incondicional en memoria síncrona
     cacheMemoria = {};
     logout();
+    encolarDelete(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO, gen);
 
     // 2. Esperar a que se completen los borrados de credenciales de esta
     // generación. La marca LIMPIEZA_PENDIENTE NO se encola aquí: si algún
@@ -441,6 +445,21 @@ export function obtenerTokensSeguros(): {
     access_token: obtenerAccessToken(),
     refresh_token: obtenerRefreshToken(),
   };
+}
+
+/** Lee un dato privado serializando su acceso junto a las operaciones del SecureStore. */
+export async function leerDatoSeguro(key: string): Promise<string | null> {
+  if (!storageInicializado) inicializarStorageSeguro();
+  await esperarMutacionesPendientes();
+  return backendActual.getItemAsync(key);
+}
+
+/** Persiste un dato privado y descarta escrituras si la generación de sesión cambió. */
+export async function guardarDatoSeguro(key: string, value: string): Promise<void> {
+  if (!storageInicializado) inicializarStorageSeguro();
+  const generacionCapturada = generacionActual;
+  await encolarSet(key, value, generacionCapturada);
+  if (generacionCapturada !== generacionActual) throw new Error('La sesión cambió durante la escritura segura.');
 }
 
 /**
