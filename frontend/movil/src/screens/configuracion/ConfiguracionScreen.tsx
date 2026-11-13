@@ -19,6 +19,7 @@ export default function ConfiguracionScreen({
     RestriccionesPremium: () => navigation.navigate('RestriccionesPremium'),
     EliminarCuenta: () => navigation.navigate('EliminarCuenta'),
     UsoRecolectores: () => navigation.navigate('UsoRecolectores'),
+    AsociarPaqueteAndroid: () => navigation.navigate('AsociarPaqueteAndroid'),
   };
 
   return (

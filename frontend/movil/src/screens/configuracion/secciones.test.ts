@@ -21,6 +21,7 @@ describe('Configuración móvil (AN-04): secciones', () => {
         'RestriccionesPremium',
         'EliminarCuenta',
         'UsoRecolectores',
+        'AsociarPaqueteAndroid',
       ]),
     );
   });
