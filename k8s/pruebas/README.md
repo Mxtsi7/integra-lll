@@ -133,7 +133,10 @@ cuota de CPU, así que el sistema recibe carga real de varios orígenes a la vez
 
 Desde otro namespace se usa `http://ojoalgasto-forellana.dev.censei.cl/health/`.
 El Ingress conserva el host público; web fija `Host: gateway` hacia el backend.
-Las políticas siguen bloqueando el acceso entre namespaces al Service interno.
+`40-red.yaml` bloquearía el acceso entre namespaces al Service interno, pero
+en este cluster no está aplicado (ver `k8s/README.md`): la prueba usa la
+entrada pública porque es la ruta que se quiere medir, no porque la otra esté
+cerrada.
 Esta prueba incluye los proxies y la red de entrada.
 
 ## Reglas del namespace que hay que respetar
