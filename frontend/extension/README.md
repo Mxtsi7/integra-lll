@@ -257,13 +257,23 @@ adicional no encontró defectos; no sustituye la recepción humana de las tarjet
   [#165](https://github.com/Mxtsi7/integra-lll/pull/165), de Víctor. Se verificó
   la [aprobación de Mxtsi7 del 11 de noviembre](https://github.com/Mxtsi7/integra-lll/pull/165#pullrequestreview-5866593924).
   El 13 de noviembre Maxi confirmó que ambos acordaron esa entrega y está lista
-  para merge. #165 sigue abierta, sin merge, HEAD `383406c`; esta corrección
-  no la fusiona ni presenta su contrato como integrado en main.
+  para merge. La comprobación final de GitHub y `origin/main` confirmó que
+  #165 ya se fusionó el 13 de noviembre a las 17:24:17 UTC mediante
+  `2b2676f`, desde HEAD `383406c`. El contrato está integrado en main;
+  esta corrección no ejecutó ese merge.
 - Ese acuerdo de contrato no acredita por sí solo la validación específica de
   consentimiento, datos recolectados y conservación de **MX-02**. La tarjeta
   [enlazada por MX-09](https://trello.com/c/QfDxfiwZ) debe aclararse al recibir
   esa entrega; no se asume aceptada por el cierre de #148. No hay evidencia
   adicional de validación de consentimiento de Chris en esta sesión.
+- Carga del código corregido en Chrome **158.0.8127.36** y Edge
+  **157.0.4341.46**, perfiles temporales y modo headless: extensión habilitada,
+  panel abierto, estado inicial sin consentimiento ni hosts concedidos. Editar
+  `example.com` y aceptar el texto habilitó Autorizar; pulsarlo dejó la petición
+  nativa pendiente, sin consentimiento guardado ni permiso concedido. Se intentó
+  Chrome con interfaz gráfica, pero la automatización no consiguió abrir de
+  forma fiable el popup de acción. No se sembró consentimiento ni se sustituyó
+  ninguna API. Esto acredita carga/panel/solicitud, no navegación ni tiempos reales.
 - El recorrido completo del README en Chrome/Edge y la recepción de
   consentimiento siguen siendo condiciones de cierre. La instalación y
   solicitud de permiso comprobadas con navegador headless se registran aparte
