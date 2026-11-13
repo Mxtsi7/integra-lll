@@ -1,0 +1,103 @@
+/* Chat del asistente financiero (S3-CH-14). Colores del tema: se lee igual en claro y en oscuro. */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+/* La zona que se desplaza; es también la región que los lectores de pantalla siguen. */
+.historial {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 240px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.vacio {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--tinta-2);
+}
+
+.mensajes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mensaje {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: min(85%, 560px);
+  padding: 10px 14px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-m);
+}
+
+.dePersona {
+  align-self: flex-end;
+  background: var(--acento-suave);
+}
+
+.delAsistente {
+  align-self: flex-start;
+  background: var(--vidrio);
+}
+
+.autor {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--tinta-2);
+}
+
+/* pre-wrap respeta los saltos de línea que escribió la persona y los del asistente. */
+.texto {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--tinta);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.aviso {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.espera {
+  margin: 0;
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ayuda {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
