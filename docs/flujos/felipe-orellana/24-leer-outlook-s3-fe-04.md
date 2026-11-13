@@ -89,7 +89,7 @@ mensajes. La página siguiente es una URL y va entre comillas.
 **Está pendiente**, por lo mismo que en Gmail: hace falta registrar la
 aplicación en Microsoft Entra con el permiso `Mail.Read`, cargar
 `OAUTH_OUTLOOK_CLIENT_ID` y `OAUTH_OUTLOOK_CLIENT_SECRET` y conectar la
-cuenta. Este lector tampoco renueva el token (S3-FE-19).
+cuenta. El lector tampoco renueva el token; el comando sí (S3-FE-19, documento 25).
 
 ## Dónde está
 

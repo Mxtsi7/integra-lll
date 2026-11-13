@@ -132,7 +132,8 @@ texto no, porque esta salida termina en una PR o en una captura.
 2. Poner `OAUTH_GMAIL_CLIENT_ID` y `OAUTH_GMAIL_CLIENT_SECRET` en el entorno
    de connectors.
 3. Conectar la cuenta desde la app (`conectores/autorizaciones/`) y correr el
-   comando antes de una hora: este módulo no renueva el token (S3-FE-19).
+   comando. El lector no renueva el token, pero el comando sí: usa la
+   renovación de S3-FE-19 (documento 25).
 
 ## Dónde está
 
