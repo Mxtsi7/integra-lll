@@ -1052,6 +1052,13 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         except (TypeError, ValueError, AttributeError) as exc:
             raise ValidationError({"actor_id": "El identificador de usuario no es válido."}) from exc
 
+    @action(detail=True, methods=['post'], url_path='uso/recolector')
+    def recibir_uso_recolector(self, request, pk=None):
+        from app.uso_recolectores.recepcion import recibir
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        return recibir(request, suscripcion, usuario_id, self._correlation_id(request))
+
     @staticmethod
     def _convertir_error_transicion(error: DjangoValidationError) -> ValidationError:
         detail = error.message_dict if hasattr(error, "message_dict") else error.messages
