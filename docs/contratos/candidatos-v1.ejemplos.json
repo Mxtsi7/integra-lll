@@ -1,0 +1,30 @@
+[
+  {
+    "origen": "csv",
+    "identificador_origen": "ejemplo-csv-opaco",
+    "organizacion_id": "11111111-1111-1111-1111-111111111111",
+    "servicio": "Netflix",
+    "servicio_texto": "Netflix",
+    "servicio_resultado": "reconocido",
+    "importe": "5990",
+    "moneda": "CLP",
+    "fecha": "2026-04-13",
+    "tipo_mensaje": "cobro_realizado",
+    "estado": "propuesto",
+    "evidencia": {"fila": "2", "descripcion_original": "Netflix"}
+  },
+  {
+    "origen": "correo",
+    "identificador_origen": "ejemplo-correo-sintetico-opaco",
+    "organizacion_id": "11111111-1111-1111-1111-111111111111",
+    "servicio": "Netflix",
+    "servicio_texto": "Netflix",
+    "servicio_resultado": "reconocido",
+    "importe": "5990",
+    "moneda": "CLP",
+    "fecha": "2026-04-13",
+    "tipo_mensaje": "aviso_de_cobro",
+    "estado": "propuesto",
+    "evidencia": {"asunto": "Tu próximo cobro", "remitente": "facturas@example.test"}
+  }
+]
