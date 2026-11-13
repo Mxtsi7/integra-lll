@@ -48,6 +48,7 @@ from email.header import decode_header, make_header
 
 import requests
 
+from .lectura_correo import normalizar_message_id
 from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe desde aquí
     LARGO_MAXIMO_TEXTO,
     LIMITE_MAXIMO,
@@ -286,6 +287,8 @@ def _mensaje(cuenta_id, crudo: dict) -> MensajeCorreo:
         asunto=cabeceras.get("subject", "")[:500],
         texto=texto,
         texto_truncado=truncado,
+        proveedor_correo=PROVEEDOR,
+        message_id=normalizar_message_id(cabeceras.get("message-id", "")),
     )
 
 

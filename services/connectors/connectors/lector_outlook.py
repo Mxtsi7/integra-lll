@@ -33,6 +33,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from .lectura_correo import normalizar_message_id
 from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe desde aquí
     LIMITE_MAXIMO,
     LIMITE_POR_DEFECTO,
@@ -62,7 +63,7 @@ _ESQUEMA, _SERVIDOR, _RUTA = "https", "graph.microsoft.com", "/v1.0/me/messages"
 LARGO_MAXIMO_PAGINA = 4096
 
 #: Lo que se le pide a Graph de cada mensaje. Lo demás no viaja.
-_CAMPOS = "id,conversationId,receivedDateTime,from,subject,body"
+_CAMPOS = "id,internetMessageId,conversationId,receivedDateTime,from,subject,body"
 
 #: Códigos de error de Graph que significan "esta cuenta no tiene buzón al
 #: que se pueda llegar por la API" (una cuenta personal sin Outlook.com, por
@@ -216,7 +217,10 @@ def _pedir(url: str, token: str, parametros: dict | None) -> dict:
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-                "Prefer": 'outlook.body-content-type="text"',
+                # `ImmutableId`: sin esto, el `id` de un mensaje CAMBIA si el
+                # usuario lo mueve de carpeta, y el mismo correo archivado
+                # tendría otra identidad (S3-FE-06).
+                "Prefer": 'outlook.body-content-type="text", IdType="ImmutableId"',
             },
             timeout=TIEMPO_LIMITE,
             # Graph no redirige la lista de mensajes. Seguir una redirección
@@ -309,6 +313,8 @@ def _mensaje(cuenta_id, crudo) -> MensajeCorreo:
         asunto=str(crudo.get("subject") or "")[:500],
         texto=texto,
         texto_truncado=truncado,
+        proveedor_correo=PROVEEDOR,
+        message_id=normalizar_message_id(crudo.get("internetMessageId")),
     )
 
 
