@@ -715,6 +715,35 @@ class RegistroUso(ModeloTenant):
         return f"{self.suscripcion.nombre} - {self.fecha}: {self.minutos} min"
 
 
+class EventoUsoRecibido(ModeloTenant):
+    """Hecho durable de recolector; la clave no incluye el destino mutable."""
+
+    usuario_id = models.PositiveBigIntegerField()
+    recolector_id = models.UUIDField()
+    event_id = models.UUIDField()
+    correlation_id = models.UUIDField(null=True, blank=True)
+    suscripcion = models.ForeignKey(
+        Subscription, on_delete=models.CASCADE, related_name="eventos_uso_recibidos",
+    )
+    cuerpo = models.JSONField()
+    fecha_local = models.DateField()
+    recibido_en = models.DateTimeField(default=timezone.now, editable=False)
+    proyeccion_pendiente = models.BooleanField(default=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "evento_uso_recibido"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("organizacion_id", "usuario_id", "recolector_id", "event_id"),
+                name="uso_rx_evento_clave_unica",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("organizacion_id", "usuario_id", "recolector_id", "fecha_local"),
+                         name="uso_rx_cobertura_dia_idx"),
+        ]
+
+
 class TransicionEstado(ModeloTenant):
     """Registro inmutable de cada evento que cambia el estado de una suscripción."""
 
