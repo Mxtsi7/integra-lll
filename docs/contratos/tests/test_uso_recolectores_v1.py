@@ -28,7 +28,7 @@ from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 RAIZ = Path(__file__).resolve().parents[3]
 DIR_CONTRATO = RAIZ / "docs" / "contratos"
 ESQUEMA = json.loads(
-    (DIR_CONTRATO / "uso-recolectores-v1.schema.json").read_text(encoding="utf-8")
+    (RAIZ / "shared/contratos/uso-recolectores-v1.schema.json").read_text(encoding="utf-8")
 )
 EJEMPLOS = json.loads(
     (DIR_CONTRATO / "uso-recolectores-v1.ejemplos.json").read_text(encoding="utf-8")
