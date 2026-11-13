@@ -20,6 +20,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from connectors import lector_gmail
 from connectors.lectura_correo import LIMITE_POR_DEFECTO, ErrorDeLectura, FiltroCorreos
+from connectors.renovacion import leer_con_renovacion
 
 
 def _fecha(texto: str) -> datetime:
@@ -48,7 +49,10 @@ class Command(BaseCommand):
     def handle(self, *args, **opciones):
         filtro = FiltroCorreos(desde=opciones["desde"], hasta=opciones["hasta"], solo_cobros=not opciones["todos"])
         try:
-            pagina = self.lector.leer_mensajes(
+            # Con renovación (S3-FE-19): una cuenta conectada hace más de una
+            # hora tiene el token de acceso vencido.
+            pagina = leer_con_renovacion(
+                self.lector,
                 organizacion_id=opciones["organizacion"],
                 cuenta_id=opciones["cuenta"],
                 filtro=filtro,

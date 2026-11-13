@@ -112,10 +112,14 @@ def consulta_gmail(filtro: FiltroCorreos) -> str:
     return " ".join(partes)
 
 
+#: El proveedor de este lector, para quien lo use sin saber cuál es (S3-FE-19).
+PROVEEDOR = CuentaConectada.Proveedor.GMAIL
+
+
 def cuenta_para_leer(*, organizacion_id, cuenta_id):
     """La cuenta de Gmail de esa organización y su token (ver `lectura_correo`)."""
     return _cuenta_para_leer(
-        organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=CuentaConectada.Proveedor.GMAIL,
+        organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=PROVEEDOR,
     )
 
 
