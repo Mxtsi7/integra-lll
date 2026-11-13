@@ -30,6 +30,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-02** Consultar los mensajes autorizados de Gmail: filtros, paginación, límites y solo cuentas conectadas de la organización | Hecho, 82 pruebas; falta la corrida contra una cuenta de prueba real | [23-leer-gmail-s3-fe-02.md](23-leer-gmail-s3-fe-02.md) |
 | **Sprint 3 · S3-FE-04** Consultar los mensajes autorizados de Outlook: la cuenta correcta, páginas de Graph validadas y rechazo de autorización explícito | Hecho, 85 pruebas; falta la corrida contra una cuenta de prueba real | [24-leer-outlook-s3-fe-04.md](24-leer-outlook-s3-fe-04.md) |
 | **Sprint 3 · S3-FE-19** Renovar credenciales vencidas y pedir reconexión sin entrar en bucle | Hecho, 34 pruebas más 1 con dos conexiones a PostgreSQL | [25-renovar-credenciales-s3-fe-19.md](25-renovar-credenciales-s3-fe-19.md) |
+| **Sprint 3 · S3-FE-06** El servicio y el identificador de origen de cada mensaje: Message-ID como identidad y el servicio sin asignarlo a la fuerza | Hecho, 39 pruebas | [26-origen-del-mensaje-s3-fe-06.md](26-origen-del-mensaje-s3-fe-06.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

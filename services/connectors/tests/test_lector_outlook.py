@@ -187,8 +187,9 @@ class TestLaCuentaCorrecta:
         (peticion,) = graph.peticiones
         assert peticion["url"] == URL_MENSAJES
         assert peticion["params"]["$top"] == 5
-        assert peticion["params"]["$select"] == "id,conversationId,receivedDateTime,from,subject,body"
-        assert peticion["headers"]["Prefer"] == 'outlook.body-content-type="text"'
+        assert peticion["params"]["$select"] == "id,internetMessageId,conversationId,receivedDateTime,from,subject,body"
+        # ImmutableId: el `id` no cambia si el usuario mueve el correo de carpeta.
+        assert peticion["headers"]["Prefer"] == 'outlook.body-content-type="text", IdType="ImmutableId"'
 
     def test_la_cuenta_de_gmail_con_ese_id_no_sirve(self, claves, graph):
         gmail = outlook(proveedor="gmail", correo="p@gmail.com")
