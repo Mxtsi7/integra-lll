@@ -87,6 +87,7 @@ export function configurarManejador401(fn: ManejadorNoAutorizado) {
 type Opciones = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  signal?: AbortSignal;
 };
 
 function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
@@ -139,6 +140,7 @@ export async function pedir<T>(
       headers,
       body:
         opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+      signal: opciones.signal,
     });
   };
 
