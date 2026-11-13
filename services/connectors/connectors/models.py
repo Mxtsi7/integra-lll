@@ -780,9 +780,9 @@ class CobroCandidato(ModeloTenant):
 
     ── La unicidad es la de `clave_deduplicacion()` ─────────────────────────
     (organizacion, origen, identificador de origen). En CSV el identificador
-    es `<sha256 del archivo>:<número de fila>`, así que reprocesar el mismo
-    archivo no duplica nada y la tarea puede reintentarse sin miedo. Es la
-    base de S3-FE-17.
+    es la huella del COBRO —fecha, importe, moneda, glosa normalizada y su
+    ocurrencia en el archivo— (S3-FE-17): reprocesar el mismo archivo no
+    duplica nada, y tampoco subir otra exportación que traiga el mismo cobro.
 
     Va en la base y no solo en el código porque una unicidad que se comprueba
     leyendo antes de escribir deja pasar dos tareas simultaneas.
@@ -823,8 +823,10 @@ class CobroCandidato(ModeloTenant):
         max_length=200,
         verbose_name="Identificador en su origen",
         help_text=(
-            "En CSV, `<sha256>:<número de fila>`; en correo, el Message-ID. "
-            "Estable: el mismo hecho leído dos veces da el mismo valor."
+            "En CSV, `csv:` y la huella del cobro (fecha, importe, moneda, "
+            "glosa normalizada y su ocurrencia en el archivo); en correo, el "
+            "Message-ID. Estable: el mismo hecho leído dos veces, aunque sea "
+            "en archivos distintos, da el mismo valor."
         ),
     )
 
