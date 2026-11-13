@@ -54,6 +54,8 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
                 **valores_clave,
                 suscripcion=destino,
                 cuerpo=evento.cuerpo,
+                inicio=evento.inicio,
+                fin=evento.fin,
                 fecha_local=evento.fecha,
                 correlation_id=correlacion,
                 proyeccion_pendiente=True,
