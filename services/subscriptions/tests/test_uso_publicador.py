@@ -5,6 +5,7 @@ topología. La prueba de integración real vive en
 ``services/analytics-uso/tests/integracion``.
 """
 
+import datetime as dt
 import json
 import uuid
 from pathlib import Path
@@ -24,6 +25,7 @@ from events.uso import (
     EXCHANGE_USO,
     ROUTING_KEY_USO,
     VERSION_USO,
+    _iso_utc,
     crear_sobre_uso,
     datos_uso,
     declarar_uso,
@@ -116,6 +118,13 @@ def test_el_cuerpo_publicado_cumple_el_contrato_canonico():
     }
 
     VALIDADOR.validate(cuerpo)
+
+
+def test_iso_utc_recorta_microsegundos_a_tres_decimales():
+    """El contrato TypeScript acepta 1–3 decimales; Python emite 6 por defecto."""
+    momento = dt.datetime(2026, 11, 9, 12, 2, 1, 123456, tzinfo=dt.timezone.utc)
+
+    assert _iso_utc(momento) == "2026-11-09T12:02:01.123Z"
 
 
 def test_crear_sobre_uso_usa_event_id_y_version_del_contrato():

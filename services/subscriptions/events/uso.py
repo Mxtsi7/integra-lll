@@ -64,9 +64,16 @@ def _correlation_id(valor: Any) -> uuid.UUID:
 
 
 def _iso_utc(valor) -> str:
+    """Serializa un instante en UTC con precisión de milisegundos.
+
+    El contrato interno solo admite 1–3 dígitos fraccionarios antes de ``Z``
+    (``validacion.ts``). Python emite 6 cuando el ``datetime`` trae
+    microsegundos, así que se recorta aquí: el sobre no puede llevar una
+    precisión que el consumidor rechaza.
+    """
     return (
         valor.astimezone(datetime_timezone.utc)
-        .isoformat()
+        .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z")
     )
 
