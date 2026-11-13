@@ -45,12 +45,33 @@ DOBLE
 chmod +x "$TMP/bin/kubectl"
 # Este arnés solo verifica parches de secretos; el guard del broker se prueba
 # aparte en scripts/tests/test_migracion_rabbitmq.py, también con broker real.
-cat > "$TMP/bin/python3" <<'DOBLE'
+# ── El doble del intérprete, con los DOS nombres ────────────────────────────
+# `desplegar.sh` ya no llama a `python3` a ciegas: prueba `python3` y después
+# `python` ejecutando `-c '...'`, y usa el primero que responda. Un doble que
+# solo aceptaba el guion del broker fallaba esa comprobación, el despliegue
+# caía al `python` DE VERDAD y ese sí ejecutaba `actualizar-rabbitmq.py`.
+#
+# Y ahí el doble de kubectl no protege: es un guion de shell, que bash
+# encuentra en el PATH pero `subprocess` de Python en Windows no, así que
+# Python terminaba llamando al kubectl.exe real contra el cluster real. Pasó
+# el 11-11-2026 y suspendió los listeners del broker de verdad.
+#
+# Por eso van los dos nombres (ningún Python real queda alcanzable) y el
+# KUBECONFIG de más abajo (si un kubectl real se cuela, no tiene cluster).
+for interprete in python3 python; do
+  cat > "$TMP/bin/$interprete" <<'DOBLE'
 #!/usr/bin/env bash
+# La comprobación del intérprete: se responde que funciona.
+[ "$#" = 2 ] && [ "$1" = -c ] && exit 0
+# Lo único que el despliegue puede ejecutar con él es el guion del broker.
 [ "$#" = 1 ] && [ "$1" = k8s/actualizar-rabbitmq.py ]
 DOBLE
-chmod +x "$TMP/bin/python3"
+  chmod +x "$TMP/bin/$interprete"
+done
 export PATH="$TMP/bin:$PATH"
+# Segunda barrera: aunque algo llame a un kubectl real, no encuentra cluster.
+export KUBECONFIG="$TMP/sin-cluster"
+: > "$KUBECONFIG"
 export SOLO_APLICAR=1 ETIQUETA=prueba GHCR_TOKEN=registro-ficticio
 if ! bash "$RAIZ/k8s/desplegar.sh" > "$TMP/salida" 2>&1; then
   tail -2 "$TMP/salida"
