@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Candidato interno v1 — Candidato.como_json()",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["origen", "identificador_origen", "organizacion_id", "servicio", "servicio_texto", "servicio_resultado", "importe", "moneda", "fecha", "tipo_mensaje", "estado", "evidencia"],
+  "properties": {
+    "origen": {"enum": ["csv", "correo"]},
+    "identificador_origen": {"type": "string", "minLength": 1},
+    "organizacion_id": {"type": "string", "minLength": 1},
+    "servicio": {"type": ["string", "null"]},
+    "servicio_texto": {"type": "string"},
+    "servicio_resultado": {"enum": ["reconocido", "ambiguo", "desconocido"]},
+    "importe": {"type": "string", "pattern": "^-?[0-9]+(?:\\.[0-9]+)?$"},
+    "moneda": {"type": "string", "pattern": "^[A-Z]{3}$"},
+    "fecha": {"type": "string", "format": "date"},
+    "tipo_mensaje": {"enum": ["cobro_realizado", "aviso_de_cobro", "pago_fallido"]},
+    "estado": {"enum": ["propuesto", "confirmado", "rechazado"]},
+    "evidencia": {"type": "object", "additionalProperties": {"type": "string"}}
+  }
+}
