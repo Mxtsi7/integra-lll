@@ -89,6 +89,17 @@ def _decodificar(contenido: bytes) -> str:
     raise ArchivoRechazado(CONTENIDO_INCOMPATIBLE, "El archivo no es texto legible.")
 
 
+def decodificar(contenido: bytes) -> str:
+    """Igual que la decodificación de la validación, para quien ya la pasó.
+
+    S3-FE-10 vuelve a leer el mismo archivo para sacarle candidatos, y tiene
+    que decodificarlo **igual** que cuando se validó: si acá se usara UTF-8 a
+    secas, una cartola en Latin-1 que entró sin problemas fallaría recién al
+    procesarla, y el error aparecería a nombre de la fila y no del archivo.
+    """
+    return _decodificar(contenido)
+
+
 def _validar_csv(contenido: bytes) -> tuple[int, str]:
     """(filas de datos, separador). Lanza si no parece una tabla."""
     if contenido.startswith(b"%PDF-"):

@@ -36,6 +36,8 @@ from django.utils import timezone
 from shared.cifrado import SECRETO_ILEGIBLE, CampoCifrado
 from shared.tenant.base import ModeloTenant
 
+from . import candidatos
+
 
 class CuentaConectada(ModeloTenant):
     """Autorización de una organización sobre una fuente externa de cobros."""
@@ -742,3 +744,337 @@ class ArchivoImportacion(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.importacion_id}: {self.formato} de {self.tamano} bytes"
+
+
+class CandidatoYaConfirmado(ValueError):
+    """No se rechaza lo que ya creó suscripciones y cobros (S3-FE-16).
+
+    Confirmar un candidato no es cambiarle un campo: crea o actualiza
+    suscripciones y cobros de verdad (S3-FE-15). Dejar que un rechazo
+    posterior lo mueva a `rechazado` daría un candidato que dice "no" con
+    movimientos creados a partir de él. Deshacer eso es otra operación, con su
+    propia tarjeta, y no un efecto de este endpoint.
+    """
+
+
+class CobroCandidato(ModeloTenant):
+    """Un cobro propuesto, ya guardado (S3-FE-10, y S3-FE-09 lo reutiliza).
+
+    Es la forma persistida de `candidatos.Candidato`: ese dataclass es lo que
+    devuelve un lector —`csv_candidatos.leer` hoy, el de correo en S3-FE-09— y
+    esta tabla es donde queda para que alguien lo mire.
+
+    ── Por qué hace falta guardarlos ───────────────────────────────────────
+    `Importacion.candidatos_detectados` es un CONTEADOR: sirve para la barra
+    de progreso y nada más. La vista previa (S3-FE-14) necesita las filas, y
+    volver a leer el archivo no es una opción: `ArchivoImportacion` es
+    temporal y `purgar_archivos_importacion` lo borra a los
+    `IMPORTACION_DIAS_RETENCION` días. Lo que sobra es el archivo; el
+    resultado queda.
+
+    ── Sigue sin ser una suscripción ───────────────────────────────────────
+    Guardar un candidato no crea ni toca nada del dinero de nadie: nace
+    `propuesto` y ahí se queda hasta que una persona lo confirme (S3-FE-15) o
+    lo rechace (S3-FE-16). Es el mismo límite que cuida `Importacion`: que el
+    análisis termine no significa que se haya tocado una suscripcion.
+
+    ── La unicidad es la de `clave_deduplicacion()` ─────────────────────────
+    (organizacion, origen, identificador de origen). En CSV el identificador
+    es `<sha256 del archivo>:<número de fila>`, así que reprocesar el mismo
+    archivo no duplica nada y la tarea puede reintentarse sin miedo. Es la
+    base de S3-FE-17.
+
+    Va en la base y no solo en el código porque una unicidad que se comprueba
+    leyendo antes de escribir deja pasar dos tareas simultaneas.
+    """
+
+    class Origen(models.TextChoices):
+        # Los valores salen de `candidatos.py` y no de literales repetidos:
+        # un candidato que nace con `origen="csv"` tiene que poder guardarse
+        # sin traducir nada, y dos listas de literales se separan con el
+        # tiempo sin que nadie se entere.
+        CSV = candidatos.ORIGEN_CSV, "Archivo CSV o cartola"
+        CORREO = candidatos.ORIGEN_CORREO, "Correo"
+
+    class TipoMensaje(models.TextChoices):
+        COBRO_REALIZADO = candidatos.TipoMensaje.COBRO_REALIZADO, "Cobro realizado"
+        AVISO_DE_COBRO = candidatos.TipoMensaje.AVISO_DE_COBRO, "Aviso de cobro"
+        PAGO_FALLIDO = candidatos.TipoMensaje.PAGO_FALLIDO, "Pago fallido"
+
+    class Estado(models.TextChoices):
+        PROPUESTO = candidatos.EstadoCandidato.PROPUESTO, "Propuesto"
+        CONFIRMADO = candidatos.EstadoCandidato.CONFIRMADO, "Confirmado"
+        RECHAZADO = candidatos.EstadoCandidato.RECHAZADO, "Rechazado"
+
+    importacion = models.ForeignKey(
+        Importacion,
+        on_delete=models.CASCADE,
+        related_name="candidatos",
+        verbose_name="Importación de la que salió",
+        help_text=(
+            "CASCADE: un candidato es el resultado de esa lectura y no "
+            "significa nada sin ella. Si la importación se borra, lo que "
+            "quedaría es una propuesta sin procedencia."
+        ),
+    )
+
+    origen = models.CharField(max_length=10, choices=Origen.choices, verbose_name="Origen")
+    identificador_origen = models.CharField(
+        max_length=200,
+        verbose_name="Identificador en su origen",
+        help_text=(
+            "En CSV, `<sha256>:<número de fila>`; en correo, el Message-ID. "
+            "Estable: el mismo hecho leído dos veces da el mismo valor."
+        ),
+    )
+
+    # ── a quién se le paga ───────────────────────────────────────────
+
+    servicio = models.CharField(
+        max_length=120,
+        null=True,
+        blank=True,
+        verbose_name="Proveedor reconocido",
+        help_text=(
+            "NULL, y no cadena vacía, cuando no se pudo resolver sin "
+            "inventar: son cosas distintas y `servicio_resultado` dice por "
+            "qué. Inventar un proveedor es peor que no asignar ninguno."
+        ),
+    )
+    servicio_texto = models.CharField(
+        max_length=300,
+        verbose_name="Texto original del servicio",
+        help_text="La glosa tal cual venía. Siempre, aunque se haya reconocido.",
+    )
+    servicio_resultado = models.CharField(
+        max_length=20,
+        verbose_name="Resultado del reconocimiento",
+        help_text="`reconocido`, `ambiguo` o `desconocido`, de `normalizacion.py`.",
+    )
+
+    # ── cuánto, en qué y cuándo ──────────────────────────────────────
+
+    importe = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        verbose_name="Importe",
+        help_text=(
+            "NUMERIC y no float: en binario 0.1 + 0.2 no da 0.3 y esto es "
+            "plata de otra persona. Dos decimales porque ninguna de las "
+            "monedas admitidas tiene tres (ver DECIMALES_POR_MONEDA)."
+        ),
+    )
+    moneda = models.CharField(
+        max_length=3,
+        verbose_name="Moneda",
+        help_text="ISO 4217 en mayúsculas. Nunca un símbolo: `$` no distingue CLP de USD.",
+    )
+    fecha = models.DateField(verbose_name="Fecha del cobro")
+
+    tipo_mensaje = models.CharField(
+        max_length=20,
+        choices=TipoMensaje.choices,
+        verbose_name="Tipo de mensaje",
+        help_text="Mezclarlos inventaría un cobro que no ocurrió, o lo contaría dos veces.",
+    )
+    estado = models.CharField(
+        max_length=12,
+        choices=Estado.choices,
+        default=Estado.PROPUESTO,
+        db_index=True,
+        verbose_name="Estado",
+    )
+
+    # ── quién decidió, y cuándo ──────────────────────────────────────
+    # La trazabilidad que pide S3-FE-16: un candidato rechazado sin saber
+    # quién ni cuándo no se puede auditar, y es la clase de dato que después
+    # no se puede reconstruir. Los usa también S3-FE-15 al confirmar.
+
+    decidido_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Confirmado o rechazado el",
+        help_text=(
+            "NULL mientras está `propuesto`. No se mueve si se vuelve a "
+            "rechazar: la decisión es la primera, no la última petición."
+        ),
+    )
+    decidido_por = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="Quién decidió",
+        help_text=(
+            "El valor crudo de `X-Usuario-Id` que inyecta el gateway. El id "
+            "vive en el esquema de `auth` y acá no se interpreta (ADR-002)."
+        ),
+    )
+
+    evidencia = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="Evidencia",
+        help_text=(
+            "Lo mínimo para comprobar de dónde salió sin volver al archivo: "
+            "en CSV, el número de fila y la glosa original."
+        ),
+    )
+
+    def rechazar(self, *, por: str = "", cuando=None) -> bool:
+        """Lo marca `rechazado`. `True` si cambió algo (S3-FE-16).
+
+        ── No crea ni toca nada de plata ───────────────────────────────────
+        Lo único que hace es mover el estado de ESTA fila. No hay suscripción
+        ni cobro de por medio: esas tablas viven en `subscriptions` y este
+        servicio no las conoce (ADR-002). Tampoco se publica un evento ni se
+        marca la importación como confirmada.
+
+        ── Rechazar de nuevo no es un error ────────────────────────────────
+        Devuelve `False` y **no mueve** `decidido_en` ni `decidido_por`: la
+        decisión es la primera, no la última petición que llegó. Es lo que
+        necesita S3-CH-09 para no tener que cuidarse de los dobles envíos, y
+        el criterio "rechazar nuevamente tiene resultado definido".
+
+        ── El candidato no se borra ────────────────────────────────────────
+        Queda `rechazado` y sigue consultable. Borrarlo perdería la
+        trazabilidad y, peor, haría que S3-FE-17 lo volviera a proponer la
+        próxima vez que se lea el mismo archivo.
+
+        La guarda va en el WHERE, no en memoria: dos peticiones simultáneas
+        sobre la misma fila leen las dos `propuesto`, y sin el filtro las dos
+        escribirían su propia fecha de decisión.
+        """
+        if self.estado == self.Estado.CONFIRMADO:
+            raise CandidatoYaConfirmado(
+                "El candidato ya está confirmado: deshacer sus suscripciones y "
+                "cobros no es parte de rechazarlo."
+            )
+        ahora = cuando or timezone.now()
+        cambiadas = (
+            type(self)
+            .objects.filter(pk=self.pk, estado=self.Estado.PROPUESTO)
+            .update(
+                estado=self.Estado.RECHAZADO,
+                decidido_en=ahora,
+                decidido_por=por,
+                actualizado_en=ahora,
+            )
+        )
+        self.refresh_from_db()
+        if self.estado == self.Estado.CONFIRMADO:
+            # Otra petición lo confirmó entre la comprobación de arriba y el
+            # UPDATE. No se rechaza, y el llamador se entera igual que si
+            # hubiera llegado tarde desde el principio.
+            raise CandidatoYaConfirmado(
+                "El candidato se confirmó mientras se procesaba el rechazo."
+            )
+        return bool(cambiadas)
+
+    @classmethod
+    def desde_candidato(cls, candidato, *, importacion: Importacion) -> "CobroCandidato":
+        """Instancia SIN guardar, para que el llamador haga un `bulk_create`.
+
+        Un `save()` por fila son 200 UPDATE en una cartola de 200 líneas.
+        """
+        return cls(
+            organizacion_id=importacion.organizacion_id,
+            importacion=importacion,
+            origen=candidato.origen,
+            identificador_origen=candidato.identificador_origen,
+            servicio=candidato.servicio,
+            servicio_texto=candidato.servicio_texto[:300],
+            servicio_resultado=candidato.servicio_resultado,
+            importe=candidato.importe,
+            moneda=candidato.moneda,
+            fecha=candidato.fecha,
+            tipo_mensaje=candidato.tipo_mensaje,
+            estado=candidato.estado,
+            evidencia=dict(candidato.evidencia),
+        )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "cobro_candidato"
+        # ── El orden TIENE que ser total ─────────────────────────────────
+        # Cronológico, con `id` como desempate. El `id` no es por gusto: sin
+        # él el orden no es total, y PostgreSQL puede devolver los empates en
+        # distinto orden en cada consulta con LIMIT/OFFSET. Con eso la
+        # paginación repite filas en una página y se salta otras: 250
+        # candidatos empatados recorridos en 25 páginas devolvían 239 ids
+        # únicos. Lo encontró la revisión de #155.
+        #
+        # Y los empates son lo NORMAL, no un caso de laboratorio: los
+        # candidatos de un CSV entran con un solo `bulk_create`, así que
+        # comparten `fecha` y `creado_en` al microsegundo.
+        #
+        # El `id` es un UUID, así que el desempate no significa nada para la
+        # persona. No importa: lo que la paginación necesita no es que el
+        # orden sea bonito, es que sea el mismo en las dos consultas.
+        ordering = ["fecha", "creado_en", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "origen", "identificador_origen"],
+                name="candidato_unico_por_origen",
+            ),
+        ]
+        indexes = ModeloTenant.Meta.indexes + [
+            models.Index(fields=["importacion", "estado"], name="candidato_importacion"),
+        ]
+        verbose_name = "Cobro candidato"
+        verbose_name_plural = "Cobros candidatos"
+
+    def __str__(self) -> str:
+        return f"{self.servicio or self.servicio_texto}: {self.importe} {self.moneda}"
+
+
+class OutboxEvento(ModeloTenant):
+    """Un evento durable que todavía no se publicó (S3-FE-15).
+
+    ── Por qué existe ──────────────────────────────────────────────────────
+    Confirmar un candidato tiene que crear o actualizar una suscripción y, si
+    corresponde, un cobro. Esas tablas viven en `subscriptions` y este
+    servicio no conoce su esquema (ADR-002). O sea que la confirmación cruza
+    una frontera de servicio, y una transacción no cruza fronteras.
+
+    Lo que sí se puede hacer en una sola transacción es dejar **el candidato
+    confirmado y el evento que lo cuenta**, los dos o ninguno. Eso es este
+    outbox, y es el criterio "confirmar es atómico": después de un commit no
+    existe un candidato confirmado sin su evento, ni un evento sin su
+    candidato. Si la transacción revienta, no queda nada a medias.
+
+    ── Es el MISMO sobre que el de subscriptions ───────────────────────────
+    Los campos son los de `subscription_event_outbox` (MX-21), uno por uno y a
+    propósito: el consumidor que lo drene ya sabe leer ese sobre, y copiarlo
+    distinto obligaría a escribir un segundo lector para decir lo mismo.
+
+    ── Lo que este servicio NO hace todavía ────────────────────────────────
+    Publicar. No hay publicador en connectors, así que las filas se acumulan
+    acá, durables, hasta que exista el que las drene. Nada se pierde y nada se
+    inventa: no se finge que la suscripción ya está creada.
+    """
+
+    evento = models.CharField(max_length=40)
+    version = models.PositiveSmallIntegerField(default=1)
+    ocurrido_en = models.DateTimeField(default=timezone.now)
+    correlation_id = models.UUIDField()
+    datos = models.JSONField()
+    publicado_en = models.DateTimeField(null=True, blank=True)
+    intentos = models.PositiveIntegerField(default=0)
+    siguiente_intento = models.DateTimeField(default=timezone.now)
+    ultimo_error = models.CharField(max_length=100, blank=True)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "connectors_event_outbox"
+        # Igual que el de subscriptions: cronológico y con `id` de desempate,
+        # para que drenarlo por páginas no repita ni se salte filas.
+        ordering = ["creado_en", "id"]
+        indexes = [
+            models.Index(
+                fields=["publicado_en", "siguiente_intento"],
+                name="con_outbox_pending_idx",
+            ),
+        ]
+        verbose_name = "Evento pendiente"
+        verbose_name_plural = "Eventos pendientes"
+
+    def __str__(self) -> str:
+        return f"{self.evento}.v{self.version} ({'publicado' if self.publicado_en else 'pendiente'})"
