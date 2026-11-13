@@ -138,7 +138,8 @@ texto no, porque esta salida termina en una PR o en una captura.
 
 | Pieza | Archivo |
 |---|---|
-| El lector | `services/connectors/connectors/lector_gmail.py` |
+| El lector, lo propio de Google | `services/connectors/connectors/lector_gmail.py` |
+| Lo común con Outlook: la cuenta, los errores, el filtro, el HTML | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_gmail.py` |
 | Las pruebas | `services/connectors/tests/test_lector_gmail.py` (82) |
 
@@ -149,7 +150,7 @@ Los dos 401 de las pruebas son **copia literal** de lo que respondió
 respuestas 200 siguen la referencia publicada de la API, y se van a
 contrastar en la corrida real.
 
-Además se rompió el código a propósito 29 veces y cada vez falló al menos una
+Además se rompió el código a propósito 30 veces y cada vez falló al menos una
 prueba. Algunos ejemplos: sacar la organización o el proveedor del filtro,
 leer una cuenta desconectada o en un estado desconocido, quitar el margen de
 vencimiento, aceptar un límite sin tope o un `True`, no validar el remitente,

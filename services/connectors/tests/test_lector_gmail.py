@@ -34,6 +34,7 @@ from connectors.lector_gmail import (
     ErrorDelProveedor,
     ErrorTransitorio,
     FiltroCorreos,
+    consulta_gmail,
     leer_mensajes,
 )
 from connectors.models import CuentaConectada
@@ -374,20 +375,20 @@ class TestFiltros:
     def test_fechas_en_segundos_epoch(self):
         desde = datetime(2026, 10, 1, tzinfo=tz.utc)
         hasta = datetime(2026, 11, 1, tzinfo=tz.utc)
-        consulta = FiltroCorreos(desde=desde, hasta=hasta, solo_cobros=False).consulta()
+        consulta = consulta_gmail(FiltroCorreos(desde=desde, hasta=hasta, solo_cobros=False))
         assert consulta == f"after:{int(desde.timestamp())} before:{int(hasta.timestamp())}"
 
     def test_fecha_sin_zona_horaria(self):
         with pytest.raises(ValueError, match="zona horaria"):
-            FiltroCorreos(desde=datetime(2026, 10, 1)).consulta()
+            consulta_gmail(FiltroCorreos(desde=datetime(2026, 10, 1)))
 
     def test_desde_posterior_a_hasta(self):
         d = datetime(2026, 10, 1, tzinfo=tz.utc)
         with pytest.raises(ValueError):
-            FiltroCorreos(desde=d, hasta=d).consulta()
+            consulta_gmail(FiltroCorreos(desde=d, hasta=d))
 
     def test_remitentes(self):
-        consulta = FiltroCorreos(remitentes=("netflix.com", "billing@spotify.com"), solo_cobros=False).consulta()
+        consulta = consulta_gmail(FiltroCorreos(remitentes=("netflix.com", "billing@spotify.com"), solo_cobros=False))
         assert consulta == "from:(netflix.com OR billing@spotify.com)"
 
     @pytest.mark.parametrize("remitente", [
@@ -395,7 +396,7 @@ class TestFiltros:
     ])
     def test_un_remitente_que_cambiaria_la_busqueda_se_rechaza(self, remitente):
         with pytest.raises(ValueError):
-            FiltroCorreos(remitentes=(remitente,)).consulta()
+            consulta_gmail(FiltroCorreos(remitentes=(remitente,)))
 
     def test_un_filtro_invalido_no_llega_a_google(self, claves, google):
         cuenta = gmail()

@@ -15,6 +15,10 @@ Por eso los errores salen como excepciones con un `codigo` estable y no como
 cambios de estado: quien llame decide si reintenta (FE-18) o si pide
 reconexión (FE-19). Este módulo no marca la cuenta.
 
+Lo que tiene que decir lo mismo para Gmail y para Outlook —qué cuenta se puede
+leer, qué se devuelve, qué errores, el filtro y el paso de HTML a texto— vive
+en `lectura_correo.py`. Aquí queda lo que es de Google.
+
 ── Solo cuentas autorizadas ────────────────────────────────────────────────
 La cuenta se busca **por organización**: una cuenta de otra organización da
 el mismo error que una que no existe, para no confirmar que existe. Además
@@ -38,59 +42,39 @@ dónde llegó. Recorrer y recordar es S3-FE-03.
 from __future__ import annotations
 
 import base64
-import dataclasses
 import re
-import uuid
-from datetime import datetime, timedelta, timezone as tz
+from datetime import datetime, timezone as tz
 from email.header import decode_header, make_header
-from html.parser import HTMLParser
 
 import requests
-from django.core.exceptions import ValidationError
-from django.utils import timezone
 
-from shared.cifrado import SECRETO_ILEGIBLE
-
+from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe desde aquí
+    LARGO_MAXIMO_TEXTO,
+    LIMITE_MAXIMO,
+    LIMITE_POR_DEFECTO,
+    PALABRAS_DE_COBRO,
+    AutorizacionRechazada,
+    CuentaNoDisponible,
+    ErrorDeLectura,
+    ErrorDelProveedor,
+    ErrorTransitorio,
+    FiltroCorreos,
+    MensajeCorreo,
+    MensajeOmitido,
+    PaginaDeMensajes,
+    html_a_texto,
+    recortar,
+    validar_limite,
+)
+from .lectura_correo import cuenta_para_leer as _cuenta_para_leer
 from .models import CuentaConectada
 from .proveedores import TIEMPO_LIMITE
 
 URL_MENSAJES = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 
-#: Cuántos mensajes trae una llamada si no se dice otra cosa, y el máximo.
-#: Google acepta hasta 500 por página en la lista, pero cada mensaje es una
-#: llamada más para traer su contenido: 100 ya son 101 peticiones.
-LIMITE_POR_DEFECTO = 25
-LIMITE_MAXIMO = 100
-
-#: Tope del texto que se conserva de cada mensaje. Un recibo cabe de sobra;
-#: un boletín con todo su HTML, no, y no hace falta.
-LARGO_MAXIMO_TEXTO = 20_000
-
 #: Un `pageToken` de Gmail es una cadena corta. Uno de este largo no lo
 #: emitió Google y no se reenvía.
 LARGO_MAXIMO_PAGINA = 512
-
-#: Un token que vence en menos de esto ya no alcanza para leer una página.
-MARGEN_VENCIMIENTO = timedelta(seconds=30)
-
-#: Lo que busca la consulta por omisión. Gmail interpreta `{a b}` como
-#: "a o b". Va en español y en inglés porque los recibos de servicios
-#: extranjeros llegan en inglés. Es un filtro amplio a propósito: un recibo
-#: que no entra aquí no se ve nunca, uno que sobra lo descarta S3-FE-08.
-PALABRAS_DE_COBRO = (
-    "recibo", "factura", "boleta", "pago", "cobro", "suscripción",
-    "suscripcion", "renovación", "renovacion", "cargo",
-    "receipt", "invoice", "payment", "subscription", "renewal", "billing",
-)
-
-#: Cómo se reconoce un remitente aceptable para el filtro: una dirección o un
-#: dominio. Cualquier otra cosa podría cambiar el sentido de la búsqueda
-#: (`a) OR in:anywhere`, o un `-` adelante, que en Gmail niega), así que se
-#: rechaza antes de armarla.
-_REMITENTE = re.compile(
-    r"^[A-Za-z0-9._%+][A-Za-z0-9._%+-]*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$"
-    r"|^[A-Za-z0-9][A-Za-z0-9-]*(\.[A-Za-z0-9-]+)+$"
-)
 
 #: Lo que se le pide a Google. Partial response: lo demás no viaja.
 _CAMPOS_LISTA = "messages(id,threadId),nextPageToken"
@@ -106,176 +90,33 @@ _PARTES_MAXIMAS = 100
 _RAZONES_DE_CUOTA = {"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"}
 
 
-# ── errores ─────────────────────────────────────────────────────────────────
+# ── la búsqueda y la cuenta ─────────────────────────────────────────────────
 
 
-class ErrorDeLectura(Exception):
-    """Base de lo que puede salir mal al leer. `codigo` es estable; el
-    mensaje es para una persona y nunca lleva el token."""
+def consulta_gmail(filtro: FiltroCorreos) -> str:
+    """El parámetro `q` de Gmail para el filtro, ya validado.
 
-    codigo = "error_de_lectura"
-
-    def __init__(self, mensaje: str, *, codigo: str | None = None):
-        super().__init__(mensaje)
-        if codigo is not None:
-            self.codigo = codigo
-
-
-class CuentaNoDisponible(ErrorDeLectura):
-    """No se habló con Google: la cuenta no se puede leer tal como está."""
-
-    NO_ENCONTRADA = "cuenta_no_encontrada"
-    DESCONECTADA = "cuenta_desconectada"
-    REQUIERE_REAUTORIZACION = "requiere_reautorizacion"
-    SIN_CREDENCIALES = "sin_credenciales"
-    CREDENCIAL_VENCIDA = "credencial_vencida"
-    ESTADO_NO_LEGIBLE = "estado_no_legible"
-
-
-class AutorizacionRechazada(ErrorDeLectura):
-    """Google dijo que el token ya no sirve o no alcanza (401, o 403 de
-    permisos). Lo resuelve S3-FE-19: renovar o pedir reconexión."""
-
-    codigo = "autorizacion_rechazada"
-
-
-class ErrorTransitorio(ErrorDeLectura):
-    """Red, tiempo agotado, cuota o una falla de Google. Se puede reintentar
-    más tarde (S3-FE-18) sin perder nada: no se guardó nada."""
-
-    codigo = "error_transitorio"
-
-
-class ErrorDelProveedor(ErrorDeLectura):
-    """Google contestó algo que reintentar no arregla: una página inválida,
-    la API sin habilitar en el proyecto, una respuesta que no se entiende."""
-
-    codigo = "error_del_proveedor"
-
-
-# ── lo que se pide y lo que se devuelve ─────────────────────────────────────
-
-
-@dataclasses.dataclass(frozen=True)
-class FiltroCorreos:
-    """Qué correos interesan. Todo opcional; por omisión, los que parecen
-    cobros, de cualquier fecha y remitente.
-
-    `desde` y `hasta` van a Gmail en segundos epoch, que es la forma en que
-    Gmail no depende de la zona horaria de la cuenta. `hasta` es exclusivo.
+    `desde` y `hasta` van en segundos epoch, que es la forma en que Gmail no
+    depende de la zona horaria de la cuenta. `{a b}` es "a o b".
     """
-
-    desde: datetime | None = None
-    hasta: datetime | None = None
-    remitentes: tuple[str, ...] = ()
-    solo_cobros: bool = True
-
-    def consulta(self) -> str:
-        """El parámetro `q` de Gmail. Valida antes de armar."""
-        partes: list[str] = []
-        for nombre, valor in (("desde", self.desde), ("hasta", self.hasta)):
-            if valor is not None and timezone.is_naive(valor):
-                raise ValueError(f"`{nombre}` tiene que traer zona horaria.")
-        if self.desde and self.hasta and self.desde >= self.hasta:
-            raise ValueError("`desde` tiene que ser anterior a `hasta`.")
-        if self.desde:
-            partes.append(f"after:{int(self.desde.timestamp())}")
-        if self.hasta:
-            partes.append(f"before:{int(self.hasta.timestamp())}")
-        if self.remitentes:
-            for remitente in self.remitentes:
-                if not isinstance(remitente, str) or not _REMITENTE.match(remitente):
-                    raise ValueError(f"remitente no válido para el filtro: {remitente!r:.60}")
-            partes.append("from:(" + " OR ".join(self.remitentes) + ")")
-        if self.solo_cobros:
-            partes.append("{" + " ".join(PALABRAS_DE_COBRO) + "}")
-        return " ".join(partes)
+    filtro.validar()
+    partes: list[str] = []
+    if filtro.desde:
+        partes.append(f"after:{int(filtro.desde.timestamp())}")
+    if filtro.hasta:
+        partes.append(f"before:{int(filtro.hasta.timestamp())}")
+    if filtro.remitentes:
+        partes.append("from:(" + " OR ".join(filtro.remitentes) + ")")
+    if filtro.solo_cobros:
+        partes.append("{" + " ".join(PALABRAS_DE_COBRO) + "}")
+    return " ".join(partes)
 
 
-@dataclasses.dataclass(frozen=True)
-class MensajeCorreo:
-    """Un mensaje leído. Vive en memoria: este módulo no lo guarda."""
-
-    cuenta_id: uuid.UUID
-    id_mensaje: str
-    id_hilo: str
-    recibido_en: datetime
-    remitente: str
-    asunto: str
-    #: Fuera del `repr` para que un log o una traza no se lleven el correo.
-    texto: str = dataclasses.field(repr=False)
-    #: True si el texto se cortó en `LARGO_MAXIMO_TEXTO`.
-    texto_truncado: bool = False
-
-
-@dataclasses.dataclass(frozen=True)
-class MensajeOmitido:
-    """Un mensaje que la lista nombró pero no se pudo traer. Se informa en
-    vez de callarlo: perderlo en silencio es perder un cobro."""
-
-    id_mensaje: str
-    motivo: str
-
-
-@dataclasses.dataclass(frozen=True)
-class PaginaDeMensajes:
-    mensajes: tuple[MensajeCorreo, ...]
-    #: Para pedir la página siguiente; `None` si no hay más.
-    siguiente_pagina: str | None
-    omitidos: tuple[MensajeOmitido, ...] = ()
-
-
-# ── la cuenta ───────────────────────────────────────────────────────────────
-
-
-def cuenta_para_leer(*, organizacion_id, cuenta_id) -> tuple[CuentaConectada, str]:
-    """La cuenta de Gmail de ESA organización y su token, o `CuentaNoDisponible`.
-
-    Devuelve el token aparte para que no haya que volver a descifrarlo, y
-    para que nadie tenga que leer `cuenta.access_token` fuera de aquí.
-    """
-    try:
-        cuenta = CuentaConectada.objects.filter(
-            pk=cuenta_id,
-            organizacion_id=organizacion_id,
-            proveedor=CuentaConectada.Proveedor.GMAIL,
-        ).first()
-    except (ValidationError, ValueError, TypeError):
-        # Un identificador que ni siquiera es un UUID tampoco es una cuenta.
-        cuenta = None
-    if cuenta is None:
-        # Ajena, de otro proveedor o inexistente: la misma respuesta.
-        raise CuentaNoDisponible(
-            "No hay una cuenta de Gmail con ese identificador en esta organización.",
-            codigo=CuentaNoDisponible.NO_ENCONTRADA,
-        )
-    if cuenta.estado == CuentaConectada.Estado.DESCONECTADA:
-        raise CuentaNoDisponible(
-            "La cuenta está desconectada.", codigo=CuentaNoDisponible.DESCONECTADA,
-        )
-    if cuenta.necesita_reautorizacion:
-        raise CuentaNoDisponible(
-            "La cuenta necesita que el usuario vuelva a autorizarla.",
-            codigo=CuentaNoDisponible.REQUIERE_REAUTORIZACION,
-        )
-    if cuenta.estado != CuentaConectada.Estado.CONECTADA:
-        # Un estado que no conocemos no se lee "por si acaso".
-        raise CuentaNoDisponible(
-            f"La cuenta está en un estado que no permite leer ({cuenta.estado[:30]}).",
-            codigo=CuentaNoDisponible.ESTADO_NO_LEGIBLE,
-        )
-    token = cuenta.access_token
-    if not token or token is SECRETO_ILEGIBLE:
-        raise CuentaNoDisponible(
-            "La cuenta no tiene credenciales guardadas.",
-            codigo=CuentaNoDisponible.SIN_CREDENCIALES,
-        )
-    if cuenta.token_expira_en and cuenta.token_expira_en <= timezone.now() + MARGEN_VENCIMIENTO:
-        raise CuentaNoDisponible(
-            "El token de acceso venció; hay que renovarlo antes de leer (S3-FE-19).",
-            codigo=CuentaNoDisponible.CREDENCIAL_VENCIDA,
-        )
-    return cuenta, str(token)
+def cuenta_para_leer(*, organizacion_id, cuenta_id):
+    """La cuenta de Gmail de esa organización y su token (ver `lectura_correo`)."""
+    return _cuenta_para_leer(
+        organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=CuentaConectada.Proveedor.GMAIL,
+    )
 
 
 # ── leer ────────────────────────────────────────────────────────────────────
@@ -295,11 +136,10 @@ def leer_mensajes(
     de rango, una página que no puede venir de Gmail o un filtro mal armado
     no gastan una llamada.
     """
-    if isinstance(limite, bool) or not isinstance(limite, int) or not 1 <= limite <= LIMITE_MAXIMO:
-        raise ValueError(f"`limite` va de 1 a {LIMITE_MAXIMO}.")
+    validar_limite(limite)
     if pagina is not None and (not isinstance(pagina, str) or not pagina or len(pagina) > LARGO_MAXIMO_PAGINA):
         raise ValueError("`pagina` no es un token de página de Gmail.")
-    consulta = (filtro or FiltroCorreos()).consulta()
+    consulta = consulta_gmail(filtro or FiltroCorreos())
 
     cuenta, token = cuenta_para_leer(organizacion_id=organizacion_id, cuenta_id=cuenta_id)
 
@@ -432,8 +272,7 @@ def _mensaje(cuenta_id, crudo: dict) -> MensajeCorreo:
 
     carga = crudo.get("payload") if isinstance(crudo.get("payload"), dict) else {}
     cabeceras = _cabeceras(carga)
-    texto = _texto(carga)
-    truncado = len(texto) > LARGO_MAXIMO_TEXTO
+    texto, truncado = recortar(_texto(carga))
     return MensajeCorreo(
         cuenta_id=cuenta_id,
         id_mensaje=id_mensaje,
@@ -441,7 +280,7 @@ def _mensaje(cuenta_id, crudo: dict) -> MensajeCorreo:
         recibido_en=recibido_en,
         remitente=cabeceras.get("from", "")[:320],
         asunto=cabeceras.get("subject", "")[:500],
-        texto=texto[:LARGO_MAXIMO_TEXTO],
+        texto=texto,
         texto_truncado=truncado,
     )
 
@@ -497,7 +336,7 @@ def _texto(carga: dict) -> str:
         (planos if tipo == "text/plain" else htmls).append(contenido)
     if planos:
         return "\n".join(planos).strip()
-    return _html_a_texto("\n".join(htmls)).strip()
+    return html_a_texto("\n".join(htmls)).strip()
 
 
 def _juego_de_caracteres(parte: dict) -> str:
@@ -517,47 +356,3 @@ def _base64url(datos: str, juego: str) -> str:
         return crudo.decode(juego, errors="replace")
     except LookupError:
         return crudo.decode("utf-8", errors="replace")
-
-
-class _ExtractorDeTexto(HTMLParser):
-    """HTML a texto, sin dependencias: se queda con el texto visible y salta
-    `script`, `style` y `head`. Los bloques terminan en salto de línea para
-    que un importe no quede pegado a la palabra de la celda vecina."""
-
-    _OCULTOS = {"script", "style", "head", "title"}
-    _BLOQUES = {"p", "div", "br", "tr", "li", "table", "h1", "h2", "h3", "h4", "td", "th"}
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self._partes: list[str] = []
-        self._oculto = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in self._OCULTOS:
-            self._oculto += 1
-        elif tag in self._BLOQUES:
-            self._partes.append("\n")
-
-    def handle_endtag(self, tag):
-        if tag in self._OCULTOS and self._oculto:
-            self._oculto -= 1
-        elif tag in self._BLOQUES:
-            self._partes.append("\n")
-
-    def handle_data(self, data):
-        if not self._oculto:
-            self._partes.append(data)
-
-    def texto(self) -> str:
-        unido = "".join(self._partes)
-        lineas = (re.sub(r"[ \t ]+", " ", linea).strip() for linea in unido.splitlines())
-        return "\n".join(linea for linea in lineas if linea)
-
-
-def _html_a_texto(html: str) -> str:
-    if not html:
-        return ""
-    extractor = _ExtractorDeTexto()
-    extractor.feed(html)
-    extractor.close()
-    return extractor.texto()
