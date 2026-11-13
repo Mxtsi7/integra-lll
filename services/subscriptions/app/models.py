@@ -700,6 +700,13 @@ class RegistroUso(ModeloTenant):
         validators=[MinValueValidator(1)],
         verbose_name="Minutos de uso",
     )
+    class Origen(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        RECOLECTOR = "recolector", "Recolector"
+
+    origen = models.CharField(max_length=16, choices=Origen.choices, default=Origen.MANUAL)
+    usuario_id = models.PositiveBigIntegerField(null=True, blank=True)
+    duracion_ms = models.PositiveBigIntegerField(default=0)
 
     class Meta(ModeloTenant.Meta):
         db_table = "registro_uso"
@@ -741,6 +748,33 @@ class EventoUsoRecibido(ModeloTenant):
         indexes = [
             models.Index(fields=("organizacion_id", "usuario_id", "recolector_id", "fecha_local"),
                          name="uso_rx_cobertura_dia_idx"),
+            models.Index(fields=("organizacion_id", "usuario_id", "suscripcion", "fecha_local"),
+                         name="uso_rx_proyeccion_dia_idx"),
+        ]
+
+
+class ProyeccionUsoRecolector(ModeloTenant):
+    """Unión exacta por usuario, suscripción y día; minutos enteros derivados."""
+
+    usuario_id = models.PositiveBigIntegerField()
+    suscripcion = models.ForeignKey(
+        Subscription, on_delete=models.CASCADE, related_name="proyecciones_uso_recolector",
+    )
+    fecha_local = models.DateField()
+    zona_horaria = models.CharField(max_length=64)
+    duracion_union_ms = models.PositiveBigIntegerField(default=0)
+    registro_uso = models.OneToOneField(
+        RegistroUso, null=True, blank=True, on_delete=models.SET_NULL,
+        related_name="proyeccion_recolector",
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "proyeccion_uso_recolector"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("organizacion_id", "usuario_id", "suscripcion", "fecha_local"),
+                name="uso_proyeccion_usuario_dia_unica",
+            ),
         ]
 
 
