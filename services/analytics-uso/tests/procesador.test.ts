@@ -46,6 +46,13 @@ describe('ProcesadorUso', () => {
     await expect(procesador.procesar(eventoBase())).resolves.toBe('duplicado');
   });
 
+  it('propaga el resultado ignorado de un tenant eliminado', async () => {
+    const repositorio = new RepositorioFalso('ignorado');
+    const procesador = new ProcesadorUso(repositorio);
+
+    await expect(procesador.procesar(eventoBase())).resolves.toBe('ignorado');
+  });
+
   it('no llama al repositorio si el mensaje es inválido', async () => {
     const repositorio = new RepositorioFalso();
     const procesador = new ProcesadorUso(repositorio);

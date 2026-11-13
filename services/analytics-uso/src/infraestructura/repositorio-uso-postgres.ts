@@ -8,11 +8,13 @@ import { proyectarMinutos } from '../dominio/agregados';
 import { ErrorConflictoEvento } from '../dominio/errores';
 import { duracionUnionMs } from '../dominio/intervalos';
 import type { EventoUsoNormalizado } from '../dominio/uso-recolectores.dto';
+import { bloquearOrganizacionCompartido } from './bloqueo-tenant';
 
 /**
  * S3-VI-11/S3-VI-12/S3-VI-14: persistencia transaccional e idempotente.
  *
  * Una transacción hace todo o nada:
+ *   0. toma la barrera compartida del tenant y aborta si está eliminado;
  *   1. inserta el evento con `ON CONFLICT DO NOTHING` sobre la clave
  *      `(organizacion_id, recolector_id, event_id)`;
  *   2. si ya existía, compara la huella del contenido + destino: igual es
@@ -24,6 +26,9 @@ import type { EventoUsoNormalizado } from '../dominio/uso-recolectores.dto';
  *
  * El bloqueo diario serializa eventos del mismo día; el mensual se toma
  * después para que dos días del mismo mes no se pisen con una suma obsoleta.
+ * La barrera del paso 0 es la misma que usa la limpieza de `shared/borrado`:
+ * un evento tardío espera al borrado y, al ver el tenant eliminado, no
+ * reinserta nada y se confirma sin efectos (`ignorado`).
  */
 export class RepositorioUsoPostgres implements RepositorioUso {
   constructor(private readonly pool: Pool) {}
@@ -32,6 +37,17 @@ export class RepositorioUsoPostgres implements RepositorioUso {
     const cliente = await this.pool.connect();
     try {
       await cliente.query('BEGIN');
+
+      // Antes de cualquier INSERT/UPSERT en `uso_*`: serializa con la limpieza
+      // y lee el estado bajo el lock compartido.
+      const estado = await bloquearOrganizacionCompartido(
+        cliente,
+        evento.organizacionId,
+      );
+      if (estado.eliminada) {
+        await cliente.query('COMMIT');
+        return 'ignorado';
+      }
 
       const insertado = await this.insertarEvento(cliente, evento);
       if (!insertado) {

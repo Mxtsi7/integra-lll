@@ -5,6 +5,7 @@ import amqp, {
 } from 'amqplib';
 
 import type { ProcesadorUso } from '../aplicacion/procesador-uso';
+import type { ResultadoRegistroUso } from '../aplicacion/repositorio-uso';
 import { ErrorConflictoEvento, ErrorValidacionUso } from '../dominio/errores';
 import type { Config } from '../infraestructura/config';
 import { crearLogger, describirError, type Logger } from '../infraestructura/logger';
@@ -133,14 +134,11 @@ export class ConsumidorUso {
     try {
       const resultado = await this.procesador.procesar(sobre);
       this.canal.ack(mensaje);
-      this.logger.info(
-        resultado === 'duplicado' ? 'uso duplicado confirmado sin efectos' : 'uso aplicado',
-        {
-          eventId,
-          resultado,
-          duracionMs: Date.now() - inicio,
-        },
-      );
+      this.logger.info(mensajeDeResultado(resultado), {
+        eventId,
+        resultado,
+        duracionMs: Date.now() - inicio,
+      });
     } catch (error) {
       const accion = decidirAccion(error);
 
@@ -182,6 +180,14 @@ export class ConsumidorUso {
       await this.conexion.close();
     }
   }
+}
+
+function mensajeDeResultado(resultado: ResultadoRegistroUso): string {
+  if (resultado === 'duplicado') return 'uso duplicado confirmado sin efectos';
+  if (resultado === 'ignorado') {
+    return 'uso de organización eliminada confirmado sin efectos';
+  }
+  return 'uso aplicado';
 }
 
 function esperar(ms: number): Promise<void> {

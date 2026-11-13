@@ -10,6 +10,16 @@
 
 CREATE SCHEMA IF NOT EXISTS analytics;
 
+-- Barrera de borrado por tenant, compartida con `shared/borrado` de los
+-- servicios Django. La limpieza toma `FOR UPDATE`; el consumidor de uso toma
+-- `FOR SHARE` antes de escribir. Si la migración de Django ya la creó, este
+-- `IF NOT EXISTS` no cambia nada (mismo nombre y columnas).
+CREATE TABLE IF NOT EXISTS analytics.estado_eliminacion_organizacion (
+    organizacion_id uuid        PRIMARY KEY,
+    eliminada       boolean     NOT NULL DEFAULT false,
+    operacion_id    uuid        NULL
+);
+
 -- Hecho exacto aceptado. Guarda el cuerpo normalizado y la huella para
 -- distinguir un duplicado (mismo contenido/destino) de un conflicto (409).
 CREATE TABLE IF NOT EXISTS analytics.uso_evento (
