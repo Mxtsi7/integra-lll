@@ -29,7 +29,8 @@ export function navegador() {
     },
     tabs: {
       onActivated: evento(), onUpdated: evento(), onRemoved: evento(),
-      query: async ({ windowId } = {}) => [{ url: (windowId ?? ventanaActiva) === 1 ? 'https://example.com/?privado=1' : 'https://no-autorizado.com', active: true }],
+      query: async ({ windowId = ventanaActiva } = {}) => [{ id: windowId === 1 ? 7 : 8, windowId,
+        url: windowId === 1 ? 'https://example.com/?privado=1' : 'https://no-autorizado.com', active: true, status: 'complete' }],
     },
     windows: { onFocusChanged: evento(), getLastFocused: async () => ({ id: ventanaActiva, focused: true }) },
     idle: { onStateChanged: evento(), setDetectionInterval: () => {}, queryState: async () => 'active' },

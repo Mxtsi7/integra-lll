@@ -10,20 +10,36 @@ async function leerActividad(api, dominios) {
   if (!ventana.focused) return { dominio: null, estado: 'sin_foco' };
   if (actividad !== 'active') return { dominio: null, estado: 'inactivo' };
   const [pestana] = await api.tabs.query({ active: true, windowId: ventana.id });
-  if (pestana?.status === 'loading') return { dominio: null, estado: 'navegando' };
+  const identidad = { ventanaId: ventana.id, pestanaId: pestana?.id };
+  if (pestana?.status === 'loading') return { ...identidad, dominio: null, estado: 'navegando' };
   const dominio = !pestana?.incognito ? dominioAutorizado(pestana?.url, dominios) : null;
-  if (!dominio) return { dominio: null, estado: 'sin_dominio_autorizado' };
+  if (!dominio) return { ...identidad, dominio: null, estado: 'sin_dominio_autorizado' };
   const tienePermiso = await api.permissions.contains({ origins: [`https://${dominio}/*`] });
-  return tienePermiso ? { dominio, estado: 'activo' } : { dominio: null, estado: 'sin_permiso' };
+  return { ...identidad, ...(tienePermiso ? { dominio, estado: 'activo' } : { dominio: null, estado: 'sin_permiso' }) };
+}
+
+export async function cortarTransicion(api, { tipo, pestanaId, ventanaId, observadoEn }) {
+  const { observacion } = await api.storage.session.get('observacion');
+  if (!observacion || !Number.isInteger(pestanaId)) return;
+  if (ventanaId !== undefined && ventanaId !== observacion.ventanaId) return;
+  const afectaObservada = tipo === 'activacion'
+    ? ventanaId === observacion.ventanaId && pestanaId !== observacion.pestanaId
+    : pestanaId === observacion.pestanaId;
+  if (afectaObservada) await observar(api, { estado: 'navegando', observadoEn });
 }
 
 export async function observar(api, { estado: pausa, observadoEn, esVigente = () => true } = {}) {
   const { configuracion } = await api.storage.session.get('configuracion');
   let dominio = null;
   let estado = 'sin_consentimiento';
+  let identidad = {};
   if (configuracion?.consentimiento) {
     if (pausa) estado = pausa;
-    else ({ dominio, estado } = await leerActividad(api, configuracion.dominios));
+    else {
+      const lectura = await leerActividad(api, configuracion.dominios);
+      ({ dominio, estado } = lectura);
+      identidad = { ventanaId: lectura.ventanaId, pestanaId: lectura.pestanaId };
+    }
   }
   const { configuracion: vigente } = await api.storage.session.get('configuracion');
   if (vigente?.id !== configuracion?.id || !vigente?.consentimiento) {
@@ -33,7 +49,7 @@ export async function observar(api, { estado: pausa, observadoEn, esVigente = ()
   const { medicion: anterior } = await api.storage.session.get('medicion');
   if (!esVigente()) return;
   const instante = pausa ? observadoEn ?? Date.now() : Date.now();
-  const observacion = { dominio, estado, observadoEn: instante, sesionId: vigente?.sesionId ?? vigente?.id,
+  const observacion = { ...identidad, dominio, estado, observadoEn: instante, sesionId: vigente?.sesionId ?? vigente?.id,
     suscripcionId: dominio ? vigente?.asociaciones?.[dominio] ?? null : null };
   const medicion = avanzarMedicion(anterior, observacion);
   if (medicion.limiteAlcanzado) observacion.estado = 'limite_de_sesion';

@@ -16,11 +16,19 @@ chrome.runtime.onMessage.addListener((mensaje, emisor, responder) => {
   operacion.then(resultado => responder(resultado ?? { ok: true }), () => responder({ ok: false }));
   return true;
 });
-chrome.tabs.onActivated.addListener(() => actualizar());
-chrome.tabs.onUpdated.addListener((_id, cambios, pestana) => {
-  if (pestana.active) actualizar();
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => actualizar({
+  transicion: { tipo: 'activacion', pestanaId: tabId, ventanaId: windowId },
+}));
+chrome.tabs.onUpdated.addListener((id, cambios, pestana) => {
+  if (!pestana.active) return;
+  const rompeContinuidad = cambios.status === 'loading' || Object.hasOwn(cambios, 'url');
+  actualizar(rompeContinuidad ? {
+    transicion: { tipo: 'navegacion', pestanaId: id, ventanaId: pestana.windowId },
+  } : undefined);
 });
-chrome.tabs.onRemoved.addListener(() => actualizar());
+chrome.tabs.onRemoved.addListener((id, info) => actualizar({
+  transicion: { tipo: 'cierre', pestanaId: id, ventanaId: info?.windowId },
+}));
 let ultimaActividad;
 chrome.windows.onFocusChanged.addListener(id => actualizar(id === chrome.windows.WINDOW_ID_NONE || id === -1
   ? { estado: ultimaActividad === 'locked' ? 'bloqueado' : 'sin_foco' } : undefined));

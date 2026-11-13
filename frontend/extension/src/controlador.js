@@ -1,4 +1,4 @@
-import { observar, registrarError } from './observador.js';
+import { observar, registrarError, cortarTransicion } from './observador.js';
 import { normalizarDominio, leerAsociaciones } from './dominio.js';
 
 export function crearControlador(api) {
@@ -29,10 +29,14 @@ export function crearControlador(api) {
       const actual = ++revision;
       // Las pausas son hechos recibidos; una reconsulta solo vale si sigue vigente.
       const pausa = senal.estado ? { estado: senal.estado, observadoEn: Date.now() } : null;
+      const transicion = senal.transicion ? { ...senal.transicion, observadoEn: Date.now() } : null;
       const esVigente = () => pausa !== null || actual === revision;
       return encolar(async () => {
-        if (!esVigente()) return;
-        try { await observar(api, { ...pausa, esVigente }); }
+        try {
+          // El corte es un hecho; solo la lectura del destino puede quedar superada.
+          if (transicion) await cortarTransicion(api, transicion);
+          if (esVigente()) await observar(api, { ...pausa, esVigente });
+        }
         catch {
           if (esVigente()) await registrarError(api, pausa?.observadoEn ?? Date.now(), esVigente);
         }

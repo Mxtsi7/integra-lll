@@ -6,6 +6,10 @@ Abre su botón, escribe dominios exactos (por ejemplo `netflix.com`), lee y marc
 consentimiento, pulsa Autorizar y acepta el permiso del navegador. El estado de
 captura se actualiza automáticamente mientras el panel permanece abierto.
 
+Estado vigente de la revisión del 13 de noviembre: #150 y #151 ya están
+integradas en #149. La corrección y la recepción actuales se detallan al final;
+las cifras y pendientes de las secciones fechadas anteriores son históricos.
+
 Permisos: `storage` conserva configuración/observación en **storage.session**, no
 historial duradero. Los hosts son opcionales y se solicitan individualmente desde
 el botón; `https://*/*` es el conjunto solicitabile, no un permiso concedido al instalar.
@@ -209,3 +213,59 @@ popup.test.js termina en un único salto de línea. Comprobación de espacios co
 Git y EOF sin errores. La extensión tiene 31 pruebas en #150 y 44 en #151.
 
 Verificación final: frontend completo 1043/1043 con VITEST_MAX_THREADS=1, VITEST_MIN_THREADS=1, VITEST_MAX_FORKS=1 y VITEST_MIN_FORKS=1; sin modificar configuración del repositorio. Dos intentos paralelos anteriores tuvieron fallos en RutaPrivada, AlertasPage, SuscripcionDetallePage, CalendarioPage e ImportacionPage.sesion, timeouts y un worker terminado; se registran junto a errores de memoria del entorno. Tipos y build web aprobados. Recorrido real final Chrome/Edge pendiente: se verificaron cargas de copias de trabajo y permisos, pero Chrome desactivó la extensión al recargar y la sesión posterior perdió su permiso temporal. No cerrar tarjetas ni declarar validación interactiva completa.
+
+## Corte de navegación conservado — 13 de noviembre de 2026
+
+Corrección sobre `5ab954b` en la rama `Maxi-extension-y-dominios` de #149.
+Los eventos de activación, inicio de carga, cambio de URL o cierre llevan solo
+el tipo y los IDs de pestaña/ventana. El controlador conserva su instante antes
+de esperar la cola y aplica el corte aunque una reconsulta posterior sustituya
+la lectura. El corte se filtra contra la identidad de la observación guardada
+en `storage.session`; una pestaña ajena o una actualización de metadatos no
+fragmenta el tramo enfocado. No se guardan URLs ni se amplían permisos.
+
+El corte publica `navegando` sin dominio antes de consultar el destino. La
+reanudación usa el instante de comprobación del dominio, conservando
+`esVigente`: ninguna lectura superada puede reconstruir actividad histórica.
+El motor de #151 recibe así una pausa antes de la siguiente observación activa.
+
+Regresión integrada: `node --test test/navegacion.test.js` desde esta carpeta.
+Usa el worker, controlador, observador y medición reales, con APIs de navegador
+y reloj simulados. Cubre navegación sin URL y cambio de pestaña, sin demora,
+con lectura de ventana pendiente desde la transición y con otra lectura ya
+pendiente antes de recibirla. Expectativa fija en las seis variantes:
+`example.com=[0,2000)` y `[7000,9000)`, total **4000 ms**, dos tramos.
+También comprueba el tramo cerrado antes de esperar el destino, eventos ajenos
+y reanudación demorada a 8000: `[0,2000)` y `[8000,9000)`, sin rellenar el hueco.
+
+Contra el código de `5ab954b`, las cuatro variantes demoradas fallan; los dos
+controles sin demora pasan. El archivo externo
+`repro-pr149-5ab954b-navegacion.mjs` citado en la revisión no está disponible
+en este checkout: la prueba integrada reproduce su secuencia y expectativas,
+sin afirmar que se ejecutó aquel archivo original.
+
+Validación local: **52/52** pruebas de extensión, sintaxis de los seis módulos
+y `git diff --check` aprobados. Se conservan las 44 regresiones anteriores,
+incluidas URL anterior durante loading, URL oculta, autorización/retirada,
+panel, pausas, B=[11000,13000), idle y errores superados. La revisión técnica
+adicional no encontró defectos; no sustituye la recepción humana de las tarjetas.
+
+### Recepción y dependencias vigentes
+
+- #150 y #151 ya están integradas en #149; no requieren otra integración previa.
+- #148 está cerrada sin merge. Su propuesta contractual fue sustituida en
+  [#165](https://github.com/Mxtsi7/integra-lll/pull/165), de Víctor. Se verificó
+  la [aprobación de Mxtsi7 del 11 de noviembre](https://github.com/Mxtsi7/integra-lll/pull/165#pullrequestreview-5866593924).
+  El 13 de noviembre Maxi confirmó que ambos acordaron esa entrega y está lista
+  para merge. #165 sigue abierta, sin merge, HEAD `383406c`; esta corrección
+  no la fusiona ni presenta su contrato como integrado en main.
+- Ese acuerdo de contrato no acredita por sí solo la validación específica de
+  consentimiento, datos recolectados y conservación de **MX-02**. La tarjeta
+  [enlazada por MX-09](https://trello.com/c/QfDxfiwZ) debe aclararse al recibir
+  esa entrega; no se asume aceptada por el cierre de #148. No hay evidencia
+  adicional de validación de consentimiento de Chris en esta sesión.
+- El recorrido completo del README en Chrome/Edge y la recepción de
+  consentimiento siguen siendo condiciones de cierre. La instalación y
+  solicitud de permiso comprobadas con navegador headless se registran aparte
+  de las regresiones con dobles; una solicitud pendiente no demuestra concesión,
+  navegación consentida ni tiempos reales. No cerrar MX-09/MX-10 por la suite.
