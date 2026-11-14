@@ -22,7 +22,7 @@ dedicado `uso.eventos`. No modifica las tablas ni los consumidores históricos.
 | S3-VI-09 | `src/consumidor/uso.consumer.ts`: worker que escucha `analytics.uso.cola`. |
 | S3-VI-10 (topología) | `src/infraestructura/topologia.ts`: exchange, cola quorum, DLX y cola de fallos del pipeline de uso. El consumidor de suscripciones de la misma tarjeta vive en su propio entregable. |
 | S3-VI-11 | Inbox en `analytics.uso_evento` con clave `(organizacion_id, recolector_id, event_id)` y huella del contenido + destino. Duplicado → ACK sin efectos; conflicto → DLQ. |
-| S3-VI-12 | Agregados `analytics.uso_diario` y `analytics.uso_mensual`. |
+| S3-VI-12 | Agregados `analytics.uso_diario` y `analytics.uso_mensual_recolector`. |
 | S3-VI-14 | Unión temporal de `tramos_actividad` antes de sumar: dos fuentes simultáneas no duplican minutos. |
 
 ## Contrato
@@ -114,7 +114,7 @@ barrera `analytics.estado_eliminacion_organizacion`:
 
 - la limpieza toma la fila con `FOR UPDATE`, marca `eliminada = true` y borra
   `analytics.uso_tramo`, `analytics.uso_evento`, `analytics.uso_diario` y
-  `analytics.uso_mensual` dentro de la misma transacción;
+  `analytics.uso_mensual_recolector` dentro de la misma transacción;
 - `registrar()` toma la fila con `FOR SHARE` **antes de cualquier INSERT** en
   `uso_*` y vuelve a leer `eliminada` bajo el lock.
 
@@ -240,19 +240,19 @@ npm run publicar:ejemplo # publica una fixture del contrato
 | `analytics.uso_evento` | Hecho aceptado, cuerpo normalizado, `fecha_local`, `huella`, `recibido_en`. |
 | `analytics.uso_tramo` | Tramos exactos por evento para la unión temporal. |
 | `analytics.uso_diario` | `ms_netos`, `minutos_netos` y `ms_residuo` por suscripción y día local. |
-| `analytics.uso_mensual` | Suma de minutos diarios por suscripción y mes. |
+| `analytics.uso_mensual_recolector` | Suma de minutos diarios por suscripción y mes. |
 | `analytics.uso_cobertura` | Vista derivada con la proyección interna de cobertura. |
 | `analytics.estado_eliminacion_organizacion` | Barrera de borrado por tenant, compartida con `shared/borrado`. |
 
-> **Limitación conocida:** el modelo Django `UsoMensual` de Analytics (FE-28)
-> usa `db_table = "uso_mensual"` y, en producción, `search_path=analytics`. En
-> una base ya migrada por ese servicio, el `CREATE TABLE IF NOT EXISTS` de este
-> DDL no cambia la forma existente y el consumidor no puede escribir
-> `anio`/`mes`/`ms_netos`. El DDL de este servicio es seguro en una base sin esa
-> tabla; antes de desplegarlo sobre la base de Analytics hay que resolver el
-> nombre (tabla propia, p. ej. `uso_mensual_recolector`, o una migración
-> coordinada). La limpieza por `organizacion_id` funciona con cualquiera de las
-> dos formas.
+> **Convivencia con Analytics:** el modelo Django `UsoMensual` (FE-28) usa
+> `db_table = "uso_mensual"` y en producción `search_path=analytics`. Por eso
+> el agregado mensual de este pipeline se llama
+> `analytics.uso_mensual_recolector`: tiene columnas distintas (`anio`, `mes`
+> entero, `minutos_netos`, `ms_netos`) y este servicio nunca crea, altera ni
+> escribe la tabla del modelo Django. Ambas pueden convivir en el mismo esquema
+> y en la misma base sin que el DDL ni el consumidor toquen la ajena. La
+> limpieza de tenant borra cada una por su dueño: `uso_mensual_recolector` en el
+> gancho de tablas del pipeline y `uso_mensual` con el modelo `UsoMensual`.
 
 ## Estructura
 
@@ -307,7 +307,10 @@ reales: publica eventos con solapamiento entre Android y navegador, arranca el
 worker, verifica la unión y los agregados, republica para comprobar el ACK de
 duplicados, fuerza un conflicto, comprueba que el mismo `event_id` en otro
 tenant se acepta y reproduce la carrera con el borrado del tenant (un evento
-tardío espera la barrera y no reinserta filas).
+tardío espera la barrera y no reinserta filas). También crea la tabla real de
+`UsoMensual` en el esquema `analytics`, aplica el DDL del pipeline encima y
+verifica que un evento escribe en `uso_mensual_recolector` sin alterar la tabla
+de Django.
 
 Requisitos: Docker y los puertos `55432` (PostgreSQL) y `55672` (RabbitMQ)
 libres.
@@ -366,5 +369,8 @@ cd ../subscriptions && ESQUEMA_BD=subscriptions pytest -v
 
 `test_eliminacion.py` aplica el DDL de `analytics-uso` y comprueba, con dos
 tenants, que las cuatro tablas `uso_*` del tenant A quedan vacías y las del
-tenant B intactas. En SQLite esa prueba se omite porque las tablas del
-consumidor no existen ahí; en PostgreSQL se ejecuta siempre.
+tenant B intactas. También simula la base real de producción: crea
+`analytics.uso_mensual` con la forma del modelo Django, aplica el DDL encima y
+verifica que la limpieza borra `uso_mensual_recolector` por organización sin
+tocar la tabla de Django. En SQLite esas pruebas se omiten porque las tablas del
+consumidor no existen ahí; en PostgreSQL se ejecutan siempre.

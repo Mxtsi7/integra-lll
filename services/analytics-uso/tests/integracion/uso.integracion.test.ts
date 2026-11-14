@@ -60,14 +60,42 @@ const SUB_D = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const EVENTO_BORRADO = 'abababab-cdcd-4efe-8a9b-0c1d2e3f4a5b';
 const EVENTO_TARDIO = 'babababa-dcdc-4fef-8b9a-1d2e3f4a5b6c';
 
+// Tenant exclusivo de la prueba de convivencia con la tabla mensual de Django.
+const ORG_COEX = '12121212-1212-4212-8212-121212121212';
+const SUB_COEX = '13131313-1313-4313-8313-131313131313';
+const EVENTO_COEX = '14141414-1414-4414-8414-141414141414';
+const ID_DJANGO_COEX = '15151515-1515-4515-8515-151515151515';
+
 const FECHA_LOCAL = '2026-11-09';
+
+// Forma real de `analytics.uso_mensual` según la migración 0006 de Analytics
+// (Django): `mes` es date y las columnas son `minutos`/`dias_con_uso`. Se crea
+// antes de aplicar el DDL del pipeline para reproducir una base ya migrada por
+// Django en el mismo esquema `analytics`, que es lo que ocurre en producción
+// (`search_path=analytics`).
+const DDL_USO_MENSUAL_DJANGO = `
+  CREATE SCHEMA IF NOT EXISTS analytics;
+  CREATE TABLE IF NOT EXISTS analytics.uso_mensual (
+    id uuid PRIMARY KEY,
+    creado_en timestamptz NOT NULL,
+    actualizado_en timestamptz NOT NULL,
+    organizacion_id uuid NOT NULL,
+    suscripcion_id uuid NOT NULL,
+    mes date NOT NULL,
+    minutos integer NOT NULL DEFAULT 0 CHECK (minutos >= 0),
+    dias_con_uso integer NOT NULL DEFAULT 0 CHECK (dias_con_uso >= 0),
+    ultimo_uso date NULL,
+    CONSTRAINT uso_mensual_unico_por_tenant_suscripcion_mes
+      UNIQUE (organizacion_id, suscripcion_id, mes)
+  )
+`;
 
 // Tablas propias del consumidor, en orden hijo/padre para borrarlas.
 const TABLAS_USO = [
   'uso_tramo',
   'uso_evento',
   'uso_diario',
-  'uso_mensual',
+  'uso_mensual_recolector',
 ] as const;
 
 // America/Santiago en noviembre es UTC-3: 12:00Z es media mañana del mismo día
@@ -172,6 +200,7 @@ suite('integración real del pipeline de uso', () => {
   let publicador: PublicadorUso;
   let conexionAdmin: ChannelModel;
   let canalAdmin: Channel;
+  let ddlUso: string;
 
   beforeAll(async () => {
     if (!habilitado) return;
@@ -183,10 +212,16 @@ suite('integración real del pipeline de uso', () => {
       path.resolve(process.cwd(), 'sql', '001_uso_recolectores.sql'),
       'utf8',
     );
+    ddlUso = sql;
+
+    // Primero la tabla que ya habría creado Django en producción; después el
+    // DDL del pipeline. Así se comprueba que la migración TypeScript no toca
+    // la tabla del modelo `UsoMensual`.
+    await pool.query(DDL_USO_MENSUAL_DJANGO);
     await pool.query(sql);
     await pool.query(
       `TRUNCATE analytics.uso_tramo, analytics.uso_evento,
-                analytics.uso_diario, analytics.uso_mensual,
+                analytics.uso_diario, analytics.uso_mensual_recolector,
                 analytics.estado_eliminacion_organizacion`,
     );
 
@@ -307,7 +342,7 @@ suite('integración real del pipeline de uso', () => {
     }>(
       `
         SELECT ms_netos::text, minutos_netos::text
-        FROM analytics.uso_mensual
+        FROM analytics.uso_mensual_recolector
         WHERE organizacion_id = $1
           AND suscripcion_id = $2
           AND anio = 2026
@@ -381,6 +416,95 @@ suite('integración real del pipeline de uso', () => {
 
     expect(await contarEventos(ORG_A)).toBe(3);
     expect(await contarTramos(ORG_A)).toBe(5);
+  });
+
+  it('convive con la tabla uso_mensual de Django en el mismo esquema', async () => {
+    // Fila que ya existía en la tabla del modelo Django antes de este evento.
+    await pool.query(
+      'DELETE FROM analytics.uso_mensual WHERE organizacion_id = $1',
+      [ORG_COEX],
+    );
+    await pool.query(
+      `
+        INSERT INTO analytics.uso_mensual (
+          id, creado_en, actualizado_en, organizacion_id, suscripcion_id,
+          mes, minutos, dias_con_uso, ultimo_uso
+        ) VALUES ($1, now(), now(), $2, $3, '2026-11-01', 7, 2, '2026-11-09')
+      `,
+      [ID_DJANGO_COEX, ORG_COEX, SUB_COEX],
+    );
+
+    // Volver a aplicar el DDL sobre la base ya migrada por Django debe ser
+    // idempotente y no alterar `analytics.uso_mensual`.
+    await pool.query(ddlUso);
+
+    const columnas = await pool.query<{
+      column_name: string;
+      data_type: string;
+    }>(
+      `
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'analytics' AND table_name = 'uso_mensual'
+        ORDER BY ordinal_position
+      `,
+    );
+    expect(columnas.rows.map((fila) => fila.column_name)).toEqual([
+      'id', 'creado_en', 'actualizado_en', 'organizacion_id', 'suscripcion_id',
+      'mes', 'minutos', 'dias_con_uso', 'ultimo_uso',
+    ]);
+    expect(
+      columnas.rows.find((fila) => fila.column_name === 'mes')?.data_type,
+    ).toBe('date');
+    expect(
+      columnas.rows.find((fila) => fila.column_name === 'minutos')?.data_type,
+    ).toBe('integer');
+
+    // Evento real del pipeline para la misma organización y suscripción.
+    await publicar(
+      EVENTO_COEX,
+      payload(EVENTO_COEX, REC_ANDROID, 'android', A),
+      ORG_COEX,
+      SUB_COEX,
+    );
+
+    // Lectura histórica del agregado propio del pipeline (150 s = 2 min).
+    const mensual = await esperar(
+      async () => {
+        const fila = await leerMensual(ORG_COEX, SUB_COEX);
+        return fila?.ms_netos === '150000' ? fila : undefined;
+      },
+      'el agregado mensual del pipeline sobre la base compartida con Django',
+    );
+    expect(mensual.ms_netos).toBe('150000');
+    expect(mensual.minutos_netos).toBe('2');
+
+    // La fila de Django sigue intacta: otro nombre de tabla, otro contrato.
+    const django = await pool.query<{
+      minutos: number;
+      dias_con_uso: number;
+      ultimo_uso: string;
+    }>(
+      `
+        SELECT minutos, dias_con_uso, ultimo_uso::text
+        FROM analytics.uso_mensual
+        WHERE organizacion_id = $1 AND suscripcion_id = $2
+      `,
+      [ORG_COEX, SUB_COEX],
+    );
+    expect(django.rows).toEqual([
+      { minutos: 7, dias_con_uso: 2, ultimo_uso: '2026-11-09' },
+    ]);
+
+    const recolector = await pool.query<{ total: string }>(
+      `
+        SELECT count(*)::text AS total
+        FROM analytics.uso_mensual_recolector
+        WHERE organizacion_id = $1
+      `,
+      [ORG_COEX],
+    );
+    expect(recolector.rows[0]?.total).toBe('1');
   });
 
   it('confirma un duplicado sin repetir efectos', async () => {
