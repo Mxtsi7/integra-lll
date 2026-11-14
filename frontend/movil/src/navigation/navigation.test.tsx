@@ -67,6 +67,16 @@ beforeEach(() => {
     'fetch',
     vi.fn().mockImplementation(async (url: string) => {
       if (typeof url === 'string' && url.includes('/suscripciones/')) {
+        const idMatch = url.match(/\/suscripciones\/([^/?]+)\/?(\?.*)?$/);
+        if (idMatch && idMatch[1] && idMatch[1] !== '') {
+          const item =
+            MOCK_SUSCRIPCIONES_API.results.find((s) => s.id === idMatch[1]) ??
+            MOCK_SUSCRIPCIONES_API.results[0];
+          return new Response(JSON.stringify(item), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         return new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },

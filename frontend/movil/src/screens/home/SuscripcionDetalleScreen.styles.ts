@@ -1,0 +1,181 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#0f172a',
+  },
+  contenedor: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  scrollContenido: {
+    paddingBottom: 32,
+  },
+  header: {
+    paddingTop: 16,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  titulo: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  subtitulo: {
+    fontSize: 14,
+    color: '#94a3b8',
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  botonVolver: {
+    minWidth: 100,
+  },
+  idText: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 4,
+  },
+  tarjetaPrincipal: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  tarjetaPrincipalFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  montoEtiqueta: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '600',
+  },
+  montoValor: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#38bdf8',
+    marginTop: 4,
+  },
+  periodoTexto: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#94a3b8',
+  },
+  equivalenteTexto: {
+    fontSize: 13,
+    color: '#94a3b8',
+    marginTop: 4,
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  badgeTexto: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  avisoFantasma: {
+    backgroundColor: '#312e81',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#4338ca',
+  },
+  avisoFantasmaTitulo: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#e0e7ff',
+    marginBottom: 4,
+  },
+  avisoFantasmaTexto: {
+    fontSize: 13,
+    color: '#c7d2fe',
+    lineHeight: 18,
+  },
+  seccionCuadricula: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 12,
+  },
+  seccionTitulo: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  seccionDescripcion: {
+    fontSize: 13,
+    color: '#94a3b8',
+    lineHeight: 18,
+    marginBottom: 8,
+  },
+  datoFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#334155',
+  },
+  datoEtiqueta: {
+    fontSize: 14,
+    color: '#94a3b8',
+  },
+  datoValor: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+    textAlign: 'right',
+  },
+  seccionAcciones: {
+    gap: 10,
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  botonAccion: {
+    minHeight: 44,
+  },
+  cajaMensaje: {
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 12,
+    borderRadius: 16,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginTop: 20,
+  },
+  cajaMensajeTitulo: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    textAlign: 'center',
+  },
+  cajaMensajeTexto: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+});

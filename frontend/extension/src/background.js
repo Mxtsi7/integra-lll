@@ -1,0 +1,59 @@
+import { UMBRAL_INACTIVIDAD_SEGUNDOS } from './observador.js';
+import { crearControlador } from './controlador.js';
+
+const controlador = crearControlador(chrome);
+function actualizar(senal) {
+  controlador.actualizar(senal).catch(() => console.warn('No se pudo actualizar el estado del recolector'));
+}
+chrome.runtime.onMessage.addListener((mensaje, emisor, responder) => {
+  if (emisor.id !== chrome.runtime.id) return false;
+  let operacion;
+  if (mensaje.tipo === 'iniciar_autorizacion') operacion = controlador.iniciarAutorizacion(mensaje.intentoId, mensaje.dominios, mensaje.asociaciones);
+  else if (mensaje.tipo === 'cancelar_autorizacion') operacion = controlador.cancelarAutorizacion(mensaje.intentoId);
+  else if (mensaje.tipo === 'guardar') operacion = controlador.guardar(mensaje.configuracion, mensaje.intentoId);
+  else if (mensaje.tipo === 'retirar') operacion = controlador.retirar();
+  else return false;
+  operacion.then(resultado => responder(resultado ?? { ok: true }), () => responder({ ok: false }));
+  return true;
+});
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => actualizar({
+  transicion: { tipo: 'activacion', pestanaId: tabId, ventanaId: windowId },
+}));
+chrome.tabs.onUpdated.addListener((id, cambios, pestana) => {
+  if (!pestana.active) return;
+  const rompeContinuidad = cambios.status === 'loading' || Object.hasOwn(cambios, 'url');
+  actualizar(rompeContinuidad ? {
+    transicion: { tipo: 'navegacion', pestanaId: id, ventanaId: pestana.windowId },
+  } : undefined);
+});
+chrome.tabs.onRemoved.addListener((id, info) => actualizar({
+  transicion: { tipo: 'cierre', pestanaId: id, ventanaId: info?.windowId },
+}));
+let ultimaActividad;
+chrome.windows.onFocusChanged.addListener(id => actualizar(id === chrome.windows.WINDOW_ID_NONE || id === -1
+  ? { estado: ultimaActividad === 'locked' ? 'bloqueado' : 'sin_foco' }
+  : { transicion: { tipo: 'foco', ventanaId: id } }));
+chrome.idle.onStateChanged.addListener(actividad => {
+  ultimaActividad = actividad;
+  actualizar(actividad === 'active' ? undefined : { estado: actividad === 'locked' ? 'bloqueado' : 'inactivo' });
+});
+chrome.idle.setDetectionInterval(UMBRAL_INACTIVIDAD_SEGUNDOS);
+
+chrome.permissions.onAdded.addListener(() => {
+  controlador.limpiarPermisos().catch(() => console.warn('No se pudieron retirar permisos sobrantes'));
+});
+chrome.permissions.onRemoved.addListener(({ origins = [] }) => actualizar({
+  transicion: { tipo: 'permiso_retirado', origins },
+}));
+chrome.storage.onChanged.addListener((cambios, area) => {
+  if (area === 'session' && cambios.configuracion) actualizar();
+});
+chrome.runtime.onStartup.addListener(() => actualizar());
+chrome.runtime.onInstalled.addListener(() => actualizar());
+
+chrome.alarms.onAlarm.addListener(alarma => {
+  if (alarma.name === 'observar-uso') actualizar();
+});
+chrome.alarms.get('observar-uso').then(alarma => {
+  if (!alarma) return chrome.alarms.create('observar-uso', { periodInMinutes: 0.5 });
+}).catch(() => console.warn('No se pudo programar la observación de uso'));

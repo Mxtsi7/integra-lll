@@ -222,14 +222,17 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         />
       );
 
-      expect(screen.getByText('No tienes suscripciones todavía')).toBeTruthy();
+      expect(screen.getByTestId('empty-state-home')).toBeTruthy();
+      expect(screen.getByText('Todavía no registras suscripciones')).toBeTruthy();
       expect(
         screen.getByText(
-          'Agrega tu primera suscripción para comenzar a controlar tus cobros y gastos.'
+          'Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar.'
         )
       ).toBeTruthy();
 
-      const btnCrear = screen.getByRole('button', { name: 'Crear suscripción' });
+      const btnCrear = screen.getByTestId('btn-crear-primera-suscripcion');
+      expect(btnCrear).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Agregar suscripción' })).toBeTruthy();
       fireEvent.click(btnCrear);
       expect(onNuevaSuscripcion).toHaveBeenCalledTimes(1);
     });
@@ -300,6 +303,133 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
       expect(onCargarSuscripciones).toHaveBeenCalledTimes(1);
 
       expect(await screen.findByText('Netflix')).toBeTruthy();
+    });
+  });
+
+  describe('Vacío Móvil y Acceso a Primera Suscripción (SE-20)', () => {
+    describe('Criterio 1: Cuenta sin suscripciones ve instrucción útil', () => {
+      it('muestra encabezado, descripción de valor basada en web y CTA primario sin mostrar lista ni resumen', () => {
+        const onNuevaSuscripcion = vi.fn();
+
+        render(
+          <HomeView
+            estado={{ tipo: 'listo', datos: [] }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={onNuevaSuscripcion}
+            onReintentar={vi.fn()}
+          />
+        );
+
+        // Contenedor de estado vacío presente
+        expect(screen.getByTestId('empty-state-home')).toBeTruthy();
+
+        // Título con rol de encabezado
+        const encabezado = screen.getByText('Todavía no registras suscripciones');
+        expect(encabezado).toBeTruthy();
+        expect(encabezado.getAttribute('role')).toBe('header');
+
+        // Instrucción útil que orienta al usuario sobre qué beneficios obtiene
+        expect(
+          screen.getByText(
+            'Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar.'
+          )
+        ).toBeTruthy();
+
+        // Botón CTA primario accesible
+        const btnCta = screen.getByTestId('btn-crear-primera-suscripcion');
+        expect(btnCta).toBeTruthy();
+        expect(btnCta.getAttribute('aria-label')).toBe('Agregar suscripción');
+
+        // No se presentan resumen numérico ni lista cuando la cuenta está vacía
+        expect(screen.queryByTestId('resumen-gastos')).toBeNull();
+        expect(screen.queryByTestId('lista-suscripciones')).toBeNull();
+
+        // Al pulsar el botón se invoca la acción
+        fireEvent.click(btnCta);
+        expect(onNuevaSuscripcion).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('Criterio 2: Un fallo de red NO se presenta como cuenta vacía', () => {
+      it('en estado error muestra NetworkError con role="alert" y NUNCA el estado vacío ni su CTA', () => {
+        render(
+          <HomeView
+            estado={{ tipo: 'error' }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={vi.fn()}
+            onReintentar={vi.fn()}
+          />
+        );
+
+        // Se muestra alerta de error de red
+        expect(screen.getByRole('alert')).toBeTruthy();
+        expect(screen.getByRole('button', { name: /reintentar/i })).toBeTruthy();
+
+        // NUNCA se presenta como vacío
+        expect(screen.queryByTestId('empty-state-home')).toBeNull();
+        expect(screen.queryByTestId('btn-crear-primera-suscripcion')).toBeNull();
+        expect(screen.queryByText('Todavía no registras suscripciones')).toBeNull();
+      });
+
+      it('en estado cargando muestra Loading con role="progressbar" y NUNCA el estado vacío', () => {
+        render(
+          <HomeView
+            estado={{ tipo: 'cargando' }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={vi.fn()}
+            onReintentar={vi.fn()}
+          />
+        );
+
+        expect(screen.getByRole('progressbar')).toBeTruthy();
+        expect(screen.queryByTestId('empty-state-home')).toBeNull();
+        expect(screen.queryByTestId('btn-crear-primera-suscripcion')).toBeNull();
+      });
+
+      it('en contenedor HomeScreen: caída de API muestra error y al reintentar exitoso con [] muestra vacío', async () => {
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockRejectedValueOnce(new Error('Network request failed'))
+          .mockResolvedValueOnce([]);
+
+        render(<HomeScreen onCargarSuscripciones={onCargarSuscripciones} />);
+
+        // Al fallar la red, muestra alerta de error y NUNCA estado vacío
+        expect(await screen.findByRole('alert')).toBeTruthy();
+        expect(screen.queryByTestId('empty-state-home')).toBeNull();
+
+        // Usuario reintenta la carga
+        fireEvent.click(screen.getByRole('button', { name: /reintentar/i }));
+
+        // Ahora la API responde lista vacía: pasa a mostrar el estado vacío con instrucción útil
+        expect(
+          await screen.findByText('Todavía no registras suscripciones')
+        ).toBeTruthy();
+        expect(screen.getByTestId('btn-crear-primera-suscripcion')).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+      });
+    });
+
+    describe('Navegación CTA hacia SuscripcionNueva', () => {
+      it('navega a SuscripcionNueva al pulsar el CTA del estado vacío en HomeScreen', () => {
+        const navigateMock = vi.fn();
+        const navigation = { navigate: navigateMock };
+
+        render(
+          <HomeScreen
+            navigation={navigation as any}
+            estadoInicial={{ tipo: 'listo', datos: [] }}
+          />
+        );
+
+        const btnCta = screen.getByTestId('btn-crear-primera-suscripcion');
+        fireEvent.click(btnCta);
+
+        expect(navigateMock).toHaveBeenCalledWith('SuscripcionNueva');
+      });
     });
   });
 });

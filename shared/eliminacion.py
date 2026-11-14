@@ -71,6 +71,10 @@ class LimpiezaOrganizacionView(APIView):
             estado.save(update_fields=["eliminada", "operacion_id"])
             for modelo in self.modelos:
                 modelo.objects.filter(organizacion_id=organizacion_id).delete()
+            # Tablas propias que no son modelos Django (por ejemplo, las `uso_*`
+            # que escribe otro proceso). Corren bajo el mismo bloqueo exclusivo
+            # y en la misma transacción que la marca de eliminación.
+            self.limpiar_datos_adicionales(organizacion_id)
         return Response(status=204)
 
     def preparar_limpieza(self, organizacion_id):
@@ -78,4 +82,14 @@ class LimpiezaOrganizacionView(APIView):
         pass
 
     def validar_limpieza(self, organizacion_id):
+        pass
+
+    def limpiar_datos_adicionales(self, organizacion_id):
+        """Gancho para datos del tenant que no son modelos Django del servicio.
+
+        Se ejecuta después de borrar ``modelos`` y antes de confirmar, dentro
+        del mismo ``transaction.atomic()`` que ya tomó el bloqueo exclusivo.
+        Las implementaciones deben ser idempotentes: la limpieza se puede
+        reintentar con la misma operación.
+        """
         pass
