@@ -321,15 +321,19 @@ def test_el_candidato_hereda_la_organizacion_de_la_importacion():
     assert CobroCandidato.objects.filter(organizacion_id=ORG_B).count() == 2
 
 
-def test_el_identificador_es_el_sha_del_archivo_y_la_fila():
-    """Es lo que hace estable la deduplicación de S3-FE-17."""
+def test_el_identificador_es_la_huella_del_cobro_y_no_del_archivo():
+    """S3-FE-17: el identificador sale del cobro (fecha, importe, moneda, glosa
+    y ocurrencia), así que dos archivos que se traslapan coinciden. Antes era
+    `<sha del archivo>:<fila>` y solo coincidía al subir el MISMO archivo."""
     importacion = crear_importacion()
-    sha = importacion.archivo.sha256
 
     tasks.procesar_importacion(str(importacion.pk))
 
-    identificadores = sorted(c.identificador_origen for c in importacion.candidatos.all())
-    assert identificadores == [f"{sha}:2", f"{sha}:3"]
+    por_glosa = {c.servicio_texto: c.identificador_origen for c in importacion.candidatos.all()}
+    assert por_glosa == {
+        "NETFLIX.COM": csv_candidatos.huella_csv(("2026-10-01", "9990.00", "CLP", "netflix.com"), 1),
+        "PAYPAL *SPOTIFY": csv_candidatos.huella_csv(("2026-10-03", "4990.00", "CLP", "paypal *spotify"), 1),
+    }
 
 
 def test_la_evidencia_guarda_la_glosa_original():
@@ -338,7 +342,12 @@ def test_la_evidencia_guarda_la_glosa_original():
     tasks.procesar_importacion(str(importacion.pk))
 
     candidato = importacion.candidatos.get(servicio_texto="PAYPAL *SPOTIFY")
-    assert candidato.evidencia == {"fila": "3", "descripcion_original": "PAYPAL *SPOTIFY"}
+    # El archivo y la fila exactos: desde S3-FE-17 ya no van en el identificador.
+    assert candidato.evidencia == {
+        "fila": "3",
+        "archivo_sha256": importacion.archivo.sha256,
+        "descripcion_original": "PAYPAL *SPOTIFY",
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -379,12 +388,11 @@ def test_reprocesar_la_misma_importacion_no_duplica_candidatos():
     assert importacion.errores_totales == 0
 
 
-def test_dos_archivos_distintos_con_la_misma_fila_si_son_dos_candidatos():
-    """La unicidad es por archivo: el sha entra en el identificador.
-
-    Dos cartolas distintas pueden traer el mismo cobro en la misma línea y
-    siguen siendo dos lecturas distintas.
-    """
+def test_dos_archivos_distintos_comparten_solo_los_cobros_que_coinciden():
+    """S3-FE-17 cambió esta regla. Antes la unicidad era POR ARCHIVO y dos
+    cartolas distintas con el mismo cobro daban dos candidatos; ahora es por
+    COBRO. Spotify viene igual en las dos y es uno; Netflix trae otra glosa
+    en la segunda (`NETFLIX.CL`) y, ante la duda, son dos."""
     primera = crear_importacion(CSV)
     otro_contenido = CSV.replace(b"NETFLIX.COM", b"NETFLIX.CL")
     segunda = crear_importacion(otro_contenido)
@@ -392,7 +400,11 @@ def test_dos_archivos_distintos_con_la_misma_fila_si_son_dos_candidatos():
     tasks.procesar_importacion(str(primera.pk))
     tasks.procesar_importacion(str(segunda.pk))
 
-    assert CobroCandidato.objects.count() == 4
+    assert sorted(CobroCandidato.objects.values_list("servicio_texto", flat=True)) == [
+        "NETFLIX.CL", "NETFLIX.COM", "PAYPAL *SPOTIFY",
+    ]
+    segunda.refresh_from_db()
+    assert segunda.candidatos_detectados == 1
 
 
 # ══════════════════════════════════════════════════════════════════════

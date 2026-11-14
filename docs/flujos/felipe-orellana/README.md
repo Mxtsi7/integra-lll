@@ -32,6 +32,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-14** Consultar candidatos y errores para la vista previa: ruta propia, filtros y aislamiento | Hecho, 29 pruebas más 3 del gateway; los de correo llegan con S3-FE-09 | [19-consultar-candidatos-s3-fe-14.md](19-consultar-candidatos-s3-fe-14.md) |
 | **Sprint 3 · S3-FE-16** Rechazar un candidato: idempotente, trazable y sin movimientos financieros | Hecho, 20 pruebas más 1 del gateway | [20-rechazar-candidatos-s3-fe-16.md](20-rechazar-candidatos-s3-fe-16.md) |
 | **Sprint 3 · S3-FE-15** Confirmar un candidato: atómico, con la orden de crear en un outbox durable | Hecho, 26 pruebas; falta el publicador y el consumidor en `subscriptions` | [21-confirmar-candidatos-s3-fe-15.md](21-confirmar-candidatos-s3-fe-15.md) |
+| **Sprint 3 · S3-FE-17** Evitar duplicados: el identificador CSV es la huella del cobro, así que una exportación que se traslapa no vuelve a proponerlo | Hecho, 24 pruebas (2 con dos conexiones a PostgreSQL) | [22-evitar-duplicados-s3-fe-17.md](22-evitar-duplicados-s3-fe-17.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

@@ -82,7 +82,7 @@ de alguien.
 **El candidato NO se borra.** Queda `rechazado` y sigue consultable con
 `?estado=rechazado`. Borrarlo tendría dos consecuencias, y la segunda es la
 grave: se pierde la trazabilidad, y **S3-FE-17 lo volvería a proponer**. El
-identificador de origen es `<sha256 del archivo>:<fila>`; si la fila
+identificador de origen es la huella del cobro ([S3-FE-17](22-evitar-duplicados-s3-fe-17.md)); si la fila
 desapareciera de la tabla, releer el mismo archivo la propondría de nuevo como
 si nadie la hubiera visto nunca.
 

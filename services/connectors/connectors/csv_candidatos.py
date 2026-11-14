@@ -40,11 +40,12 @@ algún día 13 o más, y basta una para desambiguar el archivo completo.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import re
 import threading
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Iterable, Mapping, Sequence
@@ -656,6 +657,81 @@ class _ErrorDeCampo(Exception):
 # ══════════════════════════════════════════════════════════════════════
 
 
+# ══════════════════════════════════════════════════════════════════════
+# S3-FE-17 — el mismo cobro leído dos veces es UN candidato
+# ══════════════════════════════════════════════════════════════════════
+#
+# El identificador de una fila era `<sha256 del archivo>:<número de fila>`.
+# Eso deduplicaba solo si se subía EL MISMO archivo, byte por byte. Pero lo
+# normal no es eso: se exporta la cartola de octubre, y un mes después la de
+# octubre y noviembre. Son archivos distintos y traen el mismo cobro del 1 de
+# octubre; cada uno lo proponía, y confirmar los dos dejaba dos órdenes de
+# crear el mismo cobro. Reproducido antes de cambiarlo.
+#
+# Ahora el identificador sale del COBRO: fecha, importe, moneda y glosa
+# normalizada. Dos exportaciones que se traslapan producen el mismo
+# identificador, la restricción única de la base deja pasar uno solo, y lo
+# que ya estaba —propuesto, confirmado o rechazado— no se vuelve a proponer.
+#
+# ── Dos cobros iguales el mismo día siguen siendo dos ────────────────────
+# Dos licencias del mismo plan cobradas el mismo día son posibles, y
+# colapsarlas perdería una. Por eso la huella lleva además la OCURRENCIA:
+# la primera fila con esos datos dentro del archivo es la 1, la segunda la 2.
+# Si la cartola de octubre trae uno y la de octubre-noviembre trae los dos
+# (el segundo se cobró después de exportar), el 1 coincide y el 2 entra nuevo.
+#
+# ── El límite, dicho ─────────────────────────────────────────────────────
+# Si DOS cuentas distintas tienen el mismo cobro el mismo día, por el mismo
+# monto y con la misma glosa, y se importan en archivos separados, la segunda
+# se toma por la primera. Se eligió así porque la exportación traslapada es lo
+# común y un cobro duplicado entra al presupuesto de la persona; el caso
+# contrario es raro y no queda oculto: la importación cuenta esas filas como
+# ya importadas (ver `docs/flujos/.../22-...`).
+#
+# La glosa se compara normalizada (mayúsculas, tildes y espacios no cuentan)
+# pero entera: si dos bancos la escriben distinto, son dos candidatos. Ante la
+# duda se prefiere proponer de más —se rechaza con un clic— que perder un cobro.
+
+#: Prefijo del identificador de una fila CSV. Lo distingue del formato
+#: anterior y de los de correo, que son un Message-ID.
+PREFIJO_HUELLA_CSV = "csv:"
+
+
+def _glosa_comparable(texto: str) -> str:
+    sin_marcas = unicodedata.normalize("NFKD", texto or "")
+    sin_marcas = "".join(c for c in sin_marcas if not unicodedata.combining(c))
+    return _ESPACIOS.sub(" ", unicodedata.normalize("NFKC", sin_marcas)).strip().casefold()
+
+
+def _datos_del_cobro(candidato: Candidato) -> tuple[str, str, str, str]:
+    # El importe con dos decimales fijos: `9990` y `9990.00` son el mismo cobro.
+    return (
+        candidato.fecha.isoformat(),
+        f"{candidato.importe:.2f}",
+        candidato.moneda,
+        _glosa_comparable(candidato.servicio_texto),
+    )
+
+
+def huella_csv(datos: tuple[str, str, str, str], ocurrencia: int) -> str:
+    """El identificador de origen de una fila CSV: estable entre archivos."""
+    if ocurrencia < 1:
+        raise ValueError("La ocurrencia se cuenta desde 1")
+    texto = "\x1f".join((*datos, str(ocurrencia)))
+    return PREFIJO_HUELLA_CSV + hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def _con_huella(candidatos: list[Candidato]) -> list[Candidato]:
+    """Reemplaza el identificador por fila con el del cobro, en orden del archivo."""
+    vistas: dict[tuple[str, str, str, str], int] = {}
+    resultado = []
+    for candidato in candidatos:
+        datos = _datos_del_cobro(candidato)
+        vistas[datos] = vistas.get(datos, 0) + 1
+        resultado.append(replace(candidato, identificador_origen=huella_csv(datos, vistas[datos])))
+    return resultado
+
+
 def leer(
     contenido: bytes,
     *,
@@ -772,7 +848,7 @@ def leer(
             errores.append(ErrorFila(fila=numero, codigo=e.codigo, mensaje=e.mensaje))
 
     return ResultadoLectura(
-        candidatos=tuple(candidatos),
+        candidatos=tuple(_con_huella(candidatos)),
         errores=tuple(errores),
         filas_totales=len(cuerpo),
     )
@@ -857,6 +933,8 @@ def _candidato_de_fila(
         # Fila y archivo: el mismo archivo subido dos veces da el mismo
         # identificador, y dos archivos distintos nunca chocan aunque se
         # llamen igual.
+        # Provisorio: `leer` lo reemplaza por la huella del cobro (S3-FE-17),
+        # que necesita ver el archivo entero para contar ocurrencias.
         identificador_origen=f"{sha256}:{numero}",
         organizacion_id=organizacion_id,
         servicio=resuelto.proveedor,
@@ -869,5 +947,8 @@ def _candidato_de_fila(
         # por correo, y los distingue S3-FE-08.
         tipo_mensaje=TipoMensaje.COBRO_REALIZADO,
         estado=EstadoCandidato.PROPUESTO,
-        evidencia={"fila": str(numero), "descripcion_original": descripcion},
+        # El archivo y la fila de donde salió. Antes iban dentro del
+        # identificador; ahora el identificador es el cobro, y la procedencia
+        # exacta queda acá.
+        evidencia={"fila": str(numero), "archivo_sha256": sha256, "descripcion_original": descripcion},
     )
