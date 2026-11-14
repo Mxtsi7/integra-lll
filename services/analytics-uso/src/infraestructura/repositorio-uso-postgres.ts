@@ -269,7 +269,7 @@ export class RepositorioUsoPostgres implements RepositorioUso {
 
     await cliente.query(
       `
-        INSERT INTO analytics.uso_mensual (
+        INSERT INTO analytics.uso_mensual_recolector (
           organizacion_id, suscripcion_id, anio, mes,
           minutos_netos, ms_netos, actualizado_en
         ) VALUES ($1, $2, $3, $4, 0, 0, now())
@@ -281,7 +281,7 @@ export class RepositorioUsoPostgres implements RepositorioUso {
     await cliente.query(
       `
         SELECT 1
-        FROM analytics.uso_mensual
+        FROM analytics.uso_mensual_recolector
         WHERE organizacion_id = $1
           AND suscripcion_id = $2
           AND anio = $3
@@ -295,7 +295,7 @@ export class RepositorioUsoPostgres implements RepositorioUso {
     // un residuo diario no se convierte en un minuto mensual artificial.
     await cliente.query(
       `
-        UPDATE analytics.uso_mensual m
+        UPDATE analytics.uso_mensual_recolector m
         SET minutos_netos = (
               SELECT COALESCE(SUM(d.minutos_netos), 0)
               FROM analytics.uso_diario d

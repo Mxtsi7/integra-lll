@@ -90,7 +90,13 @@ CREATE TABLE IF NOT EXISTS analytics.uso_diario (
 
 -- Agregado mensual: suma de los minutos diarios ya proyectados. No se vuelve a
 -- dividir la suma mensual de milisegundos.
-CREATE TABLE IF NOT EXISTS analytics.uso_mensual (
+--
+-- El nombre lleva el sufijo `_recolector` a propósito: `analytics.uso_mensual`
+-- pertenece al modelo Django `UsoMensual` (FE-28), que en producción vive en
+-- este mismo esquema (`search_path=analytics`) con otra forma (`mes` date,
+-- `minutos`, `dias_con_uso`). Este pipeline nunca crea, altera ni escribe esa
+-- tabla; su agregado mensual es propio.
+CREATE TABLE IF NOT EXISTS analytics.uso_mensual_recolector (
     organizacion_id uuid        NOT NULL,
     suscripcion_id  uuid        NOT NULL,
     anio            integer     NOT NULL CHECK (anio BETWEEN 1970 AND 9999),

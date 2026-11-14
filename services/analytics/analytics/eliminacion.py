@@ -9,12 +9,15 @@ from .models import (
 
 # Tablas `uso_*` que escribe el consumidor TypeScript (S3-VI-07/09/11/12/14).
 # No son modelos Django del servicio, así que la limpieza de modelos no las ve.
+# `analytics.uso_mensual` NO está acá: es la tabla del modelo Django `UsoMensual`
+# (FE-28), que se borra por su modelo. El agregado del pipeline tiene nombre
+# propio (`uso_mensual_recolector`) para no colisionar con esa tabla.
 # El orden respeta la FK de `uso_tramo` hacia `uso_evento`.
 TABLAS_USO_RECOLECTORES = (
     "analytics.uso_tramo",
     "analytics.uso_evento",
     "analytics.uso_diario",
-    "analytics.uso_mensual",
+    "analytics.uso_mensual_recolector",
 )
 
 
