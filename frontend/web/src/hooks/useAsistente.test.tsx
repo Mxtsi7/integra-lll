@@ -69,7 +69,7 @@ describe('envío de preguntas (S3-CH-15, VI-22)', () => {
     expect(pedir).toHaveBeenCalledWith('/asistente/', { method: 'POST', body: { mensaje: '¿Qué reviso primero?' } });
     expect(result.current.mensajes).toEqual([
       { id: 1, autor: 'persona', texto: '¿Qué reviso primero?' },
-      { id: 2, autor: 'asistente', texto: 'Revisa el streaming.', esRespaldo: false },
+      { id: 2, autor: 'asistente', texto: 'Revisa el streaming.', respaldo: null },
     ]);
     expect(result.current.envio).toEqual({ tipo: 'libre' });
   });
@@ -95,8 +95,34 @@ describe('envío de preguntas (S3-CH-15, VI-22)', () => {
 
     await enviar(result, 'Resumen');
 
-    expect(result.current.mensajes[1]).toEqual({ id: 2, autor: 'asistente', texto: 'Registramos 120 minutos de uso.', esRespaldo: true });
+    expect(result.current.mensajes[1]).toEqual({
+      id: 2,
+      autor: 'asistente',
+      texto: 'Registramos 120 minutos de uso.',
+      respaldo: { motivo: 'timeout' },
+    });
     expect(result.current.envio).toEqual({ tipo: 'libre' });
+  });
+
+  it('el respaldo conserva el motivo que manda la API (S3-CH-17)', async () => {
+    vi.mocked(pedir).mockResolvedValue({ ...RESPUESTA_DE_RESPALDO, motivo: 'cuota_agotada' });
+    const { result } = montarHook();
+
+    await enviar(result, 'Resumen');
+
+    expect(result.current.mensajes[1]).toMatchObject({ respaldo: { motivo: 'cuota_agotada' } });
+  });
+
+  it.each([
+    ['sin el campo motivo', { estado: 'degradado', respuesta: 'Resumen local.' }],
+    ['con un motivo que no es texto', { estado: 'degradado', motivo: 7, respuesta: 'Resumen local.' }],
+  ])('un respaldo %s sigue siendo respaldo, con motivo null', async (_descripcion, cuerpo) => {
+    vi.mocked(pedir).mockResolvedValue(cuerpo);
+    const { result } = montarHook();
+
+    await enviar(result, 'Resumen');
+
+    expect(result.current.mensajes[1]).toMatchObject({ respaldo: { motivo: null } });
   });
 
   it('recorta los espacios de la pregunta antes de mandarla', async () => {
@@ -192,6 +218,21 @@ describe('errores y reintento (S3-CH-15)', () => {
     expect(result.current.envio).toMatchObject({ tipo: 'error', mensaje: 'El asistente no pudo responder. Intenta de nuevo.' });
   });
 
+  // S3-CH-17: el gateway distingue al servicio que no contesta de uno que falla.
+  it.each([
+    [504, 'El asistente tardó demasiado en responder. Intenta de nuevo.'],
+    [502, 'El asistente no está disponible ahora. Intenta de nuevo en unos minutos.'],
+    [503, 'El asistente no está disponible ahora. Intenta de nuevo en unos minutos.'],
+  ])('un %i del gateway dice qué pasó y deja la pregunta para reintentar', async (estado, mensajeEsperado) => {
+    vi.mocked(pedir).mockRejectedValue(new ErrorDeApi('Error del gateway', estado));
+    const { result } = montarHook();
+
+    await enviar(result, 'Hola');
+
+    expect(result.current.envio).toEqual({ tipo: 'error', mensaje: mensajeEsperado, pregunta: 'Hola' });
+    expect(result.current.mensajes).toEqual([{ id: 1, autor: 'persona', texto: 'Hola' }]);
+  });
+
   it.each([
     ['sin texto', { estado: 'ok', motivo: null, respuesta: '' }],
     ['solo espacios', { estado: 'ok', motivo: null, respuesta: '   ' }],
@@ -222,7 +263,7 @@ describe('errores y reintento (S3-CH-15)', () => {
     expect(vi.mocked(pedir).mock.calls[1]).toEqual(['/asistente/', { method: 'POST', body: { mensaje: '¿Qué reviso primero?' } }]);
     expect(result.current.mensajes).toEqual([
       { id: 1, autor: 'persona', texto: '¿Qué reviso primero?' },
-      { id: 2, autor: 'asistente', texto: 'Revisa el streaming.', esRespaldo: false },
+      { id: 2, autor: 'asistente', texto: 'Revisa el streaming.', respaldo: null },
     ]);
     expect(result.current.envio).toEqual({ tipo: 'libre' });
   });
