@@ -69,6 +69,9 @@ export function crearControlador(api) {
         throw new Error('Permiso requerido');
       }
       const { configuracion: anterior } = await api.storage.session.get('configuracion');
+      // Cerrar con la configuración anterior antes de esperar su sustitución y limpieza.
+      await cortarTransicion(api, { tipo: 'configuracion', dominios,
+        asociaciones: autorizacion.asociaciones, observadoEn: Date.now() });
       await api.storage.session.set({ configuracion: {
         id: crypto.randomUUID(), sesionId: anterior?.sesionId ?? anterior?.id ?? crypto.randomUUID(),
         consentimiento: true, dominios, asociaciones: autorizacion.asociaciones, versionTexto: 'sesion-temporal-v1', aceptadoEn: new Date().toISOString(),

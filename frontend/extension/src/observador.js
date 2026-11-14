@@ -18,9 +18,24 @@ async function leerActividad(api, dominios) {
   return { ...identidad, ...(tienePermiso ? { dominio, estado: 'activo' } : { dominio: null, estado: 'sin_permiso' }) };
 }
 
-export async function cortarTransicion(api, { tipo, pestanaId, ventanaId, observadoEn }) {
+export async function cortarTransicion(api, { tipo, pestanaId, ventanaId, origins = [], dominios = [], asociaciones = {}, observadoEn }) {
   const { observacion } = await api.storage.session.get('observacion');
   if (!observacion) return;
+  if (tipo === 'configuracion') {
+    const dominio = observacion.dominio;
+    if (dominio && (!dominios.includes(dominio) ||
+        (asociaciones[dominio] ?? null) !== observacion.suscripcionId)) {
+      await observar(api, { estado: 'actualizando_configuracion', observadoEn });
+    }
+    return;
+  }
+  if (tipo === 'permiso_retirado') {
+    // El retiro es un hecho, aunque una reconsulta posterior encuentre el permiso repuesto.
+    if (observacion.dominio && origins.includes(`https://${observacion.dominio}/*`)) {
+      await observar(api, { estado: 'sin_permiso', observadoEn });
+    }
+    return;
+  }
   if (tipo === 'foco') {
     if (Number.isInteger(observacion.ventanaId) && ventanaId !== observacion.ventanaId) {
       const estado = ['bloqueado', 'sin_foco', 'inactivo'].includes(observacion.estado)

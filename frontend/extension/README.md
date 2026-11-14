@@ -7,8 +7,16 @@ consentimiento, pulsa Autorizar y acepta el permiso del navegador. El estado de
 captura se actualiza automáticamente mientras el panel permanece abierto.
 
 Estado vigente de la revisión del 13 de noviembre: #150 y #151 ya están
-integradas en #149. La corrección y la recepción actuales se detallan al final;
-las cifras y pendientes de las secciones fechadas anteriores son históricos.
+integradas en #149. La recepción se detalla al final; la revisión posterior de
+retiro de permisos y edición está en el
+[informe de PR #149](../../docs/revisiones/PR-149-revision-2026-11-13.md).
+Las cifras y pendientes de las secciones fechadas anteriores son históricos.
+
+Retirar el permiso del dominio activo cierra el tramo en el instante del evento,
+incluso si otra consulta demora la comprobación o el permiso vuelve entretanto.
+Cambiar su asociación o quitarlo de la selección también cierra el tramo antes
+de esperar la limpieza; el panel puede mostrar `actualizando_configuracion`.
+Solo una lectura vigente reanuda el cómputo; guardar la misma selección no lo corta.
 
 Permisos: `storage` conserva configuración/observación en **storage.session**, no
 historial duradero. Los hosts son opcionales y se solicitan individualmente desde

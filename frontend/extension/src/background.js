@@ -42,7 +42,9 @@ chrome.idle.setDetectionInterval(UMBRAL_INACTIVIDAD_SEGUNDOS);
 chrome.permissions.onAdded.addListener(() => {
   controlador.limpiarPermisos().catch(() => console.warn('No se pudieron retirar permisos sobrantes'));
 });
-chrome.permissions.onRemoved.addListener(() => actualizar());
+chrome.permissions.onRemoved.addListener(({ origins = [] }) => actualizar({
+  transicion: { tipo: 'permiso_retirado', origins },
+}));
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area === 'session' && cambios.configuracion) actualizar();
 });
