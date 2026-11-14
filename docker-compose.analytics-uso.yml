@@ -1,0 +1,36 @@
+services:
+  # Aplica el DDL una sola vez antes de arrancar el worker. Es idempotente,
+  # pero se separa para que varias réplicas no compitan por el mismo esquema.
+  analytics-uso-migrar:
+    networks: [analytics]
+    build: ./services/analytics-uso
+    command: ["node", "dist/migrar.js"]
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Definir DATABASE_URL en .env}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  analytics-uso-worker:
+    networks: [analytics]
+    build: ./services/analytics-uso
+    command: ["node", "dist/worker.js"]
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Definir DATABASE_URL en .env}
+      RABBITMQ_URL: ${RABBITMQ_URL:?Definir RABBITMQ_URL en .env}
+      EXCHANGE_USO: ${EXCHANGE_USO:-uso.eventos}
+      EXCHANGE_DLX: ${EXCHANGE_DLX:-uso.eventos.dlx}
+      COLA_USO: ${COLA_USO:-analytics.uso.cola}
+      COLA_FALLOS: ${COLA_FALLOS:-analytics.uso.fallos}
+      ROUTING_KEY_USO: ${ROUTING_KEY_USO:-uso.registrado}
+      PREFETCH: ${PREFETCH:-20}
+      MAX_REINTENTOS: ${MAX_REINTENTOS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      analytics-uso-migrar: { condition: service_completed_successfully }

@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from app.models import OutboxEvento
 from events.publicador import publicar
+from events.uso import EVENTO_USO, publicar_uso
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,10 @@ def despachar_pendientes() -> dict[str, int]:
                 continue
 
             try:
-                publicar(evento)
+                if evento.evento == EVENTO_USO:
+                    publicar_uso(evento)
+                else:
+                    publicar(evento)
             except (pika.exceptions.AMQPError, OSError) as exc:
                 evento.intentos += 1
                 espera = min(
