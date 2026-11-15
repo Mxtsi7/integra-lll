@@ -133,6 +133,7 @@ export interface HomeScreenPropsContainer {
   navigation?: {
     navigate: (pantalla: any, params?: any) => void;
     goBack?: () => void;
+    addListener?: (evento: any, callback: any) => (() => void) | void;
   };
   route?: any;
   estadoInicial?: EstadoCarga<Suscripcion[]>;
@@ -181,7 +182,15 @@ export default function HomeScreen({
   useEffect(() => {
     if (estadoInicial) return;
     void cargarDatos();
-  }, [estadoInicial, cargarDatos]);
+
+    const unsubscribe = navigation?.addListener?.('focus', () => {
+      void cargarDatos();
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, [estadoInicial, cargarDatos, navigation]);
 
   const manejarReintento = async () => {
     setEstado({ tipo: 'cargando' });

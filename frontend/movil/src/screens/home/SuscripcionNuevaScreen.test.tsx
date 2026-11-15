@@ -2,7 +2,12 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { CatalogosSuscripciones, OpcionesSuscripcion } from '@ojoalgasto/shared';
+import {
+  ErrorDeApi,
+  type CatalogosSuscripciones,
+  type OpcionesSuscripcion,
+  type Suscripcion,
+} from '@ojoalgasto/shared';
 import SuscripcionNuevaScreen, {
   NuevaSuscripcionFormView,
   OPCIONES_POR_DEFECTO,
@@ -484,6 +489,201 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
 
       fireEvent.click(screen.getByTestId('go-back'));
       expect(goBackMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Conexión con crearSuscripcion y navegación al resultado (SE-23)', () => {
+    function llenarFormularioValido({
+      nombre = 'Disney Plus',
+      monto = '7990',
+      fecha = '2026-11-25',
+    } = {}) {
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: nombre },
+      });
+      fireEvent.change(screen.getByTestId('input-monto'), {
+        target: { value: monto },
+      });
+      fireEvent.change(screen.getByTestId('input-fecha-cobro'), {
+        target: { value: fecha },
+      });
+    }
+
+    it('Criterio 1: Éxito agrega exactamente una suscripción y navega al detalle con su ID', async () => {
+      const suscripcionCreada: Suscripcion = {
+        id: 'sub-nueva-99',
+        nombre: 'Disney Plus',
+        monto: 7990,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-11-25',
+        categoria: 'streaming',
+        estado: 'activo',
+      };
+
+      const onCrearSuscripcion = vi.fn().mockResolvedValue(suscripcionCreada);
+      const onExito = vi.fn();
+      const replaceMock = vi.fn();
+      const navigateMock = vi.fn();
+
+      render(
+        <SuscripcionNuevaScreen
+          navigation={{ replace: replaceMock, navigate: navigateMock } as any}
+          onCrearSuscripcion={onCrearSuscripcion}
+          onExito={onExito}
+        />,
+      );
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      // Se envió exactamente una petición POST con los datos correctos
+      expect(onCrearSuscripcion).toHaveBeenCalledTimes(1);
+      expect(onCrearSuscripcion).toHaveBeenCalledWith({
+        nombre: 'Disney Plus',
+        monto: 7990,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        categoria: 'streaming',
+        fecha_proximo_cobro: '2026-11-25',
+        estado: 'activo',
+      });
+
+      // Notificó callback de éxito
+      expect(onExito).toHaveBeenCalledWith(suscripcionCreada);
+
+      // Navegó al resultado (detalle con el ID creado)
+      expect(replaceMock).toHaveBeenCalledWith('SuscripcionDetalle', {
+        id: 'sub-nueva-99',
+      });
+    });
+
+    it('Bloqueo de doble envío: múltiples pulsaciones solo envían exactamente un POST', async () => {
+      let resolverPeticion: (sub: Suscripcion) => void = () => {};
+      const promesaPendiente = new Promise<Suscripcion>((resolve) => {
+        resolverPeticion = resolve;
+      });
+      const onCrearSuscripcion = vi.fn().mockReturnValue(promesaPendiente);
+
+      render(
+        <SuscripcionNuevaScreen
+          navigation={{ replace: vi.fn() } as any}
+          onCrearSuscripcion={onCrearSuscripcion}
+        />,
+      );
+
+      llenarFormularioValido();
+
+      // Primer clic dispara la petición
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      expect(onCrearSuscripcion).toHaveBeenCalledTimes(1);
+
+      // Intentar enviar repetidas veces mientras está en vuelo
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      // NO se enviaron más peticiones (bloqueo antirrebote estricto)
+      expect(onCrearSuscripcion).toHaveBeenCalledTimes(1);
+
+      // Resolver la petición
+      await act(async () => {
+        resolverPeticion({
+          id: 'sub-1',
+          nombre: 'Disney Plus',
+          monto: 7990,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-11-25',
+          categoria: 'streaming',
+          estado: 'activo',
+        });
+      });
+    });
+
+    it('Criterio 2: Fallo con errores 400 del servidor conserva formulario y muestra error por campo', async () => {
+      const errorApi = new ErrorDeApi('Datos inválidos', 400, {
+        nombre: ['Ya existe una suscripción registrada con este nombre.'],
+      });
+      const onCrearSuscripcion = vi.fn().mockRejectedValue(errorApi);
+      const replaceMock = vi.fn();
+
+      render(
+        <SuscripcionNuevaScreen
+          navigation={{ replace: replaceMock } as any}
+          onCrearSuscripcion={onCrearSuscripcion}
+        />,
+      );
+
+      llenarFormularioValido({ nombre: 'Netflix Duplicado' });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      expect(onCrearSuscripcion).toHaveBeenCalledTimes(1);
+
+      // No navega al resultado
+      expect(replaceMock).not.toHaveBeenCalled();
+
+      // Muestra error devuelto por la API en el campo correspondiente
+      expect(screen.getByTestId('error-nombre').textContent).toBe(
+        'Ya existe una suscripción registrada con este nombre.',
+      );
+
+      // Conserva los datos tipeados (no se borran ni se inserta registro ficticio)
+      expect(screen.getByTestId('input-nombre')).toHaveProperty(
+        'value',
+        'Netflix Duplicado',
+      );
+      expect(screen.getByTestId('input-monto')).toHaveProperty('value', '7990');
+      expect(screen.getByTestId('input-fecha-cobro')).toHaveProperty(
+        'value',
+        '2026-11-25',
+      );
+    });
+
+    it('Criterio 2: Fallo de red o 500 muestra error general, conserva datos y no inserta registro ficticio', async () => {
+      const onCrearSuscripcion = vi
+        .fn()
+        .mockRejectedValue(new TypeError('Failed to fetch'));
+      const replaceMock = vi.fn();
+
+      render(
+        <SuscripcionNuevaScreen
+          navigation={{ replace: replaceMock } as any}
+          onCrearSuscripcion={onCrearSuscripcion}
+        />,
+      );
+
+      llenarFormularioValido();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      expect(onCrearSuscripcion).toHaveBeenCalledTimes(1);
+      expect(replaceMock).not.toHaveBeenCalled();
+
+      // Muestra alerta general
+      expect(screen.getByTestId('error-general').textContent).toContain(
+        'No pudimos conectar con el servidor',
+      );
+
+      // Los datos siguen disponibles para no perder lo escrito
+      expect(screen.getByTestId('input-nombre')).toHaveProperty(
+        'value',
+        'Disney Plus',
+      );
+      expect(screen.getByTestId('input-monto')).toHaveProperty('value', '7990');
     });
   });
 });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import HomeScreen, { HomeView } from './HomeScreen';
 import type { Suscripcion, Usuario } from '@ojoalgasto/shared';
 
@@ -429,6 +429,55 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         fireEvent.click(btnCta);
 
         expect(navigateMock).toHaveBeenCalledWith('SuscripcionNueva');
+      });
+    });
+
+    describe('Invalidación y actualización de listado ante foco (SE-23)', () => {
+      it('invalida y recarga la lista cuando la pantalla recupera el foco', async () => {
+        let focusCallback: (() => void) | undefined;
+        const addListenerMock = vi.fn().mockImplementation((event, cb) => {
+          if (event === 'focus') {
+            focusCallback = cb;
+          }
+          return () => {};
+        });
+
+        const suscripcionNueva: Suscripcion = {
+          id: 'sub-nueva',
+          nombre: 'HBO Max',
+          monto: 5990,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-12-10',
+          categoria: 'streaming',
+          estado: 'activo',
+        };
+
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockResolvedValueOnce(MOCK_SUSCRIPCIONES)
+          .mockResolvedValueOnce([...MOCK_SUSCRIPCIONES, suscripcionNueva]);
+
+        render(
+          <HomeScreen
+            navigation={{ addListener: addListenerMock } as any}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        // Carga inicial
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(screen.queryByText('HBO Max')).toBeNull();
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(1);
+
+        // Simular evento de foco (por ejemplo, al volver de crear una nueva suscripción)
+        await act(async () => {
+          focusCallback?.();
+        });
+
+        // La lista se actualizó y ahora incluye la nueva suscripción
+        expect(await screen.findByText('HBO Max')).toBeTruthy();
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(2);
       });
     });
   });

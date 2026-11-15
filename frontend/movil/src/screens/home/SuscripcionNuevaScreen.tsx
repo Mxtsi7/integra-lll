@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import {
+  ErrorDeApi,
+  crearSuscripcion,
   erroresDesdeServidor,
   parsearMonto,
   validarSuscripcion,
@@ -19,6 +21,7 @@ import {
   type Frecuencia,
   type Moneda,
   type OpcionesSuscripcion,
+  type Suscripcion,
   type SuscripcionPayload,
 } from '@ojoalgasto/shared';
 import type { HomeScreenProps } from '../../navigation/types';
@@ -595,19 +598,79 @@ export function NuevaSuscripcionFormView({
 
 export interface SuscripcionNuevaScreenProps {
   navigation?: HomeScreenProps<'SuscripcionNueva'>['navigation'];
+  onCrearSuscripcion?: (datos: SuscripcionPayload) => Promise<Suscripcion>;
+  catalogos?: CatalogosSuscripciones | null;
+  onExito?: (suscripcion: Suscripcion) => void;
+  onCambiosSinGuardar?: (hayCambios: boolean) => void;
 }
 
 export default function SuscripcionNuevaScreen({
   navigation,
+  onCrearSuscripcion = crearSuscripcion,
+  catalogos,
+  onExito,
+  onCambiosSinGuardar,
 }: SuscripcionNuevaScreenProps) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
+  const [erroresCampos, setErroresCampos] = useState<Record<string, string[]> | null>(null);
+  const guardandoRef = useRef(false);
+
+  const handleSubmit = async (datos: SuscripcionPayload): Promise<boolean> => {
+    // Bloqueo de doble envío concurrente (antirrebote sincrónico y reactivo)
+    if (guardandoRef.current || isSaving) {
+      return false;
+    }
+    guardandoRef.current = true;
+    setIsSaving(true);
+    setErrorGeneral(null);
+    setErroresCampos(null);
+
+    try {
+      const creada = await onCrearSuscripcion(datos);
+      onExito?.(creada);
+
+      // Navegar al resultado (detalle de la nueva suscripción)
+      if (navigation?.replace) {
+        navigation.replace('SuscripcionDetalle', { id: creada.id });
+      } else if (navigation?.navigate) {
+        navigation.navigate('SuscripcionDetalle', { id: creada.id });
+      }
+
+      return true;
+    } catch (err: unknown) {
+      if (err instanceof ErrorDeApi && err.campos) {
+        setErroresCampos(err.campos);
+      } else if (err instanceof ErrorDeApi && err.message) {
+        setErrorGeneral(err.message);
+      } else if (err instanceof TypeError) {
+        setErrorGeneral(
+          'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
+        );
+      } else {
+        setErrorGeneral('No pudimos crear la suscripción. Intenta de nuevo.');
+      }
+      return false;
+    } finally {
+      guardandoRef.current = false;
+      setIsSaving(false);
+    }
+  };
+
   return (
     <NuevaSuscripcionFormView
       testID="screen-suscripcion-nueva"
+      catalogos={catalogos}
+      onSubmit={handleSubmit}
       onCancel={() => {
         if (navigation?.goBack) {
           navigation.goBack();
         }
       }}
+      isSaving={isSaving}
+      errorGeneral={errorGeneral}
+      erroresCampos={erroresCampos}
+      onCambiosSinGuardar={onCambiosSinGuardar}
     />
   );
 }
