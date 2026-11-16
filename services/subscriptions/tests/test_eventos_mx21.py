@@ -1,5 +1,6 @@
 """Pruebas del productor de eventos y del outbox MX-21 v2."""
 
+import datetime as dt
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -16,7 +17,7 @@ from rest_framework.test import APIClient
 
 from app.models import OutboxEvento, Subscription
 from events.despacho import despachar_pendientes
-from events.outbox import registrar_creada
+from events.outbox import registrar_creada, registrar_estado_cambiado
 from events.publicador import crear_payload, publicar
 
 
@@ -179,6 +180,43 @@ def test_reintentos_reutilizan_id_y_marcan_publicado_solo_con_ack(organizacion):
     evento.refresh_from_db()
     assert evento.publicado_en is not None
     assert evento.correlation_id == correlation_id
+
+
+@pytest.mark.django_db
+def test_publicador_recorta_microsegundos_del_instante(organizacion):
+    """S3-VI-08: el consumidor rechaza más de 3 decimales antes de la Z."""
+    evento = registrar_creada(crear_suscripcion(organizacion))
+    evento.ocurrido_en = dt.datetime(
+        2026, 11, 9, 12, 2, 1, 123456, tzinfo=dt.timezone.utc
+    )
+    evento.save(update_fields=("ocurrido_en",))
+
+    payload = crear_payload(evento)
+
+    assert payload["ocurrido_en"] == "2026-11-09T12:02:01.123Z"
+    _validar_contrato(evento)
+
+
+@pytest.mark.django_db
+def test_estado_cambiado_en_el_outbox_publica_instante_en_milisegundos(
+    organizacion,
+):
+    """S3-VI-08: el hecho de estado también sale por ``crear_payload``."""
+    suscripcion = crear_suscripcion(organizacion)
+    evento = registrar_estado_cambiado(
+        suscripcion,
+        estado_anterior=Subscription.Estado.PRUEBA,
+        evento_estado=Subscription.EventoEstado.FIN_PRUEBA,
+    )
+    evento.ocurrido_en = dt.datetime(
+        2026, 11, 9, 12, 2, 1, 987654, tzinfo=dt.timezone.utc
+    )
+    evento.save(update_fields=("ocurrido_en",))
+
+    payload = _validar_contrato(evento)
+
+    assert payload["evento"] == "suscripcion.estado_cambiado"
+    assert payload["ocurrido_en"] == "2026-11-09T12:02:01.987Z"
 
 
 @pytest.mark.django_db

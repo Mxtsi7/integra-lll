@@ -1,26 +1,26 @@
 """Publicador RabbitMQ para el contrato de eventos MX-21 v2."""
 
 import json
-from datetime import timezone as datetime_timezone
 
 import pika
 from django.conf import settings
 
 from events.contrato import EXCHANGE, routing_key
+from events.tiempo import iso_utc_milisegundos
 from events.topologia import declarar
 
 
 def crear_payload(evento) -> dict:
-    """Convierte un registro de outbox al sobre común de MX-21."""
+    """Convierte un registro de outbox al sobre común de MX-21.
+
+    ``ocurrido_en`` usa la misma serialización de milisegundos que el resto
+    del catálogo: el contrato interno rechaza más de tres decimales.
+    """
     return {
         "evento": evento.evento,
         "version": evento.version,
         "id": str(evento.id),
-        "ocurrido_en": (
-            evento.ocurrido_en.astimezone(datetime_timezone.utc)
-            .isoformat()
-            .replace("+00:00", "Z")
-        ),
+        "ocurrido_en": iso_utc_milisegundos(evento.ocurrido_en),
         "correlation_id": str(evento.correlation_id),
         "organizacion_id": str(evento.organizacion_id),
         "datos": evento.datos,

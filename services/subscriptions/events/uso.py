@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from datetime import timezone as datetime_timezone
 from typing import Any
 
 import pika
@@ -34,6 +33,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from app.models import OutboxEvento
+from events.tiempo import iso_utc_milisegundos
 
 EXCHANGE_USO = "uso.eventos"
 EXCHANGE_DLX_USO = "uso.eventos.dlx"
@@ -64,18 +64,13 @@ def _correlation_id(valor: Any) -> uuid.UUID:
 
 
 def _iso_utc(valor) -> str:
-    """Serializa un instante en UTC con precisión de milisegundos.
+    """Alias histórico de :func:`events.tiempo.iso_utc_milisegundos`.
 
-    El contrato interno solo admite 1–3 dígitos fraccionarios antes de ``Z``
-    (``validacion.ts``). Python emite 6 cuando el ``datetime`` trae
-    microsegundos, así que se recorta aquí: el sobre no puede llevar una
-    precisión que el consumidor rechaza.
+    Se conserva para no romper a quien importe este helper desde ``uso``; la
+    implementación vive en un módulo compartido para que el publicador MX-21
+    publique con la misma precisión.
     """
-    return (
-        valor.astimezone(datetime_timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
+    return iso_utc_milisegundos(valor)
 
 
 def datos_uso(
