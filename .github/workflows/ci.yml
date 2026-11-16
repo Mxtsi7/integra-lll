@@ -85,6 +85,23 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
+      # El contrato de `uso.registrado` se prueba de verdad en el borde:
+      # Python construye el sobre y el validador TypeScript real lo consume.
+      # Sin Node, esa prueba falla a propósito (no se omite), así que acá se
+      # prepara el consumidor con sus dependencias.
+      - name: Node.js para el contrato cruzado Python → TypeScript
+        if: matrix.servicio == 'subscriptions'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/analytics-uso/package-lock.json
+
+      - name: Dependencias del consumidor TypeScript
+        if: matrix.servicio == 'subscriptions'
+        working-directory: ${{ github.workspace }}/services/analytics-uso
+        run: npm ci
+
       - name: Comprobar la configuración de Django
         run: python manage.py check
 
@@ -119,6 +136,94 @@ jobs:
 
       - name: Pruebas
         run: pytest shared -v
+
+  # ── Consumidor TypeScript de uso: integración real ──────────────────
+  # Las pruebas de `services/analytics-uso/tests/integracion` no usan dobles:
+  # publican por RabbitMQ, consumen con el worker real y verifican las tablas
+  # `uso_*` en PostgreSQL. Con `INTEGRACION_USO=1` dejan de omitirse; acá se
+  # levantan ambos servicios para que la barrera de borrado y el evento tardío
+  # se ejerzan de verdad en cada PR.
+  analytics-uso:
+    name: analytics-uso · integración PostgreSQL + RabbitMQ
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: suscripciones
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/suscripciones
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/analytics-uso/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: services/analytics-uso
+        run: npm ci
+
+      - name: TypeScript
+        working-directory: services/analytics-uso
+        run: npm run typecheck
+
+      - name: Pruebas unitarias
+        working-directory: services/analytics-uso
+        run: npm test
+
+      - name: Integración real (sin omisiones)
+        working-directory: services/analytics-uso
+        env:
+          INTEGRACION_USO: "1"
+          EXIGIR_INTEGRACION_USO: "1"
+        run: npm run test:integracion
+
+      # El mismo trabajo comprueba el otro lado del contrato: el sobre que
+      # arma Python tiene que pasar por este validador TypeScript. Así una
+      # regresión de precisión en `ocurrido_en` rompe un solo job, no dos
+      # suites que podrían pasar por separado.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: "**/requirements.txt"
+
+      - name: Dependencias Python de subscriptions
+        run: pip install -r services/subscriptions/requirements.txt
+
+      - name: Contrato cruzado Python → TypeScript
+        working-directory: services/subscriptions
+        env:
+          DEBUG: "True"
+          SECRET_KEY: clave-solo-para-ci
+          ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+          ESQUEMA_BD: subscriptions
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest tests/test_uso_contrato_cruzado.py -v
 
   # ── Frontend: el workspace completo ────────────────────────────────
   frontend:
