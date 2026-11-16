@@ -66,6 +66,20 @@ beforeEach(() => {
   vi.stubGlobal(
     'fetch',
     vi.fn().mockImplementation(async (url: string) => {
+      if (typeof url === 'string' && url.includes('/catalogos/suscripciones/')) {
+        return new Response(
+          JSON.stringify({
+            monedas: [{ codigo: 'CLP', nombre: 'Peso Chileno', activo: true, orden: 1 }],
+            categorias: [{ codigo: 'streaming', nombre: 'Streaming', activo: true, orden: 1 }],
+            frecuencias: [{ codigo: 'mensual', nombre: 'Mensual' }],
+            predeterminados: { moneda: 'CLP', categoria: 'streaming', frecuencia: 'mensual' },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
       if (typeof url === 'string' && url.includes('/suscripciones/')) {
         const idMatch = url.match(/\/suscripciones\/([^/?]+)\/?(\?.*)?$/);
         if (idMatch && idMatch[1] && idMatch[1] !== '') {

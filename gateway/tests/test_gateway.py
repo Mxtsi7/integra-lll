@@ -432,3 +432,67 @@ def test_las_rutas_nuevas_no_son_publicas():
     assert "/api/export/cobros/" not in settings.RUTAS_PUBLICAS
 
 
+
+
+# ── S3-FE-14: la ruta de candidatos de connectors ───────────────────
+
+
+def test_candidatos_llegan_a_connectors_con_sus_filtros(upstream):
+    """El gateway enruta por prefijo: sin esta entrada en RUTAS es un 404.
+
+    Y la query tiene que viajar intacta: la vista previa pide los de una
+    importación (S3-CH-06) o de un origen (S3-CH-04), y un filtro que se
+    pierde acá devuelve la lista entera sin que nadie se entere.
+    """
+    candidato = str(uuid.uuid4())
+
+    assert cliente.get("/api/candidatos/", **con_token(token())).status_code == 200
+    assert upstream.llamadas[-1]["url"] == (
+        settings.SERVICIOS["connectors"] + "/api/candidatos/"
+    )
+
+    query = "?origen=csv&estado=propuesto"
+    assert cliente.get("/api/candidatos/" + query, **con_token(token())).status_code == 200
+    assert upstream.llamadas[-1]["url"] == (
+        settings.SERVICIOS["connectors"] + "/api/candidatos/" + query
+    )
+
+    assert cliente.get(
+        f"/api/candidatos/{candidato}/", **con_token(token())
+    ).status_code == 200
+    assert upstream.llamadas[-1]["url"] == (
+        settings.SERVICIOS["connectors"] + f"/api/candidatos/{candidato}/"
+    )
+
+
+def test_candidatos_sin_sesion_es_401_y_no_reenvia(upstream):
+    assert cliente.get("/api/candidatos/").status_code == 401
+    assert not upstream.llamadas
+
+
+def test_rechazar_un_candidato_llega_a_connectors_como_post(upstream):
+    """S3-FE-16 cuelga de la misma entrada de `RUTAS`, pero el método importa.
+
+    Es la única ruta de candidatos que escribe. Si el gateway la reenviara
+    como GET, el servicio contestaría 405 y el rechazo se perdería en
+    silencio desde el punto de vista del frontend.
+    """
+    candidato = str(uuid.uuid4())
+
+    respuesta = cliente.post(
+        f"/api/candidatos/{candidato}/rechazar/",
+        data="{}",
+        content_type="application/json",
+        **con_token(token()),
+    )
+
+    assert respuesta.status_code == 200
+    llamada = upstream.llamadas[-1]
+    assert llamada["metodo"] == "POST"
+    assert llamada["url"] == (
+        settings.SERVICIOS["connectors"] + f"/api/candidatos/{candidato}/rechazar/"
+    )
+
+
+def test_candidatos_no_es_una_ruta_publica():
+    assert "/api/candidatos/" not in settings.RUTAS_PUBLICAS

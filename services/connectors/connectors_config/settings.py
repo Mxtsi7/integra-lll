@@ -138,6 +138,34 @@ IMPORTACION_CUOTA_DIARIA = env.int("IMPORTACION_CUOTA_DIARIA", default=20)
 # los vencidos; la importación y sus candidatos quedan.
 IMPORTACION_DIAS_RETENCION = env.int("IMPORTACION_DIAS_RETENCION", default=7)
 
+# ── Procesamiento de la importación (S3-FE-10) ────────────────────────
+# Lo que una cartola no dice y hay que decidir antes de leerla.
+#
+# Moneda cuando el archivo no trae columna de moneda. Sin esto, cada fila de
+# una cartola chilena normal se rechazaría con `moneda_no_indicada`: el
+# parser no adivina, y tiene razón en no adivinar.
+IMPORTACION_MONEDA_POR_DEFECTO = env("IMPORTACION_MONEDA_POR_DEFECTO", default="CLP")
+# Orden de día y mes: "dmy", "mdy", o vacío para deducirlo del archivo.
+# Vacío por omisión A PROPÓSITO: una cartola real casi siempre trae algún día
+# mayor que 12 y eso desambigua sola; declarar un orden que el archivo no usa
+# correría todas las fechas un mes sin que nadie se entere. Lo que no se puede
+# deducir se rechaza fila por fila con `fecha_ambigua`.
+IMPORTACION_ORDEN_FECHA = env("IMPORTACION_ORDEN_FECHA", default="")
+
+# ── El rescate de importaciones (S3-FE-10) ────────────────────────────
+# El broker es Redis y no es durable: una tarea puede perderse con el worker.
+# `rescatar_importaciones_estancadas` reencola lo que quedó `pendiente` y
+# cierra lo que quedó `procesando`, para que ningún estado se quede sin final.
+#
+# 5 minutos: suficiente para no competir con la tarea que ya está en vuelo
+# —procesar un CSV de 5 MB no toma eso— y poco para que la persona que mira
+# la barra no se quede esperando.
+IMPORTACION_REENCOLAR_TRAS_MINUTOS = env.int("IMPORTACION_REENCOLAR_TRAS_MINUTOS", default=5)
+# 30 minutos: holgado a propósito. Marcar `fallida` es irreversible —es un
+# estado terminal— así que el límite tiene que estar muy por encima de lo que
+# tarda un archivo grande, o se mataría trabajo que iba a terminar bien.
+IMPORTACION_ESTANCADA_TRAS_MINUTOS = env.int("IMPORTACION_ESTANCADA_TRAS_MINUTOS", default=30)
+
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USE_I18N = True
@@ -169,5 +197,12 @@ CELERY_BEAT_SCHEDULE = {
     "latido-de-connectors": {
         "task": "connectors.tasks.latido",
         "schedule": env.float("CONECTORES_LATIDO_SEGUNDOS", default=60.0),
+    },
+    # La red bajo el trapecio de S3-FE-10: ver el docstring de
+    # `connectors/tasks.py`. Cada 5 minutos, igual que la espera por omisión
+    # para reencolar: no sirve mirar más seguido que el plazo que se controla.
+    "rescate-de-importaciones": {
+        "task": "connectors.tasks.rescatar_importaciones_estancadas",
+        "schedule": env.float("IMPORTACION_RESCATE_SEGUNDOS", default=300.0),
     },
 }
