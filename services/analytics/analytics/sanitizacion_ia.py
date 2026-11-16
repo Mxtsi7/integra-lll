@@ -76,6 +76,7 @@ _PATRONES_INYECCION = (
 )
 
 _PATRON_PERIODO = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
+_PATRON_FECHA = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$")
 _PATRON_MONEDA = re.compile(r"^[A-Z]{3}$")
 _PATRON_CODIGO = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # ``construir_contexto()`` serializa los importes como texto decimal
@@ -130,15 +131,18 @@ MARCADOR_IDENTIFICADOR = "[identificador omitido]"
 # ── esquema ──────────────────────────────────────────────────────────
 _TIPO_SERVICIO = "servicio"
 _TIPO_PERIODO = "periodo"
+_TIPO_FECHA = "fecha"
 _TIPO_ENTERO = "entero"
 _TIPO_MONETARIO = "monetario"
 _TIPO_MONEDA = "moneda"
 _TIPO_CODIGO = "codigo"
 _TIPO_TEXTO = "texto"
+_TIPO_BOOL = "bool"
 _TIPO_MAPA = "mapa"
 _TIPO_LISTA = "lista"
 
 ESQUEMA_CAMPOS: dict[str, str] = {
+    # legado
     "uso_mensual": _TIPO_LISTA,
     "recomendaciones": _TIPO_LISTA,
     "servicio": _TIPO_SERVICIO,
@@ -148,6 +152,31 @@ ESQUEMA_CAMPOS: dict[str, str] = {
     "ahorro_estimado": _TIPO_MONETARIO,
     "moneda": _TIPO_MONEDA,
     "regla": _TIPO_CODIGO,
+    # S3-VI-19..22
+    "suscripciones_activas": _TIPO_LISTA,
+    "gastos_mensuales_por_moneda": _TIPO_LISTA,
+    "uso_recolectores": _TIPO_MAPA,
+    "consulta_analytics_legada_disponible": _TIPO_BOOL,
+    "suscripciones_activas_disponibles": _TIPO_BOOL,
+    "motivo_suscripciones_no_disponibles": _TIPO_CODIGO,
+    "nombre": _TIPO_SERVICIO,
+    "estado": _TIPO_CODIGO,
+    "monto_mensual": _TIPO_MONETARIO,
+    "total_mensual_texto": _TIPO_MONETARIO,
+    "cantidad_suscripciones_activas": _TIPO_ENTERO,
+    "disponible": _TIPO_BOOL,
+    "motivo_no_disponible": _TIPO_CODIGO,
+    "periodicidad": _TIPO_CODIGO,
+    "registros": _TIPO_LISTA,
+    "nota_semantica": _TIPO_TEXTO,
+    "duracion_positiva_ms": _TIPO_ENTERO,
+    "unidad_duracion": _TIPO_CODIGO,
+    "minutos_enteros_proyectados": _TIPO_ENTERO,
+    "unidad_minutos_enteros": _TIPO_CODIGO,
+    "cobertura": _TIPO_CODIGO,
+    "certeza": _TIPO_CODIGO,
+    "clasificacion_uso": _TIPO_CODIGO,
+    "fecha_ultima_actividad_positiva": _TIPO_FECHA,
 }
 
 # Claves que jamás deben copiarse aunque una futura ampliación las incluya.
@@ -159,7 +188,6 @@ CAMPOS_PROHIBIDOS = frozenset(
         "suscripcion_id",
         "evento_origen_id",
         "correlation_id",
-        "nombre",
         "correo",
         "email",
         "rut",
@@ -334,6 +362,18 @@ def _codigo_seguro(valor: Any) -> Any:
     return codigo if _PATRON_CODIGO.fullmatch(codigo) else _DESCARTAR
 
 
+def _fecha_segura(valor: Any) -> Any:
+    if isinstance(valor, str) and _PATRON_FECHA.fullmatch(valor.strip()):
+        return valor.strip()
+    return _DESCARTAR
+
+
+def _bool_seguro(valor: Any) -> Any:
+    if isinstance(valor, bool):
+        return valor
+    return _DESCARTAR
+
+
 def _servicio_seguro(valor: Any, contexto: _Contexto) -> Any:
     if not isinstance(valor, str) or not valor.strip():
         return _DESCARTAR
@@ -345,6 +385,8 @@ def _sanitizar_campo(clave: str, tipo: str, valor: Any, contexto: _Contexto) -> 
         return _servicio_seguro(valor, contexto)
     if tipo == _TIPO_PERIODO:
         return _periodo_seguro(valor)
+    if tipo == _TIPO_FECHA:
+        return _fecha_segura(valor)
     if tipo == _TIPO_ENTERO:
         return _entero_seguro(valor)
     if tipo == _TIPO_MONETARIO:
@@ -355,6 +397,8 @@ def _sanitizar_campo(clave: str, tipo: str, valor: Any, contexto: _Contexto) -> 
         return _codigo_seguro(valor)
     if tipo == _TIPO_TEXTO:
         return sanitizar_texto(valor) if isinstance(valor, str) else _DESCARTAR
+    if tipo == _TIPO_BOOL:
+        return _bool_seguro(valor)
     return _DESCARTAR
 
 
