@@ -308,9 +308,33 @@ def _decodificar_cabecera(valor: str) -> str:
         return valor
 
 
+def _es_adjunto(parte: dict) -> bool:
+    """Una parte que no es el cuerpo del mensaje: tiene nombre de archivo, es
+    un correo entero adjunto (`message/rfc822`) o se declara
+    `Content-Disposition: attachment`."""
+    if parte.get("filename"):
+        return True
+    if str(parte.get("mimeType") or "").lower() == "message/rfc822":
+        return True
+    for cabecera in parte.get("headers") or []:
+        if (
+            isinstance(cabecera, dict)
+            and str(cabecera.get("name") or "").lower() == "content-disposition"
+            and str(cabecera.get("value") or "").strip().lower().startswith("attachment")
+        ):
+            return True
+    return False
+
+
 def _texto(carga: dict) -> str:
     """El texto del mensaje: las partes `text/plain`, o el HTML pasado a texto
-    si no hay ninguna. Los adjuntos (partes con nombre de archivo) no se leen.
+    si no hay ninguna. Los adjuntos no se leen, **ni lo que traen adentro**.
+
+    Un adjunto se descarta ANTES de mirar sus hijas. Antes se encolaban las
+    hijas primero y después se descartaba la parte, así que un `.eml`
+    adjunto (`message/rfc822`) aportaba su `text/plain` al cuerpo: el total de
+    OTRO correo terminaba en este, y su texto plano podía desplazar el HTML
+    propio. Lo encontró la revisión de #172.
     """
     planos: list[str] = []
     htmls: list[str] = []
@@ -321,11 +345,11 @@ def _texto(carga: dict) -> str:
         vistas += 1
         if not isinstance(parte, dict):
             continue
+        if profundidad > 0 and _es_adjunto(parte):
+            continue
         hijas = parte.get("parts")
         if isinstance(hijas, list) and profundidad < _PROFUNDIDAD_MAXIMA:
             pendientes.extend((hija, profundidad + 1) for hija in hijas)
-        if parte.get("filename"):
-            continue
         tipo = str(parte.get("mimeType") or "").lower()
         if tipo not in ("text/plain", "text/html"):
             continue
