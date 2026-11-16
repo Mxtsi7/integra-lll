@@ -67,9 +67,21 @@ reautorice una cuenta que él mismo desconectó sería un error.
 - **Se piden solo los campos que se usan** (`fields`, la respuesta parcial de
   Google).
 - **Del mensaje se conserva el texto**: las partes `text/plain`, o el HTML
-  pasado a texto si no hay ninguna. Los adjuntos no se leen, el texto se corta
+  pasado a texto si no hay ninguna. Los adjuntos no se leen **ni lo que traen
+  adentro** (ver abajo), el texto se corta
   en 20.000 caracteres (con `texto_truncado` avisándolo) y el cuerpo **no sale
   en el `repr`**, para que un log o una traza no se lleven el correo.
+
+### Un correo adjunto no aporta su texto
+
+Una parte es adjunto si tiene nombre de archivo, si es un correo entero
+(`message/rfc822`, un `.eml` adjunto) o si se declara
+`Content-Disposition: attachment`. Se descarta **antes** de mirar sus hijas.
+
+Antes se encolaban las hijas primero y después se descartaba la parte, así
+que un `.eml` adjunto aportaba su `text/plain` al cuerpo: el total de OTRO
+correo terminaba en este, y su texto plano podía desplazar el HTML propio.
+Lo encontró la revisión de #172.
 
 ## Filtros
 
@@ -142,7 +154,7 @@ texto no, porque esta salida termina en una PR o en una captura.
 | El lector, lo propio de Google | `services/connectors/connectors/lector_gmail.py` |
 | Lo común con Outlook: la cuenta, los errores, el filtro, el HTML | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_gmail.py` |
-| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (82) |
+| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (88) |
 
 ## Cómo se comprobaron las pruebas
 
@@ -151,12 +163,12 @@ Los dos 401 de las pruebas son **copia literal** de lo que respondió
 respuestas 200 siguen la referencia publicada de la API, y se van a
 contrastar en la corrida real.
 
-Además se rompió el código a propósito 30 veces y cada vez falló al menos una
+Además se rompió el código a propósito 35 veces y cada vez falló al menos una
 prueba. Algunos ejemplos: sacar la organización o el proveedor del filtro,
 leer una cuenta desconectada o en un estado desconocido, quitar el margen de
 vencimiento, aceptar un límite sin tope o un `True`, no validar el remitente,
 tomar un 401 por transitorio o un 404 de la lista por un mensaje borrado,
-preferir el HTML, leer adjuntos, ignorar el juego de caracteres, dejar el
+preferir el HTML, leer adjuntos o lo que traen adentro, ignorar el juego de caracteres, dejar el
 cuerpo en el `repr` o aceptar otro mensaje del pedido.
 
 Al principio tres mutaciones no fallaban: dos revisiones de estado se tapaban

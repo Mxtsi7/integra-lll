@@ -62,6 +62,7 @@ from shared.cifrado import SECRETO_ILEGIBLE
 from . import proveedores
 from .lectura_correo import (
     AutorizacionRechazada,
+    huella_de_token,
     CuentaNoDisponible,
     ErrorDelProveedor,
     ErrorTransitorio,
@@ -80,22 +81,33 @@ DURACION_SUPUESTA = timedelta(hours=1)
 _NOMBRES = dict(CuentaConectada.Proveedor.choices)
 
 
-def _marcar(cuenta_id, *, organizacion_id, version: int, motivo: str) -> bool:
+def _marcar(cuenta_id, *, organizacion_id, version: int | None, motivo: str, huella: str | None = None) -> bool:
     """Deja la cuenta en `requiere_reautorizacion` si sigue `conectada` y con
-    las mismas credenciales. Si el usuario reconectó mientras tanto (la
-    versión subió), no se toca: esas credenciales son otras."""
-    return bool(
-        CuentaConectada.objects.filter(
-            pk=cuenta_id,
-            organizacion_id=organizacion_id,
-            estado=CuentaConectada.Estado.CONECTADA,
-            credenciales_version=version,
-        ).update(
-            estado=CuentaConectada.Estado.REQUIERE_REAUTORIZACION,
-            detalle_del_estado=motivo[:200],
-            actualizado_en=timezone.now(),
-        )
-    )
+    LAS MISMAS credenciales que fallaron: la misma versión y, si se sabe, el
+    mismo token (`huella`).
+
+    Si el usuario reconectó mientras tanto (la versión subió) o si otro
+    worker ya refrescó el token (la huella cambió), no se toca: esas
+    credenciales son otras y nadie dijo que no sirvan. Se mira con la fila
+    tomada, porque el token está cifrado y no se puede comparar en el WHERE.
+    """
+    with transaction.atomic():
+        try:
+            cuenta = (
+                CuentaConectada.objects.select_for_update()
+                .filter(pk=cuenta_id, organizacion_id=organizacion_id, estado=CuentaConectada.Estado.CONECTADA)
+                .first()
+            )
+        except (ValidationError, ValueError, TypeError):
+            return False
+        if cuenta is None or version is None or cuenta.credenciales_version != version:
+            return False
+        if huella is not None and huella_de_token(cuenta.access_token) != huella:
+            return False
+        cuenta.estado = CuentaConectada.Estado.REQUIERE_REAUTORIZACION
+        cuenta.detalle_del_estado = motivo[:200]
+        cuenta.save(update_fields=["estado", "detalle_del_estado", "actualizado_en"])
+        return True
 
 
 def _motivo(proveedor: str, que_paso: str) -> str:
@@ -103,7 +115,9 @@ def _motivo(proveedor: str, que_paso: str) -> str:
     return f"{nombre} {que_paso}: hay que volver a conectar la cuenta."
 
 
-def token_vigente(*, organizacion_id, cuenta_id, proveedor: str, forzar: bool = False) -> None:
+def token_vigente(
+    *, organizacion_id, cuenta_id, proveedor: str, forzar: bool = False, rechazo: AutorizacionRechazada | None = None,
+) -> None:
     """Deja en la base un token de acceso que sirva, si se puede.
 
     No lanza por una cuenta que no se puede leer (ajena, desconectada, que
@@ -113,6 +127,13 @@ def token_vigente(*, organizacion_id, cuenta_id, proveedor: str, forzar: bool = 
 
     `forzar=True` refresca aunque el token no esté por vencer: es lo que se
     hace cuando el proveedor ya rechazó el token con un 401.
+
+    `rechazo` es ese 401, con las credenciales con que se pidió. Si al tomar
+    la fila las credenciales ya no son esas —el usuario reconectó, o otro
+    worker refrescó—, no se refresca ni se marca nada: el rechazo era de
+    credenciales que ya no están. Antes se refrescaba (o se marcaba) lo que
+    hubiera, y un 401 tardío de la autorización vieja podía dejar pidiendo
+    reconexión a la nueva. Lo encontró la revisión de #180.
     """
     with transaction.atomic():
         try:
@@ -124,6 +145,11 @@ def token_vigente(*, organizacion_id, cuenta_id, proveedor: str, forzar: bool = 
         except (ValidationError, ValueError, TypeError):
             cuenta = None
         if cuenta is None or cuenta.estado != CuentaConectada.Estado.CONECTADA or cuenta.necesita_reautorizacion:
+            return
+        if rechazo is not None and (
+            cuenta.credenciales_version != rechazo.credenciales_version
+            or huella_de_token(cuenta.access_token) != rechazo.huella_token
+        ):
             return
 
         vence = cuenta.token_expira_en
@@ -169,35 +195,34 @@ def leer_con_renovacion(lector, *, organizacion_id, cuenta_id, **lectura) -> Pag
     """`lector.leer_mensajes(...)` con el token renovado cuando hace falta.
 
     `lector` es el módulo `lector_gmail` o `lector_outlook`. Ver el recorrido
-    en la cabecera del módulo.
+    en la cabecera del módulo. Cada rechazo trae con qué credenciales se pidió,
+    y solo esas se refrescan o se marcan.
     """
     proveedor = lector.PROVEEDOR
     token_vigente(organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=proveedor)
-    version = _version(cuenta_id)
     try:
         return lector.leer_mensajes(organizacion_id=organizacion_id, cuenta_id=cuenta_id, **lectura)
     except AutorizacionRechazada as rechazo:
-        if rechazo.codigo == "permiso_insuficiente":
-            # Faltan permisos: refrescar entrega un token con los MISMOS
-            # permisos. Solo sirve que el usuario vuelva a autorizar.
-            _marcar(cuenta_id, organizacion_id=organizacion_id, version=version,
-                    motivo=_motivo(proveedor, "no dio los permisos necesarios para leer el correo"))
+        primero = rechazo
+    if primero.codigo == "permiso_insuficiente":
+        # Faltan permisos: refrescar entrega un token con los MISMOS
+        # permisos. Solo sirve que el usuario vuelva a autorizar.
+        if _marcar(cuenta_id, organizacion_id=organizacion_id, version=primero.credenciales_version,
+                   huella=primero.huella_token,
+                   motivo=_motivo(proveedor, "no dio los permisos necesarios para leer el correo")):
             raise _requiere(proveedor) from None
+        # Las credenciales ya cambiaron: se lee una vez más con las nuevas.
 
-    token_vigente(organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=proveedor, forzar=True)
+    else:
+        token_vigente(organizacion_id=organizacion_id, cuenta_id=cuenta_id, proveedor=proveedor, forzar=True,
+                      rechazo=primero)
     try:
         return lector.leer_mensajes(organizacion_id=organizacion_id, cuenta_id=cuenta_id, **lectura)
-    except AutorizacionRechazada:
-        _marcar(cuenta_id, organizacion_id=organizacion_id, version=version,
+    except AutorizacionRechazada as segundo:
+        _marcar(cuenta_id, organizacion_id=organizacion_id, version=segundo.credenciales_version,
+                huella=segundo.huella_token,
                 motivo=_motivo(proveedor, "rechazó el token aun recién renovado"))
         raise _requiere(proveedor) from None
-
-
-def _version(cuenta_id) -> int | None:
-    try:
-        return CuentaConectada.objects.filter(pk=cuenta_id).values_list("credenciales_version", flat=True).first()
-    except (ValidationError, ValueError, TypeError):
-        return None
 
 
 def _requiere(proveedor: str) -> CuentaNoDisponible:

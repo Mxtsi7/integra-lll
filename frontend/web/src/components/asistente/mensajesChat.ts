@@ -1,0 +1,18 @@
+/**
+ * Un mensaje de la conversación que se ve en pantalla. El historial vive solo
+ * en la vista (S3-CH-14): al salir de la página o recargarla se pierde, y el
+ * backend no lo recibe: cada pregunta se responde sola.
+ */
+export type MensajeChat =
+  | { id: number; autor: 'persona'; texto: string }
+  | {
+      id: number;
+      autor: 'asistente';
+      texto: string;
+      /**
+       * Si el asistente con IA no contestó y el texto es el resumen que calcula el
+       * backend (S3-CH-17), por qué; null si contestó el asistente. El motivo es
+       * null cuando la API no lo manda.
+       */
+      respaldo: { motivo: string | null } | null;
+    };

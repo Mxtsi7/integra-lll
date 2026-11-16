@@ -5,6 +5,7 @@ import {
   Home,
   LayoutDashboard,
   Link2,
+  MessageCircle,
   Settings,
   Sparkles,
 } from 'lucide-react';
@@ -16,6 +17,7 @@ export const DESTINOS = [
   { etiqueta: 'Panel', ruta: '/dashboard', Icono: LayoutDashboard },
   { etiqueta: 'Calendario', ruta: '/calendario', Icono: CalendarDays },
   { etiqueta: 'Consejos', ruta: '/recomendaciones', Icono: Sparkles },
+  { etiqueta: 'Asistente', ruta: '/asistente', Icono: MessageCircle },
   { etiqueta: 'Cuentas', ruta: '/cuentas', Icono: Link2 },
   { etiqueta: 'Informes', ruta: '/informes', Icono: ChartNoAxesColumn },
   { etiqueta: 'Ajustes', ruta: '/configuracion', Icono: Settings },
