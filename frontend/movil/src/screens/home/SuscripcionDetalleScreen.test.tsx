@@ -589,4 +589,167 @@ describe('Detalle Móvil de Suscripción (SE-21)', () => {
       expect(await screen.findByText('Netflix Premium 4K')).toBeTruthy();
     });
   });
+
+  describe('Confirmar retiro y ejecutar DELETE móvil (SE-26)', () => {
+    it('abre el modal de confirmación al presionar "Retirar Suscripción" con título y advertencia clara', async () => {
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      const btnEliminar = screen.getByTestId('btn-eliminar-suscripcion');
+      fireEvent.click(btnEliminar);
+
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+      expect(screen.getByTestId('titulo-confirmar-retiro')).toBeTruthy();
+      expect(screen.getByText(/¿Retirar Netflix\?/)).toBeTruthy();
+      expect(screen.getByTestId('mensaje-retiro-registro')).toBeTruthy();
+      expect(screen.getByTestId('aviso-distincion-cancelar')).toBeTruthy();
+      expect(screen.getByText(/NO cancela el cobro con el proveedor externo/)).toBeTruthy();
+      expect(screen.getByTestId('btn-cancelar-retiro')).toBeTruthy();
+      expect(screen.getByTestId('btn-confirmar-retiro')).toBeTruthy();
+    });
+
+    it('Criterio 1: Cancelar en el diálogo cierra el modal sin llamar a eliminarSuscripcion ni navegar', async () => {
+      const onEliminarSuscripcion = vi.fn();
+      const goBack = vi.fn();
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+          onEliminarSuscripcion={onEliminarSuscripcion}
+          navigation={{ goBack } as any}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      // Abrir modal
+      fireEvent.click(screen.getByTestId('btn-eliminar-suscripcion'));
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      // Cancelar modal
+      fireEvent.click(screen.getByTestId('btn-cancelar-retiro'));
+
+      expect(screen.queryByTestId('modal-confirmar-retiro')).toBeNull();
+      expect(onEliminarSuscripcion).not.toHaveBeenCalled();
+      expect(goBack).not.toHaveBeenCalled();
+      expect(screen.getByText('Netflix')).toBeTruthy();
+    });
+
+    it('Criterio 2: Confirmar retiro ejecuta eliminarSuscripcion (DELETE) y navega hacia atrás tras confirmación exitosa', async () => {
+      const onEliminarSuscripcion = vi.fn().mockResolvedValue(undefined);
+      const onRetiroExitoso = vi.fn();
+      const goBack = vi.fn();
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+          onEliminarSuscripcion={onEliminarSuscripcion}
+          onRetiroExitoso={onRetiroExitoso}
+          navigation={{ goBack } as any}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      // Abrir modal
+      fireEvent.click(screen.getByTestId('btn-eliminar-suscripcion'));
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      // Confirmar retiro
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-confirmar-retiro'));
+      });
+
+      expect(onEliminarSuscripcion).toHaveBeenCalledWith('sub-1');
+      expect(onRetiroExitoso).toHaveBeenCalledWith('sub-1');
+      expect(goBack).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('modal-confirmar-retiro')).toBeNull();
+    });
+
+    it('bloqueo de doble envío: múltiples pulsaciones mientras el DELETE está en vuelo no duplican la llamada', async () => {
+      let resolverDelete: () => void;
+      const onEliminarSuscripcion = vi.fn().mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolverDelete = resolve;
+          }),
+      );
+      const goBack = vi.fn();
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+          onEliminarSuscripcion={onEliminarSuscripcion}
+          navigation={{ goBack } as any}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      // Abrir modal
+      fireEvent.click(screen.getByTestId('btn-eliminar-suscripcion'));
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      // Pulsar confirmar
+      fireEvent.click(screen.getByTestId('btn-confirmar-retiro'));
+      // Segunda pulsación inmediata mientras está en vuelo
+      fireEvent.click(screen.getByTestId('btn-confirmar-retiro'));
+
+      expect(onEliminarSuscripcion).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId('btn-confirmar-retiro').getAttribute('aria-disabled')).toBe('true');
+      expect(screen.getByTestId('btn-cancelar-retiro').getAttribute('aria-disabled')).toBe('true');
+
+      // Completar la petición en vuelo
+      await act(async () => {
+        resolverDelete!();
+      });
+
+      expect(goBack).toHaveBeenCalledTimes(1);
+    });
+
+    it('ante error del backend (500 o red), muestra mensaje accesible en el modal, mantiene la pantalla y no navega', async () => {
+      const onEliminarSuscripcion = vi
+        .fn()
+        .mockRejectedValue(new ErrorDeApi('No se pudo eliminar por conflicto en el servidor', 500));
+      const goBack = vi.fn();
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+          onEliminarSuscripcion={onEliminarSuscripcion}
+          navigation={{ goBack } as any}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      // Abrir modal
+      fireEvent.click(screen.getByTestId('btn-eliminar-suscripcion'));
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      // Confirmar retiro (falla con 500)
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-confirmar-retiro'));
+      });
+
+      expect(await screen.findByTestId('error-retiro')).toBeTruthy();
+      expect(screen.getByText('No se pudo eliminar por conflicto en el servidor')).toBeTruthy();
+      expect(goBack).not.toHaveBeenCalled();
+      expect(screen.getByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      // Los botones se rehabilitan para reintentar o cancelar
+      expect(screen.getByTestId('btn-confirmar-retiro').getAttribute('aria-disabled')).toBeNull();
+      expect(screen.getByTestId('btn-cancelar-retiro').getAttribute('aria-disabled')).toBeNull();
+    });
+  });
 });

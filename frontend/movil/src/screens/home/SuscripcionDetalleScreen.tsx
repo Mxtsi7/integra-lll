@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import {
   costoPorHora,
+  eliminarSuscripcion,
   equivalenteMensual,
   ErrorDeApi,
   formatearHoras,
@@ -9,6 +10,7 @@ import {
   getSuscripcion,
   type Suscripcion,
 } from '@ojoalgasto/shared';
+import { ConfirmarRetiroModal } from './ConfirmarRetiroModal';
 import { Loading } from '../../components/estados/Loading';
 import { NetworkError } from '../../components/estados/NetworkError';
 import { NavButton } from '../components/NavButton';
@@ -305,6 +307,8 @@ export interface SuscripcionDetalleContainerProps {
     params?: { id?: string; suscripcion?: Suscripcion };
   };
   onCargarSuscripcion?: (id: string) => Promise<Suscripcion>;
+  onEliminarSuscripcion?: (id: string) => Promise<void>;
+  onRetiroExitoso?: (id: string) => void;
   estadoInicial?: EstadoDetalle;
   onEditar?: (suscripcion: Suscripcion) => void;
   onEliminar?: (suscripcion: Suscripcion) => void;
@@ -315,6 +319,8 @@ export default function SuscripcionDetalleScreen({
   navigation,
   route,
   onCargarSuscripcion = getSuscripcion,
+  onEliminarSuscripcion = eliminarSuscripcion,
+  onRetiroExitoso,
   estadoInicial,
   onEditar,
   onEliminar,
@@ -325,6 +331,12 @@ export default function SuscripcionDetalleScreen({
   const [estado, setEstado] = useState<EstadoDetalle>(
     estadoInicial ?? { tipo: 'cargando' }
   );
+
+  // Estados para modal de confirmación y retiro (SE-26)
+  const [mostrarModalRetiro, setMostrarModalRetiro] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [errorRetiro, setErrorRetiro] = useState<string | null>(null);
+  const eliminandoRef = useRef(false);
 
   // Contador de generación e id activo para invalidar respuestas atrasadas y proteger contra desmontaje
   const generacionRef = useRef(0);
@@ -411,15 +423,69 @@ export default function SuscripcionDetalleScreen({
     }
   };
 
+  const manejarEliminar = (sub: Suscripcion) => {
+    onEliminar?.(sub);
+    setErrorRetiro(null);
+    setMostrarModalRetiro(true);
+  };
+
+  const cerrarModalRetiro = () => {
+    if (isDeleting) return;
+    setMostrarModalRetiro(false);
+    setErrorRetiro(null);
+  };
+
+  const ejecutarRetiro = async () => {
+    if (eliminandoRef.current || isDeleting) return;
+    if (estado.tipo !== 'listo') return;
+
+    const idParaEliminar = estado.suscripcion.id;
+    eliminandoRef.current = true;
+    setIsDeleting(true);
+    setErrorRetiro(null);
+
+    try {
+      await onEliminarSuscripcion(idParaEliminar);
+      onRetiroExitoso?.(idParaEliminar);
+      setMostrarModalRetiro(false);
+      if (navigation?.goBack) {
+        navigation.goBack();
+      } else if (navigation?.navigate) {
+        navigation.navigate('HomeScreen');
+      }
+    } catch (err: unknown) {
+      let mensaje = 'No pudimos retirar la suscripción. Revisa tu conexión e inténtalo de nuevo.';
+      if (err instanceof ErrorDeApi && err.message) {
+        mensaje = err.message;
+      }
+      setErrorRetiro(mensaje);
+    } finally {
+      setIsDeleting(false);
+      eliminandoRef.current = false;
+    }
+  };
+
   return (
-    <SuscripcionDetalleView
-      id={id}
-      estado={estado}
-      onVolver={manejarVolver}
-      onReintentar={() => void cargarDatos(id)}
-      onEditar={manejarEditar}
-      onEliminar={onEliminar}
-      onRegistrarUso={onRegistrarUso}
-    />
+    <>
+      <SuscripcionDetalleView
+        id={id}
+        estado={estado}
+        onVolver={manejarVolver}
+        onReintentar={() => void cargarDatos(id)}
+        onEditar={manejarEditar}
+        onEliminar={manejarEliminar}
+        onRegistrarUso={onRegistrarUso}
+      />
+      {mostrarModalRetiro && estado.tipo === 'listo' && (
+        <ConfirmarRetiroModal
+          visible={mostrarModalRetiro}
+          nombreSuscripcion={estado.suscripcion.nombre}
+          onConfirmar={ejecutarRetiro}
+          onCancelar={cerrarModalRetiro}
+          isDeleting={isDeleting}
+          error={errorRetiro}
+        />
+      )}
+    </>
   );
 }
