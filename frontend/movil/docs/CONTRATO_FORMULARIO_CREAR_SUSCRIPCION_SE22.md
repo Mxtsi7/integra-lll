@@ -35,7 +35,10 @@ import {
 
 | Prop | Tipo | Obligatorio | Descripción |
 | :--- | :--- | :---: | :--- |
-| `catalogos` | `CatalogosSuscripciones \| null` | No | Opciones dinámicas y predeterminados provenientes del backend (`getCatalogosSuscripciones`). Si se omite, usa catálogo local seguro por defecto. |
+| `catalogos` | `CatalogosSuscripciones \| null` | No | Opciones dinámicas y predeterminados provenientes del backend (`getCatalogosSuscripciones`). Se filtran únicamente opciones activas (`activo === true`). Si se omite o es `null`, se muestra estado de carga y el botón de guardado permanece deshabilitado hasta contar con un catálogo válido. |
+| `cargandoCatalogos` | `boolean` | No | Indica si las opciones del backend están en proceso de descarga. Muestra indicador accesible (`testID="estado-carga-catalogos"`, rol `progressbar`). |
+| `errorCatalogo` | `string \| null` | No | Mensaje visible cuando falla la carga del catálogo (`testID="error-catalogo"`, rol `alert`). |
+| `onReintentarCatalogos` | `() => void` | No | Callback para reintentar la descarga del catálogo (`testID="btn-reintentar-catalogos"`). |
 | `opciones` | `OpcionesSuscripcion` | No | Opciones permitidas de monedas, frecuencias y categorías para validación. |
 | `onSubmit` | `(datos: SuscripcionPayload) => Promise<boolean \| void> \| boolean \| void` | No | **Punto de integración para SE-23**. Se ejecuta tras superar todas las validaciones locales. Si resuelve `true` o `void`, el formulario se limpia; si rechaza o resuelve `false`, los datos se mantienen. |
 | `onCancel` | `() => void` | No | Callback ejecutado al pulsar "Cancelar y Volver". |
@@ -138,5 +141,8 @@ El formulario conserva todos los datos escritos en las siguientes circunstancias
 | Input Fin de Prueba | `input-fin-prueba` | - |
 | Error Fin de Prueba | `error-fin-prueba` | `alert` |
 | Mensaje General / Servidor | `error-general` | `alert` |
+| Estado Carga Catálogos | `estado-carga-catalogos` | `progressbar` |
+| Alerta Error Catálogos | `error-catalogo` | `alert` |
+| Botón Reintentar Catálogos | `btn-reintentar-catalogos` | `button` |
 | Botón Guardar | `btn-guardar-suscripcion` | `button` (`disabled`, `busy`) |
 | Botón Cancelar y Volver | `go-back` | `button` |

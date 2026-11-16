@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +13,7 @@ import {
   ErrorDeApi,
   crearSuscripcion,
   erroresDesdeServidor,
+  getCatalogosSuscripciones,
   parsearMonto,
   validarSuscripcion,
   type CampoSuscripcion,
@@ -55,9 +56,9 @@ export const OPCIONES_POR_DEFECTO: OpcionesSuscripcion = {
 const EMPTY_FORM = (): NuevaSuscripcionFormData => ({
   nombre: '',
   monto: '',
-  moneda: 'CLP',
-  frecuencia: 'mensual',
-  categoria: 'streaming',
+  moneda: '' as Moneda,
+  frecuencia: '' as Frecuencia,
+  categoria: '',
   fechaDeCobro: '',
   enPrueba: false,
   finPrueba: '',
@@ -68,9 +69,9 @@ function formularioInicial(
 ): NuevaSuscripcionFormData {
   return {
     ...EMPTY_FORM(),
-    moneda: (predeterminados?.moneda as Moneda) || 'CLP',
-    categoria: predeterminados?.categoria || 'streaming',
-    frecuencia: predeterminados?.frecuencia || 'mensual',
+    moneda: (predeterminados?.moneda as Moneda) || ('' as Moneda),
+    categoria: predeterminados?.categoria || '',
+    frecuencia: predeterminados?.frecuencia || ('' as Frecuencia),
   };
 }
 
@@ -106,6 +107,9 @@ function mismosDatos(
 
 export interface NuevaSuscripcionFormViewProps {
   catalogos?: CatalogosSuscripciones | null;
+  cargandoCatalogos?: boolean;
+  errorCatalogo?: string | null;
+  onReintentarCatalogos?: () => void;
   opciones?: OpcionesSuscripcion;
   onSubmit?: (datos: SuscripcionPayload) => Promise<boolean | void> | boolean | void;
   onCancel?: () => void;
@@ -123,6 +127,9 @@ export interface NuevaSuscripcionFormViewProps {
  */
 export function NuevaSuscripcionFormView({
   catalogos,
+  cargandoCatalogos = false,
+  errorCatalogo = null,
+  onReintentarCatalogos,
   opciones: opcionesProp,
   onSubmit,
   onCancel,
@@ -138,7 +145,7 @@ export function NuevaSuscripcionFormView({
   const [errores, setErrores] = useState<ErroresSuscripcion>({});
   const [erroresServidorGenerales, setErroresServidorGenerales] = useState<string[]>([]);
 
-  // Opciones combinadas: catálogo dinámico o catálogo predeterminado
+  // Opciones combinadas: catálogo dinámico activo o prop explícita (no inventar opciones ficticias)
   const opciones: OpcionesSuscripcion = useMemo(() => {
     if (opcionesProp) return opcionesProp;
     if (catalogos) {
@@ -148,7 +155,11 @@ export function NuevaSuscripcionFormView({
         frecuencias: catalogos.frecuencias.map((f) => f.codigo),
       };
     }
-    return OPCIONES_POR_DEFECTO;
+    return {
+      monedas: [],
+      categorias: [],
+      frecuencias: [],
+    };
   }, [catalogos, opcionesProp]);
 
   // Si llegan predeterminados de un catálogo posterior, inicializar si no se ha modificado
@@ -156,9 +167,9 @@ export function NuevaSuscripcionFormView({
     if (!catalogos?.predeterminados) return;
     setFormData((actual) => ({
       ...actual,
-      moneda: actual.moneda || (catalogos.predeterminados.moneda as Moneda) || 'CLP',
-      categoria: actual.categoria || catalogos.predeterminados.categoria || 'streaming',
-      frecuencia: actual.frecuencia || catalogos.predeterminados.frecuencia || 'mensual',
+      moneda: actual.moneda || (catalogos.predeterminados.moneda as Moneda) || ('' as Moneda),
+      categoria: actual.categoria || catalogos.predeterminados.categoria || '',
+      frecuencia: actual.frecuencia || catalogos.predeterminados.frecuencia || ('' as Frecuencia),
     }));
   }, [catalogos]);
 
@@ -173,12 +184,20 @@ export function NuevaSuscripcionFormView({
     setErroresServidorGenerales(general);
   }, [erroresCampos]);
 
-  // Detección de cambios sin guardar respecto del estado inicial (para SE-31)
+  // Detección de cambios sin guardar respecto del estado inicial (para SE-31 y CH-16)
   const inicial = useMemo(
     () => formularioInicial(catalogos?.predeterminados),
     [catalogos],
   );
-  const hayCambios = !mismosDatos(formData, inicial);
+  const hayCambios = !mismosDatos(
+    {
+      ...formData,
+      moneda: formData.moneda || inicial.moneda,
+      categoria: formData.categoria || inicial.categoria,
+      frecuencia: formData.frecuencia || inicial.frecuencia,
+    },
+    inicial,
+  );
 
   useEffect(() => {
     onCambiosSinGuardar?.(hayCambios);
@@ -200,8 +219,18 @@ export function NuevaSuscripcionFormView({
     });
   };
 
+  const listo =
+    (!!opcionesProp || !!catalogos) &&
+    !cargandoCatalogos &&
+    !errorCatalogo &&
+    opciones.monedas.length > 0 &&
+    opciones.categorias.length > 0 &&
+    opciones.frecuencias.length > 0;
+
+  const botonDeshabilitado = isSaving || !listo;
+
   const handleSubmit = async () => {
-    if (isSaving) return;
+    if (botonDeshabilitado) return;
 
     const locales = validarSuscripcion(
       {
@@ -277,6 +306,69 @@ export function NuevaSuscripcionFormView({
               Registra un servicio recurrente para controlar tus gastos y alertas.
             </Text>
           </View>
+
+          {cargandoCatalogos && (
+            <View
+              style={styles.estadoCargaCatalogos}
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel="Cargando opciones"
+              accessibilityLiveRegion="polite"
+              testID="estado-carga-catalogos"
+            >
+              <ActivityIndicator size="small" color="#38bdf8" />
+              <Text style={styles.textoCargaCatalogos}>Cargando opciones…</Text>
+            </View>
+          )}
+
+          {errorCatalogo && (
+            <View
+              style={styles.errorGeneralBox}
+              testID="error-catalogo"
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              <Text style={styles.errorGeneralText}>{errorCatalogo}</Text>
+              {onReintentarCatalogos && (
+                <Pressable
+                  testID="btn-reintentar-catalogos"
+                  accessibilityRole="button"
+                  accessibilityLabel="Reintentar cargar opciones"
+                  style={styles.botonReintentarCatalogos}
+                  onPress={onReintentarCatalogos}
+                >
+                  <Text style={styles.botonReintentarCatalogosTexto}>
+                    Reintentar opciones
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+
+          {!cargandoCatalogos && !errorCatalogo && !listo && (
+            <View
+              style={styles.errorGeneralBox}
+              testID="aviso-sin-opciones"
+              accessibilityRole="alert"
+            >
+              <Text style={styles.errorGeneralText}>
+                No hay opciones disponibles. Intenta actualizar las opciones.
+              </Text>
+              {onReintentarCatalogos && (
+                <Pressable
+                  testID="btn-reintentar-catalogos"
+                  accessibilityRole="button"
+                  accessibilityLabel="Reintentar cargar opciones"
+                  style={styles.botonReintentarCatalogos}
+                  onPress={onReintentarCatalogos}
+                >
+                  <Text style={styles.botonReintentarCatalogosTexto}>
+                    Actualizar opciones
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           {mensajesSuperiores.length > 0 && (
             <View
@@ -357,6 +449,7 @@ export function NuevaSuscripcionFormView({
                       testID={`opcion-moneda-${codigo}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected: activa }}
+                      aria-selected={activa}
                       accessibilityLabel={`Moneda ${codigo}`}
                       disabled={isSaving}
                       style={[styles.chip, activa && styles.chipActivo]}
@@ -398,6 +491,7 @@ export function NuevaSuscripcionFormView({
                       testID={`opcion-frecuencia-${codigo}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected: activa }}
+                      aria-selected={activa}
                       accessibilityLabel={`Frecuencia ${codigo}`}
                       disabled={isSaving}
                       style={[styles.chip, activa && styles.chipActivo]}
@@ -439,6 +533,7 @@ export function NuevaSuscripcionFormView({
                       testID={`opcion-categoria-${codigo}`}
                       accessibilityRole="button"
                       accessibilityState={{ selected: activa }}
+                      aria-selected={activa}
                       accessibilityLabel={`Categoría ${codigo}`}
                       disabled={isSaving}
                       style={[styles.chip, activa && styles.chipActivo]}
@@ -561,9 +656,9 @@ export function NuevaSuscripcionFormView({
               testID="btn-guardar-suscripcion"
               accessibilityRole="button"
               accessibilityLabel="Guardar suscripción"
-              accessibilityState={{ disabled: isSaving, busy: isSaving }}
-              disabled={isSaving}
-              style={[styles.botonGuardar, isSaving && styles.botonDeshabilitado]}
+              accessibilityState={{ disabled: botonDeshabilitado, busy: isSaving }}
+              disabled={botonDeshabilitado}
+              style={[styles.botonGuardar, botonDeshabilitado && styles.botonDeshabilitado]}
               onPress={handleSubmit}
             >
               {isSaving ? (
@@ -599,6 +694,7 @@ export function NuevaSuscripcionFormView({
 export interface SuscripcionNuevaScreenProps {
   navigation?: HomeScreenProps<'SuscripcionNueva'>['navigation'];
   onCrearSuscripcion?: (datos: SuscripcionPayload) => Promise<Suscripcion>;
+  onCargarCatalogos?: () => Promise<CatalogosSuscripciones>;
   catalogos?: CatalogosSuscripciones | null;
   onExito?: (suscripcion: Suscripcion) => void;
   onCambiosSinGuardar?: (hayCambios: boolean) => void;
@@ -607,10 +703,52 @@ export interface SuscripcionNuevaScreenProps {
 export default function SuscripcionNuevaScreen({
   navigation,
   onCrearSuscripcion = crearSuscripcion,
-  catalogos,
+  onCargarCatalogos = getCatalogosSuscripciones,
+  catalogos: catalogosProp,
   onExito,
   onCambiosSinGuardar,
 }: SuscripcionNuevaScreenProps) {
+  const [catalogosData, setCatalogosData] = useState<CatalogosSuscripciones | null>(
+    catalogosProp ?? null,
+  );
+  const [cargandoCatalogos, setCargandoCatalogos] = useState<boolean>(catalogosProp === undefined);
+  const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
+  const generacionCatalogoRef = useRef(0);
+
+  const cargarCatalogos = useCallback(async () => {
+    generacionCatalogoRef.current += 1;
+    const generacion = generacionCatalogoRef.current;
+    setCargandoCatalogos(true);
+    setErrorCatalogo(null);
+
+    try {
+      const resp = await onCargarCatalogos();
+      if (generacionCatalogoRef.current === generacion) {
+        setCatalogosData(resp);
+      }
+    } catch {
+      if (generacionCatalogoRef.current === generacion) {
+        setErrorCatalogo('No pudimos cargar las opciones. Intenta de nuevo.');
+      }
+    } finally {
+      if (generacionCatalogoRef.current === generacion) {
+        setCargandoCatalogos(false);
+      }
+    }
+  }, [onCargarCatalogos]);
+
+  useEffect(() => {
+    if (catalogosProp !== undefined) {
+      setCatalogosData(catalogosProp);
+      setCargandoCatalogos(false);
+      return;
+    }
+    void cargarCatalogos();
+    return () => {
+      generacionCatalogoRef.current += 1;
+    };
+  }, [catalogosProp, cargarCatalogos]);
+
   const [isSaving, setIsSaving] = useState(false);
   const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
   const [erroresCampos, setErroresCampos] = useState<Record<string, string[]> | null>(null);
@@ -660,7 +798,10 @@ export default function SuscripcionNuevaScreen({
   return (
     <NuevaSuscripcionFormView
       testID="screen-suscripcion-nueva"
-      catalogos={catalogos}
+      catalogos={catalogosData}
+      cargandoCatalogos={cargandoCatalogos}
+      errorCatalogo={errorCatalogo}
+      onReintentarCatalogos={cargarCatalogos}
       onSubmit={handleSubmit}
       onCancel={() => {
         if (navigation?.goBack) {

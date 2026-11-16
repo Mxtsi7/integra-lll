@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import {
   formatearTotales,
@@ -169,12 +169,19 @@ export default function HomeScreen({
   const [estado, setEstado] = useState<EstadoCarga<Suscripcion[]>>(
     estadoInicial ?? { tipo: 'cargando' }
   );
+  const generacionRef = useRef(0);
 
   const cargarDatos = useCallback(async () => {
+    generacionRef.current += 1;
+    const generacion = generacionRef.current;
+    const sigueVigente = () => generacionRef.current === generacion;
+
     try {
       const datos = await onCargarSuscripciones();
+      if (!sigueVigente()) return;
       setEstado({ tipo: 'listo', datos });
     } catch {
+      if (!sigueVigente()) return;
       setEstado({ tipo: 'error' });
     }
   }, [onCargarSuscripciones]);
@@ -188,9 +195,10 @@ export default function HomeScreen({
     });
 
     return () => {
+      generacionRef.current += 1;
       unsubscribe?.();
     };
-  }, [estadoInicial, cargarDatos, navigation]);
+  }, [usuarioActivo?.id, estadoInicial, cargarDatos, navigation]);
 
   const manejarReintento = async () => {
     setEstado({ tipo: 'cargando' });

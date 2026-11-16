@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   ErrorDeApi,
+  configurarApi,
   type CatalogosSuscripciones,
   type OpcionesSuscripcion,
   type Suscripcion,
@@ -23,7 +24,8 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     categorias: [
       { codigo: 'streaming', nombre: 'Streaming', activo: true, orden: 1 },
       { codigo: 'musica', nombre: 'Música', activo: true, orden: 2 },
-      { codigo: 'software', nombre: 'Software', activo: false, orden: 3 },
+      { codigo: 'salud', nombre: 'Salud', activo: true, orden: 3 },
+      { codigo: 'software', nombre: 'Software', activo: false, orden: 4 },
     ],
     frecuencias: [
       { codigo: 'mensual', nombre: 'Mensual' },
@@ -36,9 +38,33 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     },
   };
 
+  beforeEach(() => {
+    configurarApi({ urlBase: 'http://localhost:8000' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/catalogos/suscripciones/')) {
+          return new Response(JSON.stringify(CATALOGO_MOCK), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ detail: 'Ok' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
   describe('Maquetación, controles iniciales y accesibilidad', () => {
     it('renderiza título, subtítulo, campos obligatorios y botones de acción', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       expect(screen.getByText('Nueva Suscripción')).toBeTruthy();
       expect(
@@ -62,7 +88,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('muestra y oculta el campo condicional de fin de prueba al conmutar el checkbox', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       expect(screen.queryByTestId('input-fin-prueba')).toBeNull();
 
@@ -79,7 +105,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('refleja estado deshabilitado e indicador de carga durante isSaving', () => {
-      render(<NuevaSuscripcionFormView isSaving={true} />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} isSaving={true} />);
 
       const botonGuardar = screen.getByTestId('btn-guardar-suscripcion');
       expect(botonGuardar).toBeTruthy();
@@ -93,7 +119,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
   describe('Criterio 1: Datos inválidos se identifican por campo', () => {
     it('identifica campos obligatorios vacíos al intentar enviar', async () => {
       const onSubmit = vi.fn();
-      render(<NuevaSuscripcionFormView onSubmit={onSubmit} />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} onSubmit={onSubmit} />);
 
       fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
 
@@ -113,7 +139,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('identifica nombre demasiado largo (> 100 caracteres)', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       fireEvent.change(screen.getByTestId('input-nombre'), {
         target: { value: 'A'.repeat(101) },
@@ -126,7 +152,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('identifica montos negativos, no numéricos o con más de dos decimales', () => {
-      const { rerender } = render(<NuevaSuscripcionFormView />);
+      const { rerender } = render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       // Monto negativo
       fireEvent.change(screen.getByTestId('input-monto'), {
@@ -175,7 +201,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('identifica fechas inexistentes en fecha de cobro y fin de prueba', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       // Fecha imposible (30 de febrero)
       fireEvent.change(screen.getByTestId('input-fecha-cobro'), {
@@ -198,7 +224,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('identifica fin de prueba obligatorio cuando enPrueba está activo', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       fireEvent.click(screen.getByTestId('checkbox-en-prueba'));
       fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
@@ -209,7 +235,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     });
 
     it('limpia el error de un campo de inmediato cuando el usuario lo edita', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       // Provocar errores
       fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
@@ -268,7 +294,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
 
   describe('Criterio 2: No se pierde lo escrito al cerrar teclado, re-renderizar o fallar envío', () => {
     it('conserva valores tipeados al interactuar con el teclado o perder el foco', () => {
-      render(<NuevaSuscripcionFormView />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} />);
 
       const inputNombre = screen.getByTestId('input-nombre');
       const inputMonto = screen.getByTestId('input-monto');
@@ -303,7 +329,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     it('conserva los datos escritos tras un fallo en onSubmit (promesa rechazada o retorno false)', async () => {
       const onSubmitRechaza = vi.fn().mockRejectedValue(new Error('Fallo de red'));
       const { rerender } = render(
-        <NuevaSuscripcionFormView onSubmit={onSubmitRechaza} />,
+        <NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} onSubmit={onSubmitRechaza} />,
       );
 
       fireEvent.change(screen.getByTestId('input-nombre'), {
@@ -334,7 +360,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
 
     it('conserva los datos escritos ante un re-render del componente padre', () => {
       const { rerender } = render(
-        <NuevaSuscripcionFormView isSaving={false} />,
+        <NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} isSaving={false} />,
       );
 
       fireEvent.change(screen.getByTestId('input-nombre'), {
@@ -345,7 +371,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
       });
 
       // Simular re-renderizado por cambio de orientación o props externas
-      rerender(<NuevaSuscripcionFormView isSaving={false} />);
+      rerender(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} isSaving={false} />);
 
       expect(screen.getByTestId('input-nombre')).toHaveProperty('value', 'Notion');
       expect(screen.getByTestId('input-monto')).toHaveProperty('value', '10');
@@ -355,7 +381,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
   describe('Envío exitoso y reseteo del formulario', () => {
     it('llama a onSubmit con el payload tipado correcto y resetea los campos al tener éxito', async () => {
       const onSubmit = vi.fn().mockResolvedValue(true);
-      render(<NuevaSuscripcionFormView onSubmit={onSubmit} />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} onSubmit={onSubmit} />);
 
       // Completar formulario válido
       fireEvent.change(screen.getByTestId('input-nombre'), {
@@ -395,7 +421,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
 
     it('envía estado "prueba" y "fin_prueba" cuando está en período de prueba gratis', async () => {
       const onSubmit = vi.fn().mockResolvedValue(true);
-      render(<NuevaSuscripcionFormView onSubmit={onSubmit} />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} onSubmit={onSubmit} />);
 
       fireEvent.change(screen.getByTestId('input-nombre'), {
         target: { value: 'YouTube Premium' },
@@ -433,7 +459,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
   describe('Detección de cambios sin guardar (SE-31)', () => {
     it('notifica onCambiosSinGuardar con true al escribir y false si se vuelve al valor inicial', () => {
       const onCambios = vi.fn();
-      render(<NuevaSuscripcionFormView onCambiosSinGuardar={onCambios} />);
+      render(<NuevaSuscripcionFormView catalogos={CATALOGO_MOCK} onCambiosSinGuardar={onCambios} />);
 
       // Inicialmente sin cambios
       expect(onCambios).toHaveBeenLastCalledWith(false);
@@ -456,6 +482,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
     it('distribuye errores del backend por campo y generales', () => {
       render(
         <NuevaSuscripcionFormView
+          catalogos={CATALOGO_MOCK}
           errorGeneral="Servidor no disponible"
           erroresCampos={{
             nombre: ['Ya existe una suscripción con este nombre.'],
@@ -493,11 +520,12 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
   });
 
   describe('Conexión con crearSuscripcion y navegación al resultado (SE-23)', () => {
-    function llenarFormularioValido({
+    async function llenarFormularioValido({
       nombre = 'Disney Plus',
       monto = '7990',
       fecha = '2026-11-25',
     } = {}) {
+      await screen.findByTestId('opcion-moneda-CLP');
       fireEvent.change(screen.getByTestId('input-nombre'), {
         target: { value: nombre },
       });
@@ -534,7 +562,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
         />,
       );
 
-      llenarFormularioValido();
+      await llenarFormularioValido();
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
@@ -575,7 +603,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
         />,
       );
 
-      llenarFormularioValido();
+      await llenarFormularioValido();
 
       // Primer clic dispara la petición
       await act(async () => {
@@ -623,7 +651,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
         />,
       );
 
-      llenarFormularioValido({ nombre: 'Netflix Duplicado' });
+      await llenarFormularioValido({ nombre: 'Netflix Duplicado' });
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
@@ -664,7 +692,7 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
         />,
       );
 
-      llenarFormularioValido();
+      await llenarFormularioValido();
 
       await act(async () => {
         fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
@@ -684,6 +712,181 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
         'Disney Plus',
       );
       expect(screen.getByTestId('input-monto')).toHaveProperty('value', '7990');
+    });
+  });
+
+  describe('Consumo dinámico de catálogos y opciones activas (SE-22 / SE-23 revisión)', () => {
+    it('obtiene catálogo dinámico de la API por ruta real, muestra sólo opciones activas y permite crear con nueva opción', async () => {
+      const CATALOGO_DINAMICO: CatalogosSuscripciones = {
+        monedas: [
+          { codigo: 'CLP', nombre: 'Peso chileno', activo: true, orden: 1 },
+          { codigo: 'USD', nombre: 'Dólar estadounidense', activo: true, orden: 2 },
+          { codigo: 'EUR', nombre: 'Euro', activo: false, orden: 3 },
+        ],
+        categorias: [
+          { codigo: 'transporte', nombre: 'Transporte', activo: true, orden: 1 },
+          { codigo: 'streaming', nombre: 'Streaming', activo: false, orden: 2 },
+        ],
+        frecuencias: [
+          { codigo: 'mensual', nombre: 'Mensual' },
+        ],
+        predeterminados: {
+          moneda: 'CLP',
+          categoria: 'transporte',
+          frecuencia: 'mensual',
+        },
+      };
+
+      const mockCargarCatalogos = vi.fn().mockResolvedValue(CATALOGO_DINAMICO);
+      const onCrearSuscripcion = vi.fn().mockResolvedValue({
+        id: 'sub-metro-1',
+        nombre: 'Tarjeta Metro',
+        monto: 15000,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        categoria: 'transporte',
+        fecha_proximo_cobro: '2026-11-28',
+        estado: 'activo',
+      });
+      const replaceMock = vi.fn();
+
+      render(
+        <SuscripcionNuevaScreen
+          navigation={{ replace: replaceMock } as any}
+          onCargarCatalogos={mockCargarCatalogos}
+          onCrearSuscripcion={onCrearSuscripcion}
+        />,
+      );
+
+      // Esperar a que cargue el catálogo dinámico
+      expect(await screen.findByTestId('opcion-categoria-transporte')).toBeTruthy();
+
+      // Muestra únicamente opciones activas:
+      expect(screen.getByTestId('opcion-categoria-transporte')).toBeTruthy();
+      expect(screen.getByTestId('opcion-moneda-CLP')).toBeTruthy();
+      expect(screen.getByTestId('opcion-moneda-USD')).toBeTruthy();
+      expect(screen.getByTestId('opcion-frecuencia-mensual')).toBeTruthy();
+
+      // NO ofrece la opción inactiva streaming ni la moneda inactiva EUR
+      expect(screen.queryByTestId('opcion-categoria-streaming')).toBeNull();
+      expect(screen.queryByTestId('opcion-moneda-EUR')).toBeNull();
+
+      // Los predeterminados del catálogo se seleccionan automáticamente
+      expect(screen.getByTestId('opcion-categoria-transporte').getAttribute('aria-selected')).toBe('true');
+
+      // Completar campos y guardar con la nueva opción
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Tarjeta Metro' },
+      });
+      fireEvent.change(screen.getByTestId('input-monto'), {
+        target: { value: '15000' },
+      });
+      fireEvent.change(screen.getByTestId('input-fecha-cobro'), {
+        target: { value: '2026-11-28' },
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-suscripcion'));
+      });
+
+      expect(onCrearSuscripcion).toHaveBeenCalledWith({
+        nombre: 'Tarjeta Metro',
+        monto: 15000,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        categoria: 'transporte',
+        fecha_proximo_cobro: '2026-11-28',
+        estado: 'activo',
+      });
+      expect(replaceMock).toHaveBeenCalledWith('SuscripcionDetalle', {
+        id: 'sub-metro-1',
+      });
+    });
+
+    it('maneja fallo de carga del catálogo con estado visible y reintento, sin inventar opciones falsas', async () => {
+      let resolverReintento: (val: CatalogosSuscripciones) => void = () => {};
+      const promesaReintento = new Promise<CatalogosSuscripciones>((res) => {
+        resolverReintento = res;
+      });
+
+      const onCargarCatalogos = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('Fallo al obtener catálogo'))
+        .mockReturnValueOnce(promesaReintento);
+
+      render(
+        <SuscripcionNuevaScreen onCargarCatalogos={onCargarCatalogos} />,
+      );
+
+      // Muestra estado de error con rol alert y mensaje claro
+      expect(await screen.findByTestId('error-catalogo')).toBeTruthy();
+      expect(screen.getByTestId('error-catalogo').textContent).toContain(
+        'No pudimos cargar las opciones. Intenta de nuevo.',
+      );
+
+      // No inventa opciones falsas (ningún selector tiene chips de monedas o categorías)
+      expect(screen.queryByTestId('opcion-moneda-CLP')).toBeNull();
+      expect(screen.queryByTestId('opcion-categoria-streaming')).toBeNull();
+
+      // El botón de guardar suscripción está deshabilitado
+      const btnGuardar = screen.getByTestId('btn-guardar-suscripcion');
+      expect(btnGuardar.getAttribute('aria-disabled')).toBe('true');
+
+      // Botón de reintento visible
+      const btnReintentar = screen.getByTestId('btn-reintentar-catalogos');
+      expect(btnReintentar).toBeTruthy();
+
+      // Presionar reintento
+      fireEvent.click(btnReintentar);
+      expect(onCargarCatalogos).toHaveBeenCalledTimes(2);
+
+      // Ahora resuelve el reintento
+      await act(async () => {
+        resolverReintento(CATALOGO_MOCK);
+      });
+
+      // El error desaparece y aparecen las opciones reales
+      expect(screen.queryByTestId('error-catalogo')).toBeNull();
+      expect(await screen.findByTestId('opcion-categoria-streaming')).toBeTruthy();
+    });
+
+    it('los valores iniciales del catálogo no pisan datos ya ingresados por el usuario', async () => {
+      let resolverCatalogo: (val: CatalogosSuscripciones) => void = () => {};
+      const promesaCatalogo = new Promise<CatalogosSuscripciones>((res) => {
+        resolverCatalogo = res;
+      });
+
+      const onCargarCatalogos = vi.fn().mockReturnValue(promesaCatalogo);
+
+      render(<SuscripcionNuevaScreen onCargarCatalogos={onCargarCatalogos} />);
+
+      // Muestra indicador de carga de opciones
+      expect(screen.getByTestId('estado-carga-catalogos')).toBeTruthy();
+      expect(screen.getByText('Cargando opciones…')).toBeTruthy();
+
+      // Usuario ingresa datos antes de que responda el catálogo
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Mi Servicio Previo' },
+      });
+      fireEvent.change(screen.getByTestId('input-monto'), {
+        target: { value: '9990' },
+      });
+
+      // Resuelve el catálogo con predeterminados
+      await act(async () => {
+        resolverCatalogo(CATALOGO_MOCK);
+      });
+
+      // Los datos ingresados por el usuario se conservan intactos
+      expect(screen.getByTestId('input-nombre')).toHaveProperty(
+        'value',
+        'Mi Servicio Previo',
+      );
+      expect(screen.getByTestId('input-monto')).toHaveProperty('value', '9990');
+
+      // Y las opciones predeterminadas se asignan correctamente
+      expect(screen.getByTestId('opcion-moneda-CLP').getAttribute('aria-selected')).toBe('true');
+      expect(screen.getByTestId('opcion-categoria-streaming').getAttribute('aria-selected')).toBe('true');
     });
   });
 });

@@ -81,24 +81,40 @@ if (navigation?.replace) {
 ```
 Esto asegura que el usuario sea redirigido de inmediato a visualizar los datos reales y acciones de la suscripción que acaba de dar de alta.
 
-### 4.2. Invalidación y Recarga en `HomeScreen`
+### 4.2. Invalidación, Recarga y Protección contra Concurrencia en `HomeScreen`
 
-Para garantizar que el listado de suscripciones refleje exactamente la nueva suscripción sin depender de cachés estáticas:
+Para garantizar que el listado de suscripciones refleje exactamente la nueva suscripción sin depender de cachés estáticas y sin condiciones de carrera entre peticiones desfasadas (por ejemplo, una carga inicial lenta que resuelva después de una recarga por foco tras crear):
+
 ```typescript
-useEffect(() => {
-  if (estadoInicial) return;
-  void cargarDatos();
+const generacionRef = useRef(0);
 
-  const unsubscribe = navigation?.addListener?.('focus', () => {
-    void cargarDatos();
-  });
+const cargarDatos = useCallback(async () => {
+  const generacionActual = ++generacionRef.current;
+  setEstado((prev) => ({ ...prev, cargando: true, error: null }));
 
-  return () => {
-    unsubscribe?.();
-  };
-}, [estadoInicial, cargarDatos, navigation]);
+  try {
+    const data = await getSuscripciones();
+    if (generacionRef.current !== generacionActual) {
+      return; // Descarta respuesta de petición desfasada
+    }
+    setEstado({ cargando: false, error: null, suscripciones: data });
+  } catch (err) {
+    if (generacionRef.current !== generacionActual) {
+      return; // Descarta rechazo de petición desfasada
+    }
+    setEstado((prev) => ({
+      ...prev,
+      cargando: false,
+      error: 'No pudimos cargar tus suscripciones.',
+    }));
+  }
+}, [getSuscripciones]);
 ```
-Cuando el usuario regresa a `HomeScreen` (por ejemplo, desde el botón volver de `SuscripcionDetalle`), el evento `'focus'` se dispara automáticamente, reejecuta `cargarDatos()` (`getSuscripciones()`), e incorpora la suscripción recién creada a la lista y a los totales proyectados.
+
+#### Coordinación del ciclo de vida y foco:
+- **Evento `focus`:** Al regresar a `HomeScreen` desde el detalle o creación, el foco dispara una nueva generación (`cargarDatos()`).
+- **Descarte de respuestas lentas:** Si la petición previa (carga inicial) termina más tarde, su resultado es ignorado porque `generacionActual !== generacionRef.current`. De este modo, la instantánea anterior no sobrescribe la suscripción recién creada.
+- **Desmontaje y cambio de sesión:** El cleanup del efecto invalida la generación activa (`generacionRef.current++`), previniendo actualizaciones de estado sobre componentes desmontados o usuarios diferentes.
 
 ---
 

@@ -166,6 +166,31 @@ export const styles = StyleSheet.create({
   botonDeshabilitado: {
     opacity: 0.5,
   },
+  estadoCargaCatalogos: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  textoCargaCatalogos: {
+    color: '#94a3b8',
+    fontSize: 14,
+  },
+  botonReintentarCatalogos: {
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#334155',
+    borderRadius: 8,
+    alignSelf: 'center',
+  },
+  botonReintentarCatalogosTexto: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });
 
 export default styles;
