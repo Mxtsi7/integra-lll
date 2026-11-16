@@ -218,6 +218,11 @@ class TestNegativos:
         "Total: CLP \u22129.990",
         "Total: \u22129.990 CLP",
         "Total: (CLP 9.990)",
+        # Segunda revisión de #184: el código DESPUÉS del número es parte del
+        # monto, y el paréntesis cierra después del código.
+        "Total: ($9.990 CLP)",
+        "Total: ( $9.990 CLP )",
+        "Total: ($ 9.990 CLP)",
     ])
     def test_un_total_negativo_no_se_confirma_como_cobro(self, texto):
         d = datos(texto, asunto="Tu recibo")
@@ -228,6 +233,7 @@ class TestNegativos:
 
     @pytest.mark.parametrize("texto", [
         "Total: CLP 9.990", "Plan 1-2 personas: CLP 9.990", "Total: CLP 9.990 (IVA incluido)", "Total (CLP 9.990 con IVA)",
+        "Total: $9.990 CLP", "Total: ($9.990 CLP con IVA)",
     ])
     def test_controles_positivos(self, texto):
         assert resumen(texto)[0] == (Decimal("9990"), CONFIRMADO)
@@ -273,3 +279,14 @@ class TestSignoPesosJuntoAOtraMoneda:
 
     def test_control_el_codigo_del_mismo_monto_si_vale(self):
         assert resumen("Total: $10 USD")[1] == ("USD", CONFIRMADO)
+
+
+class TestParentesisConCodigoDespues:
+    def test_el_caso_de_maxi_en_dolares(self):
+        d = datos("Total: ($10 USD)", asunto="Tu recibo")
+        assert (d.importe.valor, d.importe.estado) == (Decimal("-10"), AMBIGUO)
+        assert (d.moneda.valor, d.moneda.estado) == ("USD", CONFIRMADO)
+        assert "importe" in [c for c, _ in d.para_revision]
+
+    def test_el_fragmento_es_el_de_la_linea(self):
+        assert datos("Total: ($9.990 CLP)").importe.fragmento == "Total: ($9.990 CLP)"

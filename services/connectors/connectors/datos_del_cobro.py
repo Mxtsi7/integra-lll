@@ -227,18 +227,24 @@ class _Monto:
     negativo: bool = False
 
 
-def _es_negativo(linea: str, m) -> bool:
+def _es_negativo(linea: str, m, fin: int) -> bool:
     """¿El monto que calzó en `m` lleva un signo menos o va entre paréntesis?
 
     La expresión del monto empieza DESPUÉS del signo, así que hay que mirar
     alrededor. Antes no se miraba, y «Total: -9.990 CLP» salía como 9.990
     confirmado: un abono o una devolución se proponía como un gasto. Lo
     encontró la revisión de #184.
+
+    `fin` es donde termina el monto ENTERO, que no siempre es donde termina
+    `m`: en «($9.990 CLP)» el código que va después del número es parte del
+    monto, y el paréntesis de cierre viene después del código. Mirando desde
+    el final de `m` se veía «CLP)» y el abono salía positivo. Lo encontró la
+    segunda revisión de #184.
     """
     if m.group("signo_medio"):
         return True
     antes = linea[:m.start()].rstrip()
-    despues = linea[m.end():].lstrip()
+    despues = linea[fin:].lstrip()
     if antes.endswith(_MENOS):
         return True
     return antes.endswith("(") and despues.startswith(")")
@@ -250,11 +256,14 @@ def _montos(texto: str) -> list[_Monto]:
         for m in _MONTO.finditer(linea):
             numero = m.group("numero_a") or m.group("numero_d")
             token = m.group("antes") or m.group("despues")
+            fin = m.end()
             if token == SIMBOLO_AMBIGUO:
-                # «$9.990 CLP»: el código que viene después dice cuál `$` es.
+                # «$9.990 CLP»: el código que viene después dice cuál `$` es,
+                # y es parte del monto: el monto termina después del código.
                 despues = _CODIGO_DESPUES.match(linea, m.end())
                 if despues:
                     token = despues.group(1)
+                    fin = despues.end()
             leido = leer_numero(numero)
             if leido is None:
                 continue
@@ -262,7 +271,7 @@ def _montos(texto: str) -> list[_Monto]:
             if valor <= 0 or valor > IMPORTE_MAXIMO:
                 continue
             encontrados.append(_Monto(valor, decimales, token, _etiqueta(linea, m.start()), linea.strip()[:200],
-                                      negativo=_es_negativo(linea, m)))
+                                      negativo=_es_negativo(linea, m, fin)))
     return encontrados
 
 

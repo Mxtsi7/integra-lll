@@ -75,6 +75,11 @@ símbolo (`-9.990 CLP`, `-$9.990`, `CLP -9.990`, también el menos tipográfico
 `(CLP 9.990)`. Un total negativo sale **ambiguo**, con su valor negativo y el
 motivo: puede ser una devolución o un abono.
 
+Cuando el código va **después** del número («($9.990 CLP)»), es parte del
+monto: el paréntesis de cierre se busca después del código. Antes se buscaba
+justo después del número, se veía «CLP)» y el abono salía positivo. Lo
+encontró la segunda revisión de #184.
+
 ### `$` solo no hereda la moneda de otro total
 
 «Total: USD 10» y, en otra línea, «Total: $10» confirmaban USD: el `$` sin
@@ -108,14 +113,14 @@ queda **supuesta** con la de recepción, y el motivo lo dice.
 | Pieza | Archivo |
 |---|---|
 | El extractor | `services/connectors/connectors/datos_del_cobro.py` |
-| Las pruebas | `services/connectors/tests/test_datos_del_cobro_s3_fe_07.py` (80) |
+| Las pruebas | `services/connectors/tests/test_datos_del_cobro_s3_fe_07.py` (87) |
 
 Las tablas de monedas son las mismas de `csv_candidatos` (#147). Cuando esa PR
 entre a `main`, se dejan en un solo lugar.
 
 ## Cómo se comprobaron las pruebas
 
-Se rompió el código a propósito 36 veces y cada vez falló al menos una
+Se rompió el código a propósito 37 veces y cada vez falló al menos una
 prueba. Entre otras:
 
 - tomar `$` como CLP, o elegir uno de dos totales o de dos monedas;
