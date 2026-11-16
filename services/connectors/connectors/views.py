@@ -1,13 +1,16 @@
 """Vistas del servicio de conectores."""
 
+import logging
+import uuid
 from datetime import datetime, time, timedelta
 
 from django.conf import settings
 from django.db import connection, transaction
 from django.http import JsonResponse
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, status
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -17,17 +20,30 @@ from rest_framework.views import APIView
 from shared.bloqueo import bloquear
 from shared.tenant.base import SoloLecturaTenantViewSet
 
-from . import archivos, proveedores, revocacion
-from .models import ArchivoImportacion, AutorizacionPendiente, CuentaConectada, Importacion
+from . import archivos, confirmacion, proveedores, revocacion
+from .models import (
+    ArchivoImportacion,
+    AutorizacionPendiente,
+    CandidatoYaConfirmado,
+    CobroCandidato,
+    CuentaConectada,
+    Importacion,
+)
 from .serializers import (
     ArchivoRechazadoSerializer,
     AutorizacionIniciadaSerializer,
     CallbackAutorizacionSerializer,
+    CandidatoYaConfirmadoSerializer,
+    ConfirmacionRechazadaSerializer,
+    CobroCandidatoSerializer,
     CuentaConectadaSerializer,
     ImportacionSerializer,
     IniciarAutorizacionSerializer,
     SubidaArchivoSerializer,
 )
+from .tasks import procesar_importacion
+
+log = logging.getLogger(__name__)
 
 
 def salud(request):
@@ -488,6 +504,27 @@ class ImportacionViewSet(SoloLecturaTenantViewSet):
 # ═══════════════════════════════════════════════════════════════════
 
 
+def _encolar_procesamiento(importacion_id: str) -> None:
+    """Manda la importación al worker, y no se cae si el broker no está.
+
+    Corre después del commit, cuando la respuesta 201 ya es un hecho: si acá
+    se lanzara una excepción, la persona vería un 500 por una importación que
+    SÍ se creó, y volvería a subir el mismo archivo.
+
+    Una tarea que no se pudo encolar no se pierde: la importación queda
+    `pendiente` y `rescatar_importaciones_estancadas` la vuelve a encolar.
+    Por eso esto se registra y se sigue, en vez de reintentar acá mismo.
+    """
+    try:
+        procesar_importacion.delay(importacion_id)
+    except Exception:  # noqa: BLE001 - cualquier fallo del broker cae acá
+        log.exception(
+            "no se pudo encolar el procesamiento de la importación %s; "
+            "queda pendiente para el rescate",
+            importacion_id,
+        )
+
+
 @extend_schema(
     request=SubidaArchivoSerializer,
     responses={
@@ -608,6 +645,202 @@ class SubirArchivoView(APIView):
                 contenido=contenido,
                 vence_en=ahora + retencion,
             )
+            # ── El trabajo se encola DESPUÉS del commit (S3-FE-10) ─────────
+            # `on_commit` y no un `.delay()` suelto: adentro de la
+            # transacción, el worker puede recibir el mensaje antes de que la
+            # fila exista para él, darla por inexistente y descartarla; la
+            # importación se quedaría `pendiente` hasta el rescate. Con
+            # `on_commit` el mensaje sale cuando la fila ya está visible.
+            transaction.on_commit(
+                lambda: _encolar_procesamiento(str(importacion.id))
+            )
 
         salida = ImportacionSerializer(importacion, context={"request": request})
         return Response(salida.data, status=status.HTTP_201_CREATED)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Consulta de candidatos para la vista previa (S3-FE-14)
+# ═══════════════════════════════════════════════════════════════════
+
+
+@extend_schema(
+    summary="Listar los cobros candidatos detectados (S3-FE-14)",
+    parameters=[
+        OpenApiParameter(
+            "importacion",
+            description="Solo los de esa importación. Es lo que necesita S3-CH-06 para mostrar las filas válidas de un archivo junto a sus errores.",
+        ),
+        OpenApiParameter(
+            "origen",
+            description="`csv` o `correo`. Sin el filtro vienen los dos, que es lo que pide S3-CH-04.",
+        ),
+        OpenApiParameter(
+            "estado",
+            description="`propuesto`, `confirmado` o `rechazado`.",
+        ),
+    ],
+)
+class CobroCandidatoViewSet(SoloLecturaTenantViewSet):
+    """
+        GET /api/candidatos/            los de la organización
+        GET /api/candidatos/<id>/       uno
+
+    Lo que la vista previa muestra antes de que alguien decida: S3-CH-04 lista
+    los candidatos de los dos orígenes, S3-CH-06 muestra las filas de un
+    archivo que sí se pudieron leer, y S3-CH-09 necesita el id estable para
+    no mandar dos veces el mismo rechazo.
+
+    ── Solo lectura, y a propósito ─────────────────────────────────────────
+    Un candidato lo escribe el lector que leyó su origen. Lo único que una
+    persona le puede hacer es confirmarlo (S3-FE-15) o rechazarlo (S3-FE-16),
+    y eso va por rutas propias porque no es "editar un campo": confirmar crea
+    suscripciones y cobros. Un `PATCH` abierto acá dejaría cambiarle el
+    importe a un candidato que se presenta como evidencia de lo que decía la
+    cartola.
+
+    ── Los errores NO están acá ────────────────────────────────────────────
+    Un error de fila no es un candidato: no tiene servicio, ni importe, ni
+    fecha. Viven en `Importacion.errores` y ya se exponen en
+    `GET /api/importaciones/<id>/`, con `errores_totales` al lado porque la
+    lista se corta en `Importacion.MAXIMO_ERRORES`. Duplicarlos en una ruta
+    nueva sería dos contratos para el mismo dato.
+
+    ── El aislamiento ──────────────────────────────────────────────────────
+    `MezclaTenant` filtra por la cabecera `X-Organizacion-Id` del gateway, así
+    que un candidato de otra organización ni se encuentra: 404 y no 403, que
+    confirmaría que el id es de alguien. Es el criterio "una organización no
+    consulta resultados de otra".
+
+    Orden: cronológico por fecha de cobro, como venían en la cartola. Es
+    estable, que es lo que necesita la paginación para no repetir ni saltarse
+    filas entre páginas.
+    """
+
+    queryset = CobroCandidato.objects.all()
+    serializer_class = CobroCandidatoSerializer
+    pagination_class = CuentaConectadaPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Igual que en ImportacionViewSet: solo el listado se filtra. `retrieve`
+        # también pasa por acá, y un query param colgado haría desaparecer el
+        # recurso con un 404.
+        if self.action != "list":
+            return qs
+
+        importacion = self.request.query_params.get("importacion")
+        if importacion:
+            # Se valida la forma del UUID acá: dejarlo pasar al ORM da un 500
+            # por un parámetro que escribió el cliente, y eso es un 400.
+            try:
+                qs = qs.filter(importacion_id=uuid.UUID(importacion))
+            except (ValueError, AttributeError, TypeError):
+                raise ValidationError({"importacion": "Debe ser un UUID."}) from None
+
+        origen = self.request.query_params.get("origen")
+        if origen:
+            validos = CobroCandidato.Origen.values
+            if origen not in validos:
+                raise ValidationError({"origen": f"Debe ser uno de: {', '.join(validos)}."})
+            qs = qs.filter(origen=origen)
+
+        estado = self.request.query_params.get("estado")
+        if estado:
+            validos = CobroCandidato.Estado.values
+            if estado not in validos:
+                raise ValidationError({"estado": f"Debe ser uno de: {', '.join(validos)}."})
+            qs = qs.filter(estado=estado)
+
+        return qs
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: CobroCandidatoSerializer,
+            409: CandidatoYaConfirmadoSerializer,
+        },
+        summary="Rechazar un cobro candidato (S3-FE-16)",
+    )
+    @action(detail=True, methods=["post"], url_path="rechazar")
+    def rechazar(self, request, pk=None):
+        """
+            POST /api/candidatos/<id>/rechazar/
+            → 200 con el candidato en `rechazado`
+
+        Descarta la propuesta. **No crea ni toca ninguna suscripción ni
+        ningún cobro**: esas tablas viven en `subscriptions` y este servicio
+        no las conoce (ADR-002). Tampoco publica un evento ni marca la
+        importación como confirmada.
+
+        ── Volver a rechazar da 200, no un error ───────────────────────────
+        Es idempotente: la segunda petición devuelve el mismo candidato, con
+        la MISMA `decidido_en` que dejó la primera. Es lo que necesita
+        S3-CH-09 para no tener que cuidarse de los dobles envíos, y el
+        criterio "rechazar nuevamente tiene resultado definido".
+
+        ── Y un confirmado no se rechaza ───────────────────────────────────
+        409 con `codigo: candidato_ya_confirmado`. Ese candidato ya creó
+        suscripciones y cobros (S3-FE-15); deshacerlos es otra operación y no
+        un efecto de este endpoint.
+
+        El cuerpo se ignora: no hay nada que mandar. Se pide el usuario de la
+        cabecera porque queda guardado quién decidió.
+        """
+        candidato = self.get_object()
+        try:
+            candidato.rechazar(por=_usuario_de(request))
+        except CandidatoYaConfirmado as exc:
+            return Response(
+                {"codigo": "candidato_ya_confirmado", "detail": str(exc)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(self.get_serializer(candidato).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: CobroCandidatoSerializer,
+            409: ConfirmacionRechazadaSerializer,
+        },
+        summary="Confirmar un cobro candidato (S3-FE-15)",
+    )
+    @action(detail=True, methods=["post"], url_path="confirmar")
+    def confirmar(self, request, pk=None):
+        """
+            POST /api/candidatos/<id>/confirmar/
+            → 200 con el candidato en `confirmado`
+
+        El "sí". Es lo único de todo este camino que mueve plata, y por eso es
+        la operación más cuidada: en UNA transacción deja el candidato
+        confirmado y la orden de crear la suscripción —y el cobro, si
+        corresponde—. Los dos o ninguno.
+
+        ── Lo que todavía no pasa, dicho claro ─────────────────────────────
+        La suscripción NO queda creada al responder este 200. Vive en
+        `subscriptions`, y este servicio no conoce su esquema (ADR-002): lo
+        que queda es una orden durable en el outbox, esperando a quien la
+        drene. Nada se pierde y nada se inventa.
+
+        ── Volver a confirmar da 200 y no duplica ──────────────────────────
+        Idempotente: la segunda petición devuelve el mismo candidato, con la
+        misma `decidido_en`, y **no** agrega otra orden. Es el criterio de
+        S3-CH-08: repetir la acción no crea cobros dobles.
+
+        ── Por qué puede dar 409 ───────────────────────────────────────────
+            candidato_rechazado      ya se descartó (S3-FE-16)
+            servicio_sin_resolver    no se reconoció el proveedor, y una
+                                     suscripción con el nombre de la glosa
+                                     del banco no es un dato
+
+        El cuerpo se ignora: no hay nada que mandar.
+        """
+        candidato = self.get_object()
+        try:
+            confirmacion.confirmar(candidato, por=_usuario_de(request))
+        except confirmacion.ConfirmacionRechazada as exc:
+            return Response(
+                {"codigo": exc.codigo, "detail": exc.mensaje},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(self.get_serializer(candidato).data, status=status.HTTP_200_OK)

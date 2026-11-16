@@ -4,12 +4,21 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import { Boton } from '../ui/Boton';
 import { CampoArea } from '../ui/Campo';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
+import { ENCABEZADO_DE_RESPALDO, textoDeRespaldo } from './avisosDeRespaldo';
 import styles from './ChatAsistente.module.css';
 import type { MensajeChat } from './mensajesChat';
 
 const NOMBRE_DEL_AUTOR: Record<MensajeChat['autor'], string> = { persona: 'Tú', asistente: 'Asistente' };
 
-const AVISO_DE_RESPALDO = 'Resumen automático con tus datos: el asistente con IA no estuvo disponible.';
+/** S3-CH-17: dice que lo que se ve es el resumen del backend, por qué y qué hacer. */
+function AvisoDeRespaldo({ motivo }: { motivo: string | null }) {
+  const { causa, recuperacion } = textoDeRespaldo(motivo);
+  return (
+    <p className={styles.aviso}>
+      {ENCABEZADO_DE_RESPALDO} {causa} {recuperacion}
+    </p>
+  );
+}
 
 interface ChatAsistenteProps {
   mensajes: MensajeChat[];
@@ -94,7 +103,7 @@ export function ChatAsistente({ mensajes, estaEnviando, errorDeEnvio, alEnviar, 
             >
               <span className={styles.autor}>{NOMBRE_DEL_AUTOR[mensaje.autor]}</span>
               <p className={styles.texto}>{mensaje.texto}</p>
-              {mensaje.autor === 'asistente' && mensaje.esRespaldo && <p className={styles.aviso}>{AVISO_DE_RESPALDO}</p>}
+              {mensaje.autor === 'asistente' && mensaje.respaldo !== null && <AvisoDeRespaldo motivo={mensaje.respaldo.motivo} />}
             </li>
           ))}
         </ol>
