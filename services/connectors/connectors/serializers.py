@@ -21,7 +21,7 @@ from rest_framework import serializers
 from shared.cifrado import CampoSecretoSerializer
 
 from . import proveedores
-from .models import CuentaConectada, Importacion
+from .models import CobroCandidato, CuentaConectada, Importacion
 
 
 class CuentaConectadaSerializer(serializers.ModelSerializer):
@@ -250,3 +250,106 @@ class ArchivoRechazadoSerializer(serializers.Serializer):
         help_text="formato_no_admitido | archivo_vacio | archivo_excedido | contenido_incompatible"
     )
     archivo = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
+
+
+# ── Candidatos de cobro (S3-FE-14) ───────────────────────────────────
+
+
+class CobroCandidatoSerializer(serializers.ModelSerializer):
+    """Un cobro propuesto, tal como lo lista la vista previa (S3-CH-04).
+
+    Solo lectura entera. Un candidato no se edita desde afuera: lo escribe el
+    lector que leyó su origen, y lo único que una persona puede hacerle es
+    confirmarlo o rechazarlo, que son S3-FE-15 y S3-FE-16 y tienen sus
+    propias rutas. Un `PATCH` acá dejaría cambiar el importe de un cobro que
+    se presenta como evidencia de lo que decía la cartola.
+
+    ── El importe sale como TEXTO ───────────────────────────────────────────
+    DRF serializa `DecimalField` como cadena porque `COERCE_DECIMAL_TO_STRING`
+    viene en `True`, y acá eso NO es un detalle: en JSON un número decimal lo
+    lee el otro lado como `float` y se pierde la exactitud que se cuidó desde
+    el parser. Si alguien pone esa opción en `False`, este contrato cambia sin
+    que nadie lo note; hay una prueba que lo fija.
+    """
+
+    origen_legible = serializers.CharField(source="get_origen_display", read_only=True)
+    estado_legible = serializers.CharField(source="get_estado_display", read_only=True)
+    tipo_mensaje_legible = serializers.CharField(
+        source="get_tipo_mensaje_display", read_only=True
+    )
+    aplicacion = serializers.SerializerMethodField(
+        help_text=(
+            "Si lo confirmado ya existe en Suscripciones. `null` mientras el "
+            "candidato no está confirmado; `pendiente` cuando lo está: la "
+            "orden de crear quedó guardada, pero todavía NO hay suscripción "
+            "ni cobro creados."
+        )
+    )
+
+    # ── «Confirmado» no es «aplicado» ───────────────────────────────────
+    # Confirmar deja el candidato confirmado y una orden durable en el
+    # outbox, los dos o ninguno. Lo que NO hace es crear la suscripción ni el
+    # cobro: eso pasa en `subscriptions`, cuando alguien publique y consuma
+    # esa orden, y hoy no hay ni publicador ni consumidor.
+    #
+    # Sin este campo la interfaz solo ve `estado="confirmado"` y no tiene
+    # cómo saber que del otro lado todavía no existe nada: mostraría como
+    # hecho algo que está en cola. Lo pidieron las dos revisiones de #159.
+    #
+    # Hoy vale `pendiente` para todo confirmado, y es la verdad: ninguna
+    # orden se ha aplicado nunca. El valor `aplicada` llega con el
+    # consumidor, que es quien puede afirmarlo; inventarlo acá sería dar por
+    # creada una suscripción que nadie creó.
+    APLICACION_PENDIENTE = "pendiente"
+
+    def get_aplicacion(self, candidato) -> str | None:
+        if candidato.estado == CobroCandidato.Estado.CONFIRMADO:
+            return self.APLICACION_PENDIENTE
+        return None
+
+    class Meta:
+        model = CobroCandidato
+        fields = (
+            "id",
+            "importacion",
+            "origen",
+            "origen_legible",
+            # El identificador estable que pide S3-CH-04 para que recargar no
+            # duplique: es el mismo para el mismo hecho leído dos veces.
+            "identificador_origen",
+            "servicio",
+            "servicio_texto",
+            "servicio_resultado",
+            "importe",
+            "moneda",
+            "fecha",
+            "tipo_mensaje",
+            "tipo_mensaje_legible",
+            "estado",
+            "estado_legible",
+            # Quién decidió y cuándo (S3-FE-16). `null` mientras está
+            # `propuesto`; una vez decidido no se mueve, aunque lleguen más
+            # peticiones.
+            "decidido_en",
+            "decidido_por",
+            "aplicacion",
+            "evidencia",
+            "creado_en",
+        )
+        read_only_fields = fields
+
+
+class CandidatoYaConfirmadoSerializer(serializers.Serializer):
+    """La forma del 409 al intentar rechazar un candidato ya confirmado."""
+
+    codigo = serializers.CharField(help_text="candidato_ya_confirmado")
+    detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
+
+
+class ConfirmacionRechazadaSerializer(serializers.Serializer):
+    """La forma del 409 cuando un candidato no se puede confirmar."""
+
+    codigo = serializers.CharField(
+        help_text="candidato_rechazado | servicio_sin_resolver | tipo_sin_regla"
+    )
+    detail = serializers.CharField(help_text="Qué pasó, para mostrarlo tal cual.")
