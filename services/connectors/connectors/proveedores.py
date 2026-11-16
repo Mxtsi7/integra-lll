@@ -239,6 +239,73 @@ def canjear_codigo(
     return datos
 
 
+class RefrescoRechazado(ErrorDelProveedor):
+    """El proveedor dijo `invalid_grant`: el token de refresco ya no sirve
+    (revocado por el usuario, vencido o cambiada la contraseña). Solo se
+    arregla volviendo a conectar la cuenta (S3-FE-19)."""
+
+
+class RefrescoNoDisponible(ErrorDelProveedor):
+    """No se pudo refrescar ahora, pero puede funcionar más tarde: red,
+    tiempo agotado, 429 o 5xx. No dice nada malo de la cuenta."""
+
+
+def refrescar_token(proveedor: str, *, refresh_token: str) -> dict:
+    """Pide un token de acceso nuevo con el de refresco (RFC 6749 §6).
+
+    Devuelve el cuerpo de la respuesta (`access_token`, `expires_in` y, si el
+    proveedor lo rota, un `refresh_token` nuevo). Lanza:
+
+    - `RefrescoRechazado` solo con `invalid_grant`, que es lo único que dice
+      algo de LA CUENTA;
+    - `RefrescoNoDisponible` si conviene reintentar más tarde;
+    - `ErrorDelProveedor` para todo lo demás. Ahí entra `invalid_client`
+      (Google) y `unauthorized_client` (Microsoft), que es lo que responden
+      cuando el que está mal es NUESTRO cliente OAuth: copiado de lo que
+      contestaron el 13-11-2026 a un cliente inventado. Tratarlo como
+      `invalid_grant` dejaría a todos los usuarios pidiendo reconexión por un
+      error de configuración.
+
+    Ningún mensaje lleva el token.
+    """
+    config = configuracion_de(proveedor)
+    client_id, client_secret = credenciales_de(proveedor)
+    datos = {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    if proveedor == CuentaConectada.Proveedor.OUTLOOK:
+        # Microsoft pide los scopes también al refrescar; Google no.
+        datos["scope"] = config.scope_junto
+    try:
+        respuesta = requests.post(config.url_canje, data=datos, timeout=TIEMPO_LIMITE)
+    except requests.RequestException:
+        raise RefrescoNoDisponible(f"No se pudo contactar a {proveedor} para refrescar el token.") from None
+
+    if respuesta.status_code == 200:
+        try:
+            cuerpo = respuesta.json()
+        except ValueError:
+            raise ErrorDelProveedor(f"{proveedor} respondió algo que no es JSON al refrescar.") from None
+        if not isinstance(cuerpo, dict) or not isinstance(cuerpo.get("access_token"), str) or not cuerpo["access_token"]:
+            raise ErrorDelProveedor(f"{proveedor} no devolvió un token de acceso al refrescar.")
+        return cuerpo
+
+    codigo = _error_oauth(respuesta)[:60]
+    if not codigo.replace("_", "").isalpha():
+        # Lo que no tiene forma de código OAuth no se copia al mensaje.
+        codigo = ""
+    if codigo == "invalid_grant":
+        raise RefrescoRechazado(f"{proveedor} ya no acepta la autorización de esta cuenta (invalid_grant).")
+    if respuesta.status_code == 429 or respuesta.status_code >= 500:
+        raise RefrescoNoDisponible(f"{proveedor} no pudo refrescar el token ahora ({respuesta.status_code}).")
+    raise ErrorDelProveedor(
+        f"{proveedor} rechazó el refresco ({codigo or respuesta.status_code}); revisar el cliente OAuth."
+    )
+
+
 class _TokenInvalido:
     """El proveedor contestó, y lo que dijo es que ese token ya no es válido.
 
