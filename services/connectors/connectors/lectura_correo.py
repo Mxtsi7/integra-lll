@@ -22,8 +22,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
-from contextlib import contextmanager
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 
@@ -179,6 +179,13 @@ class MensajeCorreo:
     texto: str = dataclasses.field(repr=False)
     #: True si el texto se cortó en `LARGO_MAXIMO_TEXTO`.
     texto_truncado: bool = False
+    #: De qué buzón salió: `gmail` u `outlook`.
+    proveedor_correo: str = ""
+    #: El Message-ID del correo (RFC 5322), sin los `<>`. Es la identidad
+    #: del mensaje que fija el contrato de candidatos (S3-FE-06): no cambia
+    #: si el usuario lo mueve de carpeta y es el mismo en Gmail y en
+    #: Outlook. Vacío si el correo no trae uno usable.
+    message_id: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -214,6 +221,34 @@ def atribuir_rechazo(cuenta, token):
         rechazo.credenciales_version = cuenta.credenciales_version
         rechazo.huella_token = huella_de_token(token)
         raise
+
+
+#: Un Message-ID que pase de esto no es uno de verdad (RFC 5322 limita la
+#: línea a 998 caracteres).
+_LARGO_MAXIMO_MESSAGE_ID = 998
+
+
+def normalizar_message_id(valor) -> str:
+    """`<abc@ejemplo.com>` → `abc@ejemplo.com`, o "" si no es usable.
+
+    Usable es: un solo identificador, sin espacios ni controles, con `@` y
+    con algo a cada lado. No se cambian mayúsculas: la parte izquierda
+    distingue mayúsculas, y dos correos distintos no pueden terminar con la
+    misma identidad por normalizar de más.
+    """
+    if not isinstance(valor, str):
+        return ""
+    texto = valor.strip()
+    if texto.startswith("<") and texto.endswith(">"):
+        texto = texto[1:-1].strip()
+    if not texto or len(texto) > _LARGO_MAXIMO_MESSAGE_ID or not texto.isprintable():
+        return ""
+    if any(c.isspace() or c in "<>" for c in texto):
+        return ""
+    izquierda, arroba, derecha = texto.rpartition("@")
+    if not arroba or not izquierda or not derecha:
+        return ""
+    return texto
 
 
 def validar_limite(limite) -> None:
