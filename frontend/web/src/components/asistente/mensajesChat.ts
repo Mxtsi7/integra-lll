@@ -9,6 +9,10 @@ export type MensajeChat =
       id: number;
       autor: 'asistente';
       texto: string;
-      /** true si el asistente con IA no contestó y el texto es el resumen que calcula el backend. */
-      esRespaldo: boolean;
+      /**
+       * Si el asistente con IA no contestó y el texto es el resumen que calcula el
+       * backend (S3-CH-17), por qué; null si contestó el asistente. El motivo es
+       * null cuando la API no lo manda.
+       */
+      respaldo: { motivo: string | null } | null;
     };

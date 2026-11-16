@@ -3,7 +3,8 @@
 Contrato entre servicios. **Un cambio acá afecta a todo el equipo**: se avisa
 antes, nunca se descubre en un merge.
 
-Broker: RabbitMQ · Exchange: `suscripciones` (tipo `topic`)
+Broker: RabbitMQ · Exchange principal: `suscripciones` (tipo `topic`) ·
+Uso de recolectores: `uso.eventos` (tipo `topic`, ver ADR-009)
 
 ---
 
@@ -71,6 +72,27 @@ Una cancelación en VI-26 publica solo `suscripcion.estado_cambiado.v2` por defe
 Si hay receptores v1 activos, acordar el adaptador descrito en MX-21 antes de migrarlos.
 El nombre histórico del exchange `suscripciones` también abarca alertas y los demás dominios de este catálogo.
 
+### Contrato de uso de recolectores (v1, exchange dedicado)
+
+El [contrato canónico `uso-recolectores-v1`](../../docs/contratos/uso-recolectores-v1.md)
+define el cuerpo HTTP que envía el recolector. La recepción autenticada
+(S3-MX-26..31) lo valida y persiste; el publicador de `subscriptions` lo deja
+en el outbox y lo publica en `uso.eventos` con routing key `uso.registrado`.
+El consumidor es `analytics-uso` (S3-VI-09). La separación del exchange
+histórico está registrada en la [ADR-009](../../docs/arquitectura/ADR-009-exchange-uso.md).
+
+El cuerpo canónico no lleva identidad ni destino. El sobre interno añade
+`suscripcion_id` y `usuario_id` en `datos`; `organizacion_id` viaja en la
+envoltura común. El `id` del sobre debe ser igual a `datos.event_id`.
+
+| Evento | Cuándo | Datos | Escucha |
+|---|---|---|---|
+| `uso.registrado` v1 | La recepción acepta una ventana observada por un recolector | `version`, `event_id`, `recolector_id`, `origen`, `inicio`, `fin`, `duracion_ms`, `tramos_actividad`, `zona_horaria`, `cobertura`, `estado`; el sobre añade `suscripcion_id` y `usuario_id` | analytics-uso |
+
+La idempotencia usa `(organizacion_id, recolector_id, event_id)`; la
+suscripción es destino inmutable y no forma parte de la clave. Los detalles
+semánticos y los acuses HTTP están en el contrato.
+
 ### Publica `subscriptions`
 
 | Evento | Cuándo | Datos | Escucha |
@@ -87,7 +109,7 @@ El nombre histórico del exchange `suscripciones` también abarca alertas y los 
 |---|---|---|---|
 | `conector.vinculado` | El usuario autoriza una cuenta externa | `conector_id`, `tipo`, `usuario_id` | analytics |
 | `conector.fallido` | La sincronización falla tras los reintentos | `conector_id`, `tipo`, `error` | notifications |
-| `uso.registrado` | Llegan datos de uso desde una API externa | `suscripcion_id`, `minutos`, `fecha`, `fuente` | analytics |
+| `uso.registrado` (v1 legado) | Llegan datos de uso desde una API externa | `suscripcion_id`, `minutos`, `fecha`, `fuente` | analytics (legado) |
 | `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions |
 
 ### Publica `analytics`

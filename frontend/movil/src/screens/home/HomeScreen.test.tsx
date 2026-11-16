@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import HomeScreen, { HomeView } from './HomeScreen';
 import type { Suscripcion, Usuario } from '@ojoalgasto/shared';
 
@@ -429,6 +429,274 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         fireEvent.click(btnCta);
 
         expect(navigateMock).toHaveBeenCalledWith('SuscripcionNueva');
+      });
+    });
+
+    describe('Invalidación y actualización de listado ante foco (SE-23)', () => {
+      it('invalida y recarga la lista cuando la pantalla recupera el foco', async () => {
+        let focusCallback: (() => void) | undefined;
+        const addListenerMock = vi.fn().mockImplementation((event, cb) => {
+          if (event === 'focus') {
+            focusCallback = cb;
+          }
+          return () => {};
+        });
+
+        const suscripcionNueva: Suscripcion = {
+          id: 'sub-nueva',
+          nombre: 'HBO Max',
+          monto: 5990,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-12-10',
+          categoria: 'streaming',
+          estado: 'activo',
+        };
+
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockResolvedValueOnce(MOCK_SUSCRIPCIONES)
+          .mockResolvedValueOnce([...MOCK_SUSCRIPCIONES, suscripcionNueva]);
+
+        render(
+          <HomeScreen
+            navigation={{ addListener: addListenerMock } as any}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        // Carga inicial
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(screen.queryByText('HBO Max')).toBeNull();
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(1);
+
+        // Simular evento de foco (por ejemplo, al volver de crear una nueva suscripción)
+        await act(async () => {
+          focusCallback?.();
+        });
+
+        // La lista se actualizó y ahora incluye la nueva suscripción
+        expect(await screen.findByText('HBO Max')).toBeTruthy();
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    describe('Protección contra respuestas asíncronas desordenadas o desactualizadas', () => {
+      it('ignora respuesta anterior A si B resolvió primero y conserva los datos y totales de B', async () => {
+        let resolverA: (val: Suscripcion[]) => void = () => {};
+        let resolverB: (val: Suscripcion[]) => void = () => {};
+
+        const promesaA = new Promise<Suscripcion[]>((res) => {
+          resolverA = res;
+        });
+        const promesaB = new Promise<Suscripcion[]>((res) => {
+          resolverB = res;
+        });
+
+        let focusCallback: (() => void) | undefined;
+        const addListenerMock = vi.fn().mockImplementation((event, cb) => {
+          if (event === 'focus') {
+            focusCallback = cb;
+          }
+          return () => {};
+        });
+
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockReturnValueOnce(promesaA) // Petición inicial A
+          .mockReturnValueOnce(promesaB); // Petición posterior B (por foco tras crear)
+
+        render(
+          <HomeScreen
+            navigation={{ addListener: addListenerMock } as any}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        // A está pendiente. El usuario crea y al volver a foco se dispara B:
+        await act(async () => {
+          focusCallback?.();
+        });
+
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(2);
+
+        const suscripcionNueva: Suscripcion = {
+          id: 'sub-b',
+          nombre: 'Disney Plus B',
+          monto: 7990,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-11-20',
+          categoria: 'streaming',
+          estado: 'activo',
+        };
+
+        // B resuelve primero con la nueva suscripción
+        await act(async () => {
+          resolverB([suscripcionNueva]);
+        });
+
+        expect(await screen.findByText('Disney Plus B')).toBeTruthy();
+        expect(screen.getAllByText(/7\.990/).length).toBeGreaterThanOrEqual(1);
+
+        // A termina después con la instantánea vieja (sin la suscripción nueva)
+        await act(async () => {
+          resolverA(MOCK_SUSCRIPCIONES);
+        });
+
+        // La pantalla debe conservar los datos de B y no revertir a la lista vieja de A
+        expect(screen.getByText('Disney Plus B')).toBeTruthy();
+        expect(screen.queryByText('Netflix')).toBeNull();
+        expect(screen.getAllByText(/7\.990/).length).toBeGreaterThanOrEqual(1);
+      });
+
+      it('ignora rechazo tardío de A si B ya resolvió con éxito y no muestra estado de error', async () => {
+        let rechazarA: (err: unknown) => void = () => {};
+        let resolverB: (val: Suscripcion[]) => void = () => {};
+
+        const promesaA = new Promise<Suscripcion[]>((_, rej) => {
+          rechazarA = rej;
+        });
+        const promesaB = new Promise<Suscripcion[]>((res) => {
+          resolverB = res;
+        });
+
+        let focusCallback: (() => void) | undefined;
+        const addListenerMock = vi.fn().mockImplementation((event, cb) => {
+          if (event === 'focus') {
+            focusCallback = cb;
+          }
+          return () => {};
+        });
+
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockReturnValueOnce(promesaA)
+          .mockReturnValueOnce(promesaB);
+
+        render(
+          <HomeScreen
+            navigation={{ addListener: addListenerMock } as any}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        await act(async () => {
+          focusCallback?.();
+        });
+
+        const suscripcionValida: Suscripcion = {
+          id: 'sub-ok',
+          nombre: 'Spotify OK',
+          monto: 4990,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-11-20',
+          categoria: 'musica',
+          estado: 'activo',
+        };
+
+        // B resuelve con éxito
+        await act(async () => {
+          resolverB([suscripcionValida]);
+        });
+
+        expect(await screen.findByText('Spotify OK')).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+
+        // A falla más tarde con error de red
+        await act(async () => {
+          rechazarA(new Error('Network error tardío'));
+        });
+
+        // No debe pisar los datos con error
+        expect(screen.getByText('Spotify OK')).toBeTruthy();
+        expect(screen.queryByRole('alert')).toBeNull();
+      });
+
+      it('invalida peticiones en curso al desmontar el componente', async () => {
+        let resolverA: (val: Suscripcion[]) => void = () => {};
+        const promesaA = new Promise<Suscripcion[]>((res) => {
+          resolverA = res;
+        });
+
+        const onCargarSuscripciones = vi.fn().mockReturnValueOnce(promesaA);
+
+        const { unmount } = render(
+          <HomeScreen onCargarSuscripciones={onCargarSuscripciones} />
+        );
+
+        // Desmontar mientras A está pendiente
+        unmount();
+
+        // Resolver A tras el desmontaje no debe generar errores ni actualizaciones no deseadas
+        await act(async () => {
+          resolverA(MOCK_SUSCRIPCIONES);
+        });
+
+        expect(screen.queryByTestId('screen-home')).toBeNull();
+      });
+
+      it('invalida peticiones anteriores al cambiar de usuario o sesión', async () => {
+        let resolverUser1: (val: Suscripcion[]) => void = () => {};
+        let resolverUser2: (val: Suscripcion[]) => void = () => {};
+
+        const promesa1 = new Promise<Suscripcion[]>((res) => {
+          resolverUser1 = res;
+        });
+        const promesa2 = new Promise<Suscripcion[]>((res) => {
+          resolverUser2 = res;
+        });
+
+        const onCargarSuscripciones = vi
+          .fn()
+          .mockReturnValueOnce(promesa1)
+          .mockReturnValueOnce(promesa2);
+
+        const { rerender } = render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        // Cambiar de usuario antes de que resuelva promesa1
+        const usuario2: Usuario = { ...MOCK_USUARIO, id: 'usr-2', nombre: 'Ana López' };
+
+        rerender(
+          <HomeScreen
+            usuario={usuario2}
+            onCargarSuscripciones={onCargarSuscripciones}
+          />
+        );
+
+        // El cambio de usuario invalida la petición anterior y dispara la nueva carga
+        expect(onCargarSuscripciones).toHaveBeenCalledTimes(2);
+
+        // Usuario 2 resuelve con sus datos
+        await act(async () => {
+          resolverUser2([{
+            id: 'sub-ana',
+            nombre: 'Ana Service',
+            monto: 12000,
+            moneda: 'CLP',
+            frecuencia: 'mensual',
+            fecha_proximo_cobro: '2026-11-30',
+            categoria: 'otros',
+            estado: 'activo',
+          }]);
+        });
+
+        expect(await screen.findByText('Ana Service')).toBeTruthy();
+
+        // Llega tarde la respuesta del usuario 1
+        await act(async () => {
+          resolverUser1(MOCK_SUSCRIPCIONES);
+        });
+
+        // Se mantienen los datos de Ana y no los de User 1
+        expect(screen.getByText('Ana Service')).toBeTruthy();
+        expect(screen.queryByText('Netflix')).toBeNull();
       });
     });
   });
