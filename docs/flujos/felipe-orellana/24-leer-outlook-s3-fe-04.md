@@ -42,6 +42,22 @@ Se valida la que entra **y la que devuelve Graph**: no se entrega una página
 que la llamada siguiente rechazaría. Además, `allow_redirects=False`: una
 redirección mandaría el token adonde diga la respuesta.
 
+### Una página se procesa entera
+
+El tamaño de una página que se sigue lo fija su `$top`, no el `limite` de
+la llamada. Antes se recortaba a `limite`: seguir una página de 25 con
+`limite=5` devolvía 5, conservaba el cursor que ya avanzaba después de los
+25, y los otros 20 se perdían sin aviso. Lo encontró la revisión de #177.
+
+Ahora:
+
+- la página que se sigue se procesa completa;
+- su `$top` tiene que ser un número entre 1 y 100, una sola vez (sin `$top`
+  vale el tamaño por omisión de Graph, 10); si no, la página se rechaza
+  antes de pedirla;
+- si Graph devuelve **más** mensajes de los pedidos, es un error explícito:
+  no se recorta, porque recortar es perder.
+
 ## Filtros
 
 Graph no acepta `$search` junto con `$orderby`, y la búsqueda por palabras
@@ -98,7 +114,7 @@ cuenta. Este lector tampoco renueva el token (S3-FE-19).
 | El lector | `services/connectors/connectors/lector_outlook.py` |
 | Lo común con Gmail | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_outlook.py` |
-| Las pruebas | `services/connectors/tests/test_lector_outlook.py` (85) |
+| Las pruebas | `services/connectors/tests/test_lector_outlook.py` (95) |
 
 ## Cómo se comprobaron las pruebas
 
@@ -107,7 +123,7 @@ un token ilegible y a una petición sin token. La forma de la lista y de cada
 mensaje sigue la referencia publicada de "List messages"; se va a contrastar
 en la corrida real.
 
-Se rompió el código a propósito 37 veces y cada vez falló al menos una prueba:
+Se rompió el código a propósito 43 veces y cada vez falló al menos una prueba:
 pedir la cuenta de Gmail, no validar la página que entra o la que sale,
 comparar la página por prefijo o solo por nombre de servidor, aceptar `http`,
 fragmento, espacios o cualquier largo, reenviar parámetros en la página,
