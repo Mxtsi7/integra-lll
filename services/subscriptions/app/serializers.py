@@ -334,6 +334,28 @@ class ResumenPanelSerializer(serializers.Serializer):
     conteo_estados = ConteoEstadosSerializer()
 
 
+class GastoPorMonedaSerializer(serializers.Serializer):
+    """Gasto de una moneda en un periodo. Nunca se suma con otra moneda."""
+
+    moneda = serializers.CharField()
+    gasto_real = serializers.DecimalField(max_digits=14, decimal_places=2)
+    gasto_proyectado = serializers.DecimalField(max_digits=14, decimal_places=2)
+    total_estimado = serializers.DecimalField(max_digits=14, decimal_places=2)
+    conteo_cobros = serializers.IntegerField(min_value=0)
+    conteo_suscripciones = serializers.IntegerField(min_value=0)
+
+
+class GastoPorMonedaPeriodoSerializer(serializers.Serializer):
+    """Gasto del periodo separado por código de moneda (S3-VI-15).
+
+    No existe un total entre monedas a propósito: sumar CLP con USD produciría
+    una cifra sin significado. Cada entrada conserva su propio código.
+    """
+
+    periodo = serializers.CharField()
+    monedas = GastoPorMonedaSerializer(many=True)
+
+
 class RegistrarCobroSerializer(serializers.Serializer):
     """Entrada para registrar un cobro real y disparar la detección de VI-19."""
 

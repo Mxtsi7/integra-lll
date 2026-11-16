@@ -32,6 +32,7 @@ Gestiona las suscripciones, proveedores y cobros recurrentes de cada hogar/organ
 | `GET` | `/api/suscripciones/presupuesto/?mes=YYYY-MM&moneda=CLP` | Compara presupuesto mensual vs proyección y gasto real (VI-05) | `200 OK` / `400` / `403` |
 | `POST` | `/api/suscripciones/presupuesto/` | Define o actualiza presupuesto mensual (VI-05 / RF-13 / RF-19) | `200 OK` / `400` / `403` |
 | `GET` | `/api/suscripciones/resumen/?mes=YYYY-MM&moneda=CLP` | Resumen agregado del panel: gasto real, proyección y conteo (VI-06) | `200 OK` / `400` / `403` |
+| `GET` | `/api/suscripciones/gasto-por-moneda/?mes=YYYY-MM` | Gasto del periodo separado por moneda, sin sumar divisas (S3-VI-15) | `200 OK` / `400` / `403` |
 | `GET` | `/api/suscripciones/<id>/uso/` | Consulta el histórico de uso por fecha descendente (CU-23 / RF-04 / RF-15) | `200 OK` / `404` |
 | `POST` | `/api/suscripciones/<id>/uso/` | Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16) | `200 OK` / `400` / `404` |
 | `GET` | `/api/suscripciones/<id>/transiciones/` | Consulta la auditoría de cambios de estado | `200 OK` / `404` |
@@ -71,6 +72,60 @@ Esta entrega añade las capacidades de consulta, listados enriquecidos, gestión
 - Agrega en backend el `gasto_real`, `gasto_proyectado` (excluyendo canceladas) y `total_estimado`.
 - Provee desglose `conteo_estados` con el conteo de suscripciones por estado (`activo`, `prueba`, `por_confirmar`, `cancelado`, `fantasma`, `total`).
 - Un tenant en estado vacío (sin registros) devuelve ceros y las estructuras completas y estables.
+
+#### 6. Gasto por moneda (S3-VI-15)
+`GET /api/suscripciones/gasto-por-moneda/?mes=YYYY-MM` requiere
+`X-Organizacion-Id` y devuelve el gasto del periodo agrupado por código de
+moneda. Sin `mes` usa el mes local actual; un formato distinto de `YYYY-MM`
+responde `400` y la falta de organización responde `403`.
+
+```json
+{
+  "periodo": "2026-10",
+  "monedas": [
+    {
+      "moneda": "CLP",
+      "gasto_real": "10000.00",
+      "gasto_proyectado": "2000.00",
+      "total_estimado": "12000.00",
+      "conteo_cobros": 1,
+      "conteo_suscripciones": 2
+    },
+    {
+      "moneda": "USD",
+      "gasto_real": "25.50",
+      "gasto_proyectado": "0.00",
+      "total_estimado": "25.50",
+      "conteo_cobros": 1,
+      "conteo_suscripciones": 1
+    }
+  ]
+}
+```
+
+Reglas del contrato:
+
+- **Nunca se suman monedas distintas.** No existe un total conjunto ni una
+  conversión implícita: cada fila conserva su código y la respuesta no tiene
+  una clave `total` entre divisas.
+- `gasto_real` suma los `Cobro` ocurridos en el periodo aunque la suscripción
+  se haya desactivado después. El dinero se gastó y una baja lógica no lo
+  borra.
+- `gasto_proyectado` solo considera suscripciones `activo=True`, no
+  canceladas, con una ocurrencia esperada en el mes que sea hoy o posterior y
+  sin un cobro ya registrado en el periodo. No se inventa un cobro pasado que
+  no está confirmado.
+- `conteo_cobros` cuenta cobros reales. `conteo_suscripciones` cuenta
+  suscripciones distintas que aportan a esa moneda, uniendo cobros reales y
+  proyecciones, sin duplicar una suscripción ya cobrada.
+- Los códigos se normalizan a mayúsculas antes de agrupar, de modo que una fila
+  histórica en minúsculas no parte el gasto en dos entradas.
+
+La suite del contrato se ejecuta con
+`pytest tests/test_gasto_por_moneda.py -v`. La integración con PostgreSQL real
+se ejecuta con `INTEGRACION_USO=1` y
+`pytest tests/test_gasto_por_moneda_integracion.py -v`; con
+`EXIGIR_INTEGRACION_USO=1` la falta de base falla en vez de degradar a SQLite.
 
 ### VI-10: Uso, agregado mensual y última actividad
 

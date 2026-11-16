@@ -1,6 +1,7 @@
 """Vistas del servicio de suscripciones."""
 
 from calendar import monthrange
+from collections import defaultdict
 from datetime import date, timedelta
 import re
 import uuid
@@ -8,7 +9,8 @@ import uuid
 from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models, transaction
-from django.db.models import Sum
+from django.db.models import Count, Sum
+from django.db.models.functions import Upper
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -47,6 +49,7 @@ from app.models import (
 from app.serializers import (
     CalendarioCobroSerializer,
     CobroSerializer,
+    GastoPorMonedaPeriodoSerializer,
     HallazgoCobroSerializer,
     PaginatedCobroSerializer,
     PaginatedHallazgoSerializer,
@@ -104,14 +107,119 @@ def _calcular_gasto_proyectado(
     suscripciones, inicio: date, fin: date, suscripciones_con_cobro: set
 ) -> Decimal:
     """Calcula la suma de montos proyectados en el rango para suscripciones sin cobro confirmado."""
+    return sum(
+        (
+            suscripcion.monto
+            for suscripcion in _suscripciones_proyectadas(
+                suscripciones, inicio, fin, suscripciones_con_cobro
+            )
+        ),
+        Decimal("0.00"),
+    )
+
+
+def _suscripciones_proyectadas(
+    suscripciones, inicio: date, fin: date, suscripciones_con_cobro: set
+):
+    """Itera las suscripciones que todavía tienen una ocurrencia esperada.
+
+    Una suscripción ya cobrada en el periodo no se proyecta otra vez. Una
+    ocurrencia anterior a hoy tampoco: el cobro esperado ya pasó, y si no está
+    registrado no se inventa.
+    """
     hoy = timezone.localdate()
-    total_proyectado = Decimal("0.00")
     for suscripcion in suscripciones:
         fecha = _fecha_proyectada_en_mes(suscripcion, inicio, fin)
         if fecha is None or fecha < hoy or suscripcion.id in suscripciones_con_cobro:
             continue
-        total_proyectado += suscripcion.monto
-    return total_proyectado
+        yield suscripcion
+
+
+def _entrada_gasto(por_moneda: dict, codigo: str) -> dict:
+    """Obtiene o crea la fila de una moneda, siempre separada de las demás."""
+    if codigo not in por_moneda:
+        por_moneda[codigo] = {
+            "moneda": codigo,
+            "gasto_real": Decimal("0.00"),
+            "gasto_proyectado": Decimal("0.00"),
+            "total_estimado": Decimal("0.00"),
+            "conteo_cobros": 0,
+            "conteo_suscripciones": 0,
+        }
+    return por_moneda[codigo]
+
+
+def _construir_gasto_por_moneda(
+    *, cobros, suscripciones, inicio: date, fin: date, periodo: str
+) -> dict:
+    """Gasto del periodo agrupado por moneda, sin total entre divisas.
+
+    ``gasto_real`` incluye todos los cobros efectivamente ocurridos en el
+    periodo, aunque la suscripción se haya dado de baja después: el dinero se
+    gastó. ``gasto_proyectado`` sólo considera suscripciones ``activo=True`` y
+    no canceladas, sin un cobro ya registrado en el periodo.
+
+    ``conteo_suscripciones`` cuenta las suscripciones distintas que aportan a
+    esa moneda, uniendo cobros reales y proyecciones. Así una suscripción no se
+    cuenta dos veces cuando ya tiene su cobro.
+    """
+    por_moneda: dict[str, dict] = {}
+    ids_por_moneda: dict[str, set] = defaultdict(set)
+    suscripciones_con_cobro: set = set()
+
+    filas_cobro = (
+        cobros.annotate(moneda_normalizada=Upper("moneda"))
+        .values("moneda_normalizada")
+        .annotate(
+            gasto_real=Sum("monto"),
+            conteo_cobros=Count("id"),
+        )
+        .order_by("moneda_normalizada")
+    )
+    for fila in filas_cobro:
+        codigo = (fila["moneda_normalizada"] or "").upper()
+        if not codigo:
+            continue
+        entrada = _entrada_gasto(por_moneda, codigo)
+        entrada["gasto_real"] += fila["gasto_real"] or Decimal("0.00")
+        entrada["conteo_cobros"] += int(fila["conteo_cobros"])
+
+    for codigo_crudo, suscripcion_id in (
+        cobros.annotate(moneda_normalizada=Upper("moneda")).values_list(
+            "moneda_normalizada", "suscripcion_id"
+        )
+    ):
+        codigo = (codigo_crudo or "").upper()
+        if not codigo:
+            continue
+        ids_por_moneda[codigo].add(suscripcion_id)
+        suscripciones_con_cobro.add(suscripcion_id)
+
+    suscripciones_por_moneda: dict[str, list] = defaultdict(list)
+    for suscripcion in suscripciones:
+        codigo = (suscripcion.moneda or "").upper()
+        if codigo:
+            suscripciones_por_moneda[codigo].append(suscripcion)
+
+    for codigo, lista in suscripciones_por_moneda.items():
+        proyectadas = list(
+            _suscripciones_proyectadas(lista, inicio, fin, suscripciones_con_cobro)
+        )
+        if not proyectadas:
+            continue
+        entrada = _entrada_gasto(por_moneda, codigo)
+        for suscripcion in proyectadas:
+            entrada["gasto_proyectado"] += suscripcion.monto
+            ids_por_moneda[codigo].add(suscripcion.id)
+
+    for codigo, entrada in por_moneda.items():
+        entrada["total_estimado"] = entrada["gasto_real"] + entrada["gasto_proyectado"]
+        entrada["conteo_suscripciones"] = len(ids_por_moneda[codigo])
+
+    return {
+        "periodo": periodo,
+        "monedas": [por_moneda[codigo] for codigo in sorted(por_moneda)],
+    }
 
 
 def _fecha_proyectada_en_mes(
@@ -1036,6 +1144,99 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
             "conteo_estados": conteo_estados,
         }
         return Response(ResumenPanelSerializer(datos).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="mes",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Periodo en formato YYYY-MM. Si se omite, se usa el mes "
+                    "local actual."
+                ),
+                examples=[OpenApiExample("Noviembre 2026", value="2026-11")],
+            )
+        ],
+        responses={
+            200: OpenApiResponse(
+                response=GastoPorMonedaPeriodoSerializer,
+                description="Gasto real, proyectado y estimado por moneda.",
+                examples=[
+                    OpenApiExample(
+                        "Noviembre 2026",
+                        value={
+                            "periodo": "2026-11",
+                            "monedas": [
+                                {
+                                    "moneda": "CLP",
+                                    "gasto_real": "25000.00",
+                                    "gasto_proyectado": "12990.00",
+                                    "total_estimado": "37990.00",
+                                    "conteo_cobros": 2,
+                                    "conteo_suscripciones": 3,
+                                },
+                                {
+                                    "moneda": "USD",
+                                    "gasto_real": "19.98",
+                                    "gasto_proyectado": "0.00",
+                                    "total_estimado": "19.98",
+                                    "conteo_cobros": 1,
+                                    "conteo_suscripciones": 1,
+                                },
+                            ],
+                        },
+                        response_only=True,
+                    )
+                ],
+            ),
+            400: OpenApiResponse(description="``mes`` inválido."),
+            403: OpenApiResponse(description="Falta el contexto de organización."),
+        },
+        description=(
+            "Gasto del periodo separado por código de moneda (S3-VI-15). "
+            "Nunca suma monedas distintas: cada entrada conserva su código. "
+            "``gasto_real`` incluye los cobros ocurridos, aunque la "
+            "suscripción se haya dado de baja después; ``gasto_proyectado`` "
+            "sólo considera suscripciones activas y no canceladas sin cobro "
+            "registrado en el periodo."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="gasto-por-moneda")
+    def gasto_por_moneda(self, request):
+        """GET /api/suscripciones/gasto-por-moneda/?mes=YYYY-MM (S3-VI-15)."""
+        organizacion_id = getattr(request, "organizacion_id", None)
+        if not organizacion_id:
+            raise PermissionDenied(
+                "La cabecera X-Organizacion-Id es obligatoria."
+            )
+
+        inicio, fin, periodo = _resolver_rango_mes(request.query_params.get("mes"))
+
+        # Los cobros reales no se filtran por ``activo``: el gasto ocurrió y
+        # una baja lógica posterior no lo borra del periodo.
+        cobros = Cobro.objects.filter(
+            organizacion_id=organizacion_id,
+            fecha__range=(inicio, fin),
+        )
+        suscripciones = (
+            TenantViewSet.get_queryset(self)
+            .filter(activo=True)
+            .exclude(estado=Subscription.Estado.CANCELADO)
+        )
+
+        datos = _construir_gasto_por_moneda(
+            cobros=cobros,
+            suscripciones=suscripciones,
+            inicio=inicio,
+            fin=fin,
+            periodo=periodo,
+        )
+        return Response(
+            GastoPorMonedaPeriodoSerializer(datos).data,
+            status=status.HTTP_200_OK,
+        )
 
     @staticmethod
     def _actor_id(request, *, required: bool = False):
