@@ -92,9 +92,14 @@ _TOKEN = "|".join(re.escape(t) for t in _TOKENS)
 _NUMERO = r"\d{1,3}(?:[.,\u00a0\u202f]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
 _MONTO = re.compile(
     # Un código pegado a otra palabra no es una moneda: «XCLP 9.990» no.
-    rf"(?<![A-Za-z])(?P<antes>{_TOKEN})\s?(?P<numero_a>{_NUMERO})(?![\d.,]*\d)"
+    # `signo_medio` es el menos entre el símbolo y el número: «$-9.990».
+    rf"(?<![A-Za-z])(?P<antes>{_TOKEN})\s?(?P<signo_medio>[-\u2212]\s?)?(?P<numero_a>{_NUMERO})(?![\d.,]*\d)"
     rf"|(?<![\w.,])(?P<numero_d>{_NUMERO})\s?(?P<despues>{_TOKEN})(?!\w)"
 )
+
+#: Lo que, justo antes de un monto, dice que es negativo: «-9.990 CLP»,
+#: «-$9.990», «CLP -9.990», o el paréntesis contable «(9.990)».
+_MENOS = ("-", "\u2212")
 
 #: Un código de moneda pegado (o a un espacio) después de un monto con `$`.
 _CODIGO_DESPUES = re.compile(r"\s?(" + "|".join(c for c in SIMBOLOS if c.isalpha()) + r")(?![A-Za-z])")
@@ -113,6 +118,16 @@ _FECHA_NUMERICA = re.compile(r"(?<![\d/.-])(\d{1,2})([/.-])(\d{1,2})\2(\d{4})(?!
 _FECHA_ES = re.compile(rf"(?<!\d)(\d{{1,2}})\s+de\s+({_MES})\.?(?:\s+de)?\s+(\d{{4}})(?!\d)", re.IGNORECASE)
 _FECHA_EN_MDY = re.compile(rf"(?<![\w])({_MES})\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})(?!\d)", re.IGNORECASE)
 _FECHA_EN_DMY = re.compile(rf"(?<!\d)(\d{{1,2}})\s+({_MES})\.?,?\s+(\d{{4}})(?!\d)", re.IGNORECASE)
+#: Lo que dice que una fecha es la del PRÓXIMO ciclo, no la de este cobro.
+#: Se mira antes que las etiquetas de fecha, porque «Next billing date»
+#: también contiene «billing date». Lo encontró la revisión de #184.
+_ETIQUETAS_DE_PROXIMO = re.compile(
+    r"\b(?:pr[oó]xim[oa]s?\s+(?:cobro|pago|cargo|renovaci[oó]n|facturaci[oó]n|factura|vencimiento)|"
+    r"se\s+renovar[aá]|renueva|vence|vencimiento|fecha\s+l[ií]mite|next\s+(?:billing|payment|charge|renewal)|"
+    r"se\s+cobrar[aá]|cobraremos|vamos\s+a\s+cobrar|renews?|will\s+renew|will\s+be\s+charged|due\s+(?:date|on)|valid\s+until|expires?)\b",
+    re.IGNORECASE,
+)
+
 _ETIQUETAS_DE_FECHA = re.compile(
     r"\b(?:fecha(?:\s+de\s+(?:cobro|pago|cargo|compra|facturaci[oó]n|transacci[oó]n))?|billing date|charge date|"
     r"date of (?:charge|payment|purchase)|payment date|order date|charged on|paid on|date)\b",
@@ -138,6 +153,9 @@ class DatosDelCobro:
     importe: Campo
     moneda: Campo
     fecha: Campo
+    #: La fecha del PRÓXIMO cobro, si el correo la dice: sirve para un aviso
+    #: (S3-FE-08). No es la del cobro y no entra en `para_revision`.
+    fecha_proximo_cobro: Campo = Campo(None, AUSENTE)
 
     @property
     def para_revision(self) -> tuple[tuple[str, str], ...]:
@@ -206,6 +224,24 @@ class _Monto:
     token: str
     fuerza: int
     fragmento: str
+    negativo: bool = False
+
+
+def _es_negativo(linea: str, m) -> bool:
+    """¿El monto que calzó en `m` lleva un signo menos o va entre paréntesis?
+
+    La expresión del monto empieza DESPUÉS del signo, así que hay que mirar
+    alrededor. Antes no se miraba, y «Total: -9.990 CLP» salía como 9.990
+    confirmado: un abono o una devolución se proponía como un gasto. Lo
+    encontró la revisión de #184.
+    """
+    if m.group("signo_medio"):
+        return True
+    antes = linea[:m.start()].rstrip()
+    despues = linea[m.end():].lstrip()
+    if antes.endswith(_MENOS):
+        return True
+    return antes.endswith("(") and despues.startswith(")")
 
 
 def _montos(texto: str) -> list[_Monto]:
@@ -225,7 +261,8 @@ def _montos(texto: str) -> list[_Monto]:
             valor, decimales = leido
             if valor <= 0 or valor > IMPORTE_MAXIMO:
                 continue
-            encontrados.append(_Monto(valor, decimales, token, _etiqueta(linea, m.start()), linea.strip()[:200]))
+            encontrados.append(_Monto(valor, decimales, token, _etiqueta(linea, m.start()), linea.strip()[:200],
+                                      negativo=_es_negativo(linea, m)))
     return encontrados
 
 
@@ -248,6 +285,11 @@ def _importe_y_moneda(texto: str) -> tuple[Campo, Campo]:
         return Campo(None, AMBIGUO, motivo, fragmento), _moneda(elegidos, fragmento)
     moneda = _moneda(elegidos, fragmento)
     monto = elegidos[0]
+    if any(m.negativo for m in elegidos):
+        # Un cobro es positivo. Un total negativo es un abono, una devolución
+        # o un saldo a favor: no se propone como gasto sin que alguien lo mire.
+        return (Campo(-monto.valor, AMBIGUO, "el monto es negativo: puede ser una devolución o un abono, no un cobro",
+                      fragmento), moneda)
     if moneda.confirmado and monto.decimales > DECIMALES_POR_MONEDA[moneda.valor]:
         return (Campo(monto.valor, AMBIGUO, f"{moneda.valor} no lleva {monto.decimales} decimales", fragmento),
                 moneda)
@@ -259,7 +301,14 @@ def _moneda(montos: list[_Monto], fragmento: str) -> Campo:
     codigos = {SIMBOLOS.get(t) for t in tokens}
     if codigos == {None}:
         return Campo(None, AMBIGUO, "el monto viene con `$` solo: pueden ser pesos o dólares", fragmento)
-    codigos.discard(None)
+    if None in codigos:
+        # «Total: USD 10» y, en otra línea, «Total: $10». Nada dice que ese
+        # `$` sea USD: antes se descartaba y la moneda salía confirmada. El
+        # `$` se ata a un código solo en el MISMO monto («$10 USD»). Lo
+        # encontró la revisión de #184.
+        conocidos = ", ".join(sorted(c for c in codigos if c))
+        return Campo(None, AMBIGUO, f"un monto viene en {conocidos} y otro con `$` solo, que no dice cuál es",
+                     fragmento)
     if len(codigos) > 1:
         return Campo(None, AMBIGUO, "el correo trae montos en más de una moneda: " + ", ".join(sorted(codigos)),
                      fragmento)
@@ -303,14 +352,13 @@ def _fechas_de(linea: str) -> list[tuple[set[date], str]]:
     return lecturas
 
 
-def _fecha(texto: str, recibido: date) -> Campo:
-    etiquetadas, sueltas = [], []
-    for linea in texto.splitlines():
-        for posibles, crudo in _fechas_de(linea):
-            (etiquetadas if _ETIQUETAS_DE_FECHA.search(linea) else sueltas).append((posibles, crudo, linea.strip()[:200]))
-    candidatas = etiquetadas or sueltas
+def _elegir(candidatas, recibido: date | None, ausente: str) -> Campo:
+    """Una fecha de entre las candidatas: confirmada si todas dicen lo mismo,
+    ambigua si no, y el respaldo (o ausente) si no hay ninguna."""
     if not candidatas:
-        return Campo(recibido, SUPUESTO, "el correo no dice la fecha del cobro: se usó el día en que llegó")
+        if recibido is None:
+            return Campo(None, AUSENTE, ausente)
+        return Campo(recibido, SUPUESTO, ausente)
     todas = set().union(*(p for p, _, _ in candidatas))
     _, crudo, fragmento = candidatas[0]
     if len(todas) == 1:
@@ -323,6 +371,32 @@ def _fecha(texto: str, recibido: date) -> Campo:
     return Campo(None, AMBIGUO, motivo, fragmento)
 
 
+def _fechas(texto: str, recibido: date) -> tuple[Campo, Campo]:
+    """(fecha del cobro, fecha del próximo cobro).
+
+    Una fecha cuya línea dice que es del próximo ciclo («Next billing date»,
+    «Tu próximo cobro será el…», «Renews on») NUNCA es la del cobro. Si es lo
+    único que trae el correo, la del cobro queda supuesta con la de recepción,
+    y avisada.
+    """
+    etiquetadas, sueltas, proximas = [], [], []
+    for linea in texto.splitlines():
+        for posibles, crudo in _fechas_de(linea):
+            fila = (posibles, crudo, linea.strip()[:200])
+            if _ETIQUETAS_DE_PROXIMO.search(linea):
+                proximas.append(fila)
+            elif _ETIQUETAS_DE_FECHA.search(linea):
+                etiquetadas.append(fila)
+            else:
+                sueltas.append(fila)
+    proxima = _elegir(proximas, None, "el correo no dice la fecha del próximo cobro")
+    sin_fecha = (
+        "el correo solo trae la fecha del próximo cobro: se usó el día en que llegó"
+        if proximas else "el correo no dice la fecha del cobro: se usó el día en que llegó"
+    )
+    return _elegir(etiquetadas or sueltas, recibido, sin_fecha), proxima
+
+
 # ── todo junto ─────────────────────────────────────────────────────────────
 
 
@@ -330,4 +404,5 @@ def datos_de(mensaje: MensajeCorreo) -> DatosDelCobro:
     """Importe, moneda y fecha del cobro que describe el correo."""
     texto = "\n".join(t for t in (mensaje.asunto, mensaje.texto) if t)
     importe, moneda = _importe_y_moneda(texto)
-    return DatosDelCobro(importe=importe, moneda=moneda, fecha=_fecha(texto, mensaje.recibido_en.date()))
+    fecha, proxima = _fechas(texto, mensaje.recibido_en.date())
+    return DatosDelCobro(importe=importe, moneda=moneda, fecha=fecha, fecha_proximo_cobro=proxima)

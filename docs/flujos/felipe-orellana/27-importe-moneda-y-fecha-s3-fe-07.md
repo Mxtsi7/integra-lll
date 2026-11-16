@@ -63,6 +63,25 @@ Las reglas de separadores son las del lector de CSV (S3-FE-12):
 
 Un código de moneda pegado a otra palabra no es una moneda (`XCLP`, `CLPX`).
 
+### Un monto negativo no es un cobro
+
+La expresión del monto empieza después del signo, así que antes no se veía:
+«Total: -9.990 CLP» salía como 9.990 **confirmado**, y un abono o una
+devolución se proponía como gasto. Lo encontró la revisión de #184.
+
+Ahora se mira alrededor de cada monto: un menos antes del número o del
+símbolo (`-9.990 CLP`, `-$9.990`, `CLP -9.990`, también el menos tipográfico
+`−`), uno entre el símbolo y el número (`$-9.990`), o el paréntesis contable
+`(CLP 9.990)`. Un total negativo sale **ambiguo**, con su valor negativo y el
+motivo: puede ser una devolución o un abono.
+
+### `$` solo no hereda la moneda de otro total
+
+«Total: USD 10» y, en otra línea, «Total: $10» confirmaban USD: el `$` sin
+código se descartaba. Nada dice que ese `$` sea USD, así que ahora la moneda
+queda ambigua. El `$` se ata a un código solo en el **mismo** monto
+(«$10 USD»). También de la revisión de #184.
+
 ## Las fechas
 
 Se reconocen `2026-10-01`, `01/10/2026` (y con `-` o `.`), «1 de octubre de
@@ -71,19 +90,32 @@ una etiqueta de fecha («Fecha de cobro», «Billing date»…), se usan solo
 esas: «Tu próximo cobro será el 2026-11-01» no compite con «Fecha de cobro:
 2026-10-01».
 
+### La fecha del próximo ciclo no es la del cobro
+
+Un recibo suele traer «Next billing date: November 1, 2026», y la etiqueta
+contiene «billing date»: se confirmaba el 1 de noviembre como fecha **del
+cobro**, y el pago se habría corrido al ciclo siguiente. Lo encontró la
+revisión de #184.
+
+Ahora una fecha cuya línea dice que es del próximo ciclo («Next billing
+date», «Tu próximo cobro», «Renews on», «Se cobrará el…», «Vence») nunca
+es la del cobro: va a `fecha_proximo_cobro`, que le sirve a un aviso
+(S3-FE-08) y no pide revisión. Si es la única fecha del correo, la del cobro
+queda **supuesta** con la de recepción, y el motivo lo dice.
+
 ## Dónde está
 
 | Pieza | Archivo |
 |---|---|
 | El extractor | `services/connectors/connectors/datos_del_cobro.py` |
-| Las pruebas | `services/connectors/tests/test_datos_del_cobro_s3_fe_07.py` (58) |
+| Las pruebas | `services/connectors/tests/test_datos_del_cobro_s3_fe_07.py` (80) |
 
 Las tablas de monedas son las mismas de `csv_candidatos` (#147). Cuando esa PR
 entre a `main`, se dejan en un solo lugar.
 
 ## Cómo se comprobaron las pruebas
 
-Se rompió el código a propósito 26 veces y cada vez falló al menos una
+Se rompió el código a propósito 36 veces y cada vez falló al menos una
 prueba. Entre otras:
 
 - tomar `$` como CLP, o elegir uno de dos totales o de dos monedas;

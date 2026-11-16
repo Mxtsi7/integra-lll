@@ -202,3 +202,74 @@ class TestLoQueNoEsUnMonto:
     @pytest.mark.parametrize("texto", ["Total: CLP 0", "Total: CLP 9.999.999.999.999.999"])
     def test_cero_o_fuera_de_rango(self, texto):
         assert datos(texto).importe.estado == AUSENTE
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #184
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestNegativos:
+    @pytest.mark.parametrize("texto", [
+        "Total: -9.990 CLP",
+        "Total: -$9.990 CLP",
+        "Total: $-9.990 CLP",
+        "Total: CLP -9.990",
+        "Total: CLP \u22129.990",
+        "Total: \u22129.990 CLP",
+        "Total: (CLP 9.990)",
+    ])
+    def test_un_total_negativo_no_se_confirma_como_cobro(self, texto):
+        d = datos(texto, asunto="Tu recibo")
+        assert d.importe.estado == AMBIGUO
+        assert d.importe.valor == Decimal("-9990")
+        assert "negativo" in d.importe.motivo
+        assert "importe" in [c for c, _ in d.para_revision]
+
+    @pytest.mark.parametrize("texto", [
+        "Total: CLP 9.990", "Plan 1-2 personas: CLP 9.990", "Total: CLP 9.990 (IVA incluido)", "Total (CLP 9.990 con IVA)",
+    ])
+    def test_controles_positivos(self, texto):
+        assert resumen(texto)[0] == (Decimal("9990"), CONFIRMADO)
+
+
+class TestFechaDelProximoCiclo:
+    def test_un_recibo_que_solo_trae_la_siguiente_fecha_no_la_confirma_como_la_del_cobro(self):
+        d = datos("Total: CLP 9.990\nNext billing date: November 1, 2026")
+        assert (d.fecha.valor, d.fecha.estado) == (date(2026, 10, 3), SUPUESTO)
+        assert "próximo cobro" in d.fecha.motivo
+        assert (d.fecha_proximo_cobro.valor, d.fecha_proximo_cobro.estado) == (date(2026, 11, 1), CONFIRMADO)
+
+    def test_con_fecha_actual_y_siguiente_cada_una_en_su_lugar(self):
+        d = datos("Total: CLP 9.990\nFecha de cobro: 2026-10-01\nTu próximo cobro será el 2026-11-01")
+        assert (d.fecha.valor, d.fecha.estado) == (date(2026, 10, 1), CONFIRMADO)
+        assert d.fecha_proximo_cobro.valor == date(2026, 11, 1)
+
+    @pytest.mark.parametrize("texto", [
+        "Se cobrará CLP 9.990 el 2026-11-01",
+        "You will be charged US$ 12.99 on November 1, 2026",
+        "Your subscription renews on Nov 1, 2026",
+        "Próxima facturación: 2026-11-01",
+    ])
+    def test_un_aviso_deja_la_fecha_futura_como_proximo_cobro(self, texto):
+        d = datos(texto)
+        assert d.fecha.estado == SUPUESTO
+        assert d.fecha_proximo_cobro.valor == date(2026, 11, 1)
+
+    def test_la_fecha_del_proximo_cobro_no_pide_revision(self):
+        d = datos("Total: CLP 9.990\nFecha de cobro: 2026-10-01\nNext billing date: November 1, 2026")
+        assert d.para_revision == ()
+
+    def test_sin_fecha_del_proximo_cobro_queda_ausente(self):
+        assert datos("Total: CLP 9.990").fecha_proximo_cobro.estado == AUSENTE
+
+
+class TestSignoPesosJuntoAOtraMoneda:
+    @pytest.mark.parametrize("texto", ["Total: USD 10\nTotal: $10", "Total: USD 10\nTotal: $12"])
+    def test_un_signo_solo_no_hereda_la_moneda_de_otro_total(self, texto):
+        d = datos(texto)
+        assert (d.moneda.valor, d.moneda.estado) == (None, AMBIGUO)
+        assert "USD" in d.moneda.motivo
+
+    def test_control_el_codigo_del_mismo_monto_si_vale(self):
+        assert resumen("Total: $10 USD")[1] == ("USD", CONFIRMADO)

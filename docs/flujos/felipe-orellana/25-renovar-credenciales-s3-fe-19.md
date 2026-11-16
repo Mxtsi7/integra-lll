@@ -43,9 +43,28 @@ cliente inventado). Si se tratara como `invalid_grant`, un error de
 configuración dejaría a todos los usuarios pidiendo reconexión, y ellos no lo
 pueden arreglar.
 
-La marca es condicional: solo si la cuenta sigue `conectada`, es de la misma
-organización y tiene las **mismas credenciales** (`credenciales_version`). Si
-el usuario reconectó mientras tanto, esas credenciales nuevas no se marcan.
+## Un rechazo es de las credenciales con que se pidió
+
+Cada `AutorizacionRechazada` dice **con qué credenciales se hizo la petición
+que falló**: la `credenciales_version` y una huella (sha256) del token, nunca
+el token. Con eso, al tomar la fila con el candado:
+
+- **si las credenciales ya no son esas** —el usuario reconectó, o otro worker
+  ya refrescó—, no se refresca ni se marca nada, y se lee una vez más con las
+  que están;
+- si son las mismas, se refresca, y si vuelven a rechazar, se marca.
+
+La marca también lo compara: solo marca si la cuenta sigue `conectada`, en la
+misma organización, con la **misma versión y el mismo token** que fallaron.
+La versión y el token se miran los dos, porque una reconexión es otra
+autorización aunque el proveedor repita el token, y un refresco de otro worker
+cambia el token sin cambiar la versión.
+
+Antes no era así, y lo encontró la revisión de #180. Una lectura con la
+autorización A quedaba en vuelo; el usuario reconectaba con B (acceso vigente,
+sin token de refresco); llegaba el 401 de A, y la recuperación refrescaba o
+marcaba **lo que hubiera en la fila**: B quedaba pidiendo reconexión por un
+rechazo que no era suyo. Ahora B sigue conectada y se lee.
 
 ## Por qué el refresco no sube `credenciales_version`
 
@@ -95,7 +114,7 @@ se conectó.
 |---|---|
 | Renovar y marcar | `services/connectors/connectors/renovacion.py` |
 | El refresco contra el proveedor | `proveedores.refrescar_token` |
-| Las pruebas | `tests/test_renovacion_s3_fe_19.py` (34) y `tests/test_carrera_renovacion_postgres.py` (1) |
+| Las pruebas | `tests/test_renovacion_s3_fe_19.py` (44) y `tests/test_carrera_renovacion_postgres.py` (1) |
 
 ## Cómo se comprobaron las pruebas
 
@@ -104,7 +123,7 @@ Gmail son **copia literal** de las respuestas reales. `invalid_grant` y el 200
 del refresco siguen el RFC 6749 y la documentación de cada proveedor: para
 provocarlos hace falta un cliente y una cuenta reales.
 
-Se rompió el código a propósito 23 veces y cada vez falló al menos una prueba.
+Se rompió el código a propósito 31 veces y cada vez falló al menos una prueba.
 Entre otras:
 
 - refrescar siempre o nunca, o sin margen;

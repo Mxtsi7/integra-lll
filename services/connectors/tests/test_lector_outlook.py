@@ -292,10 +292,44 @@ class TestPaginas:
         with pytest.raises(ErrorDelProveedor):
             leer(cuenta)
 
-    def test_no_devuelve_mas_que_el_limite(self, claves, graph):
+    def test_si_graph_devuelve_mas_de_lo_pedido_no_se_recorta(self, claves, graph):
+        """Recortar perdería los que sobran sin aviso: es un error explícito."""
         cuenta = outlook()
         graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(8))))
-        assert len(leer(cuenta, limite=3).mensajes) == 3
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 3"):
+            leer(cuenta, limite=3)
+
+    # ── Revisión de #177: seguir una página con otro límite ───────────────
+
+    @pytest.mark.parametrize("siguiente", [None, SIGUIENTE + "&%24skip=50"])
+    def test_seguir_una_pagina_de_25_con_limite_5_no_pierde_ninguno(self, claves, graph, siguiente):
+        """El caso de Maxi, en página final y en página intermedia: el tamaño
+        lo fija el `$top` del cursor, y se procesa la página entera."""
+        cuenta = outlook()
+        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(25)), siguiente=siguiente))
+        pagina = leer(cuenta, pagina=SIGUIENTE, limite=5)
+        assert [m.id_mensaje for m in pagina.mensajes] == [f"m{i}" for i in range(25)]
+        assert pagina.omitidos == ()
+        assert pagina.siguiente_pagina == siguiente
+
+    def test_una_pagina_que_trae_mas_que_su_top_es_un_error(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(26))))
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 25"):
+            leer(cuenta, pagina=SIGUIENTE)
+
+    @pytest.mark.parametrize("top", ["0", "101", "abc", "-5", "25&%24top=50", ""])
+    def test_una_pagina_con_un_top_que_no_armo_este_lector(self, claves, graph, top):
+        cuenta = outlook()
+        with pytest.raises(ValueError):
+            leer(cuenta, pagina=f"{URL_MENSAJES}?%24top={top}&%24skip=25")
+        assert graph.peticiones == []
+
+    def test_sin_top_vale_el_tamano_por_omision_de_graph(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(11))))
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 10"):
+            leer(cuenta, pagina=f"{URL_MENSAJES}?%24skiptoken=abc")
 
     @pytest.mark.parametrize("limite", [0, 101, True, "5"])
     def test_limite_fuera_de_rango(self, claves, graph, limite):
