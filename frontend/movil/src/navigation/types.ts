@@ -23,7 +23,7 @@ export type AuthScreenProps<T extends keyof AuthStackParamList> = NativeStackScr
 // Tab 1: Home / Suscripciones
 export type HomeStackParamList = {
   HomeScreen: undefined;
-  SuscripcionDetalle: { id: string };
+  SuscripcionDetalle: { id: string; suscripcion?: Suscripcion };
   SuscripcionNueva: undefined;
   SuscripcionEditar: { id: string; suscripcion?: Suscripcion };
 };

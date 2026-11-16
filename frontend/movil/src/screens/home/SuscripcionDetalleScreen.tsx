@@ -299,9 +299,10 @@ export interface SuscripcionDetalleContainerProps {
   navigation?: {
     goBack?: () => void;
     navigate?: (pantalla: any, params?: any) => void;
+    addListener?: (event: string, callback: () => void) => () => void;
   };
   route?: {
-    params?: { id?: string };
+    params?: { id?: string; suscripcion?: Suscripcion };
   };
   onCargarSuscripcion?: (id: string) => Promise<Suscripcion>;
   estadoInicial?: EstadoDetalle;
@@ -375,15 +376,26 @@ export default function SuscripcionDetalleScreen({
   );
 
   useEffect(() => {
+    if (route?.params?.suscripcion) {
+      setEstado({ tipo: 'listo', suscripcion: route.params.suscripcion });
+    }
+  }, [route?.params?.suscripcion]);
+
+  useEffect(() => {
     if (estadoInicial) return;
     void cargarDatos(id);
 
+    const unsubscribe = (navigation as any)?.addListener?.('focus', () => {
+      void cargarDatos(id);
+    });
+
     return () => {
+      unsubscribe?.();
       // Al cambiar id o desmontar el componente, se avanza la generación
       // para descartar inmediatamente cualquier respuesta pendiente en vuelo.
       generacionRef.current += 1;
     };
-  }, [id, estadoInicial, cargarDatos]);
+  }, [id, estadoInicial, cargarDatos, navigation]);
 
   const manejarVolver = () => {
     if (navigation?.goBack) {

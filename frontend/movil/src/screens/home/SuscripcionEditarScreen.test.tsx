@@ -11,6 +11,7 @@ import {
 import SuscripcionEditarScreen, {
   EditarSuscripcionFormView,
   aFormulario,
+  calcularPatch,
   type EditarSuscripcionFormData,
 } from './SuscripcionEditarScreen';
 
@@ -471,6 +472,194 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
 
       fireEvent.click(screen.getByTestId('go-back'));
       expect(goBack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Conexión con PATCH y cálculo diferencial (SE-25)', () => {
+    describe('Criterio 1: PATCH no borra campos omitidos (calcularPatch)', () => {
+      it('incluye exclusivamente el monto cuando solo se modifica el monto', () => {
+        const formData = {
+          ...aFormulario(SUSCRIPCION_BASE),
+          monto: '7990',
+        };
+        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
+        expect(patch).toEqual({ monto: 7990 });
+        // Comprobar que ningún otro campo está presente en el patch
+        expect('nombre' in patch).toBe(false);
+        expect('moneda' in patch).toBe(false);
+        expect('frecuencia' in patch).toBe(false);
+        expect('categoria' in patch).toBe(false);
+        expect('fecha_proximo_cobro' in patch).toBe(false);
+      });
+
+      it('incluye exclusivamente la fecha de cobro cuando solo se modifica la fecha', () => {
+        const formData = {
+          ...aFormulario(SUSCRIPCION_BASE),
+          fechaDeCobro: '2026-11-30',
+        };
+        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
+        expect(patch).toEqual({ fecha_proximo_cobro: '2026-11-30' });
+        expect('monto' in patch).toBe(false);
+      });
+
+      it('conmuta a prueba gratis y asigna fin_prueba', () => {
+        const formData = {
+          ...aFormulario(SUSCRIPCION_BASE),
+          enPrueba: true,
+          finPrueba: '2026-12-15',
+        };
+        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
+        expect(patch).toEqual({
+          estado: 'prueba',
+          fin_prueba: '2026-12-15',
+        });
+      });
+
+      it('sale de prueba gratis y asigna estado activo con fin_prueba null', () => {
+        const formData = {
+          ...aFormulario(SUSCRIPCION_EN_PRUEBA),
+          enPrueba: false,
+        };
+        const patch = calcularPatch(formData, SUSCRIPCION_EN_PRUEBA);
+        expect(patch).toEqual({
+          estado: 'activo',
+          fin_prueba: null,
+        });
+      });
+
+      it('devuelve objeto vacío si no hubo modificaciones respecto a original', () => {
+        const formData = aFormulario(SUSCRIPCION_BASE);
+        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
+        expect(patch).toEqual({});
+      });
+    });
+
+    describe('Criterio 2: Integración con actualizarSuscripcion y conciliación con Detalle', () => {
+      it('despacha PATCH con sólo los campos modificados y navega a SuscripcionDetalle', async () => {
+        const subActualizada: Suscripcion = {
+          ...SUSCRIPCION_BASE,
+          monto: 7990,
+        };
+        const onActualizar = vi.fn().mockResolvedValue(subActualizada);
+        const onExito = vi.fn();
+        const navigate = vi.fn();
+
+        render(
+          <SuscripcionEditarScreen
+            suscripcion={SUSCRIPCION_BASE}
+            catalogos={CATALOGO_MOCK}
+            onActualizarSuscripcion={onActualizar}
+            onExito={onExito}
+            navigation={{ navigate } as any}
+          />,
+        );
+
+        // Modificar solo monto
+        fireEvent.change(screen.getByTestId('input-monto'), {
+          target: { value: '7990' },
+        });
+
+        fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+        await waitFor(() => {
+          expect(onActualizar).toHaveBeenCalledTimes(1);
+        });
+
+        // Solo se envía el ID y { monto: 7990 }
+        expect(onActualizar).toHaveBeenCalledWith('sub-100', { monto: 7990 });
+        expect(onExito).toHaveBeenCalledWith(subActualizada);
+        // Navega a detalle con la suscripción confirmada
+        expect(navigate).toHaveBeenCalledWith('SuscripcionDetalle', {
+          id: 'sub-100',
+          suscripcion: subActualizada,
+        });
+      });
+
+      it('bloqueo de doble envío: múltiples pulsaciones mientras está en vuelo solo envían un PATCH', async () => {
+        let resolverActualizacion!: (sub: Suscripcion) => void;
+        const promesa = new Promise<Suscripcion>((resolve) => {
+          resolverActualizacion = resolve;
+        });
+        const onActualizar = vi.fn().mockReturnValue(promesa);
+
+        render(
+          <SuscripcionEditarScreen
+            suscripcion={SUSCRIPCION_BASE}
+            catalogos={CATALOGO_MOCK}
+            onActualizarSuscripcion={onActualizar}
+          />,
+        );
+
+        fireEvent.change(screen.getByTestId('input-monto'), {
+          target: { value: '7990' },
+        });
+
+        const btnGuardar = screen.getByTestId('btn-guardar-edicion');
+        fireEvent.click(btnGuardar);
+        fireEvent.click(btnGuardar);
+        fireEvent.click(btnGuardar);
+
+        expect(onActualizar).toHaveBeenCalledTimes(1);
+
+        // Desbloquear promesa
+        await act(async () => {
+          resolverActualizacion({ ...SUSCRIPCION_BASE, monto: 7990 });
+        });
+      });
+
+      it('ante error 400 del backend, distribuye errores por campo y conserva los datos ingresados', async () => {
+        const error400 = new ErrorDeApi('Error de validación', 400, {
+          monto: ['El monto supera el límite permitido.'],
+        });
+        const onActualizar = vi.fn().mockRejectedValue(error400);
+
+        render(
+          <SuscripcionEditarScreen
+            suscripcion={SUSCRIPCION_BASE}
+            catalogos={CATALOGO_MOCK}
+            onActualizarSuscripcion={onActualizar}
+          />,
+        );
+
+        fireEvent.change(screen.getByTestId('input-monto'), {
+          target: { value: '99999999' },
+        });
+
+        fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+        expect(
+          await screen.findByText('El monto supera el límite permitido.'),
+        ).toBeTruthy();
+
+        // Los datos tipeados se conservan intactos
+        const inputMonto = screen.getByTestId('input-monto') as HTMLInputElement;
+        expect(inputMonto.value).toBe('99999999');
+      });
+
+      it('ante fallo de red, muestra alerta general y conserva el formulario', async () => {
+        const onActualizar = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+        render(
+          <SuscripcionEditarScreen
+            suscripcion={SUSCRIPCION_BASE}
+            catalogos={CATALOGO_MOCK}
+            onActualizarSuscripcion={onActualizar}
+          />,
+        );
+
+        fireEvent.change(screen.getByTestId('input-nombre'), {
+          target: { value: 'Spotify Family Updated' },
+        });
+
+        fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+        expect(
+          await screen.findByText(/No pudimos conectar con el servidor/),
+        ).toBeTruthy();
+
+        const inputNombre = screen.getByTestId('input-nombre') as HTMLInputElement;
+        expect(inputNombre.value).toBe('Spotify Family Updated');
+      });
     });
   });
 });

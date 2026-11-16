@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ErrorDeApi, type Suscripcion } from '@ojoalgasto/shared';
 import SuscripcionDetalleScreen, {
   SuscripcionDetalleView,
@@ -530,6 +530,63 @@ describe('Detalle Móvil de Suscripción (SE-21)', () => {
       // Resolver después de desmontar
       resolverA!(MOCK_SUSCRIPCION_ACTIVA);
       await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    it('concilia y recarga con el backend ante evento focus (SE-25)', async () => {
+      let focusListener: (() => void) | undefined;
+      const addListener = vi.fn().mockImplementation((event: string, callback: () => void) => {
+        if (event === 'focus') {
+          focusListener = callback;
+        }
+        return () => {};
+      });
+
+      const onCargar = vi
+        .fn()
+        .mockResolvedValueOnce(MOCK_SUSCRIPCION_ACTIVA) // Inicial: Netflix 9990
+        .mockResolvedValueOnce({ ...MOCK_SUSCRIPCION_ACTIVA, monto: 12990 }); // Tras edición: 12990
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={onCargar}
+          navigation={{ addListener } as any}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+      expect(screen.getByText(/9\.990/)).toBeTruthy();
+
+      // Disparar evento focus (como al volver de SuscripcionEditar)
+      act(() => {
+        focusListener?.();
+      });
+
+      expect(onCargar).toHaveBeenCalledTimes(2);
+      expect(await screen.findByText(/12\.990/)).toBeTruthy();
+    });
+
+    it('refleja inmediatamente la suscripción si llega por route.params.suscripcion (SE-25)', async () => {
+      const subActualizada = { ...MOCK_SUSCRIPCION_ACTIVA, nombre: 'Netflix Premium 4K' };
+
+      const { rerender } = render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(MOCK_SUSCRIPCION_ACTIVA)}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+
+      // Navegación de vuelta pasa el objeto confirmado
+      rerender(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-1', suscripcion: subActualizada } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(subActualizada)}
+        />,
+      );
+
+      expect(await screen.findByText('Netflix Premium 4K')).toBeTruthy();
     });
   });
 });

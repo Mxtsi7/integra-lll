@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {
   ErrorDeApi,
+  actualizarSuscripcion,
   erroresDesdeServidor,
   getCatalogosSuscripciones,
   getSuscripcion,
@@ -23,6 +24,7 @@ import {
   type Moneda,
   type OpcionesSuscripcion,
   type Suscripcion,
+  type SuscripcionPayloadParcial,
 } from '@ojoalgasto/shared';
 import type { HomeScreenProps } from '../../navigation/types';
 import { Loading } from '../../components/estados/Loading';
@@ -57,6 +59,60 @@ export function aFormulario(suscripcion: Suscripcion): EditarSuscripcionFormData
     enPrueba: suscripcion.estado === 'prueba',
     finPrueba: suscripcion.fin_prueba ?? '',
   };
+}
+
+/**
+ * Calcula el payload diferencial para PATCH /suscripciones/<id>/ (SE-25).
+ * Criterio 1: Solo incluye los campos modificados para no borrar ni alterar
+ * campos omitidos en el backend.
+ */
+export function calcularPatch(
+  datos: EditarSuscripcionFormData,
+  original: Suscripcion,
+): SuscripcionPayloadParcial {
+  const patch: SuscripcionPayloadParcial = {};
+
+  if (datos.nombre.trim() !== original.nombre) {
+    patch.nombre = datos.nombre.trim();
+  }
+
+  const parseado = parsearMonto(datos.monto);
+  if ('valor' in parseado && parseado.valor !== Number(original.monto)) {
+    patch.monto = parseado.valor;
+  }
+
+  if (datos.moneda !== original.moneda) {
+    patch.moneda = datos.moneda;
+  }
+
+  if (datos.frecuencia !== original.frecuencia) {
+    patch.frecuencia = datos.frecuencia;
+  }
+
+  if (datos.categoria !== original.categoria) {
+    patch.categoria = datos.categoria;
+  }
+
+  if (datos.fechaDeCobro !== (original.fecha_proximo_cobro ?? '')) {
+    patch.fecha_proximo_cobro = datos.fechaDeCobro;
+  }
+
+  const eraPrueba = original.estado === 'prueba';
+  if (datos.enPrueba !== eraPrueba) {
+    if (datos.enPrueba) {
+      patch.estado = 'prueba';
+      if (datos.finPrueba) {
+        patch.fin_prueba = datos.finPrueba;
+      }
+    } else {
+      patch.estado = 'activo';
+      patch.fin_prueba = null as any;
+    }
+  } else if (datos.enPrueba && datos.finPrueba !== (original.fin_prueba ?? '')) {
+    patch.fin_prueba = datos.finPrueba;
+  }
+
+  return patch;
 }
 
 export const OPCIONES_POR_DEFECTO: OpcionesSuscripcion = {
@@ -669,6 +725,8 @@ export interface SuscripcionEditarScreenProps {
   onCargarSuscripcion?: (id: string) => Promise<Suscripcion>;
   onCargarCatalogos?: () => Promise<CatalogosSuscripciones>;
   catalogos?: CatalogosSuscripciones | null;
+  onActualizarSuscripcion?: (id: string, datos: SuscripcionPayloadParcial) => Promise<Suscripcion>;
+  onExito?: (suscripcion: Suscripcion) => void;
   onSubmit?: (datos: EditarSuscripcionFormData) => Promise<boolean | void> | boolean | void;
   onCancel?: () => void;
   onCambiosSinGuardar?: (hayCambios: boolean) => void;
@@ -681,6 +739,8 @@ export default function SuscripcionEditarScreen({
   onCargarSuscripcion = getSuscripcion,
   onCargarCatalogos = getCatalogosSuscripciones,
   catalogos: catalogosProp,
+  onActualizarSuscripcion = actualizarSuscripcion,
+  onExito,
   onSubmit,
   onCancel,
   onCambiosSinGuardar,
@@ -698,6 +758,11 @@ export default function SuscripcionEditarScreen({
   const [cargandoCatalogos, setCargandoCatalogos] = useState<boolean>(catalogosProp === undefined);
   const [errorCatalogo, setErrorCatalogo] = useState<string | null>(null);
   const generacionCatalogoRef = useRef(0);
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorGeneral, setErrorGeneral] = useState<string | null>(null);
+  const [erroresCampos, setErroresCampos] = useState<Record<string, string[]> | null>(null);
+  const guardandoRef = useRef(false);
 
   const cargarCatalogos = useCallback(async () => {
     generacionCatalogoRef.current += 1;
@@ -783,6 +848,66 @@ export default function SuscripcionEditarScreen({
     }
   };
 
+  const handleSubmit = async (datos: EditarSuscripcionFormData): Promise<boolean> => {
+    if (onSubmit) {
+      const res = await onSubmit(datos);
+      return res !== false;
+    }
+
+    if (!suscripcionActual) return false;
+
+    if (guardandoRef.current || isSaving) {
+      return false;
+    }
+    guardandoRef.current = true;
+    setIsSaving(true);
+    setErrorGeneral(null);
+    setErroresCampos(null);
+
+    const patch = calcularPatch(datos, suscripcionActual);
+
+    // Si no hubo campos modificados, se evita PATCH redundante y regresa
+    if (Object.keys(patch).length === 0) {
+      guardandoRef.current = false;
+      setIsSaving(false);
+      manejarCancelar();
+      return true;
+    }
+
+    try {
+      const actualizada = await onActualizarSuscripcion(suscripcionActual.id, patch);
+      onExito?.(actualizada);
+
+      // Conciliar y navegar al detalle con la suscripción confirmada (Criterio 2)
+      if (navigation?.navigate) {
+        navigation.navigate('SuscripcionDetalle', {
+          id: actualizada.id,
+          suscripcion: actualizada,
+        });
+      } else if (navigation?.goBack) {
+        navigation.goBack();
+      }
+
+      return true;
+    } catch (err: unknown) {
+      if (err instanceof ErrorDeApi && err.campos) {
+        setErroresCampos(err.campos);
+      } else if (err instanceof ErrorDeApi && err.message) {
+        setErrorGeneral(err.message);
+      } else if (err instanceof TypeError) {
+        setErrorGeneral(
+          'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.',
+        );
+      } else {
+        setErrorGeneral('No pudimos actualizar la suscripción. Intenta de nuevo.');
+      }
+      return false;
+    } finally {
+      guardandoRef.current = false;
+      setIsSaving(false);
+    }
+  };
+
   if (cargandoSub) {
     return (
       <View style={styles.safeArea} testID="screen-suscripcion-editar">
@@ -819,8 +944,11 @@ export default function SuscripcionEditarScreen({
       cargandoCatalogos={cargandoCatalogos}
       errorCatalogo={errorCatalogo}
       onReintentarCatalogos={cargarCatalogos}
-      onSubmit={onSubmit}
+      onSubmit={handleSubmit}
       onCancel={manejarCancelar}
+      isSaving={isSaving}
+      errorGeneral={errorGeneral}
+      erroresCampos={erroresCampos}
       onCambiosSinGuardar={onCambiosSinGuardar}
     />
   );
