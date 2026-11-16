@@ -611,3 +611,60 @@ class TestComando:
         self._correr("--organizacion", str(ORG_A), "--cuenta", str(cuenta.pk), "--desde", "2026-10-01", "--todos")
         desde = int(datetime(2026, 10, 1, tzinfo=tz.utc).timestamp())
         assert google.peticiones[0]["params"]["q"] == f"after:{desde}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #172 — lo que trae un adjunto tampoco se lee
+# ══════════════════════════════════════════════════════════════════════
+
+
+def correo_adjunto(texto, *, nombre="otro-correo.eml", cabeceras=()):
+    """Un `.eml` adjunto: una parte `message/rfc822` con su propio cuerpo."""
+    return {
+        "partId": "1", "mimeType": "message/rfc822", "filename": nombre, "headers": list(cabeceras),
+        "body": {"size": 0, "attachmentId": "ANGjdJ8"},
+        "parts": [{"partId": "1.0", "mimeType": "multipart/alternative", "filename": "", "headers": [],
+                   "body": {"size": 0}, "parts": [parte("text/plain", texto)]}],
+    }
+
+
+class TestAdjuntosAnidados:
+    def _texto(self, google, partes):
+        cuenta = gmail()
+        google.con_mensajes(mensaje_gmail("a1", partes=partes))
+        return leer(cuenta).mensajes[0].texto
+
+    def test_el_texto_de_un_correo_adjunto_no_entra_al_cuerpo(self, claves, google):
+        texto = self._texto(google, [parte("text/plain", "TOTAL PROPIO 10"), correo_adjunto("TOTAL DEL ADJUNTO 999")])
+        assert texto == "TOTAL PROPIO 10"
+        assert "999" not in texto
+
+    def test_un_correo_adjunto_sin_nombre_tambien_se_salta(self, claves, google):
+        texto = self._texto(google, [parte("text/plain", "TOTAL PROPIO 10"),
+                                     correo_adjunto("TOTAL DEL ADJUNTO 999", nombre="")])
+        assert "999" not in texto
+
+    def test_una_parte_declarada_adjunta_sin_nombre_se_salta(self, claves, google):
+        adjunta = parte("text/plain", "TOTAL DEL ADJUNTO 999")
+        adjunta["headers"].append({"name": "Content-Disposition", "value": "attachment"})
+        texto = self._texto(google, [parte("text/plain", "TOTAL PROPIO 10"), adjunta])
+        assert "999" not in texto
+
+    def test_el_texto_plano_de_un_adjunto_no_desplaza_al_html_propio(self, claves, google):
+        """Control de Maxi: el cuerpo propio es solo HTML y el adjunto trae
+        texto plano. Antes ganaba el plano del adjunto."""
+        texto = self._texto(google, [parte("text/html", "<p>TOTAL PROPIO 10</p>"),
+                                     correo_adjunto("TOTAL DEL ADJUNTO 999")])
+        assert texto == "TOTAL PROPIO 10"
+
+    def test_un_multipart_del_cuerpo_si_se_recorre(self, claves, google):
+        """Saltar los adjuntos no puede saltar los multipart del cuerpo real."""
+        cuerpo = {"partId": "0", "mimeType": "multipart/alternative", "filename": "", "headers": [],
+                  "body": {"size": 0}, "parts": [parte("text/plain", "TOTAL PROPIO 10")]}
+        texto = self._texto(google, [cuerpo, correo_adjunto("TOTAL DEL ADJUNTO 999")])
+        assert texto == "TOTAL PROPIO 10"
+
+    def test_inline_no_es_adjunto(self, claves, google):
+        en_linea = parte("text/plain", "TOTAL PROPIO 10")
+        en_linea["headers"].append({"name": "Content-Disposition", "value": "inline"})
+        assert self._texto(google, [en_linea]) == "TOTAL PROPIO 10"

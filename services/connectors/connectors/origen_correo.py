@@ -48,7 +48,16 @@ import re
 from email.utils import parseaddr
 
 from .lectura_correo import MensajeCorreo
-from .normalizacion import AMBIGUO, RECONOCIDO, Normalizacion, _sin_tildes, normalizar
+from .normalizacion import (
+    AMBIGUO,
+    RECONOCIDO,
+    Normalizacion,
+    _alias_ordenados,
+    _es_transferencia,
+    _sin_tildes,
+    limpiar,
+    normalizar,
+)
 
 PREFIJO_MESSAGE_ID = "mid:"
 
@@ -116,67 +125,109 @@ def _sugerencia(asunto: Normalizacion, regla: str, candidatos: tuple[str, ...]) 
     )
 
 
+def servicios_mencionados(texto: str) -> tuple[str, ...]:
+    """Todos los servicios que el texto nombra, cada uno una vez, en orden.
+
+    `normalizar` devuelve la PRIMERA coincidencia, y eso sirve para un nombre
+    («NETFLIX.COM»), no para un asunto que nombra dos: «Recibo de Netflix y
+    Spotify» salía como Netflix. Lo encontró la revisión de #183. Aquí se
+    recorren los alias del más largo al más corto, como `normalizar`, y lo
+    que calza se borra antes de seguir: así un alias genérico metido en uno
+    específico no cuenta aparte («amazon prime video» no suma un «amazon»).
+
+    Los alias débiles (palabras comunes) y los ambiguos («apple») no cuentan:
+    no reconocen nada por sí solos dentro de una frase.
+    """
+    limpio = limpiar(texto or "")
+    if not limpio or _es_transferencia(limpio):
+        return ()
+    encontrados: list[str] = []
+    for alias, proveedor, debil in _alias_ordenados():
+        patron = re.compile(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])")
+        if not patron.search(limpio):
+            continue
+        limpio = patron.sub(" ", limpio)
+        if proveedor is not None and not debil and proveedor.nombre not in encontrados:
+            encontrados.append(proveedor.nombre)
+    return tuple(encontrados)
+
+
 def servicio_de(mensaje: MensajeCorreo) -> tuple[Normalizacion, str]:
     """(el servicio, de dónde salió). Las reglas, en orden:
 
     1. El remitente (nombre, después dominio) reconoce un servicio → ese. Si
-       el asunto reconoce OTRO, ambiguo con los dos.
+       el asunto nombra OTRO, ambiguo con todos.
     2. El remitente es ambiguo (Apple, Microsoft, Google, Amazon) → si el
-       asunto reconoce uno de sus candidatos, ese; si reconoce otro (Apple
-       también cobra suscripciones ajenas), ambiguo con todos; si no, el
-       ambiguo del remitente.
+       asunto nombra uno solo y es uno de sus candidatos, ese; si nombra
+       otros (Apple también cobra suscripciones ajenas), ambiguo con todos;
+       si no nombra ninguno, el ambiguo del remitente.
     3. El remitente es un intermediario de pago (PayPal, Mercado Pago) → el
-       servicio es el del asunto, si lo reconoce.
+       servicio es el del asunto, si nombra UNO. Si nombra varios, ambiguo.
     4. El remitente no es nada de lo anterior → el asunto **no decide**. Si
-       nombra un servicio, queda como sugerencia (ambiguo con ese candidato):
+       nombra servicios, quedan como sugerencia (ambiguo con ellos):
        «Gana Netflix gratis con tu tarjeta», de una tienda, no es Netflix.
     """
     nombre, _, dominio = _partes_del_remitente(mensaje.remitente)
     por_nombre = normalizar(nombre) if nombre else None
     por_dominio = normalizar(dominio) if dominio else None
     por_asunto = normalizar(mensaje.asunto) if mensaje.asunto else None
-    asunto = por_asunto.proveedor if por_asunto is not None and por_asunto.resultado == RECONOCIDO else None
+    servicios = servicios_mencionados(mensaje.asunto)
+    if not servicios and por_asunto is not None and por_asunto.resultado == RECONOCIDO:
+        # Un alias débil que es TODO el asunto («Canva»): `normalizar` lo
+        # reconoce y la búsqueda dentro de frases, a propósito, no.
+        servicios = (por_asunto.proveedor,)
+    unico = servicios[0] if len(servicios) == 1 else None
+    lista = ", ".join(servicios)
 
     del_remitente = [(r, f) for r, f in ((por_nombre, FUENTE_NOMBRE), (por_dominio, FUENTE_DOMINIO)) if r is not None]
 
     # 1. reconocido por el remitente
     for resultado, fuente in del_remitente:
         if resultado.resultado == RECONOCIDO:
-            if asunto and asunto != resultado.proveedor:
+            otros = tuple(s for s in servicios if s != resultado.proveedor)
+            if otros:
                 return _sugerencia(
                     por_asunto,
-                    f"el remitente dice {resultado.proveedor} y el asunto {asunto}; queda para revision",
-                    (resultado.proveedor, asunto),
+                    f"el remitente dice {resultado.proveedor} y el asunto nombra {lista}; queda para revision",
+                    (resultado.proveedor, *otros),
                 ), FUENTE_NINGUNA
             return resultado, fuente
 
     # 2. ambiguo por el remitente
     for resultado, fuente in del_remitente:
         if resultado.resultado == AMBIGUO:
-            if asunto and asunto in resultado.candidatos:
+            if unico and unico in resultado.candidatos and por_asunto.proveedor == unico:
                 return por_asunto, FUENTE_ASUNTO
-            if asunto:
+            if servicios:
                 return _sugerencia(
                     por_asunto,
-                    f"el remitente puede ser {', '.join(resultado.candidatos)} y el asunto dice {asunto}; "
+                    f"el remitente puede ser {', '.join(resultado.candidatos)} y el asunto nombra {lista}; "
                     "queda para revision",
-                    (*resultado.candidatos, asunto),
+                    (*resultado.candidatos, *servicios),
                 ), FUENTE_NINGUNA
             return resultado, fuente
 
     # 3. intermediario de pago
     if _es_intermediario(nombre, dominio):
-        if por_asunto is not None and por_asunto.resultado in (RECONOCIDO, AMBIGUO):
+        if unico and por_asunto.proveedor == unico:
+            return por_asunto, FUENTE_ASUNTO
+        if servicios:
+            return _sugerencia(
+                por_asunto,
+                f"el asunto nombra varios servicios ({lista}); queda para revision",
+                servicios,
+            ), FUENTE_NINGUNA
+        if por_asunto is not None and por_asunto.resultado == AMBIGUO:
             return por_asunto, FUENTE_ASUNTO
         return normalizar(mensaje.asunto or ""), FUENTE_NINGUNA
 
     # 4. remitente desconocido
-    if asunto:
+    if servicios:
         return _sugerencia(
             por_asunto,
-            f"solo el asunto nombra a {asunto} y el remitente no es de {asunto} ni un "
+            f"solo el asunto nombra a {lista} y el remitente no es del servicio ni un "
             "intermediario de pago; queda para revision",
-            (asunto,),
+            servicios,
         ), FUENTE_NINGUNA
     if por_asunto is not None and por_asunto.resultado == AMBIGUO:
         return por_asunto, FUENTE_ASUNTO

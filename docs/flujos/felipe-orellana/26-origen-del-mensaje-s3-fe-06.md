@@ -68,6 +68,28 @@ promoción de una tienda quedaba asignada a Netflix. Ahora queda como
 sugerencia (un ambiguo con un solo candidato) para que una persona lo vea.
 Distinguir un recibo de una promoción es de S3-FE-08.
 
+### Un asunto que nombra varios servicios
+
+`normalizar` devuelve la **primera** coincidencia. Sirve para un nombre, no
+para un asunto como «Recibo de Netflix y Spotify», que salía como Netflix:
+un recibo consolidado quedaba atribuido por el orden del catálogo. Lo
+encontró la revisión de #183.
+
+Ahora `servicios_mencionados` junta **todos** los servicios que nombra el
+asunto. Recorre los alias del más largo al más corto y borra lo que ya calzó,
+así que un alias genérico metido en uno específico no cuenta aparte («Amazon
+Prime Video» es un servicio, no dos). Con eso:
+
+| Remitente | Asunto | Resultado |
+|---|---|---|
+| PayPal | Recibo de Netflix y Spotify | ambiguo: Netflix, Spotify |
+| PayPal | Recibo de tu pago a Netflix | **Netflix** |
+| Netflix | Netflix y Spotify: tu combo | ambiguo: Netflix, Spotify |
+| Amazon | Tu recibo de Amazon Prime Video | **Amazon Prime Video** |
+
+Los alias débiles y los ambiguos no cuentan dentro de una frase. Un alias
+débil que es **todo** el asunto («Canva») sí, como en `normalizar`.
+
 Los intermediarios de pago son los de `normalizacion.INTERMEDIARIOS` sin las
 siglas cortas (`pp`, `dl`, `mp`), y se comparan como **palabra entera**: `flow`
 es un intermediario, `overflow` no.
@@ -82,11 +104,11 @@ es un intermediario, `overflow` no.
 |---|---|
 | Identidad y servicio | `services/connectors/connectors/origen_correo.py` |
 | `normalizar_message_id` y los campos nuevos de `MensajeCorreo` | `services/connectors/connectors/lectura_correo.py` |
-| Las pruebas | `services/connectors/tests/test_origen_correo_s3_fe_06.py` (39) |
+| Las pruebas | `services/connectors/tests/test_origen_correo_s3_fe_06.py` (55) |
 
 ## Cómo se comprobaron las pruebas
 
-Se rompió el código a propósito 22 veces y cada vez falló al menos una prueba:
+Se rompió el código a propósito 28 veces y cada vez falló al menos una prueba:
 usar siempre el id del proveedor, el respaldo sin la cuenta o sin el
 proveedor o con el mismo prefijo que el Message-ID, guardar el Message-ID sin
 hash, inventar una identidad sin datos, dejar que el asunto gane en un
