@@ -233,3 +233,66 @@ class TestLosLectoresTraenElMessageId:
         (leido,) = lector_outlook.leer_mensajes(organizacion_id=cuenta.organizacion_id, cuenta_id=cuenta.pk).mensajes
         assert "internetMessageId" in pedido["$select"].split(",")
         assert (leido.message_id, leido.proveedor_correo) == ("BN6PR@namprd.outlook.com", "outlook")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #183 — un asunto que nombra varios servicios
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestVariosServicios:
+    def test_el_caso_de_maxi_paypal_con_dos_servicios(self):
+        resultado, proveedor, candidatos, fuente = servicio("PayPal <service@paypal.com>", "Recibo de Netflix y Spotify")
+        assert (resultado, proveedor, candidatos, fuente) == ("ambiguo", None, ("Netflix", "Spotify"), FUENTE_NINGUNA)
+
+    def test_control_paypal_con_un_solo_servicio(self):
+        assert servicio("PayPal <service@paypal.com>", "Recibo de tu pago a Netflix") == (
+            "reconocido", "Netflix", (), FUENTE_ASUNTO)
+
+    def test_remitente_reconocido_y_un_segundo_servicio_en_el_asunto(self):
+        """El asunto nombra el del remitente Y otro: no basta con que el
+        primero coincida."""
+        resultado, proveedor, candidatos, _ = servicio("Netflix <info@netflix.com>", "Netflix y Spotify: tu combo")
+        assert (resultado, proveedor, candidatos) == ("ambiguo", None, ("Netflix", "Spotify"))
+
+    def test_un_alias_especifico_que_contiene_uno_generico_es_un_solo_servicio(self):
+        assert servicio("Amazon <a@amazon.com>", "Tu recibo de Amazon Prime Video") == (
+            "reconocido", "Amazon Prime Video", (), FUENTE_ASUNTO)
+
+    def test_un_remitente_desconocido_sugiere_todos(self):
+        resultado, _, candidatos, _ = servicio("Tienda <hola@tienda.cl>", "Netflix y Spotify gratis")
+        assert (resultado, candidatos) == ("ambiguo", ("Netflix", "Spotify"))
+
+    def test_un_alias_debil_que_es_todo_el_asunto_si_cuenta(self):
+        assert servicio("PayPal <service@paypal.com>", "Canva") == ("reconocido", "Canva", (), FUENTE_ASUNTO)
+
+
+class TestServiciosMencionados:
+    @pytest.mark.parametrize("texto, esperado", [
+        ("Recibo de Netflix y Spotify", ("Netflix", "Spotify")),
+        ("Tu recibo de Amazon Prime Video", ("Amazon Prime Video",)),
+        ("Apple Music y Apple TV", ("Apple Music", "Apple TV+")),
+        ("Recibo Netflix Netflix", ("Netflix",)),
+        ("Tu recibo de Apple", ()),
+        ("Canva", ()),
+        ("Transferencia a Claude Perez", ()),
+        ("Transferencia de Spotify Rojas", ()),
+        ("", ()),
+    ])
+    def test_casos(self, texto, esperado):
+        from connectors.origen_correo import servicios_mencionados
+
+        assert servicios_mencionados(texto) == esperado
+
+    def test_lo_que_ya_calzo_no_cuenta_otra_vez_para_otro_servicio(self, monkeypatch):
+        """Hoy ningún alias de un servicio está dentro del de otro, pero el
+        catálogo crece. Con uno así, el texto es UN servicio, no dos."""
+        from connectors import origen_correo
+        from connectors.normalizacion import Proveedor
+
+        largo = Proveedor("Plataforma Plus", "streaming", ("plataforma plus",))
+        corto = Proveedor("Plus", "streaming", ("plus",))
+        monkeypatch.setattr(origen_correo, "_alias_ordenados", lambda: [
+            ("plataforma plus", largo, False), ("plus", corto, False)])
+        assert origen_correo.servicios_mencionados("Recibo de Plataforma Plus") == ("Plataforma Plus",)
+        assert origen_correo.servicios_mencionados("Plataforma Plus y Plus") == ("Plataforma Plus", "Plus")
