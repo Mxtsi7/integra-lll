@@ -66,6 +66,7 @@ from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe
     recortar,
     validar_limite,
 )
+from .lectura_correo import atribuir_rechazo
 from .lectura_correo import cuenta_para_leer as _cuenta_para_leer
 from .models import CuentaConectada
 from .proveedores import TIEMPO_LIMITE
@@ -147,42 +148,44 @@ def leer_mensajes(
 
     cuenta, token = cuenta_para_leer(organizacion_id=organizacion_id, cuenta_id=cuenta_id)
 
-    parametros = {"maxResults": limite, "fields": _CAMPOS_LISTA}
-    if consulta:
-        parametros["q"] = consulta
-    if pagina:
-        parametros["pageToken"] = pagina
-    lista = _pedir(URL_MENSAJES, token, parametros)
+    # Un 401 que salga de aquí dice con qué credenciales se pidió (S3-FE-19).
+    with atribuir_rechazo(cuenta, token):
+        parametros = {"maxResults": limite, "fields": _CAMPOS_LISTA}
+        if consulta:
+            parametros["q"] = consulta
+        if pagina:
+            parametros["pageToken"] = pagina
+        lista = _pedir(URL_MENSAJES, token, parametros)
 
-    referencias = lista.get("messages") or []
-    if not isinstance(referencias, list):
-        raise ErrorDelProveedor("Gmail devolvió una lista de mensajes que no es una lista.")
+        referencias = lista.get("messages") or []
+        if not isinstance(referencias, list):
+            raise ErrorDelProveedor("Gmail devolvió una lista de mensajes que no es una lista.")
 
-    mensajes: list[MensajeCorreo] = []
-    omitidos: list[MensajeOmitido] = []
-    for referencia in referencias[:limite]:
-        id_mensaje = referencia.get("id") if isinstance(referencia, dict) else None
-        if not isinstance(id_mensaje, str) or not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", id_mensaje):
-            omitidos.append(MensajeOmitido(str(id_mensaje)[:64], "identificador no válido"))
-            continue
-        try:
-            crudo = _pedir(f"{URL_MENSAJES}/{id_mensaje}", token, {"format": "full", "fields": _CAMPOS_MENSAJE})
-        except _MensajeYaNoExiste:
-            # Se borró entre la lista y la lectura. Se informa y se sigue.
-            omitidos.append(MensajeOmitido(id_mensaje, "el mensaje ya no existe"))
-            continue
-        if crudo.get("id") != id_mensaje:
-            omitidos.append(MensajeOmitido(id_mensaje, "Gmail devolvió otro mensaje"))
-            continue
-        try:
-            mensajes.append(_mensaje(cuenta.pk, crudo))
-        except ValueError as exc:
-            omitidos.append(MensajeOmitido(id_mensaje, str(exc)[:120]))
+        mensajes: list[MensajeCorreo] = []
+        omitidos: list[MensajeOmitido] = []
+        for referencia in referencias[:limite]:
+            id_mensaje = referencia.get("id") if isinstance(referencia, dict) else None
+            if not isinstance(id_mensaje, str) or not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", id_mensaje):
+                omitidos.append(MensajeOmitido(str(id_mensaje)[:64], "identificador no válido"))
+                continue
+            try:
+                crudo = _pedir(f"{URL_MENSAJES}/{id_mensaje}", token, {"format": "full", "fields": _CAMPOS_MENSAJE})
+            except _MensajeYaNoExiste:
+                # Se borró entre la lista y la lectura. Se informa y se sigue.
+                omitidos.append(MensajeOmitido(id_mensaje, "el mensaje ya no existe"))
+                continue
+            if crudo.get("id") != id_mensaje:
+                omitidos.append(MensajeOmitido(id_mensaje, "Gmail devolvió otro mensaje"))
+                continue
+            try:
+                mensajes.append(_mensaje(cuenta.pk, crudo))
+            except ValueError as exc:
+                omitidos.append(MensajeOmitido(id_mensaje, str(exc)[:120]))
 
-    siguiente = lista.get("nextPageToken")
-    if siguiente is not None and (not isinstance(siguiente, str) or len(siguiente) > LARGO_MAXIMO_PAGINA):
-        raise ErrorDelProveedor("Gmail devolvió un token de página que no se entiende.")
-    return PaginaDeMensajes(tuple(mensajes), siguiente or None, tuple(omitidos))
+        siguiente = lista.get("nextPageToken")
+        if siguiente is not None and (not isinstance(siguiente, str) or len(siguiente) > LARGO_MAXIMO_PAGINA):
+            raise ErrorDelProveedor("Gmail devolvió un token de página que no se entiende.")
+        return PaginaDeMensajes(tuple(mensajes), siguiente or None, tuple(omitidos))
 
 
 class _MensajeYaNoExiste(Exception):

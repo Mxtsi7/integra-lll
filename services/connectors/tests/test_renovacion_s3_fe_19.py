@@ -99,8 +99,13 @@ class Proveedor:
         return self._siguiente(self.respuestas_refresco)
 
     def get(self, url, params=None, headers=None, timeout=None, allow_redirects=True):
-        self.lecturas.append({"url": url, "token": (headers or {}).get("Authorization", "")})
-        return self._siguiente(self.respuestas_lectura)
+        token = (headers or {}).get("Authorization", "")
+        self.lecturas.append({"url": url, "token": token})
+        respuesta = self._siguiente(self.respuestas_lectura)
+        # Una respuesta puede ser una función: lo que pasa MIENTRAS la
+        # petición está en vuelo (el usuario reconecta, otro worker refresca),
+        # y después lo que contesta el proveedor.
+        return respuesta(token) if callable(respuesta) else respuesta
 
 
 @pytest.fixture
@@ -278,23 +283,6 @@ class TestSinBucle:
         c.refresh_from_db()
         assert c.estado == "requiere_reautorizacion"
 
-    def test_si_el_usuario_reconecto_entremedio_no_se_marca(self, claves, proveedor, monkeypatch):
-        """El segundo 401 llega con credenciales que ya no son las que se
-        leyeron: el usuario reconectó. Esas no se marcan."""
-        c = cuenta()
-        real = lector_gmail.leer_mensajes
-
-        def reconecta_y_falla(**kw):
-            CuentaConectada.objects.filter(pk=c.pk).update(credenciales_version=c.credenciales_version + 1)
-            return real(**kw)
-
-        monkeypatch.setattr(lector_gmail, "leer_mensajes", reconecta_y_falla)
-        proveedor.respuestas_lectura = [GMAIL_401]
-        with pytest.raises(CuentaNoDisponible):
-            leer(c)
-        c.refresh_from_db()
-        assert c.estado == "conectada"
-
     def test_la_cuenta_de_otra_organizacion_no_se_refresca_ni_se_marca(self, claves, proveedor):
         ajena = cuenta(org=OTRA, vence_en=timedelta(minutes=-1))
         with pytest.raises(CuentaNoDisponible) as error:
@@ -393,5 +381,153 @@ class TestTokenVigenteSolo:
 
         c = cuenta(org=OTRA)
         assert _marcar(c.pk, organizacion_id=ORG, version=c.credenciales_version, motivo="x") is False
+        c.refresh_from_db()
+        assert c.estado == "conectada"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #180 — un 401 tardío no castiga a las credenciales nuevas
+# ══════════════════════════════════════════════════════════════════════
+
+
+ACCESO_B = "ya29.acceso-de-la-reconexion"
+
+
+def reconectar(c, *, acceso=ACCESO_B, refresco=None):
+    """Lo que hace el callback de OAuth (`views.CallbackAutorizacionView`):
+    guarda el token nuevo, conserva el de refresco si no vino uno, deja la
+    cuenta conectada y sube la versión con `registrar_credenciales_nuevas`."""
+    from connectors import revocacion
+
+    c = CuentaConectada.objects.get(pk=c.pk)
+    c.access_token = acceso
+    c.token_expira_en = timezone.now() + timedelta(minutes=55)
+    c.estado = CuentaConectada.Estado.CONECTADA
+    c.detalle_del_estado = ""
+    if refresco is not None:
+        c.refresh_token = refresco
+    c.save()
+    revocacion.registrar_credenciales_nuevas(c)
+
+
+def en_vuelo(efecto, respuesta):
+    """Una lectura durante la cual pasa `efecto`, y que termina en `respuesta`."""
+    def ocurre(_token):
+        efecto()
+        return respuesta
+    return ocurre
+
+
+class TestRechazoTardio:
+    def test_el_caso_de_maxi_b_sin_refresco_queda_conectada_y_legible(self, claves, proveedor):
+        """A está en vuelo; el usuario reconecta con B (sin token de refresco,
+        acceso vigente); llega el 401 de A. B no se toca y se lee."""
+        c = cuenta(refresco=None)
+        proveedor.respuestas_lectura = [en_vuelo(lambda: reconectar(c), GMAIL_401), GMAIL_VACIO]
+
+        pagina = leer(c)
+
+        assert pagina.mensajes == ()
+        assert proveedor.refrescos == []
+        assert [l["token"] for l in proveedor.lecturas] == [f"Bearer {ACCESO_VIEJO}", f"Bearer {ACCESO_B}"]
+        c.refresh_from_db()
+        assert (c.estado, c.access_token, c.detalle_del_estado) == ("conectada", ACCESO_B, "")
+
+    def test_b_con_refresco_tampoco_se_refresca_por_el_rechazo_de_a(self, claves, proveedor):
+        c = cuenta()
+        proveedor.respuestas_lectura = [en_vuelo(lambda: reconectar(c, refresco="1//refresco-b"), GMAIL_401),
+                                        GMAIL_VACIO]
+        leer(c)
+        assert proveedor.refrescos == []
+        c.refresh_from_db()
+        assert (c.estado, c.access_token, c.refresh_token) == ("conectada", ACCESO_B, "1//refresco-b")
+
+    def test_si_b_tambien_es_rechazada_se_marca_porque_el_rechazo_es_suyo(self, claves, proveedor):
+        """El rechazo de la generación vigente sí marca."""
+        c = cuenta(refresco=None)
+        proveedor.respuestas_lectura = [en_vuelo(lambda: reconectar(c), GMAIL_401), GMAIL_401]
+        with pytest.raises(CuentaNoDisponible):
+            leer(c)
+        c.refresh_from_db()
+        assert c.estado == "requiere_reautorizacion"
+
+    def test_desconectada_mientras_tanto_no_se_refresca_ni_se_marca(self, claves, proveedor):
+        c = cuenta()
+
+        def desconectar():
+            CuentaConectada.objects.filter(pk=c.pk).update(estado=CuentaConectada.Estado.DESCONECTADA)
+
+        proveedor.respuestas_lectura = [en_vuelo(desconectar, GMAIL_401)]
+        with pytest.raises(CuentaNoDisponible) as error:
+            leer(c)
+        assert error.value.codigo == CuentaNoDisponible.DESCONECTADA
+        assert proveedor.refrescos == []
+        c.refresh_from_db()
+        assert c.estado == "desconectada"
+
+    def test_un_403_de_a_no_marca_a_b(self, claves, proveedor):
+        c = cuenta()
+        proveedor.respuestas_lectura = [en_vuelo(lambda: reconectar(c), GMAIL_403), GMAIL_VACIO]
+        leer(c)
+        c.refresh_from_db()
+        assert (c.estado, c.access_token) == ("conectada", ACCESO_B)
+
+    def test_si_otro_worker_ya_refresco_no_se_refresca_de_nuevo(self, claves, proveedor):
+        """Misma versión, otro token: no se refresca otra vez (Microsoft rota
+        el de refresco) y se lee con el que dejó el otro worker."""
+        c = cuenta()
+
+        def otro_worker_refresca():
+            fila = CuentaConectada.objects.get(pk=c.pk)
+            fila.access_token = "ya29.del-otro-worker"
+            fila.save(update_fields=["access_token"])
+
+        proveedor.respuestas_lectura = [en_vuelo(otro_worker_refresca, GMAIL_401), GMAIL_VACIO]
+        leer(c)
+        assert proveedor.refrescos == []
+        assert proveedor.lecturas[1]["token"] == "Bearer ya29.del-otro-worker"
+
+    def test_el_rechazo_dice_con_que_credenciales_se_pidio_y_no_lleva_el_token(self, claves, proveedor):
+        from connectors.lectura_correo import AutorizacionRechazada, huella_de_token
+
+        c = cuenta()
+        proveedor.respuestas_lectura = [GMAIL_401]
+        with pytest.raises(AutorizacionRechazada) as error:
+            lector_gmail.leer_mensajes(organizacion_id=ORG, cuenta_id=c.pk)
+        assert error.value.credenciales_version == c.credenciales_version
+        assert error.value.huella_token == huella_de_token(ACCESO_VIEJO)
+        assert ACCESO_VIEJO not in repr(vars(error.value))
+
+    def test_outlook_tambien_dice_con_que_credenciales(self, claves, proveedor):
+        from connectors.lectura_correo import AutorizacionRechazada, huella_de_token
+
+        c = cuenta(proveedor="outlook")
+        proveedor.respuestas_lectura = [_Respuesta(401, {"error": {"code": "InvalidAuthenticationToken"}})]
+        with pytest.raises(AutorizacionRechazada) as error:
+            lector_outlook.leer_mensajes(organizacion_id=ORG, cuenta_id=c.pk)
+        assert error.value.huella_token == huella_de_token(ACCESO_VIEJO)
+
+    def test_un_403_no_marca_si_otro_worker_ya_cambio_el_token(self, claves, proveedor):
+        """Misma versión, otro token: el 403 era del token viejo."""
+        c = cuenta()
+
+        def otro_worker_refresca():
+            fila = CuentaConectada.objects.get(pk=c.pk)
+            fila.access_token = "ya29.del-otro-worker"
+            fila.save(update_fields=["access_token"])
+
+        proveedor.respuestas_lectura = [en_vuelo(otro_worker_refresca, GMAIL_403), GMAIL_VACIO]
+        leer(c)
+        c.refresh_from_db()
+        assert c.estado == "conectada"
+
+    @pytest.mark.parametrize("respuesta", [GMAIL_401, GMAIL_403])
+    def test_una_reconexion_es_otra_autorizacion_aunque_repita_el_token(self, claves, proveedor, respuesta):
+        """Si el proveedor entrega el mismo token al reconectar, la versión
+        igual cambió: el rechazo de la autorización anterior no la toca."""
+        c = cuenta(refresco=None)
+        proveedor.respuestas_lectura = [en_vuelo(lambda: reconectar(c, acceso=ACCESO_VIEJO), respuesta), GMAIL_VACIO]
+        leer(c)
+        assert proveedor.refrescos == []
         c.refresh_from_db()
         assert c.estado == "conectada"

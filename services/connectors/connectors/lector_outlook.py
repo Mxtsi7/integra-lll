@@ -50,6 +50,7 @@ from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe
     recortar,
     validar_limite,
 )
+from .lectura_correo import atribuir_rechazo
 from .lectura_correo import cuenta_para_leer as _cuenta_para_leer
 from .models import CuentaConectada
 from .proveedores import TIEMPO_LIMITE
@@ -197,50 +198,52 @@ def leer_mensajes(
 
     cuenta, token = cuenta_para_leer(organizacion_id=organizacion_id, cuenta_id=cuenta_id)
 
-    if pagina:
-        cuerpo = _pedir(pagina, token, None)
-    else:
-        parametros = {"$top": limite, "$select": _CAMPOS}
-        if busqueda:
-            parametros["$search"] = f'"{busqueda}"'
+    # Un 401 que salga de aquí dice con qué credenciales se pidió (S3-FE-19).
+    with atribuir_rechazo(cuenta, token):
+        if pagina:
+            cuerpo = _pedir(pagina, token, None)
         else:
-            if fechas:
-                parametros["$filter"] = fechas
-            # Graph exige que lo que va en `$orderby` aparezca antes en
-            # `$filter` (si no, `InefficientFilter`): aquí es la misma fecha.
-            parametros["$orderby"] = "receivedDateTime desc"
-        cuerpo = _pedir(URL_MENSAJES, token, parametros)
+            parametros = {"$top": limite, "$select": _CAMPOS}
+            if busqueda:
+                parametros["$search"] = f'"{busqueda}"'
+            else:
+                if fechas:
+                    parametros["$filter"] = fechas
+                # Graph exige que lo que va en `$orderby` aparezca antes en
+                # `$filter` (si no, `InefficientFilter`): aquí es la misma fecha.
+                parametros["$orderby"] = "receivedDateTime desc"
+            cuerpo = _pedir(URL_MENSAJES, token, parametros)
 
-    crudos = cuerpo.get("value")
-    if not isinstance(crudos, list):
-        raise ErrorDelProveedor("Graph devolvió una lista de mensajes que no es una lista.")
-    pedidos = tamano_de_pagina(pagina) if pagina else limite
-    if len(crudos) > pedidos:
-        raise ErrorDelProveedor(
-            f"Graph devolvió {len(crudos)} mensajes y se pidieron {pedidos}; no se recorta para no perder ninguno."
-        )
+        crudos = cuerpo.get("value")
+        if not isinstance(crudos, list):
+            raise ErrorDelProveedor("Graph devolvió una lista de mensajes que no es una lista.")
+        pedidos = tamano_de_pagina(pagina) if pagina else limite
+        if len(crudos) > pedidos:
+            raise ErrorDelProveedor(
+                f"Graph devolvió {len(crudos)} mensajes y se pidieron {pedidos}; no se recorta para no perder ninguno."
+            )
 
-    mensajes: list[MensajeCorreo] = []
-    omitidos: list[MensajeOmitido] = []
-    # Con `$search`, Graph no aplica las fechas: se aplican aquí.
-    revisar_fechas = bool(busqueda) and bool(filtro.desde or filtro.hasta)
-    for crudo in crudos:
-        try:
-            mensaje = _mensaje(cuenta.pk, crudo)
-        except ValueError as exc:
-            identificador = crudo.get("id") if isinstance(crudo, dict) else None
-            omitidos.append(MensajeOmitido(str(identificador)[:64], str(exc)[:120]))
-            continue
-        if revisar_fechas and not filtro.admite(mensaje.recibido_en):
-            continue
-        mensajes.append(mensaje)
+        mensajes: list[MensajeCorreo] = []
+        omitidos: list[MensajeOmitido] = []
+        # Con `$search`, Graph no aplica las fechas: se aplican aquí.
+        revisar_fechas = bool(busqueda) and bool(filtro.desde or filtro.hasta)
+        for crudo in crudos:
+            try:
+                mensaje = _mensaje(cuenta.pk, crudo)
+            except ValueError as exc:
+                identificador = crudo.get("id") if isinstance(crudo, dict) else None
+                omitidos.append(MensajeOmitido(str(identificador)[:64], str(exc)[:120]))
+                continue
+            if revisar_fechas and not filtro.admite(mensaje.recibido_en):
+                continue
+            mensajes.append(mensaje)
 
-    siguiente = cuerpo.get("@odata.nextLink")
-    if siguiente is not None and not es_pagina_de_graph(siguiente):
-        # No se devuelve una página que la llamada siguiente rechazaría, ni
-        # una que lleve el token a otro lado.
-        raise ErrorDelProveedor("Graph devolvió una página siguiente que no es de la lista de mensajes.")
-    return PaginaDeMensajes(tuple(mensajes), siguiente or None, tuple(omitidos))
+        siguiente = cuerpo.get("@odata.nextLink")
+        if siguiente is not None and not es_pagina_de_graph(siguiente):
+            # No se devuelve una página que la llamada siguiente rechazaría, ni
+            # una que lleve el token a otro lado.
+            raise ErrorDelProveedor("Graph devolvió una página siguiente que no es de la lista de mensajes.")
+        return PaginaDeMensajes(tuple(mensajes), siguiente or None, tuple(omitidos))
 
 
 def _pedir(url: str, token: str, parametros: dict | None) -> dict:
