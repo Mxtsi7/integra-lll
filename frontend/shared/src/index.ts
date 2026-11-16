@@ -40,6 +40,7 @@ export * from './api/conectores';
 export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
+export * from './api/asistente';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';
@@ -49,3 +50,17 @@ export * from './api/verificacionCorreo';
 export * from './estadoCarga';
 export * from './api/calendario';
 export type { AuthSchemas } from './contratos/auth.generated';
+export type {
+  AcuseUso,
+  CodigoErrorUso,
+  CoverageIntervalPayload,
+  ErrorUso,
+  EstadoCobertura,
+  EstadoRecolector,
+  OrigenRecolector,
+  PendienteUso,
+  TramoActividad,
+  UsageEventPayload,
+  UTCDateTime,
+  UUID,
+} from './contracts/uso-recolectores.dto';
