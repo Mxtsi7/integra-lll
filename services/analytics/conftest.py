@@ -15,6 +15,34 @@ import pytest
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "analytics_config.settings")
 
 
+def _exigir_integracion() -> bool:
+    """En CI, faltar PostgreSQL no puede terminar en una suite SQLite verde."""
+    return os.environ.get("EXIGIR_INTEGRACION_USO") == "1"
+
+
+def _postgres_responde(host: str, puerto: int) -> bool:
+    if not host:
+        return False
+    if host.startswith("/"):
+        # Un socket Unix no se comprueba con create_connection desde Windows;
+        # se deja que Django intente conectarse.
+        return True
+    try:
+        with socket.create_connection((host, puerto), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def _error_postgres_ausente(host: str, puerto: int) -> RuntimeError:
+    return RuntimeError(
+        "EXIGIR_INTEGRACION_USO=1 exige PostgreSQL real, pero no responde en "
+        f"{host}:{puerto}. Levanta la base con "
+        "`docker compose -f docker-compose.analytics-uso-test.yml up -d --wait` "
+        "o configura DATABASE_URL; la suite NO puede caer a SQLite."
+    )
+
+
 def pytest_configure() -> None:
     """Inicializa Django antes de que pytest recolecte los tests."""
     django.setup()
@@ -28,23 +56,32 @@ def django_db_setup(django_db_blocker):
     from django.conf import settings
     from django.test.utils import setup_databases, teardown_databases
 
-    engine = settings.DATABASES["default"].get("ENGINE", "")
-    host = settings.DATABASES["default"].get("HOST", "")
+    configuracion = settings.DATABASES["default"]
+    engine = configuracion.get("ENGINE", "")
+    host = configuracion.get("HOST", "")
+    puerto = int(configuracion.get("PORT") or 5432)
 
     if "sqlite" in engine:
+        if _exigir_integracion():
+            raise RuntimeError(
+                "EXIGIR_INTEGRACION_USO=1 exige PostgreSQL real, pero "
+                "DATABASE_URL apunta a SQLite. Configura una base PostgreSQL; "
+                "la suite NO puede caer a SQLite."
+            )
         settings.DATABASES["default"]["OPTIONS"] = {}
     elif "postgresql" in engine or "psycopg" in engine:
         # Forzar search_path=public para que las migraciones y tablas de
         # test se creen en el esquema público, independientemente de lo que
         # diga ESQUEMA_BD. Funciona tanto con host='postgres' (Docker)
         # como con host='localhost' (CI / GitHub Actions).
-        try:
-            socket.gethostbyname(host)
+        if _postgres_responde(host, puerto):
             settings.DATABASES["default"].setdefault("OPTIONS", {})
             settings.DATABASES["default"]["OPTIONS"] = {
                 "options": "-c search_path=public"
             }
-        except OSError:
+        else:
+            if _exigir_integracion():
+                raise _error_postgres_ausente(host, puerto)
             from django.db import connections
 
             settings.DATABASES["default"] = {

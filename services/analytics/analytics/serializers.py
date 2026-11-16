@@ -8,6 +8,12 @@ from analytics.models import (
     RecomendacionDescartada,
     UsoMensual,
 )
+from analytics.resumen_uso import (
+    COBERTURAS,
+    ESTADOS_MEDICION,
+    ESTADOS_MEDICION_RESPUESTA,
+    ESTADOS_SUSCRIPCION,
+)
 
 
 # ── Uso por periodo (FE-28) y puntaje (FE-29) ────────────────────────
@@ -54,6 +60,89 @@ class PuntajeUsoSerializer(serializers.Serializer):
         read_only=True,
         help_text="Por qué dio eso: umbral usado, días observados, desglose por mes y motivo.",
     )
+
+
+# ── Resumen de uso por suscripción y periodo (S3-VI-13) ──────────────
+
+class DesgloseCoberturaSerializer(serializers.Serializer):
+    """Cantidad de eventos por tipo de cobertura en el periodo."""
+
+    completa = serializers.IntegerField(min_value=0, read_only=True)
+    parcial = serializers.IntegerField(min_value=0, read_only=True)
+    sin_medicion = serializers.IntegerField(min_value=0, read_only=True)
+
+
+class DesgloseEstadosSerializer(serializers.Serializer):
+    """Cantidad de eventos por estado de medición en el periodo."""
+
+    activo = serializers.IntegerField(min_value=0, read_only=True)
+    pausado = serializers.IntegerField(min_value=0, read_only=True)
+    sin_permiso = serializers.IntegerField(min_value=0, read_only=True)
+    revocado = serializers.IntegerField(min_value=0, read_only=True)
+
+
+class ResumenUsoSuscripcionSerializer(serializers.Serializer):
+    """Uso exacto de una suscripción en un periodo (S3-VI-13).
+
+    ``ms_netos`` es la evidencia exacta; ``minutos_netos`` es la proyección
+    diaria ya sumada. Mirar ``cobertura`` y ``estado_medicion`` antes de
+    concluir algo de ``minutos_netos``: un periodo ``sin_medicion`` no es uso
+    cero.
+    """
+
+    suscripcion_id = serializers.UUIDField(read_only=True)
+    nombre = serializers.CharField(read_only=True, allow_blank=True)
+    observada_desde = serializers.CharField(read_only=True, allow_null=True)
+    periodo = serializers.CharField(read_only=True)
+    ms_netos = serializers.IntegerField(
+        min_value=0, read_only=True, help_text="Milisegundos exactos del periodo."
+    )
+    minutos_netos = serializers.IntegerField(
+        min_value=0,
+        read_only=True,
+        help_text="Suma de los minutos enteros proyectados por día local.",
+    )
+    dias_con_uso = serializers.IntegerField(min_value=0, read_only=True)
+    ultima_actividad_positiva = serializers.CharField(
+        read_only=True,
+        allow_null=True,
+        help_text="UTC con tres decimales y sufijo Z, o null si no hubo actividad.",
+    )
+    cobertura = serializers.ChoiceField(
+        choices=COBERTURAS,
+        read_only=True,
+        help_text="completa | parcial | sin_medicion.",
+    )
+    estado_medicion = serializers.ChoiceField(
+        choices=ESTADOS_MEDICION_RESPUESTA,
+        read_only=True,
+        help_text="Por qué hay o no medición: activo | pausado | sin_permiso | revocado | sin_medicion.",
+    )
+    uso_cero_observado = serializers.BooleanField(
+        read_only=True,
+        help_text="True solo con cobertura completa, estado activo y cero milisegundos.",
+    )
+    desglose_cobertura = DesgloseCoberturaSerializer(read_only=True)
+    desglose_estados = DesgloseEstadosSerializer(read_only=True)
+    eventos_observados = serializers.IntegerField(min_value=0, read_only=True)
+    estado_suscripcion = serializers.ChoiceField(
+        choices=ESTADOS_SUSCRIPCION,
+        read_only=True,
+        allow_null=True,
+        help_text="Estado vigente proyectado por S3-VI-10, si se conoce.",
+    )
+
+
+class ResumenUsoPaginaSerializer(serializers.Serializer):
+    """Página acotada del resumen de uso por suscripción y periodo."""
+
+    periodo = serializers.CharField(read_only=True)
+    count = serializers.IntegerField(min_value=0, read_only=True)
+    next = serializers.IntegerField(read_only=True, allow_null=True)
+    previous = serializers.IntegerField(read_only=True, allow_null=True)
+    page = serializers.IntegerField(min_value=1, read_only=True)
+    page_size = serializers.IntegerField(min_value=1, max_value=100, read_only=True)
+    results = ResumenUsoSuscripcionSerializer(many=True, read_only=True)
 
 
 class EvidenciaRecomendacionSerializer(serializers.Serializer):

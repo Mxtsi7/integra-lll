@@ -174,6 +174,84 @@ existe aún en los servicios disponibles. El worker no inventa esos datos: hasta
 que un productor confiable publique el evento v2, no habrá recomendaciones. Los
 ejemplos y fixtures de prueba son mocks, no evidencia de servicios reales.
 
+## Resumen de uso por suscripción (S3-VI-13)
+
+`GET /api/analitica/resumen-uso/?mes=YYYY-MM` devuelve, por cada suscripción
+observada de la organización, el uso medido en ese mes y qué se puede afirmar
+sobre él. Exige `X-Organizacion-Id`; sin esa cabecera responde `403`. El
+parámetro `mes` es obligatorio, debe tener formato `YYYY-MM` y no puede ser
+futuro; un valor inválido responde `400`.
+
+La base de candidatas es `SuscripcionObservada`: una suscripción con eventos
+pero sin registro de observación no aparece, porque no se puede afirmar desde
+cuándo se la observa. Toda consulta filtra a la vez por `organizacion_id`, el
+mes local y los identificadores de la página. El parámetro opcional
+`suscripcion_id` restringe la respuesta a una sola suscripción de la
+organización.
+
+```json
+{
+  "periodo": "2026-10",
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "page": 1,
+  "page_size": 50,
+  "results": [
+    {
+      "suscripcion_id": "33333333-3333-4333-8333-333333333333",
+      "nombre": "Servicio A",
+      "observada_desde": "2026-07-01",
+      "periodo": "2026-10",
+      "ms_netos": 150000,
+      "minutos_netos": 2,
+      "dias_con_uso": 2,
+      "ultima_actividad_positiva": "2026-10-06T10:00:30.000Z",
+      "cobertura": "completa",
+      "estado_medicion": "activo",
+      "uso_cero_observado": false,
+      "desglose_cobertura": {"completa": 2, "parcial": 0, "sin_medicion": 0},
+      "desglose_estados": {"activo": 2, "pausado": 0, "sin_permiso": 0, "revocado": 0},
+      "eventos_observados": 2,
+      "estado_suscripcion": "activo"
+    }
+  ]
+}
+```
+
+### Precisión y cobertura
+
+- `ms_netos` es la suma exacta de `analytics.uso_diario.ms_netos`. La unidad
+  exacta es el milisegundo y nunca se redondea al minuto.
+- `minutos_netos` suma los `minutos_netos` de cada día, ya proyectados con
+  `ms_netos // 60000`. No se divide la suma mensual de milisegundos: el residuo
+  de un día no se traslada a otro.
+- `dias_con_uso` cuenta días con `ms_netos > 0`. Una fila diaria de cero
+  observado existe, pero no es un día de uso.
+- `cobertura` es `completa` si hay eventos activos completos y ningún parcial;
+  `parcial` si al menos un evento activo es parcial; `sin_medicion` si no hay
+  ningún evento activo con cobertura completa o parcial.
+- `estado_medicion` es `activo` cuando hay medición; sin ella informa
+  `pausado`, `sin_permiso` o `revocado` según lo observado, o `sin_medicion`.
+- `uso_cero_observado` solo es `true` con `cobertura: "completa"`,
+  `estado_medicion: "activo"` y `ms_netos == 0`. Un periodo parcial no rellena
+  sus huecos con cero; `sin_medicion` significa que el uso real se desconoce.
+- `ultima_actividad_positiva` es el final del último tramo positivo de un evento
+  activo del periodo, en UTC con tres decimales. Si la tabla de tramos no
+  existe, se degrada al `fin` del evento.
+- `desglose_estados` solo contiene estados observados del evento; la respuesta
+  `sin_medicion` no se suma allí porque no es un estado de la suscripción.
+
+`estado_suscripcion` procede de la proyección de S3-VI-10 y es `null` cuando esa
+tabla todavía no existe. Si el pipeline no está aplicado (por ejemplo, SQLite
+local), la respuesta degrada a `cobertura: "sin_medicion"`,
+`estado_medicion: "sin_medicion"` y ceros en los agregados, sin inventar uso
+cero.
+
+La paginación es manual y acotada: `page >= 1` y `page_size` entre 1 y 100
+(50 por omisión). `next` y `previous` son números de página, no URLs. Un
+parámetro fuera de rango responde `400`.
+
 ## Asistente financiero (VI-22, VI-24)
 
 `POST /api/asistente/` es el único endpoint de IA que consumen los clientes y
@@ -268,5 +346,31 @@ Desde `services/analytics/`:
 
 ```bash
 python -m pytest analytics
+python -m pytest tests/test_resumen_uso.py -v
 python manage.py consumir_solapamientos
 ```
+
+La suite unitaria de S3-VI-13 cubre las reglas puras de cobertura y cero
+observado, la proyección de minutos por día, la paginación acotada, el
+aislamiento por organización y la degradación sin pipeline.
+
+La prueba de integración aplica el DDL real de `analytics-uso` y escribe
+eventos, tramos y agregados diarios en PostgreSQL. Sin `INTEGRACION_USO=1` se
+omite; con `EXIGIR_INTEGRACION_USO=1` la falta de la bandera o de PostgreSQL
+falla en vez de mostrar una suite verde que no tocó la base.
+
+```bash
+# Desde la raíz del repositorio.
+docker compose -f docker-compose.analytics-uso-test.yml up -d --wait
+cd services/analytics
+export DATABASE_URL='postgres://postgres:test@localhost:55432/suscripciones_test'
+export SECRET_KEY='solo-prueba'
+export DEBUG='True'
+export ALLOWED_HOSTS='localhost,127.0.0.1,testserver'
+export INTEGRACION_USO=1
+export EXIGIR_INTEGRACION_USO=1
+python -m pytest tests/test_resumen_uso_integracion.py -v
+```
+
+En PowerShell, las mismas variables con `$env:` y el intérprete del entorno
+virtual del repositorio (`..\subscriptions\venv\Scripts\python.exe`).

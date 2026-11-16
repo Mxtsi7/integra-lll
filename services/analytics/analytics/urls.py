@@ -11,5 +11,6 @@ urlpatterns = [
     # Va antes del include por lo mismo que en connectors: el detalle del
     # router acepta cualquier segmento sin barra como pk.
     path("puntajes-uso/", views.PuntajesUsoView.as_view(), name="puntajes-uso"),
+    path("resumen-uso/", views.ResumenUsoView.as_view(), name="resumen-uso"),
     path("", include(router.urls)),
 ]

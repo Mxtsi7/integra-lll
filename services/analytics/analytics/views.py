@@ -30,11 +30,13 @@ from analytics.serializers import (
     ListaRecomendacionesSerializer,
     PuntajeUsoSerializer,
     RecomendacionDescartadaSerializer,
+    ResumenUsoPaginaSerializer,
     SolicitarDescarteSerializer,
     UsoMensualSerializer,
 )
 from analytics.asistente import construir_contexto, consultar_proveedor, resumen_local
 from analytics.politica_ia import PoliticaIA
+from analytics.resumen_uso import construir_resumen_uso, validar_paginacion
 from analytics.uso import puntuar_organizacion
 
 
@@ -280,6 +282,96 @@ class PuntajesUsoView(APIView):
         )
         return Response(
             PuntajeUsoSerializer([p.como_dict() for p in puntajes], many=True).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter(
+            "mes",
+            str,
+            description="Periodo en formato YYYY-MM. Obligatorio.",
+            required=True,
+        ),
+        OpenApiParameter(
+            "suscripcion_id",
+            str,
+            description="UUID de una suscripción concreta. Opcional.",
+            required=False,
+        ),
+        OpenApiParameter(
+            "page",
+            int,
+            description="Página, desde 1. Por omisión 1.",
+            required=False,
+        ),
+        OpenApiParameter(
+            "page_size",
+            int,
+            description="Tamaño de página entre 1 y 100. Por omisión 50.",
+            required=False,
+        ),
+    ],
+    responses={200: ResumenUsoPaginaSerializer},
+    summary="Resumen de uso por suscripción y periodo (S3-VI-13)",
+)
+class ResumenUsoView(APIView):
+    """
+        GET /api/analitica/resumen-uso/?mes=2026-11
+
+    Devuelve, por suscripción observada de la organización autenticada, el uso
+    exacto del periodo: milisegundos, minutos proyectados por día, días con
+    uso, última actividad positiva y el desglose de cobertura y estado.
+
+    ── Un periodo sin medición no es uso cero ───────────────────────────────
+    ``cobertura: sin_medicion`` o ``estado_medicion`` distinto de ``activo``
+    significan que no se sabe si hubo uso. Solo ``uso_cero_observado: true``
+    afirma un cero: requiere cobertura ``completa``, estado ``activo`` y cero
+    milisegundos. Un ``parcial`` deja los huecos sin rellenar.
+
+    La página está acotada (``page_size`` máximo 100) para que una petición no
+    pueda recorrer la organización entera. Es solo lectura y determinística:
+    pedir el mismo mes devuelve lo mismo.
+    """
+
+    def get(self, request):
+        organizacion_id = _contexto_organizacion(request)
+        mes = _mes_pedido(request)
+        hoy = timezone.localdate()
+        if mes > hoy.replace(day=1):
+            # Un mes que todavía no empezó no tiene nada que resumir, y
+            # responder ceros se leería como "no se usa".
+            raise ValidationError({"mes": "Ese mes todavía no empieza."})
+
+        suscripcion_id = None
+        crudo_suscripcion = request.query_params.get("suscripcion_id")
+        if crudo_suscripcion:
+            try:
+                suscripcion_id = UUID(str(crudo_suscripcion))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValidationError(
+                    {"suscripcion_id": "No es un UUID."}
+                ) from exc
+
+        try:
+            page, page_size = validar_paginacion(
+                request.query_params.get("page"),
+                request.query_params.get("page_size"),
+            )
+        except ValueError as exc:
+            campo = "page_size" if "page_size" in str(exc) else "page"
+            raise ValidationError({campo: str(exc)}) from exc
+
+        datos = construir_resumen_uso(
+            organizacion_id=organizacion_id,
+            mes=mes,
+            suscripcion_id=suscripcion_id,
+            page=page,
+            page_size=page_size,
+        )
+        return Response(
+            ResumenUsoPaginaSerializer(datos).data,
             status=status.HTTP_200_OK,
         )
 
