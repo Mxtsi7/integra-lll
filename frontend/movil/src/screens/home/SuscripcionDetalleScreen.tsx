@@ -391,13 +391,21 @@ export default function SuscripcionDetalleScreen({
     }
   };
 
+  const manejarEditar = (sub: Suscripcion) => {
+    if (onEditar) {
+      onEditar(sub);
+    } else if (navigation?.navigate) {
+      navigation.navigate('SuscripcionEditar', { id: sub.id, suscripcion: sub });
+    }
+  };
+
   return (
     <SuscripcionDetalleView
       id={id}
       estado={estado}
       onVolver={manejarVolver}
       onReintentar={() => void cargarDatos(id)}
-      onEditar={onEditar}
+      onEditar={manejarEditar}
       onEliminar={onEliminar}
       onRegistrarUso={onRegistrarUso}
     />

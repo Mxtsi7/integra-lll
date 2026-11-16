@@ -4,6 +4,7 @@ import type { HomeStackParamList } from './types';
 import HomeScreen from '../screens/home/HomeScreen';
 import SuscripcionDetalleScreen from '../screens/home/SuscripcionDetalleScreen';
 import SuscripcionNuevaScreen from '../screens/home/SuscripcionNuevaScreen';
+import SuscripcionEditarScreen from '../screens/home/SuscripcionEditarScreen';
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
 
@@ -31,6 +32,11 @@ export function HomeNavigator() {
         name="SuscripcionNueva"
         component={SuscripcionNuevaScreen}
         options={{ title: 'Nueva Suscripción' }}
+      />
+      <Stack.Screen
+        name="SuscripcionEditar"
+        component={SuscripcionEditarScreen}
+        options={{ title: 'Editar Suscripción' }}
       />
     </Stack.Navigator>
   );
