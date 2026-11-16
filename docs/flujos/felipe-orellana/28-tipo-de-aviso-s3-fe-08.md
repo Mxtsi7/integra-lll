@@ -30,6 +30,29 @@ realizado no lo contradice; sola, sí es un aviso. En cambio, un **cobro que
 todavía no ocurre** («se cobrará el 5») junto a un «recibo» deja el correo
 incierto.
 
+### Una frase de pago negada o en condicional no acredita nada
+
+«Aún no hemos recibido tu pago» contiene «hemos recibido tu pago», y «Te
+enviaremos el recibo cuando pagues» contiene «recibo»: los dos salían como
+cobro realizado. Lo encontró la revisión de #185.
+
+Ahora cada frase de cobro hecho se mira **en su oración** (lo que hay entre
+dos `.`, `!`, `?`, `;` o saltos de línea):
+
+- si **antes** de la frase hay una negación («no», «aún no», «todavía no»,
+  «sin», «not», «haven't»…), no acredita;
+- si **en la oración** hay un futuro o un condicional («cuando», «si», «una
+  vez que», «te enviaremos», «recibirás», «estará», «when», «if», «once»,
+  «will»…), tampoco.
+
+Una frase así queda como `cobro_no_acreditado` en la evidencia. Sola, deja
+el correo incierto; con un aviso, es aviso; con un cobro que sí se acredita,
+o con un asunto «recibo», queda incierto porque el correo se contradice.
+
+Por qué la negación solo **antes**: «Recibo no. 123» es un número de
+recibo, no un «no». Y por qué solo **en la misma oración**: un recibo que
+después dice «Si tienes dudas, escríbenos» sigue siendo un recibo.
+
 ## Las reglas
 
 1. **El asunto primero**, porque es lo que el remitente eligió para decir de
@@ -62,11 +85,11 @@ cobro pudo haberse hecho, pero no se afirma sin que alguien lo mire.
 | Pieza | Archivo |
 |---|---|
 | El clasificador | `services/connectors/connectors/tipo_de_aviso.py` |
-| Las pruebas | `services/connectors/tests/test_tipo_de_aviso_s3_fe_08.py` (32) |
+| Las pruebas | `services/connectors/tests/test_tipo_de_aviso_s3_fe_08.py` (50) |
 
 ## Cómo se comprobaron las pruebas
 
-Se rompió el código a propósito 13 veces y cada vez falló al menos una
+Se rompió el código a propósito 21 veces y cada vez falló al menos una
 prueba. Entre otras:
 
 - tomar cobro + fallo o cobro + aviso como cobro;

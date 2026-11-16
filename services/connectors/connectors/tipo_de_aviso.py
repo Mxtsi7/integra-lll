@@ -110,23 +110,65 @@ def _comparable(texto: str) -> str:
     return re.sub(r"\s+", " ", sin_tildes.lower())
 
 
+#: No es un tipo: una frase de cobro hecho que el contexto NIEGA o deja en
+#: condicional («Aún no hemos recibido tu pago», «Te enviaremos el recibo
+#: cuando pagues»). No acredita un pago. Lo encontró la revisión de #185.
+_COBRO_NO_ACREDITADO = "cobro_no_acreditado"
+
+#: Lo que, ANTES de la frase y en la misma oración, la niega.
+_NEGACION = re.compile(
+    r"(?<![a-z0-9])(?:no|nunca|jamas|sin|aun no|todavia no|not|never|"
+    r"haven't|havent|hasn't|hasnt|didn't|didnt|don't|dont|won't|wont)(?![a-z0-9])"
+)
+#: Lo que, en cualquier parte de la misma oración, la deja en futuro o en
+#: condicional: el pago o el recibo todavía no existen.
+_FUTURO_O_CONDICIONAL = re.compile(
+    r"(?<![a-z0-9])(?:cuando|si|una vez que|apenas|enviaremos|te enviaremos|recibiras|recibira|"
+    r"llegara|estara|estaran|podras|pendiente|en espera|when|if|once|will|we'll|would|pending|"
+    r"as soon as|after you)(?![a-z0-9])"
+)
+#: Dónde termina una oración. La coma no: «Gracias por tu pago, tu próximo
+#: cobro será…» es la misma idea, y cortarla ahí no cambia nada aquí.
+_FIN_DE_ORACION = re.compile(r"[.!?;\n]")
+
+
+def _oracion(comparable: str, inicio: int, fin: int) -> tuple[str, str]:
+    """(lo que va antes de la frase, la oración entera), dentro de su oración."""
+    desde = max((m.end() for m in _FIN_DE_ORACION.finditer(comparable, 0, inicio)), default=0)
+    hasta_m = _FIN_DE_ORACION.search(comparable, fin)
+    hasta = hasta_m.start() if hasta_m else len(comparable)
+    return comparable[desde:inicio], comparable[desde:hasta]
+
+
+def _no_acredita(comparable: str, inicio: int, fin: int) -> bool:
+    """¿La frase de cobro hecho está negada antes, o en futuro o condicional
+    en su oración? Una negación DESPUÉS no cuenta: «Recibo no. 123» es un
+    número de recibo, no un «no»."""
+    antes, oracion = _oracion(comparable, inicio, fin)
+    return bool(_NEGACION.search(antes) or _FUTURO_O_CONDICIONAL.search(oracion))
+
+
 def _encontrado(texto: str) -> dict[str, list[str]]:
     comparable = _comparable(texto)
-    hallado = {}
+    hallado: dict[str, set[str]] = {}
     for tipo in _ORDEN:
-        frases = sorted({m.group(0) for m in _PATRONES[tipo].finditer(comparable)})
-        if frases:
-            hallado[tipo] = frases
-    return hallado
+        for m in _PATRONES[tipo].finditer(comparable):
+            clave = tipo
+            if tipo == COBRO_REALIZADO and _no_acredita(comparable, m.start(), m.end()):
+                clave = _COBRO_NO_ACREDITADO
+            hallado.setdefault(clave, set()).add(m.group(0))
+    return {tipo: sorted(frases) for tipo, frases in hallado.items()}
 
 
 def _evidencia(donde: str, hallado: dict[str, list[str]]) -> list[str]:
-    return [f"{donde}: {tipo}: {frase}" for tipo in _ORDEN for frase in hallado.get(tipo, [])]
+    return [f"{donde}: {tipo}: {frase}" for tipo in (*_ORDEN, _COBRO_NO_ACREDITADO) for frase in hallado.get(tipo, [])]
 
 
 def _decidir(tipos: set[str]) -> tuple[str | None, str]:
     """El tipo para un conjunto de evidencias, con las reglas del módulo."""
     if COBRO_REALIZADO in tipos:
+        if _COBRO_NO_ACREDITADO in tipos:
+            return None, "dice que se pagó y, en otra parte, que no o que todavía no; queda para revisión"
         if PAGO_FALLIDO in tipos:
             return None, "habla de un cobro hecho y de un pago fallido; queda para revisión"
         if AVISO_DE_COBRO in tipos:
@@ -137,6 +179,8 @@ def _decidir(tipos: set[str]) -> tuple[str | None, str]:
         return PAGO_FALLIDO, "el pago falló" + ("; lo que viene es un nuevo intento" if len(tipos) > 1 else "")
     if AVISO_DE_COBRO in tipos or _PROXIMO_CICLO in tipos:
         return AVISO_DE_COBRO, "anuncia un cobro que todavía no ocurre"
+    if _COBRO_NO_ACREDITADO in tipos:
+        return None, "habla de un pago que no ocurrió o que todavía no ocurre; queda para revisión"
     return None, "el mensaje no dice si se cobró, se va a cobrar o falló el pago"
 
 
@@ -153,9 +197,13 @@ def clasificar(mensaje: MensajeCorreo) -> Clasificacion:
 
     tipo_asunto, _ = _decidir(set(en_asunto))
     if tipo_asunto == COBRO_REALIZADO:
-        contradice = {PAGO_FALLIDO, AVISO_DE_COBRO} & set(en_cuerpo)
+        contradice = {PAGO_FALLIDO, AVISO_DE_COBRO, _COBRO_NO_ACREDITADO} & set(en_cuerpo)
         if contradice:
-            que = "que el pago falló" if PAGO_FALLIDO in contradice else "que el cobro todavía no ocurre"
+            que = (
+                "que el pago falló" if PAGO_FALLIDO in contradice
+                else "que el cobro todavía no ocurre" if AVISO_DE_COBRO in contradice
+                else "que el pago no ocurrió o todavía no"
+            )
             return Clasificacion(None, f"el asunto dice que se cobró y el cuerpo, {que}", evidencia)
         return Clasificacion(COBRO_REALIZADO, "lo dice el asunto", evidencia)
     if tipo_asunto is not None:
