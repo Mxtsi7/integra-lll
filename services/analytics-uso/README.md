@@ -3,16 +3,17 @@
 Servicio Node.js/TypeScript que recibe los eventos de uso de recolectores y
 mantiene los agregados diarios y mensuales de Analytics.
 
-Implementa las tareas **S3-VI-07, S3-VI-09, S3-VI-11, S3-VI-12 y S3-VI-14**
-sobre el contrato canónico
-[`uso-recolectores-v1`](../../docs/contratos/uso-recolectores-v1.md). La
-topología de eventos del pipeline de uso también forma parte de este
-entregable; el **consumidor de suscripciones de S3-VI-10 pertenece a su propia
-tarjeta** y no se implementa acá.
+Implementa las tareas **S3-VI-07, S3-VI-09, S3-VI-10, S3-VI-11, S3-VI-12 y
+S3-VI-14** sobre el contrato canónico
+[`uso-recolectores-v1`](../../docs/contratos/uso-recolectores-v1.md). Además
+del pipeline de uso, este entregable consume
+`suscripcion.estado_cambiado.v2` y mantiene la proyección de estado de
+suscripción que consulta Analytics (S3-VI-13).
 
 El servicio es independiente del Analytics Python/Django existente: usa el
-esquema PostgreSQL `analytics` con tablas propias `uso_*` y un exchange
-dedicado `uso.eventos`. No modifica las tablas ni los consumidores históricos.
+esquema PostgreSQL `analytics` con tablas propias `uso_*` y de proyección, y un
+exchange dedicado `uso.eventos`. No modifica las tablas ni los consumidores
+históricos.
 
 ## Qué hace
 
@@ -20,7 +21,7 @@ dedicado `uso.eventos`. No modifica las tablas ni los consumidores históricos.
 |---|---|
 | S3-VI-07 | `src/publicador/uso.publisher.ts`: publica eventos aceptados en `uso.eventos` con routing key `uso.registrado`, confirms y `mandatory`. La recepción de `subscriptions` usa el mismo contrato desde `services/subscriptions/events/uso.py` (outbox transaccional). |
 | S3-VI-09 | `src/consumidor/uso.consumer.ts`: worker que escucha `analytics.uso.cola`. |
-| S3-VI-10 (topología) | `src/infraestructura/topologia.ts`: exchange, cola quorum, DLX y cola de fallos del pipeline de uso. El consumidor de suscripciones de la misma tarjeta vive en su propio entregable. |
+| S3-VI-10 | `src/infraestructura/topologia.ts` declara el exchange compartido `suscripciones`, el fanout `suscripciones.fallidos`, la cola quorum `analytics.suscripciones.estado` con DLX y la DLQ `analytics.suscripciones.estado.fallidos`. `src/consumidor/suscripcion.consumer.ts` procesa `suscripcion.estado_cambiado.v2` y `src/infraestructura/repositorio-suscripcion-postgres.ts` mantiene el inbox y el estado vigente bajo la barrera de borrado del tenant. |
 | S3-VI-11 | Inbox en `analytics.uso_evento` con clave `(organizacion_id, recolector_id, event_id)` y huella del contenido + destino. Duplicado → ACK sin efectos; conflicto → DLQ. |
 | S3-VI-12 | Agregados `analytics.uso_diario` y `analytics.uso_mensual_recolector`. |
 | S3-VI-14 | Unión temporal de `tramos_actividad` antes de sumar: dos fuentes simultáneas no duplican minutos. |
@@ -146,6 +147,37 @@ La unión es la operación de S3-VI-14: Android y navegador observando los mismo
 dos minutos acreditan dos minutos, no cuatro. La deduplicación por `event_id` y
 la unión de intervalos son operaciones distintas.
 
+## Proyección de estado de suscripción (S3-VI-10)
+
+El consumidor escucha `suscripcion.estado_cambiado.v2` desde el exchange topic
+`suscripciones` que ya publica Subscriptions. Usa una cola propia
+(`analytics.suscripciones.estado`) para recibir su copia sin competir con
+`subscriptions.resumen`, y una DLQ propia
+(`analytics.suscripciones.estado.fallidos`) enlazada al fanout compartido
+`suscripciones.fallidos`.
+
+La escritura es transaccional y ocurre en tres pasos:
+
+1. **Barrera de borrado.** Toma `analytics.estado_eliminacion_organizacion` con
+   `FOR SHARE` antes de escribir. Si el tenant ya fue eliminado, descarta el
+   mensaje y hace ACK sin DLQ: no se resucitan filas de un tenant borrado.
+2. **Inbox.** Inserta en `analytics.suscripcion_evento` con clave
+   `(organizacion_id, event_id)` y huella SHA-256 del sobre tipado. Un duplicado
+   hace ACK sin efectos; un conflicto de contenido se rechaza a la DLQ.
+3. **Estado vigente.** Actualiza `analytics.suscripcion_estado` con clave
+   `(organizacion_id, suscripcion_id)`. Solo avanza si
+   `EXCLUDED.ocurrido_en >= ocurrido_en`; un evento viejo queda `obsoleto` y no
+   retrocede el estado.
+
+Los resultados del procesamiento son `aplicado`, `duplicado`, `obsoleto` e
+`ignorado`. Todos hacen ACK. Solo los errores de validación o conflicto hacen
+`reject(requeue=false)` y terminan en la DLQ; un fallo transitorio de base o
+broker se reencola y el `x-delivery-limit` evita el bucle infinito.
+
+La tabla `analytics.suscripcion_estado` es la fuente de `estado_suscripcion` en
+el resumen de uso de Analytics (S3-VI-13). Si aún no existe, el resumen devuelve
+`null` en ese campo en vez de fallar.
+
 ## Integración con la recepción (S3-MX)
 
 La recepción HTTP canónica es
@@ -216,6 +248,11 @@ arranca después. El healthcheck del worker comprueba PostgreSQL y RabbitMQ.
 | `COLA_USO` | no | `analytics.uso.cola` |
 | `COLA_FALLOS` | no | `analytics.uso.fallos` |
 | `ROUTING_KEY_USO` | no | `uso.registrado` |
+| `EXCHANGE_SUSCRIPCIONES` | no | `suscripciones` |
+| `EXCHANGE_FALLIDOS_SUSCRIPCIONES` | no | `suscripciones.fallidos` |
+| `COLA_SUSCRIPCION_ESTADO` | no | `analytics.suscripciones.estado` |
+| `COLA_FALLOS_SUSCRIPCION_ESTADO` | no | `analytics.suscripciones.estado.fallidos` |
+| `ROUTING_KEY_SUSCRIPCION_ESTADO` | no | `suscripcion.estado_cambiado.v2` |
 | `PREFETCH` | no | `20` |
 | `MAX_REINTENTOS` | no | `5` |
 | `LOG_LEVEL` | no | `info` |
@@ -227,6 +264,7 @@ arranca después. El healthcheck del worker comprueba PostgreSQL y RabbitMQ.
 npm run typecheck        # tsc sin emitir, incluye tests
 npm run build            # compila a dist/
 npm test                 # Vitest
+npm run test:integracion # PostgreSQL + RabbitMQ reales (INTEGRACION_USO=1)
 npm run migrar           # aplica sql/001_uso_recolectores.sql
 npm run worker           # worker de consumo
 npm run salud            # healthcheck de base y broker
@@ -242,6 +280,8 @@ npm run publicar:ejemplo # publica una fixture del contrato
 | `analytics.uso_diario` | `ms_netos`, `minutos_netos` y `ms_residuo` por suscripción y día local. |
 | `analytics.uso_mensual_recolector` | Suma de minutos diarios por suscripción y mes. |
 | `analytics.uso_cobertura` | Vista derivada con la proyección interna de cobertura. |
+| `analytics.suscripcion_evento` | Inbox de `suscripcion.estado_cambiado.v2`: clave `(organizacion_id, event_id)` y huella SHA-256. |
+| `analytics.suscripcion_estado` | Estado vigente por `(organizacion_id, suscripcion_id)`, solo avanza con `ocurrido_en`. |
 | `analytics.estado_eliminacion_organizacion` | Barrera de borrado por tenant, compartida con `shared/borrado`. |
 
 > **Convivencia con Analytics:** el modelo Django `UsoMensual` (FE-28) usa
@@ -312,6 +352,14 @@ tardío espera la barrera y no reinserta filas). También crea la tabla real de
 verifica que un evento escribe en `uso_mensual_recolector` sin alterar la tabla
 de Django.
 
+La integración de S3-VI-10 comprueba la proyección de
+`suscripcion.estado_cambiado.v2` de punta a punta: aplica un evento, confirma
+que una reentrega hace ACK sin repetir efectos, rechaza a la DLQ un `event_id`
+reutilizado con otro contenido, aísla organizaciones aunque el `event_id`
+coincida, no retrocede el estado con un evento atrasado, descarta sin DLQ un
+evento de un tenant eliminado y espera el bloqueo de limpieza sin que el estado
+reaparezca.
+
 Requisitos: Docker y los puertos `55432` (PostgreSQL) y `55672` (RabbitMQ)
 libres.
 
@@ -320,6 +368,7 @@ libres.
 docker compose -f docker-compose.analytics-uso-test.yml up -d --wait
 cd services/analytics-uso
 export INTEGRACION_USO=1
+export EXIGIR_INTEGRACION_USO=1
 export DATABASE_URL='postgres://postgres:test@localhost:55432/suscripciones_test'
 export RABBITMQ_URL='amqp://test:test@localhost:55672/'
 npm run typecheck
@@ -336,6 +385,7 @@ En PowerShell:
 docker compose -f docker-compose.analytics-uso-test.yml up -d --wait
 Set-Location services/analytics-uso
 $env:INTEGRACION_USO='1'
+$env:EXIGIR_INTEGRACION_USO='1'
 $env:DATABASE_URL='postgres://postgres:test@localhost:55432/suscripciones_test'
 $env:RABBITMQ_URL='amqp://test:test@localhost:55672/'
 npm run typecheck
@@ -346,14 +396,15 @@ docker compose -f docker-compose.analytics-uso-test.yml down -v
 ```
 
 Sin `INTEGRACION_USO=1` la suite de integración se omite y `npm test` sigue sin
-necesitar infraestructura. En CI el job de analytics-uso la ejecuta con
-`INTEGRACION_USO=1` y `EXIGIR_INTEGRACION_USO=1`: si faltara la primera, el job
-falla en vez de mostrar una suite verde que no tocó la base ni el broker.
+necesitar infraestructura. Con `EXIGIR_INTEGRACION_USO=1` la ausencia de la
+bandera o de PostgreSQL/RabbitMQ falla; el job de CI usa ambas variables para no
+mostrar una suite verde que no tocó la base ni el broker.
 
 ### Suites Python con PostgreSQL
 
-Las pruebas de limpieza de tenant y de contrato cruzado necesitan PostgreSQL
-real. Con el mismo contenedor de la suite anterior:
+Las pruebas de limpieza de tenant, contrato cruzado y los resúmenes de uso por
+suscripción y gasto por moneda necesitan PostgreSQL real. Con el mismo
+contenedor de la suite anterior:
 
 ```bash
 # Desde la raíz del repositorio.
@@ -362,9 +413,13 @@ export DATABASE_URL='postgres://postgres:test@localhost:55432/suscripciones_test
 export SECRET_KEY='solo-prueba'
 export DEBUG='True'
 export ALLOWED_HOSTS='localhost,127.0.0.1,testserver'
+export INTEGRACION_USO=1
+export EXIGIR_INTEGRACION_USO=1
 
 cd services/analytics && ESQUEMA_BD=analytics pytest -v
+python -m pytest tests/test_resumen_uso_integracion.py -v
 cd ../subscriptions && ESQUEMA_BD=subscriptions pytest -v
+python -m pytest tests/test_gasto_por_moneda_integracion.py -v
 ```
 
 `test_eliminacion.py` aplica el DDL de `analytics-uso` y comprueba, con dos
@@ -374,3 +429,11 @@ tenant B intactas. También simula la base real de producción: crea
 verifica que la limpieza borra `uso_mensual_recolector` por organización sin
 tocar la tabla de Django. En SQLite esas pruebas se omiten porque las tablas del
 consumidor no existen ahí; en PostgreSQL se ejecutan siempre.
+
+`test_resumen_uso_integracion.py` aplica el DDL real y comprueba milisegundos
+exactos, minutos proyectados por día sin trasladar residuos, cero observado
+frente a sin medición, aislamiento por organización y paginación acotada sobre
+PostgreSQL. `test_gasto_por_moneda_integracion.py` comprueba la separación de
+divisas, el gasto real de suscripciones dadas de baja, la proyección permitida y
+el aislamiento por organización. Con `EXIGIR_INTEGRACION_USO=1`, una base
+ausente hace fallar la suite en vez de degradar a SQLite.

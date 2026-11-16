@@ -107,6 +107,51 @@ CREATE TABLE IF NOT EXISTS analytics.uso_mensual_recolector (
     PRIMARY KEY (organizacion_id, suscripcion_id, anio, mes)
 );
 
+-- Hechos de suscripción aceptados (S3-VI-10). El inbox deduplica por
+-- `(organizacion_id, event_id)`: es la identidad del evento MX-21, no la fila
+-- local del outbox. `huella` distingue una reentrega idéntica de un
+-- `event_id` reutilizado con otro contenido.
+CREATE TABLE IF NOT EXISTS analytics.suscripcion_evento (
+    organizacion_id uuid        NOT NULL,
+    event_id        uuid        NOT NULL,
+    suscripcion_id  uuid        NOT NULL,
+    ocurrido_en     timestamptz NOT NULL,
+    huella          text        NOT NULL,
+    correlation_id  uuid        NOT NULL,
+    recibido_en     timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (organizacion_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS suscripcion_evento_por_suscripcion
+    ON analytics.suscripcion_evento (organizacion_id, suscripcion_id, ocurrido_en);
+
+-- Estado vigente por suscripción. Solo se actualiza con un hecho más nuevo o
+-- igual (`ocurrido_en`): una reentrega atrasada no retrocede la proyección.
+-- El monto conserva dos decimales en `numeric`, nunca se guarda como float.
+CREATE TABLE IF NOT EXISTS analytics.suscripcion_estado (
+    organizacion_id uuid        NOT NULL,
+    suscripcion_id  uuid        NOT NULL,
+    proveedor_id    uuid        NULL,
+    nombre          text        NOT NULL CHECK (length(nombre) > 0),
+    monto           numeric(10,2) NOT NULL CHECK (monto >= 0),
+    moneda          text        NOT NULL CHECK (moneda ~ '^[A-Z]{3}$'),
+    ciclo           text        NOT NULL CHECK (ciclo IN ('mensual', 'anual')),
+    proximo_cobro   date        NOT NULL,
+    estado          text        NOT NULL
+        CHECK (estado IN ('prueba', 'activo', 'por_confirmar', 'cancelado', 'fantasma')),
+    fin_prueba      date        NULL,
+    estado_anterior text        NULL
+        CHECK (estado_anterior IN ('prueba', 'activo', 'por_confirmar', 'cancelado', 'fantasma')),
+    evento_estado   text        NULL,
+    ocurrido_en     timestamptz NOT NULL,
+    event_id        uuid        NOT NULL,
+    actualizado_en  timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (organizacion_id, suscripcion_id)
+);
+
+CREATE INDEX IF NOT EXISTS suscripcion_estado_por_estado
+    ON analytics.suscripcion_estado (organizacion_id, estado);
+
 -- Proyección interna de cobertura del contrato (CoverageIntervalPayload).
 -- No es una segunda API: se deriva de los hechos aceptados.
 CREATE OR REPLACE VIEW analytics.uso_cobertura AS

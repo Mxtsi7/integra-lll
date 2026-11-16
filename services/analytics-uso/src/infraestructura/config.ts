@@ -8,6 +8,11 @@ export interface Config {
   readonly colaUso: string;
   readonly colaFallos: string;
   readonly routingKeyUso: string;
+  readonly exchangeSuscripciones: string;
+  readonly exchangeFallidosSuscripciones: string;
+  readonly colaSuscripcionEstado: string;
+  readonly colaFallosSuscripcionEstado: string;
+  readonly routingKeySuscripcionEstado: string;
   readonly prefetch: number;
   readonly maxReintentos: number;
   readonly logLevel: string;
@@ -50,6 +55,17 @@ export function cargarConfig(env: NodeJS.ProcessEnv = process.env): Config {
     colaUso: env.COLA_USO?.trim() || 'analytics.uso.cola',
     colaFallos: env.COLA_FALLOS?.trim() || 'analytics.uso.fallos',
     routingKeyUso: env.ROUTING_KEY_USO?.trim() || 'uso.registrado',
+    exchangeSuscripciones: env.EXCHANGE_SUSCRIPCIONES?.trim() || 'suscripciones',
+    exchangeFallidosSuscripciones:
+      env.EXCHANGE_FALLIDOS_SUSCRIPCIONES?.trim() || 'suscripciones.fallidos',
+    colaSuscripcionEstado:
+      env.COLA_SUSCRIPCION_ESTADO?.trim() || 'analytics.suscripciones.estado',
+    colaFallosSuscripcionEstado:
+      env.COLA_FALLOS_SUSCRIPCION_ESTADO?.trim() ||
+      'analytics.suscripciones.estado.fallidos',
+    routingKeySuscripcionEstado:
+      env.ROUTING_KEY_SUSCRIPCION_ESTADO?.trim() ||
+      'suscripcion.estado_cambiado.v2',
     prefetch: enteroPositivo(env, 'PREFETCH', 20),
     maxReintentos: enteroPositivo(env, 'MAX_REINTENTOS', 5),
     logLevel: env.LOG_LEVEL?.trim() || 'info',
