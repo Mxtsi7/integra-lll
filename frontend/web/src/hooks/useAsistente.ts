@@ -21,13 +21,31 @@ interface Conversacion {
 const MENSAJE_SIN_ACCESO = 'No tienes acceso al asistente financiero con tu cuenta.';
 const MENSAJE_SIN_RESPUESTA = 'El asistente no devolvió una respuesta. Intenta de nuevo.';
 const MENSAJE_ERROR_GENERAL = 'El asistente no pudo responder. Intenta de nuevo.';
+const MENSAJE_TARDO_DEMASIADO = 'El asistente tardó demasiado en responder. Intenta de nuevo.';
+const MENSAJE_SERVICIO_NO_DISPONIBLE = 'El asistente no está disponible ahora. Intenta de nuevo en unos minutos.';
+
+// Qué decir según el estado HTTP con que responde el gateway (S3-CH-17):
+// - 403: el plan no incluye el asistente. La restricción Premium completa y el
+//   límite de consultas son de S3-CH-16.
+// - 502: el servicio del asistente no está disponible.
+// - 503: no se pudo comprobar la sesión o los permisos.
+// - 504: el servicio del asistente no respondió a tiempo.
+const MENSAJE_POR_ESTADO_HTTP = new Map<number, string>([
+  [403, MENSAJE_SIN_ACCESO],
+  [502, MENSAJE_SERVICIO_NO_DISPONIBLE],
+  [503, MENSAJE_SERVICIO_NO_DISPONIBLE],
+  [504, MENSAJE_TARDO_DEMASIADO],
+]);
 
 function mensajeDeError(error: unknown): string {
   if (error instanceof TypeError) return MENSAJE_SIN_RED;
-  // El gateway responde 403 cuando el plan no incluye el asistente. La restricción
-  // Premium completa y el límite de consultas son de S3-CH-16.
-  if (error instanceof ErrorDeApi && error.status === 403) return MENSAJE_SIN_ACCESO;
+  if (error instanceof ErrorDeApi) return MENSAJE_POR_ESTADO_HTTP.get(error.status) ?? MENSAJE_ERROR_GENERAL;
   return MENSAJE_ERROR_GENERAL;
+}
+
+/** Por qué el asistente con IA no contestó; null si contestó o la API no lo dice. */
+function motivoDeRespaldo(respuesta: RespuestaAsistente): string | null {
+  return typeof respuesta.motivo === 'string' ? respuesta.motivo : null;
 }
 
 /** El texto de la respuesta, o null si la API no trajo nada que mostrar. */
@@ -80,7 +98,7 @@ export function useAsistente() {
           id: ultimoIdDeMensaje.current,
           autor: 'asistente',
           texto,
-          esRespaldo: respuesta.estado !== 'ok',
+          respaldo: respuesta.estado === 'ok' ? null : { motivo: motivoDeRespaldo(respuesta) },
         };
         setConversacion((actual) => ({ mensajes: [...actual.mensajes, mensajeDelAsistente], envio: { tipo: 'libre' } }));
       } catch (error: unknown) {
