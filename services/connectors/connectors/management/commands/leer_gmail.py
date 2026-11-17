@@ -18,7 +18,9 @@ from datetime import datetime, timezone as tz
 
 from django.core.management.base import BaseCommand, CommandError
 
-from connectors.lector_gmail import ErrorDeLectura, FiltroCorreos, LIMITE_POR_DEFECTO, leer_mensajes
+from connectors import lector_gmail
+from connectors.lectura_correo import LIMITE_POR_DEFECTO, ErrorDeLectura, FiltroCorreos
+from connectors.renovacion import leer_con_renovacion
 
 
 def _fecha(texto: str) -> datetime:
@@ -30,6 +32,9 @@ def _fecha(texto: str) -> datetime:
 
 class Command(BaseCommand):
     help = "Lee una página de mensajes de una cuenta de Gmail conectada, sin guardar nada."
+
+    #: El comando de Outlook (S3-FE-04) es este mismo con otro lector.
+    lector = lector_gmail
 
     def add_arguments(self, parser):
         parser.add_argument("--organizacion", required=True, help="UUID de la organización dueña de la cuenta.")
@@ -44,7 +49,10 @@ class Command(BaseCommand):
     def handle(self, *args, **opciones):
         filtro = FiltroCorreos(desde=opciones["desde"], hasta=opciones["hasta"], solo_cobros=not opciones["todos"])
         try:
-            pagina = leer_mensajes(
+            # Con renovación (S3-FE-19): una cuenta conectada hace más de una
+            # hora tiene el token de acceso vencido.
+            pagina = leer_con_renovacion(
+                self.lector,
                 organizacion_id=opciones["organizacion"],
                 cuenta_id=opciones["cuenta"],
                 filtro=filtro,
