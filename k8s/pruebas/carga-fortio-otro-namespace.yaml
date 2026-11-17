@@ -1,6 +1,7 @@
 # Carga desde un namespace externo con cuota propia.
-# Ruta autorizada: Ingress -> web -> Gateway. No usa el Service interno,
-# que permanece bloqueado desde otros namespaces por NetworkPolicy.
+# Ruta autorizada: Ingress -> web -> Gateway. No usa el Service interno:
+# `40-red.yaml` lo cierra a otros namespaces, aunque en el cluster del ramo
+# esa politica no esta aplicada (ver k8s/README.md).
 # No enviar Host: gateway: el Ingress necesita el host publico.
 #
 # kubectl apply -f k8s/pruebas/carga-fortio-otro-namespace.yaml
@@ -32,7 +33,7 @@ spec:
             - "25"              # peticiones por segundo que pide ESTE notebook
             - -t
             - 30s
-            # Ingress → web → gateway; el Service interno sigue aislado.
+            # Ingress → web → gateway: la entrada pública, que es lo que se mide.
             - http://ojoalgasto-forellana.dev.censei.cl/health/
           resources:
             requests: { cpu: 50m, memory: 64Mi }

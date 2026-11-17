@@ -1,0 +1,9 @@
+{
+  "name": "extension-uso",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "typecheck": "node --check src/background.js && node --check src/popup.js && node --check src/dominio.js && node --check src/observador.js && node --check src/medicion.js && node --check src/controlador.js"
+  }
+}

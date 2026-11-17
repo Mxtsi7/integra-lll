@@ -180,7 +180,12 @@ def manifiestos_que_aplica_el_despliegue():
     # 3. Los que aplica un ayudante que el propio guion invoca. Se exige que
     #    el ayudante nombre el manifiesto Y haga `apply`: nombrarlo en un
     #    comentario no es desplegarlo.
-    for ayudante in re.findall(r"(?:python3|bash) (k8s/[^\s]+)", guion):
+    #
+    #    El interprete ya no se escribe `python3` a secas: en Windows ese
+    #    nombre es el alias de la Microsoft Store, asi que el guion elige uno
+    #    que funcione y lo invoca como `"$PYTHON"`. Se aceptan las dos formas;
+    #    si esta lista quedara corta, el broker pareceria sin desplegar.
+    for ayudante in re.findall(r"(?:python3|\"\$PYTHON\"|bash) (k8s/[^\s]+)", guion):
         ruta = RAIZ / ayudante
         if not ruta.is_file():
             continue
