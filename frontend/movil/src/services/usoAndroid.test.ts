@@ -49,3 +49,22 @@ describe('control de uso Android', () => {
     expect(e.nativo.leerEstadisticas).toHaveBeenCalledWith(1, 2, true);
   });
 });
+
+
+describe('rechazos del puente durante la lectura', () => {
+  it.each([false, true])('revocación sin ocultar fallos generales (permiso final %s)', async (permisoFinal) => {
+    const fallo = new Error('Fallo nativo');
+    const nativo = { tienePermiso: vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(permisoFinal),
+      abrirAjustes: vi.fn(), leerEstadisticas: vi.fn().mockRejectedValue(fallo) };
+    const control = crearControlUsoAndroid(nativo, () => 'A', () => true);
+    if (permisoFinal) await expect(control.leer(1, 2)).rejects.toBe(fallo);
+    else expect(await control.leer(1, 2)).toEqual({ estado: 'revocado' });
+  });
+  it('una sesión cambiada tiene prioridad aunque el puente rechace', async () => {
+    let sesion = 'A';
+    const nativo = { tienePermiso: vi.fn(async () => true), abrirAjustes: vi.fn(),
+      leerEstadisticas: vi.fn(async () => { sesion = 'B'; throw new Error('Acceso revocado'); }) };
+    expect(await crearControlUsoAndroid(nativo, () => sesion, () => true).leer(1, 2))
+      .toEqual({ estado: 'sesion_cambiada' });
+  });
+});
