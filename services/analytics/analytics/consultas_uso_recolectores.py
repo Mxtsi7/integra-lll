@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from django.db import DatabaseError, connection
+from django.db import DatabaseError, connection, transaction
 
 from .motor_puntajes_recolectores import (
     COBERTURA_COMPLETA,
@@ -70,9 +70,12 @@ def _ejecutar_consulta(sql: str, parametros: list[Any]) -> list[tuple[Any, ...]]
     if connection.vendor == "sqlite":
         consulta = _adaptar_sql_para_sqlite(sql)
     try:
-        with connection.cursor() as cursor:
-            cursor.execute(consulta, parametros)
-            return list(cursor.fetchall())
+        # Savepoint para que un fallo (tabla/esquema ausente, etc.) no deje la
+        # transacción PostgreSQL abortada y rompa el resto de la petición.
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(consulta, parametros)
+                return list(cursor.fetchall())
     except DatabaseError as exc:
         raise ConsultaUsoRecolectoresError("No fue posible consultar evidencia de uso.") from exc
 
