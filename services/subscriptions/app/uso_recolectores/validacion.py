@@ -57,8 +57,12 @@ def validar_evento(evento):
     inicio, fin = instante(evento['inicio']), instante(evento['fin'])
     if inicio >= fin:
         raise ErrorEventoUso('La ventana debe cumplir inicio < fin.')
-    fecha = inicio.astimezone(zona).date()
-    if (fin - timedelta(milliseconds=1)).astimezone(zona).date() != fecha:
+    try:
+        fecha = inicio.astimezone(zona).date()
+        fecha_fin = (fin - timedelta(milliseconds=1)).astimezone(zona).date()
+    except OverflowError as error:
+        raise ErrorEventoUso('La ventana queda fuera del rango de fechas de la zona horaria.') from error
+    if fecha_fin != fecha:
         raise ErrorEventoUso('La ventana cruza el día local.', 'intervalo_cruza_dia_local')
     tramos = tuple((instante(tramo['inicio']), instante(tramo['fin'])) for tramo in evento['tramos_actividad'])
     fin_anterior = inicio

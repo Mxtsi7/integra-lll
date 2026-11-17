@@ -1059,6 +1059,27 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         usuario_id = self._actor_id(request, required=True)
         return recibir(request, suscripcion, usuario_id, self._correlation_id(request))
 
+    @action(detail=True, methods=['get'], url_path='uso/exacto')
+    def uso_exacto_recolector(self, request, pk=None):
+        """Unión diaria exacta propia, incluso cuando no completa un minuto."""
+        from app.models import ProyeccionUsoRecolector
+        from app.serializers import ProyeccionUsoRecolectorSerializer
+
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        proyecciones = ProyeccionUsoRecolector.objects.filter(
+            organizacion_id=suscripcion.organizacion_id,
+            usuario_id=usuario_id,
+            suscripcion=suscripcion,
+        ).order_by('-fecha_local', 'id')
+        pagina = self.paginate_queryset(proyecciones)
+        resultado = ProyeccionUsoRecolectorSerializer(
+            pagina if pagina is not None else proyecciones, many=True,
+        ).data
+        if pagina is not None:
+            return self.get_paginated_response(resultado)
+        return Response(resultado)
+
     @action(detail=True, methods=['get'], url_path='uso/cobertura')
     def cobertura_uso_recolector(self, request, pk=None):
         from app.models import EventoUsoRecibido
@@ -1067,7 +1088,10 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         suscripcion = self.get_object()
         usuario_id = self._actor_id(request, required=True)
         fecha_texto = request.query_params.get('fecha')
-        fecha = parse_date(fecha_texto) if fecha_texto else None
+        try:
+            fecha = parse_date(fecha_texto) if fecha_texto else None
+        except ValueError as error:
+            raise ValidationError({'fecha': 'Se requiere una fecha válida con formato YYYY-MM-DD.'}) from error
         if fecha is None:
             raise ValidationError({'fecha': 'Se requiere una fecha válida con formato YYYY-MM-DD.'})
         eventos = EventoUsoRecibido.objects.filter(

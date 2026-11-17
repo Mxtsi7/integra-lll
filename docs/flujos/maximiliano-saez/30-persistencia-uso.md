@@ -47,3 +47,17 @@ Las pruebas cubren 30 s + 30 s, ventanas solapadas cuya unión es 180 s y 50 s,
 residuo inferior al minuto, eventos concurrentes distintos, conservación de
 uso manual, mes agregado y purga. Las pruebas de concurrencia exigen
 PostgreSQL; las de consentimiento usan un callback sintético.
+
+
+## Lectura exacta posterior
+
+`GET /api/suscripciones/{uuid}/uso/exacto/` devuelve las proyecciones diarias
+paginadas del usuario autenticado dentro de su organización. Cada resultado
+incluye `id` (identidad estable de la proyección), `suscripcion_id`, `usuario_id`,
+`fecha`, `zona_horaria`, `origen=recolector`, `duracion_ms` y `registro_uso_id`.
+La duración es la unión exacta de los tramos; 30 segundos se leen como 30000 ms
+y 90 como 90000 ms. `registro_uso_id` es null hasta completar un minuto.
+Los eventos de entrada conservan sus propias identidades en EventoUsoRecibido;
+la identidad de esta respuesta corresponde al agregado diario, no a un evento.
+El historial `/uso/` mantiene su contrato de minutos y sus filas manuales.
+La prueba POST→GET cubre ambas duraciones, otra identidad y otra organización.
