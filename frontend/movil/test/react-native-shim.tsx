@@ -42,6 +42,24 @@ export const KeyboardAvoidingView = React.forwardRef<HTMLDivElement, any>(
 );
 KeyboardAvoidingView.displayName = 'KeyboardAvoidingView';
 
+export const Modal = React.forwardRef<HTMLDivElement, any>(
+  ({ testID, visible = true, children, transparent, animationType, onRequestClose, ...props }, ref) => {
+    if (!visible) return null;
+    return (
+      <div
+        data-testid={testID}
+        role="dialog"
+        aria-modal="true"
+        ref={ref}
+        {...props}
+      >
+        {children}
+      </div>
+    );
+  }
+);
+Modal.displayName = 'Modal';
+
 export const Text = React.forwardRef<HTMLSpanElement, any>(
   ({ testID, children, style, accessibilityRole, numberOfLines, ellipsizeMode, ...props }, ref) => (
     <span
@@ -349,4 +367,5 @@ export default {
   Keyboard,
   TextInput,
   FlatList,
+  Modal,
 };
