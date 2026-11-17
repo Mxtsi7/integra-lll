@@ -8,13 +8,15 @@ import { usePermisosPlan, type ApiPermisos } from './usePermisosPlan';
 
 export interface RestriccionesPremiumContenidoProps {
   onVerPlanes: () => void;
+  /** Avisa cuando la persona vuelve a esta pantalla. Devuelve la función para dejar de escuchar. */
+  alVolverAPantalla?: (alVolver: () => void) => () => void;
   /** Solo en pruebas. */
   api?: ApiPermisos;
 }
 
 /** Qué funciones incluye el plan de la persona y cuáles necesitan Premium (AN-11). */
-export function RestriccionesPremiumContenido({ onVerPlanes, api }: RestriccionesPremiumContenidoProps) {
-  const { estado, cargar } = usePermisosPlan(api);
+export function RestriccionesPremiumContenido({ onVerPlanes, alVolverAPantalla, api }: RestriccionesPremiumContenidoProps) {
+  const { estado, cargar } = usePermisosPlan(api, alVolverAPantalla);
 
   return (
     <View testID="restricciones-contenido" style={styles.contenedor}>

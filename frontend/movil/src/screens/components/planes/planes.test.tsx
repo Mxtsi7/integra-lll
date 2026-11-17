@@ -3,6 +3,7 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ErrorDeApi, type ContratacionPlan, type PermisosPlan, type PlanDisponible } from '@ojoalgasto/shared';
+import { crearAlmacenIntento, type AlmacenIntento, type IntentoGuardado } from './almacenIntento';
 import { BloqueoPremium } from './BloqueoPremium';
 import { PlanesContenido } from './PlanesContenido';
 import {
@@ -11,6 +12,7 @@ import {
   leerPermisos,
   mensajeDeErrorDeContratacion,
   MENSAJE_CHECKOUT_INSEGURO,
+  MENSAJE_NO_RECUPERO_PENDIENTE,
   MENSAJE_NO_SE_PUDO_ABRIR,
   MENSAJE_SIN_RED,
 } from './reglasPlanes';
@@ -340,5 +342,291 @@ describe('BloqueoPremium (componente reutilizable de AN-11)', () => {
       </BloqueoPremium>,
     );
     expect(screen.queryByTestId('contenido-premium')).toBeNull();
+  });
+});
+
+
+/** Un almacén en memoria que además deja ver qué quedó guardado. */
+function crearAlmacenEnMemoria(inicial: IntentoGuardado | null = null) {
+  let valor = inicial;
+  return {
+    leer: vi.fn(async () => valor),
+    guardar: vi.fn(async (intento: IntentoGuardado) => {
+      valor = intento;
+    }),
+    borrar: vi.fn(async () => {
+      valor = null;
+    }),
+    valor: () => valor,
+  } satisfies AlmacenIntento & { valor: () => IntentoGuardado | null };
+}
+
+/** Una promesa que se resuelve a mano, para controlar en qué orden llegan las respuestas. */
+function crearDiferido<T>() {
+  let resolver: (valor: T) => void = () => {};
+  const promesa = new Promise<T>((alResolver) => {
+    resolver = alResolver;
+  });
+  return { promesa, resolver };
+}
+
+/**
+ * Regresión de la revisión de #170: la contratación pendiente no puede perderse al salir y
+ * reabrir Planes (el servidor respondería 409 y no habría cómo verificarla ni cancelarla).
+ */
+describe('Contratación pendiente que sobrevive a la pantalla', () => {
+  function montarConAlmacen(api: ApiPlanes, almacen: AlmacenIntento) {
+    const abrirUrl = vi.fn().mockResolvedValue(undefined);
+    render(<PlanesContenido abrirUrl={abrirUrl} api={api} almacen={almacen} />);
+    return { abrirUrl };
+  }
+
+  it('guarda la clave ANTES de pedir la contratación y el id apenas lo recibe', async () => {
+    const respuesta = crearDiferido<ContratacionPlan>();
+    const almacen = crearAlmacenEnMemoria();
+    const api = crearApi({ iniciarContratacion: vi.fn().mockReturnValue(respuesta.promesa) });
+    montarConAlmacen(api, almacen);
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+
+    await waitFor(() => expect(api.iniciarContratacion).toHaveBeenCalledTimes(1));
+    const clave = (api.iniciarContratacion as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(almacen.valor()).toEqual({ clave, contratoId: null }); // la respuesta todavía no llegó
+
+    await act(async () => respuesta.resolver(crearContrato()));
+    await screen.findByTestId('contratacion-pendiente');
+    expect(almacen.valor()).toEqual({ clave, contratoId: 'c-1' });
+  });
+
+  it('pendiente → salir → reabrir: restaura «Verificar» y «Cancelar» sin pedir otra contratación', async () => {
+    const almacen = crearAlmacenEnMemoria();
+    const api = crearApi();
+    montarConAlmacen(api, almacen);
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+    await screen.findByTestId('contratacion-pendiente');
+
+    cleanup(); // la persona sale de Planes
+    montarConAlmacen(api, almacen); // y la reabre
+
+    expect(await screen.findByTestId('contratacion-pendiente')).toBeTruthy();
+    expect(screen.getByTestId('verificar-estado')).toBeTruthy();
+    expect(screen.getByTestId('cancelar-contratacion')).toBeTruthy();
+    expect(screen.queryByTestId('contratar-premium')).toBeNull();
+    expect(api.getContratacion).toHaveBeenCalledWith('c-1');
+    expect(api.iniciarContratacion).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('cancelar-contratacion'));
+    expect(await screen.findByTestId('contratacion-cancelada')).toBeTruthy();
+    expect(api.cancelarContratacion).toHaveBeenCalledWith('c-1');
+    expect(almacen.valor()).toBeNull();
+  });
+
+  it('si la respuesta se perdió tras crear la contratación, al volver a contratar se usa la misma clave', async () => {
+    const almacen = crearAlmacenEnMemoria();
+    // El servidor creó la contratación, pero la respuesta nunca llegó a la app.
+    const iniciarContratacion = vi.fn().mockRejectedValueOnce(new TypeError('se cortó')).mockResolvedValue(crearContrato());
+    const api = crearApi({ iniciarContratacion });
+    montarConAlmacen(api, almacen);
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+    await screen.findByTestId('error-planes');
+    expect(almacen.valor()?.contratoId).toBeNull();
+
+    cleanup();
+    montarConAlmacen(api, almacen);
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+
+    expect(await screen.findByTestId('contratacion-pendiente')).toBeTruthy();
+    expect(iniciarContratacion).toHaveBeenCalledTimes(2);
+    expect(iniciarContratacion.mock.calls[1][0]).toBe(iniciarContratacion.mock.calls[0][0]);
+    expect(almacen.valor()?.contratoId).toBe('c-1');
+  });
+
+  it('cuando la contratación termina se olvida el intento y el siguiente usa otra clave', async () => {
+    const almacen = crearAlmacenEnMemoria();
+    const api = crearApi({ getContratacion: vi.fn().mockResolvedValue(crearContrato({ estado: 'fallida' })) });
+    montarConAlmacen(api, almacen);
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+    fireEvent.click(await screen.findByTestId('verificar-estado'));
+    await screen.findByTestId('contratacion-fallida');
+    expect(almacen.valor()).toBeNull();
+
+    fireEvent.click(screen.getByTestId('contratar-premium'));
+    await waitFor(() => expect(api.iniciarContratacion).toHaveBeenCalledTimes(2));
+    const llamadas = (api.iniciarContratacion as ReturnType<typeof vi.fn>).mock.calls;
+    expect(llamadas[1][0]).not.toBe(llamadas[0][0]);
+  });
+
+  it('si no se puede consultar el pendiente al reabrir, lo conserva y deja verificar o cancelar', async () => {
+    const almacen = crearAlmacenEnMemoria({ clave: 'clave-1', contratoId: 'c-1' });
+    const getContratacion = vi.fn().mockRejectedValueOnce(new TypeError('sin red')).mockResolvedValue(crearContrato());
+    montarConAlmacen(crearApi({ getContratacion }), almacen);
+
+    expect(await screen.findByTestId('contratacion-sin-cargar')).toBeTruthy();
+    expect(screen.getByTestId('error-planes').textContent).toBe(MENSAJE_NO_RECUPERO_PENDIENTE);
+    expect(screen.getByTestId('cancelar-contratacion')).toBeTruthy();
+    expect(screen.queryByTestId('contratar-premium')).toBeNull();
+    expect(almacen.valor()).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId('verificar-estado'));
+    expect(await screen.findByTestId('contratacion-pendiente')).toBeTruthy();
+  });
+
+  it('si el id guardado ya no existe (404) se olvida y se puede contratar de nuevo', async () => {
+    const almacen = crearAlmacenEnMemoria({ clave: 'clave-1', contratoId: 'c-viejo' });
+    const getContratacion = vi.fn().mockRejectedValue(new ErrorDeApi('no existe', 404));
+    montarConAlmacen(crearApi({ getContratacion }), almacen);
+
+    await waitFor(() => expect(almacen.valor()).toBeNull());
+    expect(await screen.findByTestId('contratar-premium')).toBeTruthy();
+  });
+
+  it('un 409 sin intento conocido avisa que no se pudo recuperar, en vez de pedir verificar algo inexistente', async () => {
+    const api = crearApi({ iniciarContratacion: vi.fn().mockRejectedValue(new ErrorDeApi('pendiente', 409)) });
+    montarConAlmacen(api, crearAlmacenEnMemoria());
+    fireEvent.click(await screen.findByTestId('contratar-premium'));
+    expect((await screen.findByTestId('error-planes')).textContent).toContain('no pudo recuperar');
+    expect(screen.queryByTestId('verificar-estado')).toBeNull();
+  });
+});
+
+describe('Almacén del intento de contratación', () => {
+  function crearBackend() {
+    const datos = new Map<string, string>();
+    return {
+      datos,
+      getItemAsync: vi.fn(async (clave: string) => datos.get(clave) ?? null),
+      setItemAsync: vi.fn(async (clave: string, valor: string) => {
+        datos.set(clave, valor);
+      }),
+      deleteItemAsync: vi.fn(async (clave: string) => {
+        datos.delete(clave);
+      }),
+    };
+  }
+
+  it('guarda y recupera el intento', async () => {
+    const almacen = crearAlmacenIntento('u1:o1', crearBackend());
+    await almacen.guardar({ clave: 'k', contratoId: 'c-1' });
+    expect(await almacen.leer()).toEqual({ clave: 'k', contratoId: 'c-1' });
+    await almacen.borrar();
+    expect(await almacen.leer()).toBeNull();
+  });
+
+  it('cada persona y organización tiene el suyo: otro alcance no ve ni pisa el ajeno', async () => {
+    const backend = crearBackend();
+    const deAna = crearAlmacenIntento('u1:o1', backend);
+    const deLuis = crearAlmacenIntento('u2:o1', backend);
+    await deAna.guardar({ clave: 'k-ana', contratoId: 'c-1' });
+
+    expect(await deLuis.leer()).toBeNull();
+    await deLuis.guardar({ clave: 'k-luis', contratoId: null });
+    expect(await deAna.leer()).toEqual({ clave: 'k-ana', contratoId: 'c-1' });
+    expect(backend.datos.size).toBe(2);
+    for (const nombre of backend.datos.keys()) expect(nombre).toMatch(/^[A-Za-z0-9._-]+$/);
+  });
+
+  it('lo guardado con otro alcance dentro de la misma entrada se ignora', async () => {
+    const backend = crearBackend();
+    await crearAlmacenIntento('u1:o1', backend).guardar({ clave: 'k', contratoId: 'c-1' });
+    // Mismo nombre de entrada, pero el contenido dice que es de otra organización.
+    const [nombre, texto] = [...backend.datos.entries()][0];
+    backend.datos.set(nombre, texto.replace('u1:o1', 'u1:otra'));
+    expect(await crearAlmacenIntento('u1:o1', backend).leer()).toBeNull();
+  });
+
+  it('un contenido dañado o un fallo del almacenamiento no rompen nada', async () => {
+    const backend = crearBackend();
+    const almacen = crearAlmacenIntento('u1:o1', backend);
+    backend.datos.set([...backend.datos.keys()][0] ?? 'contratacion_pendiente_u1_o1', 'esto no es JSON');
+    expect(await almacen.leer()).toBeNull();
+
+    const roto = {
+      getItemAsync: vi.fn().mockRejectedValue(new Error('boom')),
+      setItemAsync: vi.fn().mockRejectedValue(new Error('boom')),
+      deleteItemAsync: vi.fn().mockRejectedValue(new Error('boom')),
+    };
+    const sobreRoto = crearAlmacenIntento('u1:o1', roto);
+    expect(await sobreRoto.leer()).toBeNull();
+    await expect(sobreRoto.guardar({ clave: 'k', contratoId: null })).resolves.toBeUndefined();
+    await expect(sobreRoto.borrar()).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * Regresión de la revisión de #170: Restricciones sigue montada cuando la persona va a Planes,
+ * contrata (o cancela) y vuelve. Al volver debe consultar de nuevo el plan.
+ */
+describe('Permisos al volver a Restricciones', () => {
+  function montarRestricciones(getPermisosPlan: ReturnType<typeof vi.fn>) {
+    let avisarRetorno: () => void = () => {};
+    const alVolverAPantalla = (alVolver: () => void) => {
+      avisarRetorno = alVolver;
+      return () => {};
+    };
+    render(<RestriccionesPremiumContenido onVerPlanes={vi.fn()} alVolverAPantalla={alVolverAPantalla} api={{ getPermisosPlan }} />);
+    return { volver: () => act(() => avisarRetorno()) };
+  }
+
+  it('Free → Premium: al volver de Planes muestra las funciones disponibles', async () => {
+    const getPermisosPlan = vi.fn().mockResolvedValue(PERMISOS_FREE);
+    const { volver } = montarRestricciones(getPermisosPlan);
+    expect((await screen.findByTestId('funcion-asistente_financiero')).textContent).toContain('Requiere Premium');
+
+    getPermisosPlan.mockResolvedValue(PERMISOS_PREMIUM); // contrató mientras tanto
+    volver();
+    await waitFor(() => expect(screen.getByTestId('funcion-asistente_financiero').textContent).toContain('Disponible'));
+    expect(screen.getByTestId('todo-incluido')).toBeTruthy();
+  });
+
+  it('Premium → Free: al volver deja de mostrar lo que ya no incluye el plan', async () => {
+    const getPermisosPlan = vi.fn().mockResolvedValue(PERMISOS_PREMIUM);
+    const { volver } = montarRestricciones(getPermisosPlan);
+    expect((await screen.findByTestId('funcion-asistente_financiero')).textContent).toContain('Disponible');
+
+    getPermisosPlan.mockResolvedValue(PERMISOS_FREE); // canceló o venció mientras tanto
+    volver();
+    await waitFor(() => expect(screen.getByTestId('funcion-asistente_financiero').textContent).toContain('Requiere Premium'));
+    expect(screen.getByTestId('ver-planes')).toBeTruthy();
+  });
+
+  it('mientras se confirma el plan no se muestra el estado anterior', async () => {
+    const segunda = crearDiferido<PermisosPlan>();
+    const getPermisosPlan = vi.fn().mockResolvedValueOnce(PERMISOS_PREMIUM).mockReturnValueOnce(segunda.promesa);
+    const { volver } = montarRestricciones(getPermisosPlan);
+    await screen.findByTestId('funcion-asistente_financiero');
+
+    volver();
+    await waitFor(() => expect(screen.queryByTestId('funcion-asistente_financiero')).toBeNull()); // bloqueado y cargando
+
+    await act(async () => segunda.resolver(PERMISOS_FREE));
+    expect((await screen.findByTestId('funcion-asistente_financiero')).textContent).toContain('Requiere Premium');
+  });
+
+  it('una respuesta anterior que llega tarde no pisa la más reciente', async () => {
+    const lenta = crearDiferido<PermisosPlan>();
+    const getPermisosPlan = vi.fn().mockReturnValueOnce(lenta.promesa).mockResolvedValue(PERMISOS_PREMIUM);
+    const { volver } = montarRestricciones(getPermisosPlan);
+
+    volver(); // se pide de nuevo antes de que llegue la primera
+    await waitFor(() => expect(screen.getByTestId('funcion-asistente_financiero').textContent).toContain('Disponible'));
+
+    await act(async () => lenta.resolver(PERMISOS_FREE)); // la vieja llega tarde, con el plan de antes
+    expect(screen.getByTestId('funcion-asistente_financiero').textContent).toContain('Disponible');
+  });
+});
+
+describe('Planes al volver a la pantalla sin pago pendiente', () => {
+  it('vuelve a leer el plan: si cambió mientras la pantalla seguía montada, lo muestra', async () => {
+    let avisarRetorno: () => void = () => {};
+    const alVolverAPantalla = (alVolver: () => void) => {
+      avisarRetorno = alVolver;
+      return () => {};
+    };
+    const getPermisosPlan = vi.fn().mockResolvedValue(PERMISOS_FREE);
+    await montarPlanes(crearApi({ getPermisosPlan }), { alVolverAPantalla });
+    expect(screen.getByTestId('plan-vigente').textContent).toBe('Tu plan: Gratuito');
+
+    getPermisosPlan.mockResolvedValue(PERMISOS_PREMIUM);
+    act(() => avisarRetorno());
+    await waitFor(() => expect(screen.getByTestId('plan-vigente').textContent).toBe('Tu plan: Premium'));
   });
 });

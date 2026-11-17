@@ -13,8 +13,13 @@ const API_REAL: ApiPermisos = { getPermisosPlan };
  * Lee del servidor qué incluye el plan de la persona (AN-11). El plan del token o de la
  * pantalla anterior no se usa: lo que manda es la respuesta de `/usuarios/me/permisos/`.
  * Mientras carga, si falla o si la respuesta es rara, no hay permisos: todo lo Premium queda bloqueado.
+ *
+ * La pantalla puede seguir montada mientras la persona contrata o cancela el plan en otra
+ * (Restricciones → Planes → volver). Por eso, cada vez que se vuelve a la pantalla
+ * (`alVolverAPantalla`) se consulta de nuevo: queda bloqueado mientras se confirma, y la respuesta
+ * anterior, si llega tarde, se descarta.
  */
-export function usePermisosPlan(api: ApiPermisos = API_REAL) {
+export function usePermisosPlan(api: ApiPermisos = API_REAL, alVolverAPantalla?: (alVolver: () => void) => () => void) {
   const [estado, setEstado] = useState<EstadoCarga<PermisosPlan>>({ tipo: 'cargando' });
   const numeroDeCarga = useRef(0);
 
@@ -38,6 +43,11 @@ export function usePermisosPlan(api: ApiPermisos = API_REAL) {
       numeroDeCarga.current += 1;
     };
   }, [cargar]);
+
+  // La última versión de `cargar` sin volver a suscribirse en cada render.
+  const cargarRef = useRef(cargar);
+  cargarRef.current = cargar;
+  useEffect(() => alVolverAPantalla?.(() => void cargarRef.current()), [alVolverAPantalla]);
 
   return { estado, cargar };
 }

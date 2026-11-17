@@ -89,9 +89,22 @@ export const MENSAJE_PLAN_ACTIVANDO =
 export const MENSAJE_SIN_RED = 'No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.';
 export const MENSAJE_CHECKOUT_INSEGURO = 'No pudimos abrir el pago de forma segura. Inténtalo de nuevo más tarde.';
 export const MENSAJE_NO_SE_PUDO_ABRIR = 'No pudimos abrir el navegador para completar el pago.';
+export const MENSAJE_NO_RECUPERO_PENDIENTE =
+  'No pudimos recuperar el estado de tu contratación pendiente. Puedes verificarla o cancelarla.';
+export const MENSAJE_PENDIENTE_NO_RECUPERABLE =
+  'Ya tienes una contratación pendiente, pero no pudo recuperarse en este dispositivo.';
+
+/** Mensaje controlado para situaciones de contratación que deben mostrarse tal cual a la persona. */
+export class AvisoDeContratacion extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = 'AvisoDeContratacion';
+  }
+}
 
 /** Traduce el error del backend (MX-17) a un mensaje. Ningún error deja a la persona como Premium. */
 export function mensajeDeErrorDeContratacion(error: unknown): string {
+  if (error instanceof AvisoDeContratacion) return error.message;
   if (error instanceof ErrorDeApi) {
     if (error.status === 403) return 'Solo la persona titular de la organización puede contratar Premium.';
     if (error.status === 409) return 'Ya tienes una contratación pendiente. Verifica su estado o cancélala.';

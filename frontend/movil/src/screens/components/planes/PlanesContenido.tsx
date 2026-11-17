@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ContenidoConEstado } from '../../../components/estados';
 import { NavButton } from '../NavButton';
+import type { AlmacenIntento } from './almacenIntento';
 import { COLORES_PLANES as C } from './estilos';
 import { MENSAJE_PLAN_ACTIVANDO, TEXTOS_CONTRATACION } from './reglasPlanes';
 import { TarjetaPlan } from './TarjetaPlan';
@@ -14,23 +15,32 @@ export interface PlanesContenidoProps {
   alVolverAPantalla?: (alVolver: () => void) => () => void;
   /** Solo en pruebas. */
   api?: ApiPlanes;
+  /** Almacén persistente del intento de contratación pendiente. */
+  almacen?: AlmacenIntento | null;
 }
 
 /** Planes Gratuito y Premium, estado del plan y contratación (AN-08). */
-export function PlanesContenido({ abrirUrl, alVolverAPantalla, api }: PlanesContenidoProps) {
-  const { estado, contrato, operacion, mensajeError, cargar, contratar, verificar, cancelar } = usePlanes(abrirUrl, api);
+export function PlanesContenido({ abrirUrl, alVolverAPantalla, api, almacen }: PlanesContenidoProps) {
+  const { estado, contrato, idSinCargar, operacion, mensajeError, cargar, contratar, verificar, cancelar, releerPermisos } =
+    usePlanes(abrirUrl, api, almacen);
   const ocupado = operacion !== null;
 
-  // Al volver a la pantalla, si había un pago pendiente se consulta cómo terminó.
-  const hayPagoPendiente = contrato?.estado === 'pendiente';
+  // Al volver a la pantalla: si había un pago pendiente se consulta cómo terminó; si no, se relee el plan.
+  const hayPagoPendiente = contrato?.estado === 'pendiente' || idSinCargar !== null;
   const verificarRef = useRef(verificar);
   verificarRef.current = verificar;
+  const releerPermisosRef = useRef(releerPermisos);
+  releerPermisosRef.current = releerPermisos;
   const pendienteRef = useRef(hayPagoPendiente);
   pendienteRef.current = hayPagoPendiente;
   useEffect(
     () =>
       alVolverAPantalla?.(() => {
-        if (pendienteRef.current) void verificarRef.current();
+        if (pendienteRef.current) {
+          void verificarRef.current();
+        } else {
+          void releerPermisosRef.current();
+        }
       }),
     [alVolverAPantalla],
   );
@@ -65,6 +75,31 @@ export function PlanesContenido({ abrirUrl, alVolverAPantalla, api }: PlanesCont
                 ) : null}
               </View>
             ))}
+
+            {!contrato && idSinCargar !== null ? (
+              <View testID="contratacion-sin-cargar" style={styles.resultado}>
+                <Text style={styles.tituloResultado} accessibilityRole="header">
+                  {TEXTOS_CONTRATACION.pendiente.titulo}
+                </Text>
+                <Text style={styles.texto}>{TEXTOS_CONTRATACION.pendiente.detalle}</Text>
+                <NavButton
+                  testID="verificar-estado"
+                  title="Verificar estado"
+                  variant="secondary"
+                  loading={operacion === 'verificando'}
+                  disabled={ocupado}
+                  onPress={() => void verificar()}
+                />
+                <NavButton
+                  testID="cancelar-contratacion"
+                  title="Cancelar contratación"
+                  variant="danger"
+                  loading={operacion === 'cancelando'}
+                  disabled={ocupado}
+                  onPress={() => void cancelar()}
+                />
+              </View>
+            ) : null}
 
             {contrato ? (
               <View testID={`contratacion-${contrato.estado}`} style={styles.resultado}>
