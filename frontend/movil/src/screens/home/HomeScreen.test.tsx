@@ -2,8 +2,16 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import HomeScreen, { HomeView } from './HomeScreen';
-import type { Suscripcion, Usuario } from '@ojoalgasto/shared';
+import HomeScreen, { HomeView, deduplicarSuscripciones } from './HomeScreen';
+import {
+  FiltrosSuscripcionesMovil,
+  describirCriterioActivo,
+} from './FiltrosSuscripcionesMovil';
+import type {
+  Suscripcion,
+  SuscripcionesPaginadas,
+  Usuario,
+} from '@ojoalgasto/shared';
 
 const MOCK_USUARIO: Usuario = {
   id: 'usr-1',
@@ -700,4 +708,1024 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
       });
     });
   });
+
+  describe('Conectar listado móvil paginado (SE-19)', () => {
+    describe('Función pura deduplicarSuscripciones', () => {
+      it('conserva el orden y elimina cualquier elemento de nuevas cuyo id ya esté en acumuladas', () => {
+        const acumuladas: Suscripcion[] = [MOCK_SUSCRIPCIONES[0], MOCK_SUSCRIPCIONES[1]];
+        const nuevasConDuplicado: Suscripcion[] = [
+          MOCK_SUSCRIPCIONES[1], // Spotify repetido
+          MOCK_SUSCRIPCIONES[2], // Gimnasio nuevo
+        ];
+
+        const resultado = deduplicarSuscripciones(acumuladas, nuevasConDuplicado);
+        expect(resultado).toHaveLength(3);
+        expect(resultado.map((s) => s.id)).toEqual(['1', '2', '3']);
+      });
+
+      it('concatena todas si no hay IDs repetidos', () => {
+        const acumuladas = [MOCK_SUSCRIPCIONES[0]];
+        const nuevas = [MOCK_SUSCRIPCIONES[1], MOCK_SUSCRIPCIONES[2]];
+        const resultado = deduplicarSuscripciones(acumuladas, nuevas);
+        expect(resultado).toHaveLength(3);
+        expect(resultado.map((s) => s.id)).toEqual(['1', '2', '3']);
+      });
+
+      it('maneja listas vacías correctamente', () => {
+        expect(deduplicarSuscripciones([], [MOCK_SUSCRIPCIONES[0]])).toHaveLength(1);
+        expect(deduplicarSuscripciones([MOCK_SUSCRIPCIONES[0]], [])).toHaveLength(1);
+      });
+    });
+
+    describe('HomeView - Controles de paginación', () => {
+      it('renderiza botón "Cargar más" y contador cuando hayMás es true', () => {
+        const onCargarMas = vi.fn();
+
+        render(
+          <HomeView
+            estado={{ tipo: 'listo', datos: [MOCK_SUSCRIPCIONES[0], MOCK_SUSCRIPCIONES[1]] }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={vi.fn()}
+            onReintentar={vi.fn()}
+            hayMas={true}
+            totalGeneral={5}
+            onCargarMas={onCargarMas}
+          />
+        );
+
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        expect(btnCargarMas).toBeTruthy();
+        expect(screen.getByText('Cargar más')).toBeTruthy();
+        expect(screen.getByTestId('contador-paginacion')).toBeTruthy();
+        expect(screen.getByText('Mostrando 2 de 5')).toBeTruthy();
+
+        fireEvent.click(btnCargarMas);
+        expect(onCargarMas).toHaveBeenCalledTimes(1);
+      });
+
+      it('muestra estado de carga en el botón y lo deshabilita cuando cargandoMas es true', () => {
+        render(
+          <HomeView
+            estado={{ tipo: 'listo', datos: [MOCK_SUSCRIPCIONES[0]] }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={vi.fn()}
+            onReintentar={vi.fn()}
+            hayMas={true}
+            cargandoMas={true}
+            onCargarMas={vi.fn()}
+          />
+        );
+
+        expect(screen.getByText('Cargando más...')).toBeTruthy();
+      });
+
+      it('oculta el botón "Cargar más" cuando hayMas es false', () => {
+        render(
+          <HomeView
+            estado={{ tipo: 'listo', datos: [MOCK_SUSCRIPCIONES[0]] }}
+            usuario={MOCK_USUARIO}
+            onSuscripcionPress={vi.fn()}
+            onNuevaSuscripcion={vi.fn()}
+            onReintentar={vi.fn()}
+            hayMas={false}
+          />
+        );
+
+        expect(screen.queryByTestId('btn-cargar-mas')).toBeNull();
+      });
+    });
+
+    describe('HomeScreen - Integración de paginación real', () => {
+      it('consume la página 1 inicialmente mediante onCargarPagina', async () => {
+        const onCargarPagina = vi.fn().mockResolvedValue({
+          count: 3,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(onCargarPagina).toHaveBeenCalledWith({}, 1);
+        expect(screen.getByTestId('btn-cargar-mas')).toBeTruthy();
+        expect(screen.getByText('Mostrando 1 de 3')).toBeTruthy();
+      });
+
+      it('Criterio 1 SE-19: más de una página muestra cada suscripción una sola vez (deduplicación entre páginas)', async () => {
+        const pag1: SuscripcionesPaginadas = {
+          count: 3,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0], MOCK_SUSCRIPCIONES[1]], // Netflix (id: 1), Spotify (id: 2)
+        };
+
+        const pag2: SuscripcionesPaginadas = {
+          count: 3,
+          next: null,
+          previous: 'http://api.local/suscripciones/?page=1',
+          results: [MOCK_SUSCRIPCIONES[1], MOCK_SUSCRIPCIONES[2]], // Spotify (id: 2 - duplicado por inserción concurrente), Gimnasio (id: 3)
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockResolvedValueOnce(pag2);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        // Esperar página 1
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(screen.getByText('Spotify')).toBeTruthy();
+        expect(screen.queryByText('Gimnasio')).toBeNull();
+
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        await act(async () => {
+          fireEvent.click(btnCargarMas);
+        });
+
+        // Esperar página 2 agregada
+        expect(await screen.findByText('Gimnasio')).toBeTruthy();
+        expect(onCargarPagina).toHaveBeenCalledWith({}, 2);
+
+        // Spotify estaba en ambas páginas pero sólo debe aparecer UNA vez en la lista
+        expect(screen.getAllByText('Spotify')).toHaveLength(1);
+        expect(screen.getAllByText('Netflix')).toHaveLength(1);
+        expect(screen.getAllByText('Gimnasio')).toHaveLength(1);
+
+        // Al finalizar las páginas (next === null), desaparece el botón de cargar más
+        expect(screen.queryByTestId('btn-cargar-mas')).toBeNull();
+      });
+
+      it('recarga desde página 1 al ejecutar refresh de la lista', async () => {
+        const pag1: SuscripcionesPaginadas = {
+          count: 1,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        };
+        const pagRefrescada: SuscripcionesPaginadas = {
+          count: 2,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0], MOCK_SUSCRIPCIONES[1]],
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockResolvedValueOnce(pagRefrescada);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(screen.queryByText('Spotify')).toBeNull();
+
+        const btnRefresh = screen.getByTestId('flatlist-refresh-button');
+        await act(async () => {
+          fireEvent.click(btnRefresh);
+        });
+
+        expect(await screen.findByText('Spotify')).toBeTruthy();
+        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+      });
+
+      it('falla al cargar página siguiente no corrompe la lista previa', async () => {
+        const pag1: SuscripcionesPaginadas = {
+          count: 3,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockRejectedValueOnce(new Error('Fallo de red en página 2'));
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        await act(async () => {
+          fireEvent.click(btnCargarMas);
+        });
+
+        // La lista no se cae ni se borra la página 1
+        expect(screen.getByText('Netflix')).toBeTruthy();
+      });
+    });
+  });
+
+  describe('Aplicar filtros móviles por estado y fecha (SE-27)', () => {
+    describe('FiltrosSuscripcionesMovil y describirCriterioActivo', () => {
+      it('describirCriterioActivo genera texto conciso para accesibilidad', () => {
+        expect(describirCriterioActivo('todas', '')).toBe('');
+        expect(describirCriterioActivo('activo', '')).toBe(
+          'Filtro activo: Estado: Activas'
+        );
+        expect(describirCriterioActivo('fantasma', '2026-10-05')).toBe(
+          'Filtro activo: Estado: Sin uso · Cobro: 2026-10-05'
+        );
+        expect(describirCriterioActivo('todas', '2026-10-05')).toBe(
+          'Filtro activo: Cobro: 2026-10-05'
+        );
+      });
+
+      it('renderiza chips de estado y dispara callbacks al seleccionarlos', () => {
+        const onCambiarEstado = vi.fn();
+        const onCambiarFecha = vi.fn();
+        const onLimpiarFiltros = vi.fn();
+
+        render(
+          <FiltrosSuscripcionesMovil
+            filtroEstado="todas"
+            filtroFecha=""
+            onCambiarEstado={onCambiarEstado}
+            onCambiarFecha={onCambiarFecha}
+            onLimpiarFiltros={onLimpiarFiltros}
+            hayFiltrosActivos={false}
+          />
+        );
+
+        expect(screen.getByTestId('filtros-suscripciones')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-todas')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-activo')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-fantasma')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-prueba')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-por_confirmar')).toBeTruthy();
+        expect(screen.getByTestId('filtro-estado-cancelado')).toBeTruthy();
+        expect(screen.queryByTestId('btn-limpiar-filtros')).toBeNull();
+
+        fireEvent.click(screen.getByTestId('filtro-estado-activo'));
+        expect(onCambiarEstado).toHaveBeenCalledWith('activo');
+
+        const inputFecha = screen.getByTestId('input-filtro-fecha');
+        fireEvent.change(inputFecha, { target: { value: '2026-10-05' } });
+        expect(onCambiarFecha).toHaveBeenCalledWith('2026-10-05');
+      });
+
+      it('muestra botón de limpiar filtros cuando hay filtros activos y dispara callback', () => {
+        const onLimpiarFiltros = vi.fn();
+
+        render(
+          <FiltrosSuscripcionesMovil
+            filtroEstado="activo"
+            filtroFecha="2026-10-05"
+            onCambiarEstado={vi.fn()}
+            onCambiarFecha={vi.fn()}
+            onLimpiarFiltros={onLimpiarFiltros}
+            hayFiltrosActivos={true}
+          />
+        );
+
+        const btnLimpiar = screen.getByTestId('btn-limpiar-filtros');
+        expect(btnLimpiar).toBeTruthy();
+        fireEvent.click(btnLimpiar);
+        expect(onLimpiarFiltros).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe('HomeScreen - Criterio 1: Combinación filtra en servidor', () => {
+      it('filtra por estado en servidor al seleccionar un chip', async () => {
+        const onCargarPagina = vi.fn().mockResolvedValue({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]], // Netflix activo
+        } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(onCargarPagina).toHaveBeenCalledWith({}, 1);
+
+        const chipActivo = screen.getByTestId('filtro-estado-activo');
+        await act(async () => {
+          fireEvent.click(chipActivo);
+        });
+
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+      });
+
+      it('filtra por fecha en servidor y combina con estado', async () => {
+        const onCargarPagina = vi.fn().mockResolvedValue({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // 1. Aplicar estado activo
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-activo'));
+        });
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+
+        // 2. Aplicar fecha válida YYYY-MM-DD
+        const inputFecha = screen.getByTestId('input-filtro-fecha');
+        await act(async () => {
+          fireEvent.change(inputFecha, { target: { value: '2026-10-05' } });
+        });
+
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'activo', fecha_cobro: '2026-10-05' },
+          1
+        );
+      });
+
+      it('ignora fechas inválidas en la petición al servidor', async () => {
+        const onCargarPagina = vi.fn().mockResolvedValue({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        const inputFecha = screen.getByTestId('input-filtro-fecha');
+        // Fecha inválida de mes 13 o texto incompleto
+        await act(async () => {
+          fireEvent.change(inputFecha, { target: { value: '2026-13-40' } });
+        });
+
+        // Al no ser fecha real, no envía fecha_cobro
+        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+      });
+    });
+
+    describe('HomeScreen - Criterio 2: No deja resultados de la consulta anterior y maneja carreras', () => {
+      it('cambiar filtro pasa de inmediato a cargando y oculta los datos previos', async () => {
+        let resolverFiltro: (val: SuscripcionesPaginadas) => void = () => {};
+        const promesaFiltro = new Promise<SuscripcionesPaginadas>((res) => {
+          resolverFiltro = res;
+        });
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[0]], // Netflix
+          } satisfies SuscripcionesPaginadas)
+          .mockReturnValueOnce(promesaFiltro);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        // Vista inicial lista con Netflix
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Cambiar filtro a fantasma
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-fantasma'));
+        });
+
+        // Inmediatamente muestra cargando (progressbar) y Netflix ya no está visible
+        expect(screen.getByRole('progressbar')).toBeTruthy();
+        expect(screen.queryByText('Netflix')).toBeNull();
+
+        // Resolver la promesa de fantasma
+        await act(async () => {
+          resolverFiltro({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[2]], // Gimnasio
+          });
+        });
+
+        // Aparece Gimnasio y desaparece el cargando
+        expect(await screen.findByText('Gimnasio')).toBeTruthy();
+        expect(screen.queryByRole('progressbar')).toBeNull();
+      });
+
+      it('ignora respuesta lenta de filtro A si filtro B resolvió primero', async () => {
+        let resolverA: (val: SuscripcionesPaginadas) => void = () => {};
+        let resolverB: (val: SuscripcionesPaginadas) => void = () => {};
+
+        const promesaA = new Promise<SuscripcionesPaginadas>((res) => {
+          resolverA = res;
+        });
+        const promesaB = new Promise<SuscripcionesPaginadas>((res) => {
+          resolverB = res;
+        });
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[0]],
+          } satisfies SuscripcionesPaginadas) // inicial
+          .mockReturnValueOnce(promesaA) // Filtro A (activo)
+          .mockReturnValueOnce(promesaB); // Filtro B (fantasma)
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Disparar Filtro A
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-activo'));
+        });
+
+        // Inmediatamente disparar Filtro B
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-fantasma'));
+        });
+
+        // B resuelve primero con Gimnasio
+        await act(async () => {
+          resolverB({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[2]], // Gimnasio
+          });
+        });
+
+        expect(await screen.findByText('Gimnasio')).toBeTruthy();
+
+        // Llega tarde A con Netflix
+        await act(async () => {
+          resolverA({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[0]], // Netflix
+          });
+        });
+
+        // Se mantiene Gimnasio y no se mezcla Netflix
+        expect(screen.getByText('Gimnasio')).toBeTruthy();
+        expect(screen.queryByText('Netflix')).toBeNull();
+      });
+    });
+
+    describe('HomeScreen - Reinicio de paginación y limpiar filtros', () => {
+      it('reinicia a página 1 al cambiar de filtro cuando se estaba en una página posterior', async () => {
+        const pag1: SuscripcionesPaginadas = {
+          count: 5,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        };
+        const pag2: SuscripcionesPaginadas = {
+          count: 5,
+          next: null,
+          previous: 'http://api.local/suscripciones/?page=1',
+          results: [MOCK_SUSCRIPCIONES[1]],
+        };
+        const pagFiltro: SuscripcionesPaginadas = {
+          count: 1,
+          next: null,
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[2]],
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockResolvedValueOnce(pag2)
+          .mockResolvedValueOnce(pagFiltro);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Ir a página 2
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('btn-cargar-mas'));
+        });
+        expect(await screen.findByText('Spotify')).toBeTruthy();
+        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 2);
+
+        // Ahora cambiar filtro a fantasma
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-fantasma'));
+        });
+
+        // Debe solicitar página 1, NO página 2
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'fantasma' }, 1);
+        expect(await screen.findByText('Gimnasio')).toBeTruthy();
+      });
+
+      it('limpiar filtros restablece estado a "todas", borra fecha y solicita página 1 sin filtros', async () => {
+        const onCargarPagina = vi.fn().mockResolvedValue({
+          count: 3,
+          next: null,
+          previous: null,
+          results: MOCK_SUSCRIPCIONES,
+        } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Aplicar filtro
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-activo'));
+        });
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+
+        // Limpiar filtros con botón
+        const btnLimpiar = screen.getByTestId('btn-limpiar-filtros');
+        await act(async () => {
+          fireEvent.click(btnLimpiar);
+        });
+
+        // Debe haber solicitado nuevamente sin filtros
+        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+      });
+
+      it('distingue cuenta vacía de búsqueda sin coincidencias según filtros activos', async () => {
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[0]],
+          } satisfies SuscripcionesPaginadas)
+          .mockResolvedValueOnce({
+            count: 0,
+            next: null,
+            previous: null,
+            results: [],
+          } satisfies SuscripcionesPaginadas)
+          .mockResolvedValueOnce({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[0]],
+          } satisfies SuscripcionesPaginadas);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Aplicar filtro que no tiene coincidencias
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-cancelado'));
+        });
+
+        // Muestra estado vacío de filtros, no el estado vacío de bienvenida de la cuenta
+        expect(await screen.findByTestId('empty-state-filtros')).toBeTruthy();
+        expect(screen.queryByTestId('empty-state-home')).toBeNull();
+        expect(screen.getByText('Ninguna suscripción coincide')).toBeTruthy();
+        expect(screen.getAllByText(/Filtro activo: Estado: Canceladas/).length).toBeGreaterThan(0);
+
+        // El botón para limpiar filtros desde el estado vacío limpia los filtros y recarga
+        const btnLimpiarVacio = screen.getByTestId('btn-limpiar-filtros-vacio');
+        await act(async () => {
+          fireEvent.click(btnLimpiarVacio);
+        });
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        expect(screen.queryByTestId('empty-state-filtros')).toBeNull();
+      });
+    });
+  });
+
+  describe('Resolución de Observaciones P2 (SE-19 y SE-27)', () => {
+    describe('P2.1: El resumen presenta subtotal cargado inequívocamente etiquetado como parcial', () => {
+      it('con 11 suscripciones y página de 10, muestra subtotal parcial y al cargar página 2 pasa a total global', async () => {
+        // 11 suscripciones de 10.000 CLP mensuales
+        const sub11: Suscripcion[] = Array.from({ length: 11 }, (_, i) => ({
+          id: `sub-p2-${i + 1}`,
+          nombre: `Servicio ${i + 1}`,
+          monto: 10000,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-10-15',
+          categoria: 'streaming',
+          estado: 'activo',
+        }));
+
+        const pag1: SuscripcionesPaginadas = {
+          count: 11,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: sub11.slice(0, 10),
+        };
+
+        const pag2: SuscripcionesPaginadas = {
+          count: 11,
+          next: null,
+          previous: 'http://api.local/suscripciones/?page=1',
+          results: sub11.slice(10, 11),
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockResolvedValueOnce(pag2);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        // Esperar página 1
+        expect(await screen.findByText('Servicio 1')).toBeTruthy();
+
+        // Verificar que el resumen está inequívocamente etiquetado como subtotal parcial
+        const etiqueta = screen.getByTestId('resumen-etiqueta');
+        const subtitulo = screen.getByTestId('resumen-subtitulo');
+        const total = screen.getByTestId('resumen-total');
+
+        expect(etiqueta.textContent).toBe('Subtotal mensual proyectado (parcial)');
+        expect(subtitulo.textContent).toBe('Subtotal de 10 de 11 suscripciones (parcial)');
+        expect(total.textContent).toMatch(/100\.000/);
+
+        // NO debe atribuirse como gasto completo ni afirmar que son 11 en total
+        expect(screen.queryByText('Gasto mensual proyectado')).toBeNull();
+        expect(screen.queryByText('11 suscripciones en total')).toBeNull();
+
+        // Cargar página 2
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        await act(async () => {
+          fireEvent.click(btnCargarMas);
+        });
+
+        expect(await screen.findByText('Servicio 11')).toBeTruthy();
+
+        // Al completarse todas las suscripciones, pasa a total global definitivo
+        expect(etiqueta.textContent).toBe('Gasto mensual proyectado');
+        expect(subtitulo.textContent).toBe('11 suscripciones en total');
+        expect(total.textContent).toMatch(/110\.000/);
+        expect(screen.queryByText(/parcial/i)).toBeNull();
+      });
+
+      it('soporta múltiples monedas en el subtotal parcial', async () => {
+        const subMulti: Suscripcion[] = [
+          {
+            id: 'sub-clp',
+            nombre: 'Servicio CLP',
+            monto: 50000,
+            moneda: 'CLP',
+            frecuencia: 'mensual',
+            fecha_proximo_cobro: '2026-10-15',
+            categoria: 'streaming',
+            estado: 'activo',
+          },
+          {
+            id: 'sub-usd',
+            nombre: 'Servicio USD',
+            monto: 50,
+            moneda: 'USD',
+            frecuencia: 'mensual',
+            fecha_proximo_cobro: '2026-10-15',
+            categoria: 'software',
+            estado: 'activo',
+          },
+        ];
+
+        const pag: SuscripcionesPaginadas = {
+          count: 15,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: subMulti,
+        };
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={vi.fn().mockResolvedValue(pag)}
+          />
+        );
+
+        expect(await screen.findByText('Servicio CLP')).toBeTruthy();
+        expect(screen.getByTestId('resumen-etiqueta').textContent).toBe(
+          'Subtotal mensual proyectado (parcial)'
+        );
+        expect(screen.getByTestId('resumen-subtitulo').textContent).toBe(
+          'Subtotal de 2 de 15 suscripciones (parcial)'
+        );
+        const total = screen.getByTestId('resumen-total');
+        expect(total.textContent).toContain('CLP');
+        expect(total.textContent).toContain('USD');
+      });
+
+      it('si se provee resumenGlobal del servidor, no cambia al paginar y muestra gasto mensual proyectado', async () => {
+        const sub11: Suscripcion[] = Array.from({ length: 11 }, (_, i) => ({
+          id: `sub-glob-${i + 1}`,
+          nombre: `Global ${i + 1}`,
+          monto: 10000,
+          moneda: 'CLP',
+          frecuencia: 'mensual',
+          fecha_proximo_cobro: '2026-10-15',
+          categoria: 'streaming',
+          estado: 'activo',
+        }));
+
+        const resumenGlobal = [{ moneda: 'CLP' as const, total: 110000 }];
+
+        const pag1: SuscripcionesPaginadas = {
+          count: 11,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: sub11.slice(0, 10),
+          totales: resumenGlobal,
+        };
+        const pag2: SuscripcionesPaginadas = {
+          count: 11,
+          next: null,
+          previous: 'http://api.local/suscripciones/?page=1',
+          results: sub11.slice(10, 11),
+          totales: resumenGlobal,
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1)
+          .mockResolvedValueOnce(pag2);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Global 1')).toBeTruthy();
+
+        // Desde la primera página el resumen ya es el global
+        expect(screen.getByTestId('resumen-etiqueta').textContent).toBe(
+          'Gasto mensual proyectado'
+        );
+        expect(screen.getByTestId('resumen-total').textContent).toMatch(/110\.000/);
+
+        // Avanzar a página 2
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('btn-cargar-mas'));
+        });
+
+        expect(await screen.findByText('Global 11')).toBeTruthy();
+
+        // El resumen global no muta al paginar
+        expect(screen.getByTestId('resumen-etiqueta').textContent).toBe(
+          'Gasto mensual proyectado'
+        );
+        expect(screen.getByTestId('resumen-total').textContent).toMatch(/110\.000/);
+      });
+    });
+
+    describe('P2.2: Invalidar una página pendiente no deja "Cargar más" bloqueado', () => {
+      it('cambiar filtro mientras página 2 está pendiente no bloquea "Cargar más" en el nuevo listado', async () => {
+        let resolverPagina2Antigua: (val: SuscripcionesPaginadas) => void = () => {};
+        const promesaPagina2Antigua = new Promise<SuscripcionesPaginadas>((res) => {
+          resolverPagina2Antigua = res;
+        });
+
+        const pag1Todas: SuscripcionesPaginadas = {
+          count: 20,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [
+            {
+              id: 'todas-1',
+              nombre: 'Todas Servicio 1',
+              monto: 5000,
+              moneda: 'CLP',
+              frecuencia: 'mensual',
+              fecha_proximo_cobro: '2026-10-10',
+              categoria: 'otros',
+              estado: 'activo',
+            },
+          ],
+        };
+
+        const pag1Activas: SuscripcionesPaginadas = {
+          count: 12,
+          next: 'http://api.local/suscripciones/?page=2&estado=activo',
+          previous: null,
+          results: [
+            {
+              id: 'activo-1',
+              nombre: 'Activa Servicio 1',
+              monto: 8000,
+              moneda: 'CLP',
+              frecuencia: 'mensual',
+              fecha_proximo_cobro: '2026-10-12',
+              categoria: 'otros',
+              estado: 'activo',
+            },
+          ],
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1Todas) // carga inicial
+          .mockReturnValueOnce(promesaPagina2Antigua) // clic en cargar más de Todas
+          .mockResolvedValueOnce(pag1Activas); // cambio a filtro Activas
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        // 1. Carga inicial de Todas
+        expect(await screen.findByText('Todas Servicio 1')).toBeTruthy();
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        expect(btnCargarMas.getAttribute('aria-disabled')).toBeNull();
+        expect(screen.getByText('Cargar más')).toBeTruthy();
+
+        // 2. Pedir página 2 de Todas (queda pendiente)
+        await act(async () => {
+          fireEvent.click(btnCargarMas);
+        });
+        expect(screen.getByText('Cargando más...')).toBeTruthy();
+        expect(btnCargarMas.getAttribute('aria-disabled')).toBe('true');
+
+        // 3. Mientras página 2 está pendiente, cambiar filtro a 'activo'
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('filtro-estado-activo'));
+        });
+
+        // 4. Se carga la nueva página 1 de Activas
+        expect(await screen.findByText('Activa Servicio 1')).toBeTruthy();
+        expect(screen.queryByText('Todas Servicio 1')).toBeNull();
+
+        // 5. El botón de la nueva consulta debe estar HABILITADO ("Cargar más"), NO bloqueado
+        const btnCargarMasNuevo = screen.getByTestId('btn-cargar-mas');
+        expect(screen.getByText('Cargar más')).toBeTruthy();
+        expect(btnCargarMasNuevo.getAttribute('aria-disabled')).toBeNull();
+
+        // 6. Resuelve la página 2 antigua de Todas
+        await act(async () => {
+          resolverPagina2Antigua({
+            count: 20,
+            next: null,
+            previous: 'http://api.local/suscripciones/?page=1',
+            results: [
+              {
+                id: 'todas-2',
+                nombre: 'Todas Servicio 2 Obsoleto',
+                monto: 5000,
+                moneda: 'CLP',
+                frecuencia: 'mensual',
+                fecha_proximo_cobro: '2026-10-10',
+                categoria: 'otros',
+                estado: 'activo',
+              },
+            ],
+          });
+        });
+
+        // 7. La respuesta antigua no altera datos ni bloquea el botón
+        expect(screen.queryByText('Todas Servicio 2 Obsoleto')).toBeNull();
+        expect(screen.getByText('Activa Servicio 1')).toBeTruthy();
+        expect(screen.getByText('Cargar más')).toBeTruthy();
+        expect(btnCargarMasNuevo.getAttribute('aria-disabled')).toBeNull();
+
+        // 8. El nuevo listado puede pedir su página 2 con éxito
+        await act(async () => {
+          fireEvent.click(btnCargarMasNuevo);
+        });
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 2);
+      });
+
+      it('pull-to-refresh mientras página 2 está pendiente descarta la respuesta tardía y desbloquea Cargar más', async () => {
+        let resolverPag2: (val: SuscripcionesPaginadas) => void = () => {};
+        const promesaPag2 = new Promise<SuscripcionesPaginadas>((res) => {
+          resolverPag2 = res;
+        });
+
+        const pag1Inicial: SuscripcionesPaginadas = {
+          count: 15,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        };
+
+        const pag1Refrescada: SuscripcionesPaginadas = {
+          count: 15,
+          next: 'http://api.local/suscripciones/?page=2',
+          previous: null,
+          results: [MOCK_SUSCRIPCIONES[0]],
+        };
+
+        const onCargarPagina = vi
+          .fn()
+          .mockResolvedValueOnce(pag1Inicial)
+          .mockReturnValueOnce(promesaPag2)
+          .mockResolvedValueOnce(pag1Refrescada);
+
+        render(
+          <HomeScreen
+            usuario={MOCK_USUARIO}
+            onCargarPagina={onCargarPagina}
+          />
+        );
+
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+
+        // Iniciar carga de página 2
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('btn-cargar-mas'));
+        });
+        expect(screen.getByText('Cargando más...')).toBeTruthy();
+
+        // Disparar refresh antes de que resuelva
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('flatlist-refresh-button'));
+        });
+
+        // Resolver la página 2 antigua
+        await act(async () => {
+          resolverPag2({
+            count: 15,
+            next: null,
+            previous: null,
+            results: [MOCK_SUSCRIPCIONES[1]],
+          });
+        });
+
+        // La lista refrescada está lista y "Cargar más" está habilitado
+        expect(await screen.findByText('Netflix')).toBeTruthy();
+        const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+        expect(screen.getByText('Cargar más')).toBeTruthy();
+        expect(btnCargarMas.getAttribute('aria-disabled')).toBeNull();
+      });
+    });
+  });
 });
+
+
