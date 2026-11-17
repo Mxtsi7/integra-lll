@@ -51,7 +51,19 @@ export function crearControlUsoAndroid(
       const bloqueoInicial = bloqueo();
       if (bloqueoInicial) return { estado: bloqueoInicial };
       if (!permisoInicial) return { estado: 'sin_permiso' };
-      const estadisticas = await nativo.leerEstadisticas(inicioMs, finMs, true);
+      let estadisticas: EstadisticaAndroid[];
+      try {
+        estadisticas = await nativo.leerEstadisticas(inicioMs, finMs, true);
+      } catch (error) {
+        const bloqueoLectura = bloqueo();
+        if (bloqueoLectura) return { estado: bloqueoLectura };
+        // El puente puede rechazar si Android revoca el permiso durante la consulta.
+        const permisoTrasError = await nativo.tienePermiso();
+        const bloqueoTrasError = bloqueo();
+        if (bloqueoTrasError) return { estado: bloqueoTrasError };
+        if (!permisoTrasError) return { estado: 'revocado' };
+        throw error;
+      }
       const permisoFinal = await nativo.tienePermiso();
       const bloqueoFinal = bloqueo();
       if (bloqueoFinal) return { estado: bloqueoFinal };
