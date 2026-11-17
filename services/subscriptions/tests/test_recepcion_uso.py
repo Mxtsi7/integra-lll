@@ -87,3 +87,11 @@ def test_valida_antes_de_invocar_el_receptor(suscripcion, evento, settings):
     settings.USO_PERSISTIR_EVENTO = no_debe_persistir
     evento['duracion_ms'] = -1
     assert enviar(suscripcion, evento).status_code == 400
+
+
+def test_fecha_fuera_del_rango_local_devuelve_400(suscripcion, evento):
+    evento.update(inicio='0001-01-01T00:00:00Z', fin='0001-01-01T00:01:00Z',
+                  duracion_ms=0, tramos_actividad=[])
+    respuesta = enviar(suscripcion, evento)
+    assert respuesta.status_code == 400
+    assert respuesta.data['codigo'] == 'evento_invalido'
