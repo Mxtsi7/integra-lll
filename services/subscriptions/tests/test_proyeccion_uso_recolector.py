@@ -119,3 +119,25 @@ def test_eventos_distintos_simultaneos_no_pierden_el_residuo(destino):
     assert codigos == [201, 201]
     assert proyeccion.duracion_union_ms == 60000
     assert registro.minutos == 1
+
+
+@pytest.mark.parametrize('segundos', [30, 90])
+def test_lectura_exacta_recupera_uso_aceptado(destino, segundos):
+    inicio, fin = intervalo(0, segundos)
+    assert enviar(destino, evento_con_tramo(inicio, fin)).status_code == 201
+    cabeceras = {'X-Organizacion-Id': str(destino.organizacion_id), 'X-Usuario-Id': '42'}
+    ruta = f'/api/suscripciones/{destino.id}/uso/exacto/'
+    respuesta = APIClient().get(ruta, headers=cabeceras)
+    assert respuesta.status_code == 200
+    fila, = respuesta.data['results']
+    assert fila['duracion_ms'] == segundos * 1000
+    assert fila['origen'] == 'recolector'
+    assert fila['usuario_id'] == 42
+    assert fila['suscripcion_id'] == str(destino.id)
+    assert fila['id'] == str(ProyeccionUsoRecolector.objects.get().id)
+    assert fila['fecha'] == '2026-11-09'
+    assert fila['zona_horaria'] == 'America/Santiago'
+    assert APIClient().get(ruta, headers={**cabeceras, 'X-Usuario-Id': '43'}).data['results'] == []
+    assert APIClient().get(ruta, headers={**cabeceras, 'X-Organizacion-Id': str(uuid4())}).status_code == 404
+    assert APIClient().get(ruta, headers={**cabeceras, 'X-Usuario-Id': ''}).status_code == 403
+

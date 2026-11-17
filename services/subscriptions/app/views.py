@@ -1059,6 +1059,27 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         usuario_id = self._actor_id(request, required=True)
         return recibir(request, suscripcion, usuario_id, self._correlation_id(request))
 
+    @action(detail=True, methods=['get'], url_path='uso/exacto')
+    def uso_exacto_recolector(self, request, pk=None):
+        """Unión diaria exacta propia, incluso cuando no completa un minuto."""
+        from app.models import ProyeccionUsoRecolector
+        from app.serializers import ProyeccionUsoRecolectorSerializer
+
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        proyecciones = ProyeccionUsoRecolector.objects.filter(
+            organizacion_id=suscripcion.organizacion_id,
+            usuario_id=usuario_id,
+            suscripcion=suscripcion,
+        ).order_by('-fecha_local', 'id')
+        pagina = self.paginate_queryset(proyecciones)
+        resultado = ProyeccionUsoRecolectorSerializer(
+            pagina if pagina is not None else proyecciones, many=True,
+        ).data
+        if pagina is not None:
+            return self.get_paginated_response(resultado)
+        return Response(resultado)
+
     @staticmethod
     def _convertir_error_transicion(error: DjangoValidationError) -> ValidationError:
         detail = error.message_dict if hasattr(error, "message_dict") else error.messages

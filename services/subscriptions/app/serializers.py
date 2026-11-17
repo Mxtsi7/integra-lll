@@ -207,6 +207,19 @@ class RegistrarUsoSerializer(serializers.Serializer):
         return value
 
 
+class ProyeccionUsoRecolectorSerializer(serializers.Serializer):
+    """Lectura exacta: identidad de proyección, procedencia y milisegundos."""
+
+    id = serializers.UUIDField(read_only=True)
+    suscripcion_id = serializers.UUIDField(read_only=True)
+    usuario_id = serializers.IntegerField(read_only=True)
+    fecha = serializers.DateField(source='fecha_local', read_only=True)
+    zona_horaria = serializers.CharField(read_only=True)
+    origen = serializers.ReadOnlyField(default='recolector')
+    duracion_ms = serializers.IntegerField(source='duracion_union_ms', read_only=True)
+    registro_uso_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+
 class RegistroUsoSerializer(serializers.ModelSerializer):
     """Serializa los registros históricos de uso de una suscripción (CU-23 / RF-04 / RF-15)."""
 
