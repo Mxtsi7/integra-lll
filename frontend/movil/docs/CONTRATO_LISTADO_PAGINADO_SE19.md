@@ -90,9 +90,11 @@ export function deduplicarSuscripciones(
 | :--- | :--- | :--- | :--- |
 | **Carga Inicial** | Montaje de pantalla | Muestra indicador de carga (`progressbar`). | Llama a página 1. Al responder, inicializa lista con `results`, `hayMas = Boolean(next)` y `totalGeneral = count`. |
 | **Cargar Siguiente Página** | Pulsar `btn-cargar-mas` | Botón cambia a `"Cargando más..."` y se deshabilita (`cargandoMas = true`). | Pide página `N + 1`, aplica `deduplicarSuscripciones`, actualiza `hayMas` con el nuevo `next`. |
-| **Última Página Alcanzada** | Servidor responde `next: null` | `btn-cargar-mas` desaparece de la vista. | Muestra la totalidad de los elementos cargados. |
+| **Última Página Alcanzada** | Servidor responde `next: null` | `btn-cargar-mas` desaparece de la vista. Al completarse todas las páginas, el resumen pasa a global. | Muestra la totalidad de los elementos cargados. |
 | **Fallo en Cargar Más** | Rechazo de red en página `N + 1` | `cargandoMas` vuelve a `false`. Botón se rehabilita. | La lista y totales de las páginas previas permanecen intactos sin mostrar pantalla de error destructiva. |
-| **Pull-to-refresh** | Deslizar hacia abajo | Muestra indicador de refresco activo. | Invoca página 1, descarta la lista acumulada previa y establece los nuevos elementos. |
+| **Invalidación por Refresco o Filtro (P2.2)** | Cambio de filtro, foco o pull-to-refresh mientras página 2 está pendiente | Se resetea `cargandoMas = false` de inmediato; la respuesta tardía se descarta por `generacionRef`. | El nuevo listado no hereda el bloqueo ni los datos obsoletos de la página en vuelo. |
+| **Resumen Parcial vs Global (P2.1)** | Conjunto parcial en memoria (`hayMas === true` o `totalGeneral > cargadas`) | Etiquetado inequívoco: `"Subtotal mensual proyectado (parcial)"` y subtítulo `"Subtotal de X de Y suscripciones (parcial)"`. | No atribuye el gasto parcial a la totalidad. Si el servidor provee `resumenGlobal` o `totales`, se conserva la proyección global. |
+| **Pull-to-refresh** | Deslizar hacia abajo | Muestra indicador de refresco activo. | Invoca página 1, descarta la lista acumulada previa y restablece `cargandoMas = false`. |
 
 ---
 

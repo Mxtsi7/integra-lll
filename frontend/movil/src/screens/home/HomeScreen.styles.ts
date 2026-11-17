@@ -39,6 +39,13 @@ export const styles = StyleSheet.create({
     letterSpacing: 0.5,
     fontWeight: '600',
   },
+  resumenEtiquetaParcial: {
+    fontSize: 12,
+    color: '#f59e0b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '600',
+  },
   resumenTotal: {
     fontSize: 20,
     fontWeight: '700',

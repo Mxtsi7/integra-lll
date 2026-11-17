@@ -8,6 +8,7 @@ import {
   getSuscripcionesPaginadas,
   type ConsultaSuscripciones,
   type EstadoCarga,
+  type Moneda,
   type Suscripcion,
   type SuscripcionesPaginadas,
   type Usuario,
@@ -59,6 +60,7 @@ export interface HomeViewProps {
   refreshing?: boolean;
   onRefresh?: () => void;
   paginaActual?: number;
+  resumenGlobal?: { moneda: Moneda; total: number }[];
 }
 
 /**
@@ -85,6 +87,7 @@ export function HomeView({
   refreshing = false,
   onRefresh,
   paginaActual = 1,
+  resumenGlobal,
 }: HomeViewProps) {
   const tieneSuscripciones =
     estado.tipo === 'listo' && estado.datos.length > 0;
@@ -173,21 +176,45 @@ export function HomeView({
           }
         >
           {(suscripciones) => {
-            const totales = gastosPorMoneda(suscripciones);
+            const esParcial =
+              !resumenGlobal &&
+              Boolean(
+                hayMas ||
+                (totalGeneral !== undefined && totalGeneral > suscripciones.length)
+              );
+
+            const totales = resumenGlobal ?? gastosPorMoneda(suscripciones);
             const totalTexto = formatearTotales(totales);
+
+            const etiquetaResumen = esParcial
+              ? 'Subtotal mensual proyectado (parcial)'
+              : 'Gasto mensual proyectado';
+
+            const subtituloResumen = esParcial
+              ? `Subtotal de ${suscripciones.length} de ${totalGeneral ?? suscripciones.length} suscripciones (parcial)`
+              : `${totalGeneral !== undefined ? totalGeneral : suscripciones.length} ${(totalGeneral !== undefined ? totalGeneral : suscripciones.length) === 1 ? 'suscripción activa' : 'suscripciones en total'}`;
 
             return (
               <>
-                <View style={styles.resumenCaja} testID="resumen-gastos">
-                  <Text style={styles.resumenEtiqueta}>
-                    Gasto mensual proyectado
+                <View
+                  style={styles.resumenCaja}
+                  testID="resumen-gastos"
+                  accessibilityRole="summary"
+                  accessibilityLabel={
+                    esParcial
+                      ? `Subtotal mensual proyectado (parcial): ${totalTexto}, correspondiente a ${suscripciones.length} de ${totalGeneral} suscripciones`
+                      : `Gasto mensual proyectado: ${totalTexto}`
+                  }
+                >
+                  <Text
+                    style={esParcial ? styles.resumenEtiquetaParcial : styles.resumenEtiqueta}
+                    testID="resumen-etiqueta"
+                  >
+                    {etiquetaResumen}
                   </Text>
-                  <Text style={styles.resumenTotal}>{totalTexto}</Text>
-                  <Text style={styles.resumenSubtitulo}>
-                    {totalGeneral !== undefined ? totalGeneral : suscripciones.length}{' '}
-                    {(totalGeneral !== undefined ? totalGeneral : suscripciones.length) === 1
-                      ? 'suscripción activa'
-                      : 'suscripciones en total'}
+                  <Text style={styles.resumenTotal} testID="resumen-total">{totalTexto}</Text>
+                  <Text style={styles.resumenSubtitulo} testID="resumen-subtitulo">
+                    {subtituloResumen}
                   </Text>
                 </View>
 
@@ -217,6 +244,7 @@ export function HomeView({
                           accessibilityRole="button"
                           accessibilityLabel="Cargar más suscripciones"
                           disabled={cargandoMas}
+                          accessibilityState={{ disabled: cargandoMas }}
                           style={styles.botonCargarMas}
                           onPress={onCargarMas}
                         >
@@ -262,6 +290,10 @@ export interface HomeScreenPropsContainer {
   ) => Promise<SuscripcionesPaginadas>;
   usuario?: Usuario | null;
   onLogout?: () => void;
+  resumenGlobal?: { moneda: Moneda; total: number }[];
+  onCargarResumen?: (
+    consulta?: ConsultaSuscripciones,
+  ) => Promise<{ moneda: Moneda; total: number }[]>;
 }
 
 /**
@@ -275,6 +307,8 @@ export default function HomeScreen({
   onCargarPagina,
   usuario,
   onLogout,
+  resumenGlobal: propResumenGlobal,
+  onCargarResumen,
 }: (HomeScreenProps<'HomeScreen'> & HomeScreenPropsContainer) | HomeScreenPropsContainer) {
   let authUsuario: Usuario | null = null;
   let authCerrarSesion: (() => Promise<void>) | undefined;
@@ -303,6 +337,9 @@ export default function HomeScreen({
   const [cargandoMas, setCargandoMas] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [totalGeneral, setTotalGeneral] = useState<number | undefined>(undefined);
+  const [resumenGlobal, setResumenGlobal] = useState<
+    { moneda: Moneda; total: number }[] | undefined
+  >(propResumenGlobal);
 
   const generacionRef = useRef(0);
 
@@ -327,15 +364,29 @@ export default function HomeScreen({
     const generacion = generacionRef.current;
     const sigueVigente = () => generacionRef.current === generacion;
 
+    setCargandoMas(false);
     setEstado({ tipo: 'cargando' });
     setPaginaActual(1);
 
     const consulta = construirConsulta();
 
+    if (onCargarResumen) {
+      onCargarResumen(consulta)
+        .then((res) => {
+          if (sigueVigente()) setResumenGlobal(res);
+        })
+        .catch(() => {});
+    } else if (propResumenGlobal) {
+      setResumenGlobal(propResumenGlobal);
+    } else {
+      setResumenGlobal(undefined);
+    }
+
     try {
       let resultadoSuscripciones: Suscripcion[] = [];
       let existeSiguiente = false;
       let total: number | undefined;
+      let totalesPagina: { moneda: Moneda; total: number }[] | undefined;
 
       if (onCargarPagina) {
         const pag = await onCargarPagina(consulta, 1);
@@ -343,6 +394,7 @@ export default function HomeScreen({
         resultadoSuscripciones = pag.results;
         existeSiguiente = Boolean(pag.next);
         total = pag.count;
+        totalesPagina = pag.totales;
       } else if (onCargarSuscripciones) {
         const subs = await onCargarSuscripciones(consulta);
         if (!sigueVigente()) return;
@@ -355,8 +407,12 @@ export default function HomeScreen({
         resultadoSuscripciones = pag.results;
         existeSiguiente = Boolean(pag.next);
         total = pag.count;
+        totalesPagina = pag.totales;
       }
 
+      if (totalesPagina && !propResumenGlobal && !onCargarResumen) {
+        setResumenGlobal(totalesPagina);
+      }
       setHayMas(existeSiguiente);
       setTotalGeneral(total);
       setEstado({ tipo: 'listo', datos: resultadoSuscripciones });
@@ -364,7 +420,7 @@ export default function HomeScreen({
       if (!sigueVigente()) return;
       setEstado({ tipo: 'error' });
     }
-  }, [construirConsulta, onCargarPagina, onCargarSuscripciones]);
+  }, [construirConsulta, onCargarPagina, onCargarSuscripciones, onCargarResumen, propResumenGlobal]);
 
   const manejarCargarMas = useCallback(async () => {
     if (cargandoMas || !hayMas) return;
@@ -399,7 +455,7 @@ export default function HomeScreen({
       setPaginaActual(siguientePagina);
       setHayMas(existeSiguiente);
       setEstado((prev) => {
-        if (prev.tipo !== 'listo') return prev;
+        if (prev.tipo !== 'listo' || !sigueVigente()) return prev;
         return {
           tipo: 'listo',
           datos: deduplicarSuscripciones(prev.datos, nuevas),
@@ -500,6 +556,7 @@ export default function HomeScreen({
       refreshing={refreshing}
       onRefresh={manejarRefresh}
       paginaActual={paginaActual}
+      resumenGlobal={resumenGlobal}
     />
   );
 }

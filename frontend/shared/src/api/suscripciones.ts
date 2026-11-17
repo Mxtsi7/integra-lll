@@ -1,4 +1,4 @@
-import type { EstadoSuscripcion, Suscripcion } from '../tipos';
+import type { EstadoSuscripcion, Moneda, Suscripcion } from '../tipos';
 import { pedir, type Paginado } from './cliente';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './ejemplo';
 
@@ -137,6 +137,7 @@ export interface SuscripcionesPaginadas {
   next: string | null;
   previous: string | null;
   results: Suscripcion[];
+  totales?: { moneda: Moneda; total: number }[];
 }
 
 /**
@@ -158,6 +159,7 @@ export async function getSuscripcionesPaginadas(
     next: respuesta.next,
     previous: respuesta.previous,
     results: respuesta.results.map(desdeLaApi),
+    totales: (respuesta as any).totales,
   };
 }
 
