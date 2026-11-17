@@ -150,18 +150,20 @@ def _construir_contexto_recolectores(organizacion_id, nombres: dict, hoy: date) 
 
     Los fallos de consulta se degradan explícitamente: no se fabrican "0 minutos".
     """
-    suscripciones_activas: list[SuscripcionActivaContexto] = []
+    suscripciones_todas: list[SuscripcionActivaContexto] = []
     consulta_suscripciones_disponible = True
     try:
         filas_suscripciones = obtener_suscripciones_activas_con_gasto(str(organizacion_id))
-        for fila in filas_suscripciones[:MAX_SUSCRIPCIONES_ACTIVAS]:
-            suscripciones_activas.append(
+        for fila in filas_suscripciones:
+            suscripciones_todas.append(
                 SuscripcionActivaContexto(
                     suscripcion_id=fila.suscripcion_id,
                     nombre=sanear_texto(fila.nombre),
                     estado=sanear_texto(fila.estado, limite=30),
                     moneda=sanear_texto(fila.moneda, limite=3).upper(),
-                    monto_mensual_texto=sanear_texto(fila.monto_mensual, limite=40),
+                    monto_estimado_mensual_texto=sanear_texto(fila.monto_estimado_mensual, limite=40),
+                    frecuencia=sanear_texto(fila.frecuencia, limite=20).lower() or "mensual",
+                    tipo_gasto=sanear_texto(fila.tipo_gasto_estimado, limite=60) or "estimacion_recurrente_mensual_equivalente",
                 )
             )
             if fila.suscripcion_id not in nombres and fila.nombre:
@@ -170,18 +172,27 @@ def _construir_contexto_recolectores(organizacion_id, nombres: dict, hoy: date) 
         consulta_suscripciones_disponible = False
         log.warning("consulta_suscripciones_no_disponible", exc_info=True)
 
+    total_suscripciones_activas = len(suscripciones_todas)
+    suscripciones_detalle = suscripciones_todas[:MAX_SUSCRIPCIONES_ACTIVAS]
+    detalle_suscripciones_truncado = total_suscripciones_activas > len(suscripciones_detalle)
+
     usos_recolectados: list[UsoRecolectadoContexto] = []
     consulta_uso_disponible = True
     motivo_no_disponible = None
+    detalle_uso_truncado = False
     try:
-        ids_suscripciones = [s.suscripcion_id for s in suscripciones_activas]
+        # Totales/cálculos sobre la colección completa de suscripciones activas;
+        # el límite aplica solo al detalle enviado.
+        ids_suscripciones = [s.suscripcion_id for s in suscripciones_todas]
         uso_por_suscripcion = obtener_uso_recolectado_mensual(
             str(organizacion_id), hoy.year, hoy.month, suscripcion_ids=ids_suscripciones or None
         )
         evidencias = construir_evidencias_ventana(uso_por_suscripcion)
         # Indexar por suscripcion_id para salida estable
         puntajes = {e.suscripcion_id: calcular_puntaje_aprovechamiento(e) for e in evidencias}
-        for suscripcion_id, uso in list(uso_por_suscripcion.items())[:MAX_USO_RECOLECTORES]:
+        items_uso = list(uso_por_suscripcion.items())
+        detalle_uso_truncado = len(items_uso) > MAX_USO_RECOLECTORES
+        for suscripcion_id, uso in items_uso[:MAX_USO_RECOLECTORES]:
             puntaje = puntajes.get(suscripcion_id)
             nombre = sanear_texto(nombres.get(suscripcion_id, "") or "")
             fecha_ultima = uso.fecha_ultima_actividad_positiva
@@ -204,12 +215,30 @@ def _construir_contexto_recolectores(organizacion_id, nombres: dict, hoy: date) 
         motivo_no_disponible = "consulta_analytics_no_disponible"
         log.warning("consulta_uso_recolectores_no_disponible", exc_info=True)
 
+    # Los agregados financieros se calculan sobre la colección completa.
     contexto_recolectores = construir_contexto_ia_puro(
-        suscripciones_activas=suscripciones_activas,
+        suscripciones_activas=suscripciones_todas,
         usos_recolectados=usos_recolectados,
         consulta_uso_disponible=consulta_uso_disponible,
         motivo_consulta_uso_no_disponible=motivo_no_disponible,
+        total_suscripciones_activas=total_suscripciones_activas,
+        detalle_suscripciones_truncado=detalle_suscripciones_truncado,
+        limite_detalle_suscripciones=MAX_SUSCRIPCIONES_ACTIVAS,
+        detalle_uso_truncado=detalle_uso_truncado,
+        limite_detalle_uso=MAX_USO_RECOLECTORES,
     )
+    # Limitar solo el detalle expuesto de suscripciones activas.
+    contexto_recolectores["suscripciones_activas"] = [
+        {
+            "nombre": s.nombre,
+            "estado": s.estado,
+            "moneda": s.moneda,
+            "monto_estimado_mensual": contexto_recolectores["suscripciones_activas"][i]["monto_estimado_mensual"],
+            "frecuencia": s.frecuencia,
+            "tipo_gasto": s.tipo_gasto,
+        }
+        for i, s in enumerate(suscripciones_detalle)
+    ]
 
     if not consulta_suscripciones_disponible:
         contexto_recolectores["suscripciones_activas_disponibles"] = False
@@ -257,12 +286,21 @@ def construir_contexto(organizacion_id) -> dict:
         log.warning("contexto_recolectores_degradado", exc_info=True)
         contexto_recolectores = {
             "suscripciones_activas": [],
-            "gastos_mensuales_por_moneda": [],
+            "total_suscripciones_activas": 0,
+            "detalle_suscripciones_truncado": False,
+            "limite_detalle_suscripciones": MAX_SUSCRIPCIONES_ACTIVAS,
+            "gastos_estimados_mensuales_por_moneda": [],
+            "nota_gastos": (
+                "Estimación recurrente mensual equivalente por suscripción activa (normalizada por frecuencia); "
+                "no representa necesariamente cobros efectivamente realizados en el período."
+            ),
             "uso_recolectores": {
                 "disponible": False,
                 "motivo_no_disponible": "consulta_analytics_no_disponible",
                 "periodicidad": "mensual",
                 "registros": [],
+                "detalle_truncado": False,
+                "limite_detalle_registros": MAX_USO_RECOLECTORES,
                 "nota_semantica": (
                     "Una duracion_positiva_ms mayor que 0 es uso positivo confirmado aunque "
                     "minutos_enteros_proyectados sea 0. Cero observado solo aplica con "
@@ -288,7 +326,14 @@ def resumen_local(contexto: dict) -> str:
     recomendaciones = contexto.get("recomendaciones") or []
     uso_recolectores = contexto.get("uso_recolectores") or {}
     suscripciones_activas = contexto.get("suscripciones_activas") or []
-    gastos = contexto.get("gastos_mensuales_por_moneda") or []
+    total_suscripciones_activas = contexto.get("total_suscripciones_activas")
+    if total_suscripciones_activas is None:
+        total_suscripciones_activas = len(suscripciones_activas)
+    gastos = (
+        contexto.get("gastos_estimados_mensuales_por_moneda")
+        or contexto.get("gastos_mensuales_por_moneda")
+        or []
+    )
 
     if not usos and not recomendaciones and not suscripciones_activas and not (uso_recolectores.get("registros") or []):
         if uso_recolectores and not uso_recolectores.get("disponible", True):
@@ -303,16 +348,25 @@ def resumen_local(contexto: dict) -> str:
         )
 
     partes: list[str] = []
-    if suscripciones_activas:
-        partes.append(f"Tienes {len(suscripciones_activas)} suscripción(es) activa(s) registrada(s).")
+    if total_suscripciones_activas or suscripciones_activas:
+        detalle = f"Tienes {int(total_suscripciones_activas)} suscripción(es) activa(s) registrada(s)."
+        if contexto.get("detalle_suscripciones_truncado"):
+            detalle += f" (mostrando detalle de {len(suscripciones_activas)})."
+        partes.append(detalle)
     if gastos:
         detalle_gastos = ", ".join(
-            f"{item.get('total_mensual_texto', '0.00')} {item.get('moneda', '')}".strip()
+            f"{item.get('total_estimado_mensual_texto', item.get('total_mensual_texto', '0.00'))} {item.get('moneda', '')}".strip()
             for item in gastos
             if item.get("moneda")
         )
         if detalle_gastos:
-            partes.append(f"Gasto mensual agrupado por moneda (sin mezclar divisas): {detalle_gastos}.")
+            partes.append(
+                "Gasto estimado mensual equivalente por moneda, sin mezclar divisas "
+                "(normalizado por frecuencia; no necesariamente cobrado en el período): "
+                f"{detalle_gastos}."
+            )
+    if contexto.get("detalle_uso_truncado") or uso_recolectores.get("detalle_truncado"):
+        partes.append("El detalle de uso recolector mostrado está truncado; los totales/cálculos consideran la colección completa.")
     if usos:
         total = sum(int(fila.get("minutos", 0) or 0) for fila in usos)
         partes.append(

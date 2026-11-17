@@ -158,3 +158,25 @@ def test_sin_permiso_y_revocado_no_penalizan():
         regla = evaluar_regla_recomendacion(resultado)
         assert regla.accion == ACCION_SIN_RECOMENDACION_AUTOMATICA
         assert regla.penalizacion_aplicada is False
+
+
+def test_brecha_explicita_bloquea_recomendacion_de_reduccion():
+    evidencia = EvidenciaUsoVentana(
+        suscripcion_id="sub-brecha",
+        duracion_positiva_ms=120000,
+        cobertura_predominante=COBERTURA_COMPLETA,
+        estado_predominante=ESTADO_ACTIVO,
+        existe_observacion_completa_activa=True,
+        existe_brecha_de_medicion=True,
+        fecha_ultima_actividad_positiva=date(2026, 11, 10),
+        minutos_enteros_proyectados=2,
+    )
+
+    resultado = calcular_puntaje_aprovechamiento(evidencia)
+
+    assert resultado.clasificacion_uso == CLASIFICACION_USO_POSITIVO
+    assert resultado.permite_penalizacion_por_bajo_uso is False
+
+    regla = evaluar_regla_recomendacion(resultado)
+    assert regla.accion == ACCION_SIN_RECOMENDACION_AUTOMATICA
+    assert regla.penalizacion_aplicada is False

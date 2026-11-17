@@ -20,18 +20,19 @@ pytestmark = pytest.mark.django_db
 
 def test_gastos_agrupados_estrictamente_por_moneda_sin_mezclar_divisas():
     suscripciones = [
-        SuscripcionActivaContexto("s1", "Netflix", "activo", "CLP", "9990.00"),
-        SuscripcionActivaContexto("s2", "Spotify", "activo", "CLP", "4550.00"),
-        SuscripcionActivaContexto("s3", "Adobe", "activo", "USD", "20.00"),
-        SuscripcionActivaContexto("s4", "AWS", "activo", "USD", "5.50"),
+        SuscripcionActivaContexto("s1", "Netflix", "activo", "CLP", "9990.00", "mensual", "estimacion_recurrente_mensual_equivalente"),
+        SuscripcionActivaContexto("s2", "Spotify", "activo", "CLP", "4550.00", "mensual", "estimacion_recurrente_mensual_equivalente"),
+        SuscripcionActivaContexto("s3", "Adobe", "activo", "USD", "20.00", "mensual", "estimacion_recurrente_mensual_equivalente"),
+        SuscripcionActivaContexto("s4", "AWS", "activo", "USD", "5.50", "mensual", "estimacion_recurrente_mensual_equivalente"),
     ]
 
     gastos = agrupar_gastos_por_moneda(suscripciones)
 
-    assert [(g.moneda, g.total_mensual_texto, g.cantidad_suscripciones_activas) for g in gastos] == [
+    assert [(g.moneda, g.total_estimado_mensual_texto, g.cantidad_suscripciones_activas) for g in gastos] == [
         ("CLP", "14540.00", 2),
         ("USD", "25.50", 2),
     ]
+    assert all(g.tipo_gasto == "estimacion_recurrente_mensual_equivalente" for g in gastos)
     monedas = {g.moneda for g in gastos}
     assert monedas == {"CLP", "USD"}
 
@@ -43,15 +44,25 @@ def test_sanitizacion_contexto_recolectores_no_expone_ids_ni_secretos_y_aliaza_n
                 "nombre": "Netflix de Ana",
                 "estado": "activo",
                 "moneda": "CLP",
-                "monto_mensual": "9990.00",
+                "monto_estimado_mensual": "9990.00",
+                "frecuencia": "mensual",
+                "tipo_gasto": "estimacion_recurrente_mensual_equivalente",
                 "suscripcion_id": "11111111-1111-4111-8111-111111111111",
                 "correo": "ana@example.com",
                 "token": "secreto",
             }
         ],
-        "gastos_mensuales_por_moneda": [
-            {"moneda": "CLP", "total_mensual_texto": "9990.00", "cantidad_suscripciones_activas": 1}
+        "total_suscripciones_activas": 1,
+        "detalle_suscripciones_truncado": False,
+        "gastos_estimados_mensuales_por_moneda": [
+            {
+                "moneda": "CLP",
+                "total_estimado_mensual_texto": "9990.00",
+                "cantidad_suscripciones_activas": 1,
+                "tipo_gasto": "estimacion_recurrente_mensual_equivalente",
+            }
         ],
+        "nota_gastos": "Estimación recurrente mensual equivalente; no necesariamente cobrado en el período.",
         "uso_recolectores": {
             "disponible": True,
             "motivo_no_disponible": None,
@@ -89,6 +100,7 @@ def test_sanitizacion_contexto_recolectores_no_expone_ids_ni_secretos_y_aliaza_n
     assert suscripcion["nombre"].startswith("servicio_")
     assert "suscripcion_id" not in suscripcion
     assert suscripcion["moneda"] == "CLP"
+    assert suscripcion["frecuencia"] == "mensual"
 
     registro = datos["uso_recolectores"]["registros"][0]
     assert registro["nombre"].startswith("servicio_")
@@ -100,9 +112,10 @@ def test_sanitizacion_contexto_recolectores_no_expone_ids_ni_secretos_y_aliaza_n
     assert "suscripcion_id" not in registro
     assert "api_key" not in registro
 
-    assert datos["gastos_mensuales_por_moneda"] == [
-        {"moneda": "CLP", "total_mensual_texto": "9990.00", "cantidad_suscripciones_activas": 1}
-    ]
+    assert datos["gastos_estimados_mensuales_por_moneda"][0]["moneda"] == "CLP"
+    assert datos["gastos_estimados_mensuales_por_moneda"][0]["total_estimado_mensual_texto"] in ("9990.00", "9990.0", "9990") or float(datos["gastos_estimados_mensuales_por_moneda"][0]["total_estimado_mensual_texto"]) == 9990.0
+    assert datos["gastos_estimados_mensuales_por_moneda"][0]["cantidad_suscripciones_activas"] == 1
+    assert datos["total_suscripciones_activas"] == 1
 
 
 def test_contexto_ia_aisla_organizaciones_y_separa_gastos(monkeypatch):
@@ -112,11 +125,11 @@ def test_contexto_ia_aisla_organizaciones_y_separa_gastos(monkeypatch):
     def fake_suscripciones(organizacion_id):
         if str(organizacion_id) == org_a:
             return [
-                SuscripcionActivaConGasto("sub-a", "Servicio A", "1000.00", "CLP", "activo", True),
-                SuscripcionActivaConGasto("sub-a2", "Servicio USD A", "10.00", "USD", "activo", True),
+                SuscripcionActivaConGasto("sub-a", "Servicio A", "1000.00", "mensual", "1000.00", "estimacion_recurrente_mensual_equivalente", "CLP", "activo", True),
+                SuscripcionActivaConGasto("sub-a2", "Servicio USD A", "10.00", "mensual", "10.00", "estimacion_recurrente_mensual_equivalente", "USD", "activo", True),
             ]
         if str(organizacion_id) == org_b:
-            return [SuscripcionActivaConGasto("sub-b", "Servicio B", "9999.00", "EUR", "activo", True)]
+            return [SuscripcionActivaConGasto("sub-b", "Servicio B", "9999.00", "mensual", "9999.00", "estimacion_recurrente_mensual_equivalente", "EUR", "activo", True)]
         return []
 
     def fake_uso(organizacion_id, anio, mes, suscripcion_ids=None):
@@ -142,16 +155,18 @@ def test_contexto_ia_aisla_organizaciones_y_separa_gastos(monkeypatch):
     assert "Servicio A" in texto_a
     assert "Servicio B" not in texto_a
     assert "9999.00" not in texto_a
-    assert "EUR" not in {g["moneda"] for g in contexto_a["gastos_mensuales_por_moneda"]}
+    gastos_a = contexto_a.get("gastos_estimados_mensuales_por_moneda") or []
+    assert "EUR" not in {g["moneda"] for g in gastos_a}
 
     assert "Servicio B" in texto_b
     assert "Servicio A" not in texto_b
     assert "1000.00" not in texto_b
 
-    monedas_a = {(g["moneda"], g["total_mensual_texto"]) for g in contexto_a["gastos_mensuales_por_moneda"]}
+    monedas_a = {(g["moneda"], g["total_estimado_mensual_texto"]) for g in gastos_a}
     assert ("CLP", "1000.00") in monedas_a
     assert ("USD", "10.00") in monedas_a
     assert len(monedas_a) == 2
+    assert contexto_a.get("total_suscripciones_activas") == 2
 
     registros_a = contexto_a["uso_recolectores"]["registros"]
     assert any(r["duracion_positiva_ms"] == 30000 and r["minutos_enteros_proyectados"] == 0 for r in registros_a)

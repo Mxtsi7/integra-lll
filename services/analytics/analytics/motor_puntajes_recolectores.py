@@ -153,7 +153,11 @@ def clasificar_uso_ventana(evidencia: EvidenciaUsoVentana) -> tuple[str, str, st
     # 1) Uso positivo confirmado: cualquier duracion_ms > 0 es positivo, incluso
     # si la proyección a minutos enteros es 0 (p.ej. 30000 ms).
     if duracion_ms > 0:
-        certeza = CERTEZA_ALTA if cobertura == COBERTURA_COMPLETA and estado == ESTADO_ACTIVO else CERTEZA_MEDIA
+        certeza = (
+            CERTEZA_ALTA
+            if cobertura == COBERTURA_COMPLETA and estado == ESTADO_ACTIVO and not evidencia.existe_brecha_de_medicion
+            else CERTEZA_MEDIA
+        )
         # Si hay brechas o estados no activos, no es "cero"/penalizable por bajo
         # uso extremo más allá de lo observado; la positividad sigue siendo real.
         return (CLASIFICACION_USO_POSITIVO, certeza, "uso_positivo_confirmado", False)
@@ -208,13 +212,15 @@ def calcular_puntaje_aprovechamiento(evidencia: EvidenciaUsoVentana) -> Resultad
             rango = max(1, UMBRAL_APROVECHAMIENTO_NORMAL_MS - UMBRAL_APROVECHAMIENTO_BAJO_MS)
             proporcion = tramo / rango
             puntaje = 50 + int(round(50 * proporcion))
-        # Bajo uso comprobado solo cuando hay evidencia completa/activa y al
-        # menos 1 minuto entero observado; duraciones sub-minuto (p.ej. 30 s)
-        # son uso positivo confirmado pero no deben disparar reducción automática.
+        # Bajo uso comprobado solo cuando hay evidencia completa/activa, sin
+        # brechas de medición, y al menos 1 minuto entero observado; duraciones
+        # sub-minuto (p.ej. 30 s) son uso positivo confirmado pero no deben
+        # disparar reducción automática.
         permite_penalizacion = (
             60_000 <= duracion_ms < UMBRAL_APROVECHAMIENTO_BAJO_MS
             and cobertura == COBERTURA_COMPLETA
             and certeza == CERTEZA_ALTA
+            and not evidencia.existe_brecha_de_medicion
         )
         if permite_penalizacion:
             motivo = MOTIVO_BAJO_USO_COMPROBADO
