@@ -65,7 +65,7 @@ export interface ConfirmarRetiroModalProps {
 | Escenario | Condición | Comportamiento en UI | Estado de Datos |
 | :--- | :--- | :--- | :--- |
 | **Cancelar en Diálogo** | Clic en `btn-cancelar-retiro` | Modal se cierra inmediatamente. | Sin llamadas HTTP. Suscripción conservada en detalle y listado. |
-| **Éxito DELETE (204)** | Petición completada | Modal se cierra y navega a `HomeScreen`. Foco recarga listado. | Suscripción retirada del panel y recalculados los totales. |
+| **Éxito DELETE (204)** | Petición completada | Modal se cierra y desapila con `popTo('HomeScreen')`. Foco recarga listado. | Suscripción retirada del panel y recalculados los totales. |
 | **Fallo API (403/404/500)** | Error retornado por servidor | Modal permanece visible mostrando `error-retiro` con rol `alert`. Botones se rehabilitan. | No navega. Pantalla de detalle se conserva íntegra. |
 | **Fallo de Red / Desconexión**| Excepción de red / timeout | Muestra alerta accesible de conexión en `error-retiro`. Botones se rehabilitan. | No navega. Permite reintentar o cancelar. |
 | **Doble Clic Rápido** | Pulsación concurrente | Candado `eliminandoRef` y `isDeleting` bloquea el segundo clic. | Exactamente un único `DELETE` enviado al backend. |
@@ -78,6 +78,8 @@ export interface ConfirmarRetiroModalProps {
   `SuscripcionDetalleScreen` expone:
   - `onEliminarSuscripcion?: (id: string) => Promise<void>` (por defecto `eliminarSuscripcion` de `@ojoalgasto/shared`).
   - `onRetiroExitoso?: (id: string) => void`.
+- **Navegación limpia con `popTo` (P2):**
+  Al completar el retiro, se utiliza `(navigation as any).popTo('HomeScreen')` para vaciar las pantallas intermedias del stack (`SuscripcionDetalle` y cualquier `SuscripcionEditar` anterior), impidiendo que al volver atrás reaparezca la entidad eliminada.
 - **Conciliación con `HomeScreen`:**
   El listener `navigation.addListener('focus', ...)` en `HomeScreen` garantiza que al volver tras el retiro, la lista se actualice directamente contra la fuente de verdad del backend.
 

@@ -97,18 +97,14 @@ export function calcularPatch(
     patch.fecha_proximo_cobro = datos.fechaDeCobro;
   }
 
-  const eraPrueba = original.estado === 'prueba';
-  if (datos.enPrueba !== eraPrueba) {
-    if (datos.enPrueba) {
-      patch.estado = 'prueba';
-      if (datos.finPrueba) {
-        patch.fin_prueba = datos.finPrueba;
-      }
-    } else {
-      patch.estado = 'activo';
-      patch.fin_prueba = null as any;
-    }
-  } else if (datos.enPrueba && datos.finPrueba !== (original.fin_prueba ?? '')) {
+  // Solo si la suscripción original está en prueba, permite actualizar la fecha fin_prueba.
+  // IMPORTANTE: Nunca se envía estado en el PATCH porque services/subscriptions/app/views.py:1081-1093
+  // prohíbe modificaciones directas de estado vía PATCH y responde 400.
+  if (
+    original.estado === 'prueba' &&
+    datos.finPrueba &&
+    datos.finPrueba !== (original.fin_prueba ?? '')
+  ) {
     patch.fin_prueba = datos.finPrueba;
   }
 
@@ -195,11 +191,21 @@ export function EditarSuscripcionFormView({
   onCambiosSinGuardar,
   testID = 'screen-suscripcion-editar',
 }: EditarSuscripcionFormViewProps) {
+  const [prevId, setPrevId] = useState(suscripcion.id);
   const [formData, setFormData] = useState<EditarSuscripcionFormData>(() =>
     aFormulario(suscripcion),
   );
   // Estado inicial inmutable contra el cual contrastar cambios (SE-31 / conservación)
-  const [inicial] = useState<EditarSuscripcionFormData>(() => aFormulario(suscripcion));
+  const [inicial, setInicial] = useState<EditarSuscripcionFormData>(() =>
+    aFormulario(suscripcion),
+  );
+
+  if (suscripcion.id !== prevId) {
+    setPrevId(suscripcion.id);
+    const nuevo = aFormulario(suscripcion);
+    setFormData(nuevo);
+    setInicial(nuevo);
+  }
 
   const hayCambios = useMemo(() => !mismosDatos(formData, inicial), [formData, inicial]);
 
@@ -619,28 +625,16 @@ export function EditarSuscripcionFormView({
               )}
             </View>
 
-            {/* Checkbox: Período de prueba */}
-            <Pressable
-              testID="checkbox-en-prueba"
-              accessibilityRole="checkbox"
-              accessibilityState={{ checked: formData.enPrueba }}
-              accessibilityLabel="Está en período de prueba gratis"
-              disabled={isSaving}
-              style={styles.casillaFila}
-              onPress={() => handleChange('enPrueba', !formData.enPrueba)}
-            >
-              <View
-                style={[
-                  styles.checkbox,
-                  formData.enPrueba && styles.checkboxActivo,
-                ]}
-              >
-                {formData.enPrueba && <Text style={styles.checkboxCheck}>✓</Text>}
+            {/* Si la suscripción original está en período de prueba, permite ajustar la fecha de fin de prueba */}
+            {formData.enPrueba && (
+              <View style={styles.formGroup}>
+                <View testID="indicador-en-prueba" style={styles.casillaFila}>
+                  <Text style={styles.casillaTexto}>
+                    Suscripción en período de prueba gratis
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.casillaTexto}>
-                Está en período de prueba gratis
-              </Text>
-            </Pressable>
+            )}
 
             {/* Campo condicional: Fin de prueba */}
             {formData.enPrueba && (
@@ -878,8 +872,13 @@ export default function SuscripcionEditarScreen({
       const actualizada = await onActualizarSuscripcion(suscripcionActual.id, patch);
       onExito?.(actualizada);
 
-      // Conciliar y navegar al detalle con la suscripción confirmada (Criterio 2)
-      if (navigation?.navigate) {
+      // Conciliar y volver al detalle existente con la suscripción confirmada (React Navigation 7 popTo)
+      if (typeof (navigation as any)?.popTo === 'function') {
+        (navigation as any).popTo('SuscripcionDetalle', {
+          id: actualizada.id,
+          suscripcion: actualizada,
+        });
+      } else if (navigation?.navigate) {
         navigation.navigate('SuscripcionDetalle', {
           id: actualizada.id,
           suscripcion: actualizada,

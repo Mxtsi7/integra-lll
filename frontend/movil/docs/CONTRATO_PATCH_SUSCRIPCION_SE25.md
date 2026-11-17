@@ -58,18 +58,14 @@ export function calcularPatch(
     patch.fecha_proximo_cobro = datos.fechaDeCobro;
   }
 
-  const eraPrueba = original.estado === 'prueba';
-  if (datos.enPrueba !== eraPrueba) {
-    if (datos.enPrueba) {
-      patch.estado = 'prueba';
-      if (datos.finPrueba) {
-        patch.fin_prueba = datos.finPrueba;
-      }
-    } else {
-      patch.estado = 'activo';
-      patch.fin_prueba = null as any;
-    }
-  } else if (datos.enPrueba && datos.finPrueba !== (original.fin_prueba ?? '')) {
+  // Solo si la suscripción original está en prueba, permite actualizar la fecha fin_prueba.
+  // IMPORTANTE: Nunca se envía estado en el PATCH porque services/subscriptions/app/views.py:1081-1093
+  // prohíbe modificaciones directas de estado vía PATCH y responde 400.
+  if (
+    original.estado === 'prueba' &&
+    datos.finPrueba &&
+    datos.finPrueba !== (original.fin_prueba ?? '')
+  ) {
     patch.fin_prueba = datos.finPrueba;
   }
 
@@ -80,18 +76,25 @@ export function calcularPatch(
 ### Garantía Contractual:
 - Si el usuario modifica exclusivamente el monto (ej. $5.990 \to \$7.990$), el body del PATCH es `{ monto: 7990 }`.
 - No viajan `nombre`, `moneda`, `categoria` ni ningún otro campo inalterado. El backend conserva sus valores previos intactos.
+- **Resolución P2:** Bajo ninguna circunstancia se envía el campo `estado` en el PATCH. El backend rechaza modificaciones directas de estado vía PATCH (HTTP 400). Si la suscripción ya estaba en prueba, se permite ajustar `fin_prueba` sin mutar `estado`.
 
 ---
 
 ## 3. Conciliación entre Pantalla de Detalle y Listado
 
-### 3.1. Retorno y Navegación tras Éxito
+### 3.1. Retorno y Navegación tras Éxito (React Navigation 7 `popTo`)
 Al resolver `actualizarSuscripcion` con éxito:
 ```typescript
 const actualizada = await onActualizarSuscripcion(suscripcionActual.id, patch);
 onExito?.(actualizada);
 
-if (navigation?.navigate) {
+// Conciliar y volver al detalle existente con la suscripción confirmada (React Navigation 7 popTo)
+if (typeof (navigation as any)?.popTo === 'function') {
+  (navigation as any).popTo('SuscripcionDetalle', {
+    id: actualizada.id,
+    suscripcion: actualizada,
+  });
+} else if (navigation?.navigate) {
   navigation.navigate('SuscripcionDetalle', {
     id: actualizada.id,
     suscripcion: actualizada,
@@ -100,6 +103,8 @@ if (navigation?.navigate) {
   navigation.goBack();
 }
 ```
+
+**Resolución P2 (Stack Navigation):** `navigation.popTo('SuscripcionDetalle', ...)` desapila la pantalla de edición (`SuscripcionEditarScreen`) y transfiere la entidad actualizada directamente a la pantalla de detalle preexistente. Al presionar "Volver" desde el detalle, se regresa directo a `HomeScreen`, sin pantallas "zombie" de edición en la pila.
 
 ### 3.2. Sincronización en `SuscripcionDetalleScreen`
 1. **Inmediata:** Si recibe `route.params.suscripcion`, conmuta su estado a `listo` con la nueva entidad.

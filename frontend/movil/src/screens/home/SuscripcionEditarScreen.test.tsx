@@ -202,10 +202,11 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
       expect(await screen.findByText('Esa fecha no existe.')).toBeTruthy();
     });
 
-    it('fin_prueba es opcional cuando enPrueba está inactivo, pero obligatorio y fecha real cuando está activo', async () => {
+    it('muestra fin_prueba y valida formato real cuando la suscripción original está en prueba', async () => {
       const onSubmit = vi.fn();
 
-      render(
+      // Caso 1: Suscripción en estado activo (no tiene fin_prueba ni indicador de prueba)
+      const { rerender } = render(
         <EditarSuscripcionFormView
           suscripcion={SUSCRIPCION_BASE}
           catalogos={CATALOGO_MOCK}
@@ -213,18 +214,22 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
         />,
       );
 
-      // Estando sin prueba, no hay input-fin-prueba y se puede guardar
       expect(screen.queryByTestId('input-fin-prueba')).toBeNull();
+      expect(screen.queryByTestId('indicador-en-prueba')).toBeNull();
       fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
       expect(onSubmit).toHaveBeenCalledTimes(1);
 
-      // Activar prueba
-      fireEvent.click(screen.getByTestId('checkbox-en-prueba'));
-      expect(screen.getByTestId('input-fin-prueba')).toBeTruthy();
+      // Caso 2: Suscripción en estado prueba (muestra indicador y campo de fin de prueba)
+      rerender(
+        <EditarSuscripcionFormView
+          suscripcion={SUSCRIPCION_EN_PRUEBA}
+          catalogos={CATALOGO_MOCK}
+          onSubmit={onSubmit}
+        />,
+      );
 
-      // Dejar fin de prueba vacío e intentar guardar
-      fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
-      expect(await screen.findByText('Ingresa cuándo termina la prueba.')).toBeTruthy();
+      expect(screen.getByTestId('indicador-en-prueba')).toBeTruthy();
+      expect(screen.getByTestId('input-fin-prueba')).toBeTruthy();
 
       // Ingresar fecha imposible
       fireEvent.change(screen.getByTestId('input-fin-prueba'), {
@@ -502,29 +507,42 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
         expect('monto' in patch).toBe(false);
       });
 
-      it('conmuta a prueba gratis y asigna fin_prueba', () => {
-        const formData = {
+      it('nunca incluye el campo estado en el PATCH (evita 400 del backend)', () => {
+        const formDataActiva = {
           ...aFormulario(SUSCRIPCION_BASE),
-          enPrueba: true,
-          finPrueba: '2026-12-15',
+          nombre: 'Nuevo Nombre',
         };
-        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
-        expect(patch).toEqual({
-          estado: 'prueba',
-          fin_prueba: '2026-12-15',
-        });
+        const patchActiva = calcularPatch(formDataActiva, SUSCRIPCION_BASE);
+        expect('estado' in patchActiva).toBe(false);
+
+        const formDataPrueba = {
+          ...aFormulario(SUSCRIPCION_EN_PRUEBA),
+          finPrueba: '2026-12-25',
+        };
+        const patchPrueba = calcularPatch(formDataPrueba, SUSCRIPCION_EN_PRUEBA);
+        expect('estado' in patchPrueba).toBe(false);
       });
 
-      it('sale de prueba gratis y asigna estado activo con fin_prueba null', () => {
+      it('permite actualizar fin_prueba solo si la suscripción original está en prueba', () => {
         const formData = {
           ...aFormulario(SUSCRIPCION_EN_PRUEBA),
-          enPrueba: false,
+          finPrueba: '2026-12-25',
         };
         const patch = calcularPatch(formData, SUSCRIPCION_EN_PRUEBA);
         expect(patch).toEqual({
-          estado: 'activo',
-          fin_prueba: null,
+          fin_prueba: '2026-12-25',
         });
+        expect('estado' in patch).toBe(false);
+      });
+
+      it('no incluye fin_prueba si la suscripción original no está en prueba', () => {
+        const formData = {
+          ...aFormulario(SUSCRIPCION_BASE),
+          finPrueba: '2026-12-25',
+        };
+        const patch = calcularPatch(formData, SUSCRIPCION_BASE);
+        expect('fin_prueba' in patch).toBe(false);
+        expect('estado' in patch).toBe(false);
       });
 
       it('devuelve objeto vacío si no hubo modificaciones respecto a original', () => {
@@ -535,13 +553,14 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
     });
 
     describe('Criterio 2: Integración con actualizarSuscripcion y conciliación con Detalle', () => {
-      it('despacha PATCH con sólo los campos modificados y navega a SuscripcionDetalle', async () => {
+      it('despacha PATCH con sólo los campos modificados y navega a SuscripcionDetalle vía popTo', async () => {
         const subActualizada: Suscripcion = {
           ...SUSCRIPCION_BASE,
           monto: 7990,
         };
         const onActualizar = vi.fn().mockResolvedValue(subActualizada);
         const onExito = vi.fn();
+        const popTo = vi.fn();
         const navigate = vi.fn();
 
         render(
@@ -550,7 +569,7 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
             catalogos={CATALOGO_MOCK}
             onActualizarSuscripcion={onActualizar}
             onExito={onExito}
-            navigation={{ navigate } as any}
+            navigation={{ popTo, navigate } as any}
           />,
         );
 
@@ -568,7 +587,41 @@ describe('Formulario Móvil de Edición de Suscripción (SE-24)', () => {
         // Solo se envía el ID y { monto: 7990 }
         expect(onActualizar).toHaveBeenCalledWith('sub-100', { monto: 7990 });
         expect(onExito).toHaveBeenCalledWith(subActualizada);
-        // Navega a detalle con la suscripción confirmada
+        // Usa popTo para desapilar el formulario de edición y volver al detalle existente
+        expect(popTo).toHaveBeenCalledWith('SuscripcionDetalle', {
+          id: 'sub-100',
+          suscripcion: subActualizada,
+        });
+        expect(navigate).not.toHaveBeenCalled();
+      });
+
+      it('utiliza navigate como respaldo si navigation no implementa popTo', async () => {
+        const subActualizada: Suscripcion = {
+          ...SUSCRIPCION_BASE,
+          monto: 7990,
+        };
+        const onActualizar = vi.fn().mockResolvedValue(subActualizada);
+        const navigate = vi.fn();
+
+        render(
+          <SuscripcionEditarScreen
+            suscripcion={SUSCRIPCION_BASE}
+            catalogos={CATALOGO_MOCK}
+            onActualizarSuscripcion={onActualizar}
+            navigation={{ navigate } as any}
+          />,
+        );
+
+        fireEvent.change(screen.getByTestId('input-monto'), {
+          target: { value: '7990' },
+        });
+
+        fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+        await waitFor(() => {
+          expect(onActualizar).toHaveBeenCalledTimes(1);
+        });
+
         expect(navigate).toHaveBeenCalledWith('SuscripcionDetalle', {
           id: 'sub-100',
           suscripcion: subActualizada,

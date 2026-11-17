@@ -448,10 +448,12 @@ export default function SuscripcionDetalleScreen({
       await onEliminarSuscripcion(idParaEliminar);
       onRetiroExitoso?.(idParaEliminar);
       setMostrarModalRetiro(false);
-      if (navigation?.goBack) {
-        navigation.goBack();
+      if (typeof (navigation as any)?.popTo === 'function') {
+        (navigation as any).popTo('HomeScreen');
       } else if (navigation?.navigate) {
         navigation.navigate('HomeScreen');
+      } else if (navigation?.goBack) {
+        navigation.goBack();
       }
     } catch (err: unknown) {
       let mensaje = 'No pudimos retirar la suscripción. Revisa tu conexión e inténtalo de nuevo.';
