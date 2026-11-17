@@ -83,3 +83,12 @@ def test_http_conserva_datos_y_excluye_identidad_tenant():
         assert respuesta["fecha"] == candidato.fecha.isoformat()
         assert respuesta["evidencia"] == dict(candidato.evidencia)
         assert respuesta["aplicacion"] is None
+
+
+@pytest.mark.parametrize('importe', ['1E+3', '1E-7', '123.4500'])
+def test_decimal_se_serializa_en_formato_fijo(validador, importe):
+    from dataclasses import replace
+    _, candidatos = candidatos_de_ejemplo()
+    salida = replace(candidatos[0], importe=Decimal(importe)).como_json()
+    assert salida['importe'] == format(Decimal(importe), 'f')
+    validador.validate(salida)

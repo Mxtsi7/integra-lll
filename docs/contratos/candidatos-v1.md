@@ -74,3 +74,10 @@ importes numéricos, literales incompatibles y campos desconocidos.
 Pendientes de aceptación: Felipe/Seba (productores y procedencia), Chris
 (respuesta HTTP), Víctor (consumidor/evento) y Andrea (cuenta autorizada para
 validación real de correo). No se registran esas aceptaciones como obtenidas.
+
+
+### Representación decimal al serializar
+
+`Candidato.como_json()` convierte el Decimal a texto en formato fijo sin
+redondearlo: `Decimal("1E+3")` produce `"1000"` y `Decimal("1E-7")` produce
+`"0.0000001"`. Así mantiene precisión y cumple el patrón del esquema común.

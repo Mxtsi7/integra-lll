@@ -173,7 +173,7 @@ class Candidato:
             "servicio": self.servicio,
             "servicio_texto": self.servicio_texto,
             "servicio_resultado": self.servicio_resultado,
-            "importe": str(self.importe),
+            "importe": format(self.importe, "f"),
             "moneda": self.moneda,
             "fecha": self.fecha.isoformat(),
             "tipo_mensaje": self.tipo_mensaje,
