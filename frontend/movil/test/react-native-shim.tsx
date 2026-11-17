@@ -151,6 +151,8 @@ export const FlatList = React.forwardRef<HTMLDivElement, any>(
       initialNumToRender,
       maxToRenderPerBatch,
       windowSize,
+      refreshing,
+      onRefresh,
       ...props
     },
     ref
@@ -168,6 +170,16 @@ export const FlatList = React.forwardRef<HTMLDivElement, any>(
         ref={ref}
         {...props}
       >
+        {onRefresh ? (
+          <button
+            data-testid="flatlist-refresh-button"
+            type="button"
+            onClick={onRefresh}
+            style={{ display: 'none' }}
+          >
+            Refresh
+          </button>
+        ) : null}
         {ListHeaderComponent
           ? typeof ListHeaderComponent === 'function'
             ? React.createElement(ListHeaderComponent)

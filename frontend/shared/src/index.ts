@@ -13,6 +13,8 @@ export {
 } from './api/cliente';
 export {
   getSuscripciones,
+  getSuscripcionesPaginadas,
+  type SuscripcionesPaginadas,
   esOrdenSuscripciones,
   ORDENES_SUSCRIPCIONES,
   type ConsultaSuscripciones,
