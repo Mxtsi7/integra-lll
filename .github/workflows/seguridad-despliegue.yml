@@ -41,6 +41,19 @@ jobs:
           # Publicar AMQP solo en loopback del runner para la integración.
           printf 'services:\n  rabbitmq:\n    ports: ["127.0.0.1:5679:5672"]\n' > "$RUNNER_TEMP/rabbitmq-pruebas.yaml"
           docker compose -f docker-compose.yml -f "$RUNNER_TEMP/rabbitmq-pruebas.yaml" up -d --wait rabbitmq
+          # "Healthy" en el contenedor no garantiza que la app RabbitMQ esté lista
+          # para rabbitmqctl en el nodo; esperar explícitamente el arranque.
+          for intento in $(seq 1 30); do
+            if docker compose exec -T rabbitmq rabbitmqctl status >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$intento" -eq 30 ]; then
+              echo 'RabbitMQ no quedó listo para rabbitmqctl' >&2
+              docker compose exec -T rabbitmq rabbitmqctl status || true
+              exit 1
+            fi
+            sleep 2
+          done
           docker compose exec -T rabbitmq rabbitmqctl authenticate_user ojoalgasto pruebas-d11
           if docker compose exec -T rabbitmq rabbitmqctl authenticate_user guest guest; then
             echo 'guest sigue habilitado' >&2
