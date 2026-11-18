@@ -772,7 +772,9 @@ describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
       expect(screen.queryByTestId('opcion-moneda-EUR')).toBeNull();
 
       // Los predeterminados del catálogo se seleccionan automáticamente
-      expect(screen.getByTestId('opcion-categoria-transporte').getAttribute('aria-selected')).toBe('true');
+      await waitFor(() => {
+        expect(screen.getByTestId('opcion-categoria-transporte').getAttribute('aria-selected')).toBe('true');
+      });
 
       // Completar campos y guardar con la nueva opción
       fireEvent.change(screen.getByTestId('input-nombre'), {

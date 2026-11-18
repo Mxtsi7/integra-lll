@@ -39,6 +39,13 @@ export const styles = StyleSheet.create({
     letterSpacing: 0.5,
     fontWeight: '600',
   },
+  resumenEtiquetaParcial: {
+    fontSize: 12,
+    color: '#f59e0b',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: '600',
+  },
   resumenTotal: {
     fontSize: 20,
     fontWeight: '700',
@@ -140,5 +147,32 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     color: '#94a3b8',
     textAlign: 'right',
+  },
+  footerPaginacion: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    gap: 8,
+  },
+  botonCargarMas: {
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#38bdf8',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    minWidth: 160,
+    alignItems: 'center',
+  },
+  textoCargarMas: {
+    color: '#38bdf8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  contadorPaginacion: {
+    marginTop: 4,
+  },
+  contadorTexto: {
+    fontSize: 12,
+    color: '#64748b',
   },
 });
