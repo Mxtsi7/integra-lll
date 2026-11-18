@@ -373,3 +373,75 @@ it("no redirige ni muestra mensajes si se abandona la página antes de resolver 
     expect(redirigir).not.toHaveBeenCalled();
     expect(screen.queryByText(/No pudimos iniciar la reautorización/)).not.toBeInTheDocument();
   });
+it("desconectar otra cuenta mientras OAuth está pendiente no deja bloqueada la reautorización", async () => {
+    const gmailPendiente = cuenta({
+      id: "c-gmail",
+      proveedor: "gmail",
+      proveedor_legible: "Gmail",
+      cuenta_externa: "ana@gmail.com",
+      estado: "requiere_reautorizacion",
+      estado_legible: "Requiere reautorización",
+      necesita_reautorizacion: true,
+    });
+    const outlookActiva = cuenta({
+      id: "c-outlook",
+      proveedor: "outlook",
+      proveedor_legible: "Outlook",
+      cuenta_externa: "ana@outlook.com",
+      estado: "conectada",
+      estado_legible: "Conectada",
+    });
+    const outlookRevocada = cuenta({
+      ...outlookActiva,
+      estado: "desconectada",
+      estado_legible: "Desconectada",
+    });
+
+    let rechazarOAuth!: (err: unknown) => void;
+    const onReautorizar = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<string>((_res, rej) => {
+            rechazarOAuth = rej;
+          }),
+      )
+      .mockResolvedValueOnce("https://accounts.google.com/o/oauth2/v2/auth?client_id=nuevo");
+
+    const onDesconectar = vi.fn().mockResolvedValue(outlookRevocada);
+    const redirigir = vi.fn();
+
+    await montar({
+      cargarCuentas: async () => [gmailPendiente, outlookActiva],
+      onReautorizar,
+      onDesconectar,
+      redirigir,
+    });
+
+    // 1. Inicia reautorización en Gmail y queda pendiente.
+    const botonReautorizar = screen.getByRole("button", { name: "Volver a autorizar" });
+    fireEvent.click(botonReautorizar);
+    expect(botonReautorizar).toBeDisabled();
+
+    // 2. Mientras OAuth sigue pendiente, desconecta Outlook.
+    const itemOutlook = screen.getByText("ana@outlook.com").closest("li")!;
+    fireEvent.click(within(itemOutlook).getByRole("button", { name: "Desconectar" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar desconexión" }));
+    });
+    expect(onDesconectar).toHaveBeenCalledWith("c-outlook");
+
+    // 3. Rechaza la petición OAuth pendiente de Gmail: debe liberar el botón y permitir reintentar.
+    await act(async () => {
+      rechazarOAuth(new Error("Fallo temporal"));
+    });
+
+    expect(screen.getByRole("button", { name: "Volver a autorizar" })).not.toBeDisabled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Volver a autorizar" }));
+    });
+
+    expect(onReautorizar).toHaveBeenCalledTimes(2);
+    expect(redirigir).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?client_id=nuevo");
+  });

@@ -50,21 +50,24 @@ export function CuentasConectadasPage({
   // Evita que una respuesta tardía de GET pise una cuenta recién revocada por DELETE.
   const revocadasRef = useRef(new Map<string, CuentaConectada>());
 
-  // Control de montaje y generación de operaciones asíncronas (evita redirecciones/toasts tardíos).
+  // Control independiente de montaje y generación por tipo de operación.
   const montadoRef = useRef(true);
-  const generacionOpRef = useRef(0);
+  const generacionDesconexionRef = useRef(0);
+  const generacionReautorizacionRef = useRef(0);
 
   useEffect(() => {
     montadoRef.current = true;
     return () => {
       montadoRef.current = false;
-      generacionOpRef.current += 1;
+      generacionDesconexionRef.current += 1;
+      generacionReautorizacionRef.current += 1;
     };
   }, []);
 
   // Si cambia la sesión (logout / login de otra cuenta), invalida operaciones pendientes.
   useEffect(() => {
-    generacionOpRef.current += 1;
+    generacionDesconexionRef.current += 1;
+    generacionReautorizacionRef.current += 1;
     revocadasRef.current.clear();
     setReautorizandoId(null);
     setCuentaADesconectar(null);
@@ -115,7 +118,7 @@ export function CuentasConectadasPage({
   async function confirmarDesconexion() {
     if (!cuentaADesconectar || !onDesconectar || desconectando) return;
     const sesionAlIniciar = capturarSesion();
-    const generacion = ++generacionOpRef.current;
+    const generacion = ++generacionDesconexionRef.current;
 
     setDesconectando(true);
     setErrorDesconexion('');
@@ -123,7 +126,7 @@ export function CuentasConectadasPage({
       const actualizada = await onDesconectar(cuentaADesconectar.id);
       if (
         !montadoRef.current ||
-        generacionOpRef.current !== generacion ||
+        generacionDesconexionRef.current !== generacion ||
         capturarSesion() !== sesionAlIniciar
       ) {
         return;
@@ -141,7 +144,7 @@ export function CuentasConectadasPage({
     } catch (err: unknown) {
       if (
         !montadoRef.current ||
-        generacionOpRef.current !== generacion ||
+        generacionDesconexionRef.current !== generacion ||
         capturarSesion() !== sesionAlIniciar
       ) {
         return;
@@ -152,7 +155,7 @@ export function CuentasConectadasPage({
           : 'No pudimos desconectar la cuenta. Inténtalo de nuevo.',
       );
     } finally {
-      if (montadoRef.current && generacionOpRef.current === generacion) {
+      if (montadoRef.current && generacionDesconexionRef.current === generacion) {
         setDesconectando(false);
       }
     }
@@ -163,15 +166,16 @@ export function CuentasConectadasPage({
     if (cuenta.proveedor !== 'gmail' && cuenta.proveedor !== 'outlook') return;
 
     const sesionAlIniciar = capturarSesion();
-    const generacion = ++generacionOpRef.current;
+    const generacion = ++generacionReautorizacionRef.current;
 
     setReautorizandoId(cuenta.id);
     try {
       const url = await onReautorizar(cuenta.proveedor);
       if (
         !montadoRef.current ||
-        generacionOpRef.current !== generacion ||
-        capturarSesion() !== sesionAlIniciar
+        generacionReautorizacionRef.current !== generacion ||
+        capturarSesion() !== sesionAlIniciar ||
+        revocadasRef.current.has(cuenta.id)
       ) {
         return;
       }
@@ -183,14 +187,14 @@ export function CuentasConectadasPage({
     } catch {
       if (
         !montadoRef.current ||
-        generacionOpRef.current !== generacion ||
+        generacionReautorizacionRef.current !== generacion ||
         capturarSesion() !== sesionAlIniciar
       ) {
         return;
       }
       toast.error('No pudimos iniciar la reautorización. Intenta de nuevo.');
     } finally {
-      if (montadoRef.current && generacionOpRef.current === generacion) {
+      if (montadoRef.current && generacionReautorizacionRef.current === generacion) {
         setReautorizandoId(null);
       }
     }
