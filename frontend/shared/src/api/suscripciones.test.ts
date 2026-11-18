@@ -4,6 +4,7 @@ import {
   crearSuscripcion,
   getSuscripcion,
   getSuscripciones,
+  getSuscripcionesPaginadas,
   getUsos,
   registrarUso,
   type OrdenSuscripciones,
@@ -565,5 +566,47 @@ describe("contrato real de VI-10: lo que devuelve la API y lo que entiende la we
     expect(validarUso({ minutos: "44641", fecha: "" }, hoy).minutos).toBe(VI10.errores.minutosMaximo.minutos[0]);
     // Una fecha "" la API la rechaza: por eso registrarUso no la manda.
     expect(VI10.errores.fechaVacia).toHaveProperty("fecha");
+  });
+
+  describe("getSuscripcionesPaginadas (SE-19)", () => {
+    it("obtiene una única página tipada sin recorrer en bucle", async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          count: 15,
+          next: "http://api.test/api/suscripciones/?page=2",
+          previous: null,
+          results: RESPUESTA_REAL.results,
+        }),
+      });
+      vi.stubGlobal("fetch", mockFetch);
+
+      const res = await getSuscripcionesPaginadas({ estado: "activo", fecha_cobro: "2026-10-10" }, 1);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("/suscripciones/?page=1");
+      expect(url).toContain("estado=activo");
+      expect(url).toContain("fecha_cobro=2026-10-10");
+
+      expect(res.count).toBe(15);
+      expect(res.next).toBe("http://api.test/api/suscripciones/?page=2");
+      expect(res.previous).toBeNull();
+      expect(res.results).toHaveLength(2);
+      expect(typeof res.results[0].monto).toBe("number");
+      expect(res.results[0].monto).toBe(5990);
+    });
+
+    it("lanza RangeError sin consultar la API si el orden no está permitido", async () => {
+      const mockFetch = vi.fn();
+      vi.stubGlobal("fetch", mockFetch);
+
+      await expect(
+        getSuscripcionesPaginadas({ orden: "orden_invalido" as any }, 1),
+      ).rejects.toThrow(RangeError);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
   });
 });
