@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from app.models import EventoUsoRecibido, Subscription
 from .validacion import ErrorEventoUso
+from .proyeccion import proyectar
 
 NOMBRE_RESTRICCION_CLAVE = 'uso_rx_evento_clave_unica'
 
@@ -53,10 +54,15 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
                 **valores_clave,
                 suscripcion=destino,
                 cuerpo=evento.cuerpo,
+                inicio=evento.inicio,
+                fin=evento.fin,
                 fecha_local=evento.fecha,
                 correlation_id=correlacion,
                 proyeccion_pendiente=True,
             )
+            proyectar(destino, usuario_id, evento.fecha, correlacion)
+            recibido.proyeccion_pendiente = False
+            recibido.save(update_fields=('proyeccion_pendiente', 'actualizado_en'))
     except IntegrityError as error:
         diagnostico = getattr(getattr(error.__cause__, 'diag', None), 'constraint_name', None)
         if diagnostico != NOMBRE_RESTRICCION_CLAVE:
