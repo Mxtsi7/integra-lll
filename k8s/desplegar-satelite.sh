@@ -173,8 +173,13 @@ echo "── esperando al consumidor ──"
 #
 # Ahora se duerme PAUSA_CONSUMIDOR entre consultas y se abandona al pasar
 # PLAZO_CONSUMIDOR en total. Si el plazo vence, el núcleo no se toca.
+#
+# El `+ 1` es porque `date +%s` cuenta segundos enteros: partiendo en x,9 s,
+# `vence` quedaba en x+4 y el guion se rendía con poco más de 3 segundos de
+# los 4 pedidos. Con el `+ 1` espera el plazo entero, y como mucho uno más.
+# Lo delató una corrida de la CI que midió 3,26 s.
 escuchando=0
-vence=$(( $(date +%s) + PLAZO_CONSUMIDOR ))
+vence=$(( $(date +%s) + PLAZO_CONSUMIDOR + 1 ))
 while :; do
   if kubectl logs "deployment/$SERVICIO" -n "$NS_SATELITE" -c consumidor --tail=50 2>/dev/null | grep -q "Escuchando "; then
     escuchando=1
