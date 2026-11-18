@@ -11,6 +11,7 @@ import {
   adaptadorStorageSincrono,
   hidratarSesionSegura,
   guardarTokensSeguros,
+  guardarDatoSeguro,
   inicializarStorageSeguro,
   limpiarSesionSegura,
   obtenerTokensSeguros,
@@ -140,6 +141,7 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
       };
 
       await guardarTokensSeguros(tokens);
+      await guardarDatoSeguro(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO, '{"sesion":[{"paquete":"com.ejemplo.app"}]}');
       expect(obtenerAccessToken()).toBe(tokens.access_token);
 
       // Reinicio simulado e hidratación
@@ -168,6 +170,7 @@ describe('Almacenamiento seguro y sesión móvil (SE-08)', () => {
 
       // Ejecutar limpieza de logout
       await limpiarSesionSegura();
+      expect(almacenamientoSimulado.has(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO)).toBe(false);
 
       // 1. Memoria síncrona vacía
       expect(obtenerAccessToken()).toBeNull();
