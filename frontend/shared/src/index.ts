@@ -13,6 +13,8 @@ export {
 } from './api/cliente';
 export {
   getSuscripciones,
+  getSuscripcionesPaginadas,
+  type SuscripcionesPaginadas,
   esOrdenSuscripciones,
   ORDENES_SUSCRIPCIONES,
   type ConsultaSuscripciones,
@@ -27,6 +29,7 @@ export {
   reactivarSuscripcion,
   registrarUso,
   getUsos,
+  getHistorialUso,
   type RegistroUso,
   type SuscripcionPayload,
   type SuscripcionPayloadParcial,
@@ -41,6 +44,7 @@ export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/asistente';
+export * from './api/candidatos';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';
