@@ -97,3 +97,16 @@ export function nombresDiasSemana(largo: 'short' | 'long'): string[] {
 export function conMayuscula(texto: string): string {
   return texto.charAt(0).toUpperCase() + texto.slice(1);
 }
+
+/**
+ * Formatea una cantidad de minutos en texto legible y conciso:
+ * 45 -> "45 min"
+ * 60 -> "1 h"
+ * 90 -> "1 h 30 min"
+ */
+export function formatearDuracionMinutos(minutos: number): string {
+  if (minutos < 60) return `${minutos} min`;
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto === 0 ? `${horas} h` : `${horas} h ${resto} min`;
+}

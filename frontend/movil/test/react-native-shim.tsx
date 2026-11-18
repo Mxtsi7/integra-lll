@@ -42,6 +42,39 @@ export const KeyboardAvoidingView = React.forwardRef<HTMLDivElement, any>(
 );
 KeyboardAvoidingView.displayName = 'KeyboardAvoidingView';
 
+export const Modal = React.forwardRef<HTMLDivElement, any>(
+  ({ testID, visible = true, children, transparent, animationType, onRequestClose, ...props }, ref) => {
+    if (!visible) return null;
+    return (
+      <div
+        data-testid={testID}
+        role="dialog"
+        aria-modal="true"
+        ref={ref}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && onRequestClose) {
+            onRequestClose();
+          }
+        }}
+        {...props}
+      >
+        {onRequestClose ? (
+          <button
+            data-testid={testID ? `${testID}-request-close` : 'modal-request-close'}
+            type="button"
+            onClick={onRequestClose}
+            style={{ display: 'none' }}
+          >
+            Request Close
+          </button>
+        ) : null}
+        {children}
+      </div>
+    );
+  }
+);
+Modal.displayName = 'Modal';
+
 export const Text = React.forwardRef<HTMLSpanElement, any>(
   ({ testID, children, style, accessibilityRole, numberOfLines, ellipsizeMode, ...props }, ref) => (
     <span
@@ -133,6 +166,8 @@ export const FlatList = React.forwardRef<HTMLDivElement, any>(
       initialNumToRender,
       maxToRenderPerBatch,
       windowSize,
+      refreshing,
+      onRefresh,
       ...props
     },
     ref
@@ -150,6 +185,16 @@ export const FlatList = React.forwardRef<HTMLDivElement, any>(
         ref={ref}
         {...props}
       >
+        {onRefresh ? (
+          <button
+            data-testid="flatlist-refresh-button"
+            type="button"
+            onClick={onRefresh}
+            style={{ display: 'none' }}
+          >
+            Refresh
+          </button>
+        ) : null}
         {ListHeaderComponent
           ? typeof ListHeaderComponent === 'function'
             ? React.createElement(ListHeaderComponent)
@@ -349,4 +394,5 @@ export default {
   Keyboard,
   TextInput,
   FlatList,
+  Modal,
 };
