@@ -3,13 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { StrictMode } from "react";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ErrorDeApi, type CuentaConectada } from "@ojoalgasto/shared";
-import { AuthProvider } from "../context/AuthContext";
 import { ToastProvider } from "../context/ToastContext";
 import { CuentasConectadasPage, type CuentasConectadasPageProps } from "./CuentasConectadasPage";
-
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { AuthProvider, useAuth } from "../context/AuthContext";
 // Forma de CuentaConectadaSerializer (services/connectors). Datos solo de
 // prueba: la página nunca los inventa, los recibe por `cargarCuentas`.
 function cuenta(extra: Partial<CuentaConectada>): CuentaConectada {
@@ -237,4 +236,140 @@ it("desconecta con confirmación ejecutando DELETE una sola vez y actualizando e
 
     expect(onReautorizar).toHaveBeenCalledWith("gmail");
     expect(redirigir).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+  });
+it("no redirige ni muestra mensajes si se abandona la página antes de resolver o rechazar la reautorización", async () => {
+    const pendiente = cuenta({
+      id: "c2",
+      estado: "requiere_reautorizacion",
+      estado_legible: "Requiere reautorización",
+      necesita_reautorizacion: true,
+    });
+    let resolver!: (url: string) => void;
+    const onReautorizar = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolver = res;
+        }),
+    );
+    const redirigir = vi.fn();
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/cuentas"]}>
+          <ToastProvider>
+            <AuthProvider>
+              <Routes>
+                <Route
+                  path="/cuentas"
+                  element={
+                    <CuentasConectadasPage
+                      cargarCuentas={async () => [pendiente]}
+                      onReautorizar={onReautorizar}
+                      redirigir={redirigir}
+                    />
+                  }
+                />
+                <Route path="/dashboard" element={<div>Panel principal</div>} />
+              </Routes>
+            </AuthProvider>
+          </ToastProvider>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    await act(async () => {});
+
+    fireEvent.click(screen.getByRole("button", { name: "Volver a autorizar" }));
+    expect(onReautorizar).toHaveBeenCalledTimes(1);
+
+    // El usuario navega fuera de Cuentas mientras onReautorizar sigue pendiente.
+    fireEvent.click(screen.getByRole("link", { name: "Panel" }));
+    expect(screen.getByText("Panel principal")).toBeInTheDocument();
+
+    // La respuesta antigua llega después de abandonar la página.
+    await act(async () => {
+      resolver("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+    });
+
+    expect(redirigir).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("invalida la reautorización pendiente de la sesión A cuando cierra sesión y entra la sesión B", async () => {
+    const jwt = (sub: string) => {
+      const b64 = (o: unknown) =>
+        btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      return `${b64({ alg: "HS256" })}.${b64({ sub, exp: Math.floor((Date.now() + 30 * 60_000) / 1000) })}.firma`;
+    };
+
+    const pendienteA = cuenta({
+      id: "c-a",
+      cuenta_externa: "usuario.a@gmail.com",
+      estado: "requiere_reautorizacion",
+      estado_legible: "Requiere reautorización",
+      necesita_reautorizacion: true,
+    });
+    const conectadaB = cuenta({
+      id: "c-b",
+      cuenta_externa: "usuario.b@gmail.com",
+      estado: "conectada",
+      estado_legible: "Conectada",
+    });
+
+    let resolverA!: (url: string) => void;
+    const onReautorizar = vi.fn().mockImplementation(
+      () =>
+        new Promise<string>((res) => {
+          resolverA = res;
+        }),
+    );
+    const redirigir = vi.fn();
+
+    let apiAuth!: ReturnType<typeof useAuth>;
+    function CapturadorAuth() {
+      apiAuth = useAuth();
+      return null;
+    }
+
+    let listaActual = [pendienteA];
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={["/cuentas"]}>
+          <ToastProvider>
+            <AuthProvider>
+              <CapturadorAuth />
+              <CuentasConectadasPage
+                cargarCuentas={async () => listaActual}
+                onReautorizar={onReautorizar}
+                redirigir={redirigir}
+              />
+            </AuthProvider>
+          </ToastProvider>
+        </MemoryRouter>
+      </StrictMode>,
+    );
+
+    await act(async () => {
+      apiAuth.iniciarSesion({ access_token: jwt("7"), refresh_token: jwt("7-r") });
+    });
+
+    // Sesión A inicia reautorización y queda pendiente.
+    fireEvent.click(screen.getByRole("button", { name: "Volver a autorizar" }));
+    expect(onReautorizar).toHaveBeenCalledTimes(1);
+
+    // Cierre de sesión A → entrada sesión B.
+    listaActual = [conectadaB];
+    await act(async () => {
+      apiAuth.cerrarSesionLocal();
+      apiAuth.iniciarSesion({ access_token: jwt("8"), refresh_token: jwt("8-r") });
+    });
+
+    expect(screen.getByText("usuario.b@gmail.com")).toBeInTheDocument();
+
+    // Llega la respuesta tardía de A: no debe redirigir ni mostrar toasts en B.
+    await act(async () => {
+      resolverA("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+    });
+
+    expect(redirigir).not.toHaveBeenCalled();
+    expect(screen.queryByText(/No pudimos iniciar la reautorización/)).not.toBeInTheDocument();
   });

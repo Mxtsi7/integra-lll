@@ -11,6 +11,7 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Modal } from '../components/ui/Modal';
 import { Seccion } from '../components/ui/Seccion';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 
@@ -32,6 +33,7 @@ export function CuentasConectadasPage({
   redirigir = (url) => window.location.assign(url),
 }: CuentasConectadasPageProps) {
   const toast = useToast();
+  const { sesion, capturarSesion } = useAuth();
   const [estado, setEstado] = useState<EstadoListaCuentas>(
     cargarCuentas ? { tipo: 'cargando' } : { tipo: 'no_disponible' },
   );
@@ -48,6 +50,28 @@ export function CuentasConectadasPage({
   // Evita que una respuesta tardía de GET pise una cuenta recién revocada por DELETE.
   const revocadasRef = useRef(new Map<string, CuentaConectada>());
 
+  // Control de montaje y generación de operaciones asíncronas (evita redirecciones/toasts tardíos).
+  const montadoRef = useRef(true);
+  const generacionOpRef = useRef(0);
+
+  useEffect(() => {
+    montadoRef.current = true;
+    return () => {
+      montadoRef.current = false;
+      generacionOpRef.current += 1;
+    };
+  }, []);
+
+  // Si cambia la sesión (logout / login de otra cuenta), invalida operaciones pendientes.
+  useEffect(() => {
+    generacionOpRef.current += 1;
+    revocadasRef.current.clear();
+    setReautorizandoId(null);
+    setCuentaADesconectar(null);
+    setDesconectando(false);
+    setErrorDesconexion('');
+  }, [sesion]);
+
   useEffect(() => {
     if (!cargarCuentas) {
       setEstado({ tipo: 'no_disponible' });
@@ -57,7 +81,7 @@ export function CuentasConectadasPage({
     setEstado({ tipo: 'cargando' });
     cargarCuentas()
       .then((cuentas: unknown) => {
-        if (!vigente) return;
+        if (!vigente || !montadoRef.current) return;
         if (!Array.isArray(cuentas)) {
           setEstado({ tipo: 'error', mensaje: MENSAJE_ERROR });
           return;
@@ -68,14 +92,14 @@ export function CuentasConectadasPage({
         setEstado({ tipo: 'listo', cuentas: consolidadas });
       })
       .catch((err: unknown) => {
-        if (vigente) {
+        if (vigente && montadoRef.current) {
           setEstado({ tipo: 'error', mensaje: err instanceof TypeError ? MENSAJE_SIN_RED : MENSAJE_ERROR });
         }
       });
     return () => {
       vigente = false;
     };
-  }, [cargarCuentas, intento]);
+  }, [cargarCuentas, intento, sesion]);
 
   function abrirModalDesconexion(cuenta: CuentaConectada) {
     setErrorDesconexion('');
@@ -90,10 +114,20 @@ export function CuentasConectadasPage({
 
   async function confirmarDesconexion() {
     if (!cuentaADesconectar || !onDesconectar || desconectando) return;
+    const sesionAlIniciar = capturarSesion();
+    const generacion = ++generacionOpRef.current;
+
     setDesconectando(true);
     setErrorDesconexion('');
     try {
       const actualizada = await onDesconectar(cuentaADesconectar.id);
+      if (
+        !montadoRef.current ||
+        generacionOpRef.current !== generacion ||
+        capturarSesion() !== sesionAlIniciar
+      ) {
+        return;
+      }
       revocadasRef.current.set(actualizada.id, actualizada);
       setEstado((previo) => {
         if (previo.tipo !== 'listo') return previo;
@@ -105,13 +139,22 @@ export function CuentasConectadasPage({
       setCuentaADesconectar(null);
       toast.exito('Cuenta desconectada correctamente.');
     } catch (err: unknown) {
+      if (
+        !montadoRef.current ||
+        generacionOpRef.current !== generacion ||
+        capturarSesion() !== sesionAlIniciar
+      ) {
+        return;
+      }
       setErrorDesconexion(
         err instanceof TypeError
           ? MENSAJE_SIN_RED
           : 'No pudimos desconectar la cuenta. Inténtalo de nuevo.',
       );
     } finally {
-      setDesconectando(false);
+      if (montadoRef.current && generacionOpRef.current === generacion) {
+        setDesconectando(false);
+      }
     }
   }
 
@@ -119,18 +162,37 @@ export function CuentasConectadasPage({
     if (!onReautorizar || reautorizandoId !== null) return;
     if (cuenta.proveedor !== 'gmail' && cuenta.proveedor !== 'outlook') return;
 
+    const sesionAlIniciar = capturarSesion();
+    const generacion = ++generacionOpRef.current;
+
     setReautorizandoId(cuenta.id);
     try {
       const url = await onReautorizar(cuenta.proveedor);
+      if (
+        !montadoRef.current ||
+        generacionOpRef.current !== generacion ||
+        capturarSesion() !== sesionAlIniciar
+      ) {
+        return;
+      }
       if (!esUrlAutorizacionValida(cuenta.proveedor, url)) {
         toast.error('No pudimos iniciar la reautorización de forma segura.');
         return;
       }
       redirigir(url);
     } catch {
+      if (
+        !montadoRef.current ||
+        generacionOpRef.current !== generacion ||
+        capturarSesion() !== sesionAlIniciar
+      ) {
+        return;
+      }
       toast.error('No pudimos iniciar la reautorización. Intenta de nuevo.');
     } finally {
-      setReautorizandoId(null);
+      if (montadoRef.current && generacionOpRef.current === generacion) {
+        setReautorizandoId(null);
+      }
     }
   }
 
