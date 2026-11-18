@@ -101,4 +101,49 @@ describe('asociación explícita de paquete Android y suscripción', () => {
     await expect(asociacionPendiente).rejects.toThrow('sesión cambió');
     expect(almacen.guardar).not.toHaveBeenCalled();
   });
+
+  it.each(['asociar', 'quitar'] as const)(
+    'rechaza %s encolado por A después de cambiar a B',
+    async (mutacion) => {
+      const sesionA = 'org:usuario-a:sesion-a';
+      const sesionB = 'org:usuario-b:sesion-b';
+      let sesionActual = sesionA;
+      const existente = { suscripcionId: 'suscripcion-compartida', paquete: 'com.ejemplo.app' };
+      const valorInicial = JSON.stringify({ [sesionB]: [existente] });
+      const almacen = crearAlmacen(valorInicial);
+      let liberarValidacion!: () => void;
+      const validacionPendiente = new Promise<void>((resolver) => { liberarValidacion = resolver; });
+      const obtenerSuscripcion = vi.fn(async (id: string) => ({ id }))
+        .mockImplementationOnce(async (id) => {
+          await validacionPendiente;
+          return { id };
+        });
+      const control = crearControlAsociacionPaquetes({
+        obtenerSesion: () => sesionActual, obtenerSuscripcion, almacen,
+      });
+
+      const primera = control.asociar('suscripcion-compartida', 'com.ejemplo.primera');
+      await vi.waitFor(() => expect(obtenerSuscripcion).toHaveBeenCalledOnce());
+      const segunda = mutacion === 'asociar'
+        ? control.asociar('suscripcion-compartida', 'com.ejemplo.segunda')
+        : control.quitar(existente.paquete);
+      const resultados = Promise.allSettled([primera, segunda]);
+      sesionActual = sesionB;
+      liberarValidacion();
+
+      // Ninguna intención de A debe consultar ni escribir con la sesión de B.
+      expect(await resultados).toEqual([
+        { status: 'rejected', reason: expect.objectContaining({ message: expect.stringContaining('sesión cambió') }) },
+        { status: 'rejected', reason: expect.objectContaining({ message: expect.stringContaining('sesión cambió') }) },
+      ]);
+      expect(obtenerSuscripcion).toHaveBeenCalledOnce();
+      expect(almacen.leer).not.toHaveBeenCalled();
+      expect(almacen.guardar).not.toHaveBeenCalled();
+      await expect(control.listar()).resolves.toEqual([existente]);
+
+      // B todavía puede actuar tras el rechazo de ambas operaciones de A.
+      await expect(control.quitar(existente.paquete)).resolves.toBeUndefined();
+      await expect(control.listar()).resolves.toEqual([]);
+    },
+  );
 });

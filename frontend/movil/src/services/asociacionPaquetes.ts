@@ -45,8 +45,17 @@ function parsearAsociaciones(valor: string | null): Record<string, AsociacionPaq
 export function crearControlAsociacionPaquetes(dependencias: DependenciasAsociacion) {
   let colaMutaciones: Promise<void> = Promise.resolve();
 
-  function serializarMutacion<T>(operacion: () => Promise<T>): Promise<T> {
-    const resultado = colaMutaciones.then(operacion);
+  function exigirMismaSesion(sesion: string, momento: string): void {
+    if (dependencias.obtenerSesion() !== sesion) {
+      throw new Error(`La sesión cambió ${momento}.`);
+    }
+  }
+
+  function serializarMutacion(sesion: string, operacion: () => Promise<void>): Promise<void> {
+    const resultado = colaMutaciones.then(() => {
+      exigirMismaSesion(sesion, 'mientras la operación esperaba');
+      return operacion();
+    });
     colaMutaciones = resultado.then(() => undefined, () => undefined);
     return resultado;
   }
@@ -64,43 +73,43 @@ export function crearControlAsociacionPaquetes(dependencias: DependenciasAsociac
       return [...(asociaciones[sesion] ?? [])];
     },
 
-    asociar(suscripcionId: string, paqueteRecibido: string): Promise<void> {
-      return serializarMutacion(async () => {
-      const paquete = validarPaqueteAndroid(paqueteRecibido);
+    async asociar(suscripcionId: string, paqueteRecibido: string): Promise<void> {
       const sesion = dependencias.obtenerSesion();
       if (!sesion) throw new Error('Inicia sesión para asociar un paquete Android.');
-      const suscripcionValidada = await dependencias.obtenerSuscripcion(suscripcionId);
-      if (suscripcionValidada.id !== suscripcionId) throw new Error('La suscripción validada no coincide.');
-      if (dependencias.obtenerSesion() !== sesion) throw new Error('La sesión cambió durante la validación.');
+      return serializarMutacion(sesion, async () => {
+        const paquete = validarPaqueteAndroid(paqueteRecibido);
+        const suscripcionValidada = await dependencias.obtenerSuscripcion(suscripcionId);
+        exigirMismaSesion(sesion, 'durante la validación');
+        if (suscripcionValidada.id !== suscripcionId) throw new Error('La suscripción validada no coincide.');
 
-      const asociacionesPorSesion = await leerAsociacionesPorSesion();
-      if (dependencias.obtenerSesion() !== sesion) throw new Error('La sesión cambió durante la validación.');
-      const asociacionesSesion = asociacionesPorSesion[sesion] ?? [];
-      const asociacionExistente = asociacionesSesion.find((asociacion) => asociacion.paquete === paquete);
-      if (asociacionExistente && asociacionExistente.suscripcionId !== suscripcionId) {
-        throw new Error('Este paquete ya está asociado a otra suscripción.');
-      }
+        const asociacionesPorSesion = await leerAsociacionesPorSesion();
+        exigirMismaSesion(sesion, 'antes de escribir');
+        const asociacionesSesion = asociacionesPorSesion[sesion] ?? [];
+        const asociacionExistente = asociacionesSesion.find((asociacion) => asociacion.paquete === paquete);
+        if (asociacionExistente && asociacionExistente.suscripcionId !== suscripcionId) {
+          throw new Error('Este paquete ya está asociado a otra suscripción.');
+        }
 
-      asociacionesPorSesion[sesion] = [
-        ...asociacionesSesion.filter((asociacion) => asociacion.paquete !== paquete),
-        { suscripcionId, paquete },
-      ];
-      await dependencias.almacen.guardar(JSON.stringify(asociacionesPorSesion));
-      if (dependencias.obtenerSesion() !== sesion) throw new Error('La sesión cambió durante la escritura.');
+        asociacionesPorSesion[sesion] = [
+          ...asociacionesSesion.filter((asociacion) => asociacion.paquete !== paquete),
+          { suscripcionId, paquete },
+        ];
+        await dependencias.almacen.guardar(JSON.stringify(asociacionesPorSesion));
+        exigirMismaSesion(sesion, 'durante la escritura');
       });
     },
 
-    quitar(paqueteRecibido: string): Promise<void> {
-      return serializarMutacion(async () => {
-      const paquete = validarPaqueteAndroid(paqueteRecibido);
+    async quitar(paqueteRecibido: string): Promise<void> {
       const sesion = dependencias.obtenerSesion();
       if (!sesion) throw new Error('Inicia sesión para administrar asociaciones.');
-      const asociacionesPorSesion = await leerAsociacionesPorSesion();
-      if (dependencias.obtenerSesion() !== sesion) throw new Error('La sesión cambió durante la validación.');
-      asociacionesPorSesion[sesion] = (asociacionesPorSesion[sesion] ?? [])
-        .filter((asociacion) => asociacion.paquete !== paquete);
-      await dependencias.almacen.guardar(JSON.stringify(asociacionesPorSesion));
-      if (dependencias.obtenerSesion() !== sesion) throw new Error('La sesión cambió durante la escritura.');
+      return serializarMutacion(sesion, async () => {
+        const paquete = validarPaqueteAndroid(paqueteRecibido);
+        const asociacionesPorSesion = await leerAsociacionesPorSesion();
+        exigirMismaSesion(sesion, 'antes de escribir');
+        asociacionesPorSesion[sesion] = (asociacionesPorSesion[sesion] ?? [])
+          .filter((asociacion) => asociacion.paquete !== paquete);
+        await dependencias.almacen.guardar(JSON.stringify(asociacionesPorSesion));
+        exigirMismaSesion(sesion, 'durante la escritura');
       });
     },
   };
