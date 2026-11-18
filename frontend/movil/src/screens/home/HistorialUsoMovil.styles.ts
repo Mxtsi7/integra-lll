@@ -1,0 +1,98 @@
+import { StyleSheet } from 'react-native';
+
+export const styles = StyleSheet.create({
+  contenedor: {
+    marginTop: 12,
+    gap: 8,
+  },
+  tituloHistorial: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  cajaEstado: {
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#0f172a',
+  },
+  textoCargando: {
+    fontSize: 13,
+    color: '#94a3b8',
+  },
+  cajaError: {
+    padding: 14,
+    backgroundColor: '#450a0a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#b91c1c',
+    alignItems: 'center',
+    gap: 10,
+  },
+  textoError: {
+    fontSize: 13,
+    color: '#fca5a5',
+    textAlign: 'center',
+  },
+  botonReintentar: {
+    minHeight: 36,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1e293b',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#64748b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textoBotonReintentar: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  cajaVacia: {
+    padding: 14,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textoVacio: {
+    fontSize: 13,
+    color: '#94a3b8',
+    textAlign: 'center',
+  },
+  contenedorLista: {
+    borderRadius: 10,
+    backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: '#334155',
+    overflow: 'hidden',
+  },
+  filaUso: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#334155',
+  },
+  filaFecha: {
+    fontSize: 14,
+    color: '#e2e8f0',
+    fontWeight: '500',
+  },
+  filaMinutos: {
+    fontSize: 14,
+    color: '#38bdf8',
+    fontWeight: '700',
+  },
+});

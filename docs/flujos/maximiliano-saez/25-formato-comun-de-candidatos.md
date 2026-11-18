@@ -11,10 +11,10 @@ dataclass/esquema. Ambos pasan por `CobroCandidato.desde_candidato()` y el
 serializer HTTP en memoria. No se consulta ni escribe una base de datos.
 
 `services/connectors/tests/test_contrato_candidatos_v1.py` comprueba esa
-compatibilidad y rechaza ocho variantes incompatibles. `jsonschema==4.26.0`
-queda declarado en las dependencias usadas por la CI existente.
+compatibilidad y rechaza, entre otros casos, importes de cero o negativos.
+`jsonschema[format]==4.26.0` queda declarado en las dependencias de CI.
 
-La rama depende de #147; #171 puede cambiar la identidad CSV sin obligar al
-consumidor a interpretarla. Faltan aceptación de responsables y validación
-contra cuenta real autorizada; este trabajo no acredita extracción de correo,
-publicación ni consumo de eventos. El contrato enumera esas fronteras.
+La PR apunta a `main` e incluye el parser de #147 y la procedencia CSV de #171.
+El consumidor trata las identidades CSV y correo como valores opacos. Quedan
+pendientes la aceptación de los responsables y la validación de la extracción
+con una cuenta autorizada, además de la publicación y consumo de eventos.

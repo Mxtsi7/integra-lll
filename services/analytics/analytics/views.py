@@ -122,6 +122,12 @@ def asistente(request):
     mensaje = entrada.validated_data.get("mensaje", "")
 
     contexto = construir_contexto(organizacion_id)
+    uso_recolectores = contexto.get("uso_recolectores") or {}
+    consulta_analytics_degradada = (
+        contexto.get("consulta_analytics_legada_disponible") is False
+        or uso_recolectores.get("disponible") is False
+        or contexto.get("suscripciones_activas_disponibles") is False
+    )
 
     def proveedor(timeout):
         return consultar_proveedor(contexto, timeout=timeout, mensaje=mensaje)
@@ -142,6 +148,16 @@ def asistente(request):
         cuerpo["respuesta"] = resultado["datos"].get("respuesta", "")
     else:
         cuerpo["respuesta"] = resumen_local(contexto)
+
+    if consulta_analytics_degradada:
+        # La consulta de Analytics/uso recolector falló o quedó incompleta:
+        # no se inventaron "0 minutos". Se expone el estado incompleto en datos.
+        if resultado["estado"] != "ok":
+            cuerpo["estado"] = "degradado"
+            if not cuerpo.get("motivo"):
+                cuerpo["motivo"] = uso_recolectores.get("motivo_no_disponible") or "consulta_analytics_no_disponible"
+            cuerpo["respuesta"] = resumen_local(contexto)
+
     return Response(cuerpo, status=status.HTTP_200_OK)
 
 

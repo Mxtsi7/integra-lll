@@ -11,6 +11,7 @@ import { ImportacionesPage } from './pages/ImportacionesPage';
 import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { AlertasPage } from './pages/AlertasPage';
+import { AsistentePage } from './pages/AsistentePage';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
 import { CatalogosLayout } from './context/CatalogosContext';
@@ -112,6 +113,8 @@ export function App() {
               {/* SE-01 y CH-31: el Centro de alertas (FE-19, FE-20). La
                   campana lleva acá. */}
               <Route path="/alertas" element={<AlertasPage />} />
+              {/* S3-CH-14 y S3-CH-15: el chat con el asistente financiero (VI-22). */}
+              <Route path="/asistente" element={<AsistentePage />} />
               <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
             </Route>
 

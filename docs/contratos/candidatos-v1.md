@@ -1,8 +1,8 @@
 # S3-MX-25 — Formato común de candidatos v1
 
 Estado: formalización de la implementación de Felipe en PR #147; aceptación
-entre productores y consumidores pendiente. Esta entrega está apilada sobre
-`felipe/s3-fe-csv-candidatos`; no implementa otro parser ni cambia sus modelos.
+entre productores y consumidores pendiente. La PR #179 tiene como base `main`,
+que ya incluye #147.
 
 ## Representación interna
 
@@ -19,21 +19,34 @@ El constructor no ejecuta el esquema; las pruebas detectan divergencias.
 | `organizacion_id` | Organización resuelta por el productor autorizado |
 | `servicio` | Nombre canónico o `null` si no se resuelve |
 | `servicio_texto`, `servicio_resultado` | Texto original y `reconocido`, `ambiguo` o `desconocido` |
-| `importe`, `moneda` | Decimal como texto; código ISO en mayúsculas |
-| `fecha` | Fecha del hecho en `YYYY-MM-DD`; no fecha de recepción del correo |
+| `importe`, `moneda` | Decimal estrictamente positivo en texto de formato fijo y código ISO en mayúsculas |
+| `fecha` | Fecha del cobro o intento en `YYYY-MM-DD`. Para avisos, fecha del cobro anunciado |
 | `tipo_mensaje` | `cobro_realizado`, `aviso_de_cobro` o `pago_fallido` |
 | `estado` | `propuesto`, `confirmado` o `rechazado`; el productor nace propuesto |
 | `evidencia` | Mapa de texto a texto con procedencia verificable |
 
-No interpretar el identificador ni derivar fecha/servicio de él. PR #171
-cambia la huella CSV y conserva procedencia en evidencia; este contrato no
-fija su algoritmo. Sigue pendiente acordar con extracción de correo la
-identidad entre proveedor, cuenta y mensaje: el ID de Gmail no equivale
-automáticamente al encabezado RFC Message-ID. Esta entrega no decide esa regla.
+`identificador_origen` es opaco para los consumidores. Para correo, S3-FE-06
+usa `mid:` seguido del SHA-256 del `Message-ID` (RFC 5322), quitando los
+corchetes angulares y conservando las mayúsculas. Así la misma organización
+puede deduplicar copias de un mensaje entre buzones y proveedores. Si falta un
+`Message-ID` usable, usa `gmail:` u `outlook:` seguido del SHA-256 del par
+(cuenta, ID del proveedor). Outlook solicita `ImmutableId` para conservar el
+ID al mover el mensaje. La regla completa está en
+[el flujo S3-FE-06](../flujos/felipe-orellana/26-origen-del-mensaje-s3-fe-06.md).
 
-La evidencia CSV existente contiene `fila` (texto) y `descripcion_original`.
-El ejemplo de correo usa asunto y remitente sintéticos. El mapa permite nuevas
-claves sin cambiar campos comunes; no incluir tokens, adjuntos ni cuerpo entero.
+En avisos de cobro, `fecha` representa la fecha del cobro futuro que entrega
+S3-FE-07 como `fecha_proximo_cobro`. Si un recibo carece de fecha y la extracción
+usa la de recepción como supuesto, FE-09 puede proponer el candidato para
+revisión declarando `evidencia["fecha_origen"] = "recepcion"` y conservando el
+motivo del supuesto. Los importes cero o negativos quedan fuera del contrato de
+candidatos. El CSV normaliza el signo de cartola y descarta cero. La extracción
+de correo marca los negativos para revisión antes de producir un candidato.
+
+La evidencia CSV contiene `fila` (texto), `archivo_sha256` y
+`descripcion_original`, como en #171. El ejemplo de correo incluye un
+`message_id`, un `proveedor_correo`, asunto, remitente y fragmentos de importe y
+fecha sintéticos. El mapa admite claves de procedencia por origen. Se excluyen
+tokens, adjuntos y el cuerpo entero.
 El esquema valida forma, no monedas admitidas, exactitud de una extracción,
 pertenencia ni transiciones. Esas reglas siguen en productores y servicios.
 
@@ -74,7 +87,6 @@ importes numéricos, literales incompatibles y campos desconocidos.
 Pendientes de aceptación: Felipe/Seba (productores y procedencia), Chris
 (respuesta HTTP), Víctor (consumidor/evento) y Andrea (cuenta autorizada para
 validación real de correo). No se registran esas aceptaciones como obtenidas.
-
 
 ### Representación decimal al serializar
 

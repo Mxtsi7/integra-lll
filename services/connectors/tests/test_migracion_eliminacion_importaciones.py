@@ -21,6 +21,8 @@ DE_S3_FE14 = ("connectors", "0006_orden_total_del_candidato")
 DE_S3_FE16 = ("connectors", "0007_decision_del_candidato")
 # S3-FE-15: el outbox de la confirmación. Tampoco publicada.
 DE_S3_FE15 = ("connectors", "0008_outbox_de_connectors")
+# S3-FE-17: solo el texto de ayuda del identificador; no toca la base.
+DE_S3_FE17 = ("connectors", "0009_identificador_es_la_huella_del_cobro")
 
 
 @pytest.mark.django_db(transaction=True)
@@ -54,7 +56,7 @@ def test_migraciones_publicadas_conservan_datos(origen, claves):
         executor = MigrationExecutor(connection)
         plan = [(migracion.app_label, migracion.name) for migracion, _ in executor.migration_plan(destino)]
         sin_publicar = [
-            DE_ESTA_PR, DE_FE07, DE_S3_FE10, DE_S3_FE14, DE_S3_FE16, DE_S3_FE15,
+            DE_ESTA_PR, DE_FE07, DE_S3_FE10, DE_S3_FE14, DE_S3_FE16, DE_S3_FE15, DE_S3_FE17,
         ]
         esperado = sin_publicar if origen == PUBLICADA[1] else [PUBLICADA] + sin_publicar
         assert sorted(plan) == sorted(esperado)

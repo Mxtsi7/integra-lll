@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ def validador():
 def candidatos_de_ejemplo():
     ejemplos = json.loads((CONTRATOS / "candidatos-v1.ejemplos.json").read_text(encoding="utf-8"))
     contenido = (CONTRATOS / "fixtures" / "candidatos-v1.csv").read_bytes()
-    resultado = leer(contenido, separador=";", sha256="a" * 64,
+    resultado = leer(contenido, separador=";", sha256=sha256(contenido).hexdigest(),
                      organizacion_id=ejemplos[0]["organizacion_id"])
     assert not resultado.errores
     assert len(resultado.candidatos) == 1
@@ -60,7 +61,8 @@ def test_todos_los_campos_comunes_son_obligatorios(validador):
 
 
 @pytest.mark.parametrize("cambio", [
-    {"importe": 5990.0}, {"fecha": "2026-02-31"}, {"origen": "pdf"},
+    {"importe": 5990.0}, {"importe": "-1.50"}, {"importe": "0"},
+    {"importe": "00.000"}, {"fecha": "2026-02-31"}, {"origen": "pdf"},
     {"tipo_mensaje": "pagado"}, {"estado": "aplicado"},
     {"identificador_origen": ""}, {"evidencia": {"fila": 2}},
     {"campo_desconocido": True},
