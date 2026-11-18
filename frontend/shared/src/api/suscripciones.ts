@@ -1,4 +1,4 @@
-import type { EstadoSuscripcion, Suscripcion } from '../tipos';
+import type { EstadoSuscripcion, Moneda, Suscripcion } from '../tipos';
 import { pedir, type Paginado } from './cliente';
 import { SUSCRIPCIONES_DE_EJEMPLO } from './ejemplo';
 
@@ -129,6 +129,41 @@ export async function getSuscripciones(consulta: ConsultaSuscripciones = {}): Pr
 }
 
 /**
+ * Respuesta paginada de suscripciones desde la API (SE-19).
+ * Expone total de registros, enlaces de página y lista tipada de entidades.
+ */
+export interface SuscripcionesPaginadas {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: Suscripcion[];
+  totales?: { moneda: Moneda; total: number }[];
+}
+
+/**
+ * GET /suscripciones/?page=N... -> Obtiene una única página de suscripciones
+ * desde el backend DRF (PageNumberPagination), sin auto-descargar múltiples páginas (SE-19).
+ */
+export async function getSuscripcionesPaginadas(
+  consulta: ConsultaSuscripciones = {},
+  pagina: number = 1,
+): Promise<SuscripcionesPaginadas> {
+  if (consulta.orden !== undefined && !esOrdenSuscripciones(consulta.orden)) {
+    throw new RangeError(`Orden de suscripciones no permitido: ${String(consulta.orden)}`);
+  }
+  const respuesta = await pedir<Paginado<SuscripcionDeApi>>(
+    `/suscripciones/?${parametrosDePagina(consulta, Math.max(1, pagina))}`,
+  );
+  return {
+    count: respuesta.count,
+    next: respuesta.next,
+    previous: respuesta.previous,
+    results: respuesta.results.map(desdeLaApi),
+    totales: (respuesta as any).totales,
+  };
+}
+
+/**
  * Datos que el dominio manda al crear o reemplazar una suscripcion. Es el
  * tipo del dominio sin `id` (lo asigna el backend) y sin los campos que solo
  * tienen sentido como respuesta de la API.
@@ -246,6 +281,9 @@ export interface RegistroUso {
 export async function getUsos(id: string): Promise<RegistroUso[]> {
   return pedir<RegistroUso[]>(`/suscripciones/${id}/uso/`);
 }
+
+/** Alias semántico para getUsos (CH-15 / SE-30). */
+export const getHistorialUso = getUsos;
 
 /**
  * POST /suscripciones/<id>/uso/ -> 200 OK / 400 / 404.
