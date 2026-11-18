@@ -1,16 +1,19 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { formatearFecha, formatearMonto, TAMANO_PAGINA_CANDIDATOS, type CandidatoDetectado } from '@ojoalgasto/shared';
 import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
 import type { CargaCandidatos } from './cargaCandidatos';
 import styles from './ListaCandidatos.module.css';
+import { sePuedeDecidir, type SeleccionDeCandidatos } from './seleccionCandidatos';
 
 interface ListaCandidatosProps {
   carga: CargaCandidatos;
   pagina: number;
   alCambiarPagina: (pagina: number) => void;
   alReintentar: () => void;
+  /** Sin esto la lista no tiene casillas ni barra de selección (S3-CH-07). */
+  seleccion?: SeleccionDeCandidatos;
 }
 
 /**
@@ -18,7 +21,7 @@ interface ListaCandidatosProps {
  * lo que le llega: no sabe de dónde vienen los datos (eso lo hace useCandidatos),
  * así que se prueba con datos inventados.
  */
-export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar }: ListaCandidatosProps) {
+export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, seleccion }: ListaCandidatosProps) {
   // La sección queda montada en todos los estados. «Anterior», «Siguiente» y
   // «Reintentar» desaparecen mientras se carga: sin esto el foco caería al
   // inicio de la página y quien usa teclado tendría que recorrerla otra vez.
@@ -53,9 +56,10 @@ export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar }
       )}
       {carga.tipo === 'listo' && carga.datos.count > 0 && (
         <>
+          {seleccion && seleccion.cantidadSeleccionable > 0 && <BarraDeSeleccion seleccion={seleccion} />}
           <ol className={styles.items}>
             {carga.datos.results.map((candidato) => (
-              <ItemCandidato key={candidato.id} candidato={candidato} />
+              <ItemCandidato key={candidato.id} candidato={candidato} seleccion={seleccion} />
             ))}
           </ol>
           <PaginacionCandidatos
@@ -79,31 +83,91 @@ const AVISO_DE_PROVEEDOR = new Map<string, string>([
 ]);
 const AVISO_DE_PROVEEDOR_GENERAL = 'Proveedor sin reconocer.';
 
-function ItemCandidato({ candidato }: { candidato: CandidatoDetectado }) {
+function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado; seleccion?: SeleccionDeCandidatos }) {
   // Sin proveedor se muestra lo que decía el archivo o el correo: inventar un nombre sería peor.
   const sinProveedor = candidato.servicio === null;
   const nombre = candidato.servicio ?? (candidato.servicio_texto || 'Cobro sin descripción');
   const pendienteDeAplicar = candidato.aplicacion === 'pendiente';
   return (
     <li className={styles.item}>
-      <div className={styles.cabecera}>
-        <span className={styles.nombre}>{nombre}</span>
-        <span className={styles.importe}>{importeLegible(candidato)}</span>
-      </div>
-      {sinProveedor && (
+      {seleccion &&
+        (sePuedeDecidir(candidato) ? (
+          <input
+            type="checkbox"
+            className={styles.casilla}
+            checked={seleccion.seleccionados.has(candidato.id)}
+            onChange={() => seleccion.alAlternar(candidato.id)}
+            aria-label={`Seleccionar ${nombre}, ${importeLegible(candidato)}, ${formatearFecha(candidato.fecha)}`}
+          />
+        ) : (
+          // Un cobro ya resuelto no tiene casilla; el hueco mantiene alineados a los demás.
+          <div className={styles.sinCasilla} aria-hidden="true" />
+        ))}
+      <div className={styles.contenido}>
+        <div className={styles.cabecera}>
+          <span className={styles.nombre}>{nombre}</span>
+          <span className={styles.importe}>{importeLegible(candidato)}</span>
+        </div>
+        {sinProveedor && (
+          <p className={styles.detalle}>
+            {AVISO_DE_PROVEEDOR.get(candidato.servicio_resultado) ?? AVISO_DE_PROVEEDOR_GENERAL}
+          </p>
+        )}
         <p className={styles.detalle}>
-          {AVISO_DE_PROVEEDOR.get(candidato.servicio_resultado) ?? AVISO_DE_PROVEEDOR_GENERAL}
+          {candidato.origen_legible} · {formatearFecha(candidato.fecha)} · {candidato.tipo_mensaje_legible}
         </p>
-      )}
-      <p className={styles.detalle}>
-        {candidato.origen_legible} · {formatearFecha(candidato.fecha)} · {candidato.tipo_mensaje_legible}
-      </p>
-      <p className={styles.estado}>
-        {candidato.estado_legible}
-        {pendienteDeAplicar && ' · orden pendiente de aplicar: todavía no hay suscripción ni cobro creados'}
-      </p>
+        <p className={styles.estado}>
+          {candidato.estado_legible}
+          {pendienteDeAplicar && ' · orden pendiente de aplicar: todavía no hay suscripción ni cobro creados'}
+        </p>
+      </div>
     </li>
   );
+}
+
+/** S3-CH-07: elegir todos los de la página, cuántos hay elegidos y cuántos de ellos no se pueden confirmar. */
+function BarraDeSeleccion({ seleccion }: { seleccion: SeleccionDeCandidatos }) {
+  const casillaDePagina = useRef<HTMLInputElement>(null);
+  const cuantos = seleccion.seleccionados.size;
+  const estanTodos = cuantos === seleccion.cantidadSeleccionable;
+  const hayAlgunos = cuantos > 0 && !estanTodos;
+  const sinProveedor = cuantos - seleccion.idsParaConfirmar.length;
+
+  // `indeterminate` no es un atributo de HTML: solo se puede poner por la propiedad.
+  useEffect(() => {
+    if (casillaDePagina.current) casillaDePagina.current.indeterminate = hayAlgunos;
+  }, [hayAlgunos]);
+
+  // «Limpiar selección» desaparece al usarse: el foco vuelve a la casilla de la página.
+  const limpiar = () => {
+    seleccion.alLimpiar();
+    casillaDePagina.current?.focus();
+  };
+
+  return (
+    <div className={styles.barraSeleccion}>
+      <label className={styles.etiquetaCasilla}>
+        <input ref={casillaDePagina} type="checkbox" checked={estanTodos} onChange={seleccion.alAlternarPagina} />
+        Seleccionar todos los de esta página
+      </label>
+      <span role="status" className={styles.conteo}>
+        {textoDelConteo(cuantos, sinProveedor)}
+      </span>
+      {cuantos > 0 && (
+        <Boton variante="sutil" tamano="s" onClick={limpiar}>
+          Limpiar selección
+        </Boton>
+      )}
+    </div>
+  );
+}
+
+function textoDelConteo(cuantos: number, sinProveedor: number): string {
+  if (cuantos === 0) return 'Ninguno seleccionado';
+  const elegidos = cuantos === 1 ? '1 seleccionado' : `${cuantos} seleccionados`;
+  if (sinProveedor === 0) return elegidos;
+  const aviso = sinProveedor === 1 ? '1 no se puede confirmar' : `${sinProveedor} no se pueden confirmar`;
+  return `${elegidos} · ${aviso}: proveedor sin reconocer`;
 }
 
 /** Más dígitos que estos no caben en un número sin perder precisión. */

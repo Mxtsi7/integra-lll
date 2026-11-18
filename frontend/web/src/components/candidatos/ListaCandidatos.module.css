@@ -30,10 +30,52 @@
 }
 
 .item {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radio-m);
+}
+
+.contenido {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* S3-CH-07: la casilla y el hueco que deja un cobro ya resuelto miden lo mismo. */
+.casilla,
+.sinCasilla {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+}
+
+.casilla {
+  accent-color: var(--acento);
+  cursor: pointer;
+}
+
+.barraSeleccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.etiquetaCasilla {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.conteo {
+  font-variant-numeric: tabular-nums;
 }
 
 .cabecera {
