@@ -51,8 +51,23 @@ export const Modal = React.forwardRef<HTMLDivElement, any>(
         role="dialog"
         aria-modal="true"
         ref={ref}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && onRequestClose) {
+            onRequestClose();
+          }
+        }}
         {...props}
       >
+        {onRequestClose ? (
+          <button
+            data-testid={testID ? `${testID}-request-close` : 'modal-request-close'}
+            type="button"
+            onClick={onRequestClose}
+            style={{ display: 'none' }}
+          >
+            Request Close
+          </button>
+        ) : null}
         {children}
       </div>
     );

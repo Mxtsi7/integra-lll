@@ -16,15 +16,21 @@ export function RegistrarUsoModal({
   visible,
   nombreSuscripcion,
   onCancelar,
+  bloqueado,
   ...formProps
 }: RegistrarUsoModalProps) {
+  const manejarRequestClose = () => {
+    if (bloqueado) return;
+    onCancelar?.();
+  };
+
   return (
     <Modal
       testID="modal-registrar-uso"
       visible={visible}
       transparent
       animationType="fade"
-      onRequestClose={onCancelar}
+      onRequestClose={manejarRequestClose}
     >
       <View style={styles.overlay}>
         <View style={styles.card} accessibilityRole="alert">
@@ -43,7 +49,8 @@ export function RegistrarUsoModal({
 
           <RegistrarUsoFormMovil
             nombreSuscripcion={nombreSuscripcion}
-            onCancelar={onCancelar}
+            onCancelar={manejarRequestClose}
+            bloqueado={bloqueado}
             {...formProps}
           />
         </View>

@@ -332,5 +332,66 @@ describe('SE-30 — Mostrar historial móvil de uso por fecha', () => {
       expect(screen.queryByTestId('historial-error')).toBeNull();
       expect(screen.getByText('15 oct 2026')).toBeTruthy();
     });
+
+    it('Regresión P2 · Una lectura inicial lenta del mismo historial se descarta al recargar tras registrar uso sin pisar los nuevos registros', async () => {
+      let resolverLecturaInicialA: (usos: RegistroUso[]) => void = () => {};
+      const promesaInicialLenta = new Promise<RegistroUso[]>((resolve) => {
+        resolverLecturaInicialA = resolve;
+      });
+
+      const onCargarSuscripcion = vi.fn().mockResolvedValue(MOCK_SUSCRIPCION);
+      const onCargarHistorial = vi.fn()
+        .mockImplementationOnce(() => promesaInicialLenta) // Petición A inicial (lenta)
+        .mockResolvedValueOnce([ // Petición B posterior tras registrar uso
+          { fecha: '2026-10-20', minutos: 60 },
+        ]);
+
+      const onRegistrarUsoApi = vi.fn().mockResolvedValue({
+        ...MOCK_SUSCRIPCION,
+        horas_uso_mes: 3,
+      });
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-netflix' } }}
+          onCargarSuscripcion={onCargarSuscripcion}
+          onCargarHistorial={onCargarHistorial}
+          onRegistrarUsoApi={onRegistrarUsoApi}
+        />
+      );
+
+      // La suscripción carga correctamente
+      expect(await screen.findByText('Netflix')).toBeTruthy();
+      expect(onCargarHistorial).toHaveBeenCalledTimes(1);
+
+      // Abrir modal de registro de uso
+      fireEvent.click(screen.getByTestId('btn-registrar-uso'));
+      expect(await screen.findByTestId('modal-registrar-uso')).toBeTruthy();
+
+      // Enviar 60 minutos
+      fireEvent.change(screen.getByTestId('input-minutos'), { target: { value: '60' } });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-submit-uso'));
+      });
+
+      expect(onRegistrarUsoApi).toHaveBeenCalledTimes(1);
+      // Se solicitó la recarga B
+      expect(onCargarHistorial).toHaveBeenCalledTimes(2);
+
+      // La recarga B resolvió y muestra "1 h"
+      expect(await screen.findByText('1 h')).toBeTruthy();
+      expect(screen.getByText('20 oct 2026')).toBeTruthy();
+
+      // Ahora la petición lenta anterior A resuelve tardíamente con []
+      await act(async () => {
+        resolverLecturaInicialA([]);
+      });
+
+      // La fila de "1 h" del nuevo uso debe permanecer intacta y no borrarse
+      expect(screen.getByText('1 h')).toBeTruthy();
+      expect(screen.getByText('20 oct 2026')).toBeTruthy();
+      expect(screen.queryByTestId('historial-vacio')).toBeNull();
+      expect(screen.queryByTestId('historial-error')).toBeNull();
+    });
   });
 });

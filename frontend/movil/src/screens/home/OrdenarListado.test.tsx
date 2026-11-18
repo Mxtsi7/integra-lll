@@ -173,15 +173,18 @@ describe('SE-29 — Ordenar listado móvil y mostrar criterio', () => {
         />
       );
 
-      // Carga inicial sin filtros ni orden
+      // Carga inicial sin filtros, envía orden predeterminado 'fecha_proximo_cobro'
       expect(await screen.findByText('Gimnasio')).toBeTruthy();
-      expect(onCargarPagina).toHaveBeenCalledWith({}, 1);
+      expect(onCargarPagina).toHaveBeenCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
 
       // Activar filtro de estado 'activo'
       await act(async () => {
         fireEvent.click(screen.getByTestId('filtro-estado-activo'));
       });
-      expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+      expect(onCargarPagina).toHaveBeenLastCalledWith(
+        { estado: 'activo', orden: 'fecha_proximo_cobro' },
+        1
+      );
 
       // Seleccionar orden por monto descendente (-monto)
       await act(async () => {
@@ -351,8 +354,8 @@ describe('SE-29 — Ordenar listado móvil y mostrar criterio', () => {
         fireEvent.click(btnLimpiarVacio);
       });
 
-      // Debe volver a consultar página 1 sin orden ni filtros
-      expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+      // Debe volver a consultar página 1 con orden predeterminado
+      expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
     });
 
     it('el botón "Limpiar filtros" restablece tanto el estado como el orden seleccionado', async () => {
@@ -388,8 +391,114 @@ describe('SE-29 — Ordenar listado móvil y mostrar criterio', () => {
         fireEvent.click(btnLimpiar);
       });
 
-      // Debe consultar sin orden ni filtros
-      expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+      // Debe consultar con orden predeterminado tras limpiar filtros
+      expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
+    });
+
+    it('Regresión P2 · Envía fecha_proximo_cobro como predeterminado en montaje, siguiente página y limpieza, coincidiendo primera fila y etiqueta', async () => {
+      const subCercana: Suscripcion = {
+        id: 'sub-cercana',
+        nombre: 'Cobro Cercano',
+        monto: 10000,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-10-01',
+        categoria: 'servicios',
+        estado: 'activo',
+        horas_uso_mes: 0,
+      };
+
+      const subLejana: Suscripcion = {
+        id: 'sub-lejana',
+        nombre: 'Cobro Lejano',
+        monto: 20000,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-10-30',
+        categoria: 'servicios',
+        estado: 'activo',
+        horas_uso_mes: 0,
+      };
+
+      const subPagina2: Suscripcion = {
+        id: 'sub-pag2',
+        nombre: 'Tercer Cobro',
+        monto: 15000,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-11-15',
+        categoria: 'servicios',
+        estado: 'activo',
+        horas_uso_mes: 0,
+      };
+
+      const onCargarPagina = vi.fn().mockImplementation((consulta, pagina) => {
+        if (pagina === 1) {
+          const results =
+            consulta.orden === 'fecha_proximo_cobro'
+              ? [subCercana, subLejana]
+              : [subLejana, subCercana];
+          return Promise.resolve({
+            count: 3,
+            next: 'http://test/api/suscripciones/?page=2',
+            previous: null,
+            results,
+          } satisfies SuscripcionesPaginadas);
+        }
+        return Promise.resolve({
+          count: 3,
+          next: null,
+          previous: 'http://test/api/suscripciones/?page=1',
+          results: [subPagina2],
+        } satisfies SuscripcionesPaginadas);
+      });
+
+      render(
+        <HomeScreen
+          usuario={MOCK_USUARIO}
+          onCargarPagina={onCargarPagina}
+        />
+      );
+
+      // 1. Montaje inicial:
+      // Debe haber enviado explícitamente consulta con orden: 'fecha_proximo_cobro'
+      expect(onCargarPagina).toHaveBeenCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
+
+      // La etiqueta anuncia "más cercano"
+      const indicador = await screen.findByTestId('indicador-orden-activo');
+      expect(indicador.textContent).toContain('más cercano');
+
+      // La primera fila coincide con la fecha más cercana
+      expect(await screen.findByText('Cobro Cercano')).toBeTruthy();
+      expect(screen.getByTestId('go-detalle').textContent).toContain('Cobro Cercano');
+
+      // 2. Siguiente página ("Cargar más"):
+      const btnCargarMas = screen.getByTestId('btn-cargar-mas');
+      await act(async () => {
+        fireEvent.click(btnCargarMas);
+      });
+      // La solicitud a la siguiente página conserva orden: 'fecha_proximo_cobro'
+      expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 2);
+      expect(await screen.findByText('Tercer Cobro')).toBeTruthy();
+
+      // 3. Modificar filtros/orden y luego limpiar:
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('orden-chip--monto'));
+      });
+      expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: '-monto' }, 1);
+
+      const btnLimpiar = screen.getByTestId('btn-limpiar-filtros');
+      await act(async () => {
+        fireEvent.click(btnLimpiar);
+      });
+
+      // Tras limpiar filtros:
+      // Debe volver a solicitar con orden: 'fecha_proximo_cobro' a la página 1
+      expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
+      // La etiqueta vuelve a anunciar "más cercano"
+      expect(indicador.textContent).toContain('más cercano');
+      // La primera fila vuelve a ser la fecha más cercana
+      expect(screen.getByTestId('go-detalle').textContent).toContain('Cobro Cercano');
     });
   });
 

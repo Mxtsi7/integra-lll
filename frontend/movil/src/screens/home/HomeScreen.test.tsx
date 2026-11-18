@@ -814,7 +814,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         );
 
         expect(await screen.findByText('Netflix')).toBeTruthy();
-        expect(onCargarPagina).toHaveBeenCalledWith({}, 1);
+        expect(onCargarPagina).toHaveBeenCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
         expect(screen.getByTestId('btn-cargar-mas')).toBeTruthy();
         expect(screen.getByText('Mostrando 1 de 3')).toBeTruthy();
       });
@@ -858,7 +858,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
 
         // Esperar página 2 agregada
         expect(await screen.findByText('Gimnasio')).toBeTruthy();
-        expect(onCargarPagina).toHaveBeenCalledWith({}, 2);
+        expect(onCargarPagina).toHaveBeenCalledWith({ orden: 'fecha_proximo_cobro' }, 2);
 
         // Spotify estaba en ambas páginas pero sólo debe aparecer UNA vez en la lista
         expect(screen.getAllByText('Spotify')).toHaveLength(1);
@@ -904,7 +904,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         });
 
         expect(await screen.findByText('Spotify')).toBeTruthy();
-        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
       });
 
       it('falla al cargar página siguiente no corrompe la lista previa', async () => {
@@ -1026,14 +1026,17 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         );
 
         expect(await screen.findByText('Netflix')).toBeTruthy();
-        expect(onCargarPagina).toHaveBeenCalledWith({}, 1);
+        expect(onCargarPagina).toHaveBeenCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
 
         const chipActivo = screen.getByTestId('filtro-estado-activo');
         await act(async () => {
           fireEvent.click(chipActivo);
         });
 
-        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'activo', orden: 'fecha_proximo_cobro' },
+          1
+        );
       });
 
       it('filtra por fecha en servidor y combina con estado', async () => {
@@ -1057,7 +1060,10 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         await act(async () => {
           fireEvent.click(screen.getByTestId('filtro-estado-activo'));
         });
-        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'activo', orden: 'fecha_proximo_cobro' },
+          1
+        );
 
         // 2. Aplicar fecha válida YYYY-MM-DD
         const inputFecha = screen.getByTestId('input-filtro-fecha');
@@ -1066,7 +1072,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         });
 
         expect(onCargarPagina).toHaveBeenLastCalledWith(
-          { estado: 'activo', fecha_cobro: '2026-10-05' },
+          { estado: 'activo', fecha_cobro: '2026-10-05', orden: 'fecha_proximo_cobro' },
           1
         );
       });
@@ -1095,7 +1101,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         });
 
         // Al no ser fecha real, no envía fecha_cobro
-        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
       });
     });
 
@@ -1260,7 +1266,7 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
           fireEvent.click(screen.getByTestId('btn-cargar-mas'));
         });
         expect(await screen.findByText('Spotify')).toBeTruthy();
-        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 2);
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 2);
 
         // Ahora cambiar filtro a fantasma
         await act(async () => {
@@ -1268,7 +1274,10 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         });
 
         // Debe solicitar página 1, NO página 2
-        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'fantasma' }, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'fantasma', orden: 'fecha_proximo_cobro' },
+          1
+        );
         expect(await screen.findByText('Gimnasio')).toBeTruthy();
       });
 
@@ -1293,7 +1302,10 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         await act(async () => {
           fireEvent.click(screen.getByTestId('filtro-estado-activo'));
         });
-        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 1);
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'activo', orden: 'fecha_proximo_cobro' },
+          1
+        );
 
         // Limpiar filtros con botón
         const btnLimpiar = screen.getByTestId('btn-limpiar-filtros');
@@ -1301,8 +1313,8 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
           fireEvent.click(btnLimpiar);
         });
 
-        // Debe haber solicitado nuevamente sin filtros
-        expect(onCargarPagina).toHaveBeenLastCalledWith({}, 1);
+        // Debe haber solicitado nuevamente con orden predeterminado
+        expect(onCargarPagina).toHaveBeenLastCalledWith({ orden: 'fecha_proximo_cobro' }, 1);
       });
 
       it('distingue cuenta vacía de búsqueda sin coincidencias según filtros activos', async () => {
@@ -1659,7 +1671,10 @@ describe('Home Móvil de Suscripciones (SE-17)', () => {
         await act(async () => {
           fireEvent.click(btnCargarMasNuevo);
         });
-        expect(onCargarPagina).toHaveBeenLastCalledWith({ estado: 'activo' }, 2);
+        expect(onCargarPagina).toHaveBeenLastCalledWith(
+          { estado: 'activo', orden: 'fecha_proximo_cobro' },
+          2
+        );
       });
 
       it('pull-to-refresh mientras página 2 está pendiente descarta la respuesta tardía y desbloquea Cargar más', async () => {

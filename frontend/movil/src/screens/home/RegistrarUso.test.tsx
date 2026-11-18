@@ -457,5 +457,154 @@ describe('Registrar Minutos de Uso desde Móvil (SE-28)', () => {
       expect(screen.getByText('5 h')).toBeTruthy();
       expect(screen.queryByText('6 h')).toBeNull();
     });
+
+    it('Regresión P2 · POST pendiente + Atrás (onRequestClose) no permite doble envío y recupera estado correcto tras éxito', async () => {
+      let resolverPost: (sub: Suscripcion) => void = () => {};
+      const promesaPostPendiente = new Promise<Suscripcion>((resolve) => {
+        resolverPost = resolve;
+      });
+
+      const suscripcionInicial: Suscripcion = {
+        id: 'sub-doble-envio',
+        nombre: 'Disney+',
+        monto: 7990,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-10-15',
+        categoria: 'streaming',
+        estado: 'activo',
+        horas_uso_mes: 2,
+      };
+
+      const onRegistrarUsoApi = vi.fn().mockImplementation(() => promesaPostPendiente);
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-doble-envio' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(suscripcionInicial)}
+          onRegistrarUsoApi={onRegistrarUsoApi}
+        />
+      );
+
+      expect(await screen.findByText('Disney+')).toBeTruthy();
+
+      // 1. Abrir modal
+      fireEvent.click(screen.getByTestId('btn-registrar-uso'));
+      expect(await screen.findByTestId('modal-registrar-uso')).toBeTruthy();
+
+      // 2. Ingresar 60 minutos y presionar enviar
+      fireEvent.change(screen.getByTestId('input-minutos'), { target: { value: '60' } });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-submit-uso'));
+      });
+
+      // Primer POST disparado y en curso
+      expect(onRegistrarUsoApi).toHaveBeenCalledTimes(1);
+
+      // 3. Simular evento Atrás de Android (onRequestClose en Modal)
+      const btnRequestClose = screen.getByTestId('modal-registrar-uso-request-close');
+      await act(async () => {
+        fireEvent.click(btnRequestClose);
+      });
+
+      // El modal permanece visible porque está bloqueado durante el POST pendiente
+      expect(screen.queryByTestId('modal-registrar-uso')).toBeTruthy();
+
+      // El botón de submit está deshabilitado / aria-disabled=true
+      const btnSubmit = screen.getByTestId('btn-submit-uso');
+      expect(btnSubmit.getAttribute('disabled')).not.toBeNull();
+
+      // Intentar forzar un segundo click de envío mientras sigue pendiente
+      await act(async () => {
+        fireEvent.click(btnSubmit);
+      });
+
+      // Sigue habiendo SOLO un POST en vuelo (no se duplicó el envío)
+      expect(onRegistrarUsoApi).toHaveBeenCalledTimes(1);
+
+      // 4. Resolver el POST pendiente con éxito
+      await act(async () => {
+        resolverPost({
+          ...suscripcionInicial,
+          horas_uso_mes: 3,
+        });
+      });
+
+      // Se muestra la confirmación del nuevo uso
+      expect(screen.getByTestId('confirmacion-uso')).toBeTruthy();
+
+      // Ahora que terminó el POST, el modal permite cerrarse normalmente
+      const btnCancelar = screen.getByTestId('btn-cancelar-uso');
+      expect(btnCancelar.getAttribute('disabled')).toBeNull();
+      await act(async () => {
+        fireEvent.click(btnCancelar);
+      });
+      expect(screen.queryByTestId('modal-registrar-uso')).toBeNull();
+
+      // Las métricas se actualizaron correctamente a 3 h
+      expect(screen.getByText('3 h')).toBeTruthy();
+    });
+
+    it('Regresión P2 · Si POST pendiente con intento de cierre falla, se muestra el error y se recupera el estado para reintentar o cancelar', async () => {
+      let rechazarPost: (err: any) => void = () => {};
+      const promesaPostFalla = new Promise<Suscripcion>((_, reject) => {
+        rechazarPost = reject;
+      });
+
+      const suscripcionInicial: Suscripcion = {
+        id: 'sub-falla',
+        nombre: 'HBO Max',
+        monto: 6990,
+        moneda: 'CLP',
+        frecuencia: 'mensual',
+        fecha_proximo_cobro: '2026-10-15',
+        categoria: 'streaming',
+        estado: 'activo',
+        horas_uso_mes: 1,
+      };
+
+      const onRegistrarUsoApi = vi.fn().mockImplementation(() => promesaPostFalla);
+
+      render(
+        <SuscripcionDetalleScreen
+          route={{ params: { id: 'sub-falla' } } as any}
+          onCargarSuscripcion={vi.fn().mockResolvedValue(suscripcionInicial)}
+          onRegistrarUsoApi={onRegistrarUsoApi}
+        />
+      );
+
+      expect(await screen.findByText('HBO Max')).toBeTruthy();
+
+      // Abrir modal y enviar
+      fireEvent.click(screen.getByTestId('btn-registrar-uso'));
+      fireEvent.change(screen.getByTestId('input-minutos'), { target: { value: '45' } });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-submit-uso'));
+      });
+
+      expect(onRegistrarUsoApi).toHaveBeenCalledTimes(1);
+
+      // Simular Atrás mientras POST está en vuelo: bloqueado
+      const btnRequestClose = screen.getByTestId('modal-registrar-uso-request-close');
+      await act(async () => {
+        fireEvent.click(btnRequestClose);
+      });
+      expect(screen.getByTestId('modal-registrar-uso')).toBeTruthy();
+
+      // Ahora el POST falla
+      await act(async () => {
+        rechazarPost(new ErrorDeApi('Fallo temporal de servidor', 500));
+      });
+
+      // Muestra el error y libera el bloqueo
+      expect(screen.getByTestId('error-general')).toBeTruthy();
+      expect(screen.getByText('Fallo temporal de servidor')).toBeTruthy();
+
+      // Ahora Atrás o Cancelar sí permite cerrar el modal
+      await act(async () => {
+        fireEvent.click(btnRequestClose);
+      });
+      expect(screen.queryByTestId('modal-registrar-uso')).toBeNull();
+    });
   });
 });

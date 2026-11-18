@@ -64,7 +64,7 @@ export function RegistrarUsoFormMovil({
 
   const handleSubmit = async () => {
     // Un doble tap no registra dos veces el mismo uso
-    if (enviandoRef.current || bloqueado || !sigueVigente()) return;
+    if (enviandoRef.current || estaDeshabilitado || !sigueVigente()) return;
 
     const fechaLimpia = fecha.trim();
     const locales = validarUso({ minutos, fecha: fechaLimpia }, hoy);
@@ -208,10 +208,18 @@ export function RegistrarUsoFormMovil({
             testID="btn-cancelar-uso"
             accessibilityRole="button"
             accessibilityLabel="Cancelar registro de uso"
-            style={[styles.boton, styles.botonSecundario]}
-            disabled={guardando}
-            accessibilityState={{ disabled: guardando }}
-            onPress={onCancelar}
+            style={[
+              styles.boton,
+              styles.botonSecundario,
+              estaDeshabilitado && styles.botonDeshabilitado,
+            ]}
+            disabled={estaDeshabilitado}
+            accessibilityState={{ disabled: estaDeshabilitado }}
+            onPress={() => {
+              if (!estaDeshabilitado && !enviandoRef.current) {
+                onCancelar();
+              }
+            }}
           >
             <Text style={styles.botonSecundarioTexto}>Cancelar</Text>
           </Pressable>
