@@ -2,13 +2,20 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import {
   costoPorHora,
+  eliminarSuscripcion,
   equivalenteMensual,
   ErrorDeApi,
   formatearHoras,
   formatearMonto,
   getSuscripcion,
+  getUsos,
+  registrarUso,
+  type RegistroUso,
   type Suscripcion,
 } from '@ojoalgasto/shared';
+import { ConfirmarRetiroModal } from './ConfirmarRetiroModal';
+import { HistorialUsoMovil, type EstadoHistorialUso } from './HistorialUsoMovil';
+import { RegistrarUsoModal } from './RegistrarUsoModal';
 import { Loading } from '../../components/estados/Loading';
 import { NetworkError } from '../../components/estados/NetworkError';
 import { NavButton } from '../components/NavButton';
@@ -35,6 +42,8 @@ export interface SuscripcionDetalleViewProps {
   onEditar?: (suscripcion: Suscripcion) => void;
   onEliminar?: (suscripcion: Suscripcion) => void;
   onRegistrarUso?: (suscripcion: Suscripcion) => void;
+  estadoHistorial?: EstadoHistorialUso;
+  onReintentarHistorial?: () => void;
 }
 
 /**
@@ -49,6 +58,8 @@ export function SuscripcionDetalleView({
   onEditar,
   onEliminar,
   onRegistrarUso,
+  estadoHistorial = { tipo: 'listo', usos: [] },
+  onReintentarHistorial,
 }: SuscripcionDetalleViewProps) {
   if (estado.tipo === 'cargando') {
     return (
@@ -271,6 +282,10 @@ export function SuscripcionDetalleView({
             onPress={() => onRegistrarUso?.(suscripcion)}
             style={styles.botonAccion}
           />
+          <HistorialUsoMovil
+            estado={estadoHistorial}
+            onReintentar={onReintentarHistorial ?? (() => {})}
+          />
         </View>
 
         {/* Acciones principales de suscripción (SE-24 y SE-26) */}
@@ -299,25 +314,38 @@ export interface SuscripcionDetalleContainerProps {
   navigation?: {
     goBack?: () => void;
     navigate?: (pantalla: any, params?: any) => void;
+    addListener?: (event: string, callback: () => void) => () => void;
   };
   route?: {
-    params?: { id?: string };
+    params?: { id?: string; suscripcion?: Suscripcion };
   };
   onCargarSuscripcion?: (id: string) => Promise<Suscripcion>;
+  onEliminarSuscripcion?: (id: string) => Promise<void>;
+  onRetiroExitoso?: (id: string) => void;
   estadoInicial?: EstadoDetalle;
   onEditar?: (suscripcion: Suscripcion) => void;
   onEliminar?: (suscripcion: Suscripcion) => void;
   onRegistrarUso?: (suscripcion: Suscripcion) => void;
+  onRegistrarUsoApi?: (id: string, payload: { minutos: number; fecha?: string }) => Promise<Suscripcion>;
+  onUsoRegistrado?: (suscripcionActualizada: Suscripcion) => void;
+  onCargarHistorial?: (id: string) => Promise<RegistroUso[]>;
+  estadoHistorialInicial?: EstadoHistorialUso;
 }
 
 export default function SuscripcionDetalleScreen({
   navigation,
   route,
   onCargarSuscripcion = getSuscripcion,
+  onEliminarSuscripcion = eliminarSuscripcion,
+  onRetiroExitoso,
   estadoInicial,
   onEditar,
   onEliminar,
   onRegistrarUso,
+  onRegistrarUsoApi = registrarUso,
+  onUsoRegistrado,
+  onCargarHistorial = getUsos,
+  estadoHistorialInicial,
 }: (HomeScreenProps<'SuscripcionDetalle'> & SuscripcionDetalleContainerProps) | SuscripcionDetalleContainerProps) {
   const id = route?.params?.id ?? '';
 
@@ -325,10 +353,57 @@ export default function SuscripcionDetalleScreen({
     estadoInicial ?? { tipo: 'cargando' }
   );
 
+  // Estado del historial de uso (SE-30)
+  const [estadoHistorial, setEstadoHistorial] = useState<EstadoHistorialUso>(
+    estadoHistorialInicial ?? { tipo: 'cargando' }
+  );
+
+  // Estados para modal de confirmación y retiro (SE-26)
+  const [mostrarModalRetiro, setMostrarModalRetiro] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [errorRetiro, setErrorRetiro] = useState<string | null>(null);
+  const eliminandoRef = useRef(false);
+
+  // Estados para modal de registro de minutos de uso (SE-28)
+  const [mostrarModalUso, setMostrarModalUso] = useState(false);
+  const [registrandoUso, setRegistrandoUso] = useState(false);
+  const registrandoUsoRef = useRef(false);
+
   // Contador de generación e id activo para invalidar respuestas atrasadas y proteger contra desmontaje
   const generacionRef = useRef(0);
+  const generacionHistorialRef = useRef(0);
   const idActualRef = useRef(id);
   idActualRef.current = id;
+
+  const cargarHistorial = useCallback(
+    async (idObjetivo: string) => {
+      if (!idObjetivo) {
+        setEstadoHistorial({ tipo: 'listo', usos: [] });
+        return;
+      }
+      generacionHistorialRef.current += 1;
+      const generacionHistorialActual = generacionHistorialRef.current;
+      const generacionActual = generacionRef.current;
+      const sigueVigente = () =>
+        generacionRef.current === generacionActual &&
+        generacionHistorialRef.current === generacionHistorialActual &&
+        idActualRef.current === idObjetivo;
+
+      setEstadoHistorial({ tipo: 'cargando' });
+      try {
+        const usos = await onCargarHistorial(idObjetivo);
+        if (!sigueVigente()) return;
+        setEstadoHistorial({ tipo: 'listo', usos });
+      } catch {
+        if (!sigueVigente()) return;
+        setEstadoHistorial({
+          tipo: 'error',
+          mensaje: 'No pudimos cargar el historial de uso.',
+        });
+      }
+    },
+    [onCargarHistorial]
+  );
 
   const cargarDatos = useCallback(
     async (idObjetivo: string) => {
@@ -341,6 +416,7 @@ export default function SuscripcionDetalleScreen({
       if (!idObjetivo) {
         if (sigueVigente()) {
           setEstado({ tipo: 'no-encontrada' });
+          setEstadoHistorial({ tipo: 'listo', usos: [] });
         }
         return;
       }
@@ -348,6 +424,8 @@ export default function SuscripcionDetalleScreen({
       if (sigueVigente()) {
         setEstado({ tipo: 'cargando' });
       }
+
+      void cargarHistorial(idObjetivo);
 
       try {
         const suscripcion = await onCargarSuscripcion(idObjetivo);
@@ -375,15 +453,27 @@ export default function SuscripcionDetalleScreen({
   );
 
   useEffect(() => {
+    if (route?.params?.suscripcion) {
+      setEstado({ tipo: 'listo', suscripcion: route.params.suscripcion });
+    }
+  }, [route?.params?.suscripcion]);
+
+  useEffect(() => {
     if (estadoInicial) return;
     void cargarDatos(id);
 
+    const unsubscribe = (navigation as any)?.addListener?.('focus', () => {
+      void cargarDatos(id);
+    });
+
     return () => {
+      unsubscribe?.();
       // Al cambiar id o desmontar el componente, se avanza la generación
       // para descartar inmediatamente cualquier respuesta pendiente en vuelo.
       generacionRef.current += 1;
+      generacionHistorialRef.current += 1;
     };
-  }, [id, estadoInicial, cargarDatos]);
+  }, [id, estadoInicial, cargarDatos, navigation]);
 
   const manejarVolver = () => {
     if (navigation?.goBack) {
@@ -391,15 +481,130 @@ export default function SuscripcionDetalleScreen({
     }
   };
 
+  const manejarEditar = (sub: Suscripcion) => {
+    if (onEditar) {
+      onEditar(sub);
+    } else if (navigation?.navigate) {
+      navigation.navigate('SuscripcionEditar', { id: sub.id, suscripcion: sub });
+    }
+  };
+
+  const manejarEliminar = (sub: Suscripcion) => {
+    onEliminar?.(sub);
+    setErrorRetiro(null);
+    setMostrarModalRetiro(true);
+  };
+
+  const cerrarModalRetiro = () => {
+    if (isDeleting) return;
+    setMostrarModalRetiro(false);
+    setErrorRetiro(null);
+  };
+
+  const manejarRegistrarUso = (sub: Suscripcion) => {
+    onRegistrarUso?.(sub);
+    setMostrarModalUso(true);
+  };
+
+  const cerrarModalUso = () => {
+    if (registrandoUsoRef.current || registrandoUso) return;
+    setMostrarModalUso(false);
+  };
+
+  const ejecutarRegistrarUso = async (
+    minutos: number,
+    fecha?: string
+  ): Promise<Suscripcion> => {
+    if (estado.tipo !== 'listo') {
+      throw new Error('No hay suscripción activa para registrar uso');
+    }
+    if (registrandoUsoRef.current) {
+      throw new Error('Ya hay un registro de uso en curso para esta suscripción');
+    }
+    const idSuscripcion = estado.suscripcion.id;
+    registrandoUsoRef.current = true;
+    setRegistrandoUso(true);
+
+    try {
+      const actualizada = await onRegistrarUsoApi(idSuscripcion, { minutos, fecha });
+      if (idActualRef.current === idSuscripcion) {
+        setEstado({ tipo: 'listo', suscripcion: actualizada });
+        onUsoRegistrado?.(actualizada);
+        void cargarHistorial(idSuscripcion);
+      }
+      return actualizada;
+    } finally {
+      registrandoUsoRef.current = false;
+      setRegistrandoUso(false);
+    }
+  };
+
+  const ejecutarRetiro = async () => {
+    if (eliminandoRef.current || isDeleting) return;
+    if (estado.tipo !== 'listo') return;
+
+    const idParaEliminar = estado.suscripcion.id;
+    eliminandoRef.current = true;
+    setIsDeleting(true);
+    setErrorRetiro(null);
+
+    try {
+      await onEliminarSuscripcion(idParaEliminar);
+      onRetiroExitoso?.(idParaEliminar);
+      setMostrarModalRetiro(false);
+      if (typeof (navigation as any)?.popTo === 'function') {
+        (navigation as any).popTo('HomeScreen');
+      } else if (navigation?.navigate) {
+        navigation.navigate('HomeScreen');
+      } else if (navigation?.goBack) {
+        navigation.goBack();
+      }
+    } catch (err: unknown) {
+      let mensaje = 'No pudimos retirar la suscripción. Revisa tu conexión e inténtalo de nuevo.';
+      if (err instanceof ErrorDeApi && err.message) {
+        mensaje = err.message;
+      }
+      setErrorRetiro(mensaje);
+    } finally {
+      setIsDeleting(false);
+      eliminandoRef.current = false;
+    }
+  };
+
   return (
-    <SuscripcionDetalleView
-      id={id}
-      estado={estado}
-      onVolver={manejarVolver}
-      onReintentar={() => void cargarDatos(id)}
-      onEditar={onEditar}
-      onEliminar={onEliminar}
-      onRegistrarUso={onRegistrarUso}
-    />
+    <>
+      <SuscripcionDetalleView
+        id={id}
+        estado={estado}
+        onVolver={manejarVolver}
+        onReintentar={() => void cargarDatos(id)}
+        onEditar={manejarEditar}
+        onEliminar={manejarEliminar}
+        onRegistrarUso={manejarRegistrarUso}
+        estadoHistorial={estadoHistorial}
+        onReintentarHistorial={() => void cargarHistorial(id)}
+      />
+      {mostrarModalUso && estado.tipo === 'listo' && (
+        <RegistrarUsoModal
+          visible={mostrarModalUso}
+          idSuscripcion={estado.suscripcion.id}
+          nombreSuscripcion={estado.suscripcion.nombre}
+          onRegistrar={ejecutarRegistrarUso}
+          onCancelar={cerrarModalUso}
+          bloqueado={registrandoUso || isDeleting}
+          sigueVigente={() => idActualRef.current === estado.suscripcion.id}
+        />
+      )}
+      {mostrarModalRetiro && estado.tipo === 'listo' && (
+        <ConfirmarRetiroModal
+          visible={mostrarModalRetiro}
+          nombreSuscripcion={estado.suscripcion.nombre}
+          onConfirmar={ejecutarRetiro}
+          onCancelar={cerrarModalRetiro}
+          isDeleting={isDeleting}
+          error={errorRetiro}
+        />
+      )}
+    </>
   );
 }
