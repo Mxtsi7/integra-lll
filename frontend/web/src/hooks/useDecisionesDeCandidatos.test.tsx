@@ -8,13 +8,15 @@ import { guardarTokens } from '../../../shared/src/auth';
 import {
   MENSAJE_COBRO_NO_ENCONTRADO,
   MENSAJE_ERROR_AL_CONFIRMAR,
-} from '../components/candidatos/confirmacionCandidatos';
+  MENSAJE_ERROR_AL_RECHAZAR,
+  MENSAJE_YA_CONFIRMADO,
+} from '../components/candidatos/decisionesCandidatos';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../context/ToastContext';
 import { candidatoDePrueba } from '../test/candidatosDePrueba';
 import { crearTokenDePrueba } from '../test/tokensDePrueba';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
-import { useConfirmacionCandidatos } from './useConfirmacionCandidatos';
+import { useDecisionesDeCandidatos } from './useDecisionesDeCandidatos';
 
 // Solo se simula la red (pedir). El hook, el cliente de shared y el AuthProvider son los reales.
 vi.mock('../../../shared/src/api/cliente', async (importOriginal) => {
@@ -39,18 +41,24 @@ function Proveedores({ children }: { children: ReactNode }) {
 }
 
 type Salida = 'ok' | Error | Promise<unknown>;
+type Accion = 'confirmar' | 'rechazar';
 
-/** Responde /usuarios/me/ con la persona actual y deja que el test decida qué pasa con cada confirmación (por id). */
+/** Responde /usuarios/me/ con la persona actual y deja que el test decida qué pasa con cada decisión (por id). */
 function simularRed(salidaPorId: Record<string, Salida>) {
   vi.mocked(pedir).mockImplementation((ruta: string) => {
-    const id = /^\/candidatos\/([^/]+)\/confirmar\/$/.exec(ruta)?.[1];
+    const coincidencia = /^\/candidatos\/([^/]+)\/(confirmar|rechazar)\/$/.exec(ruta);
+    const id = coincidencia?.[1];
+    const accion = coincidencia?.[2];
     if (id === undefined) return Promise.resolve(PERSONA_ACTUAL);
     const salida = salidaPorId[id] ?? 'ok';
-    if (salida === 'ok') return Promise.resolve({ id, estado: 'confirmado', aplicacion: 'pendiente' });
+    if (salida === 'ok') return Promise.resolve({ id, estado: accion === 'confirmar' ? 'confirmado' : 'rechazado' });
     return salida instanceof Error ? Promise.reject(salida) : (salida as Promise<unknown>);
   });
 }
-const confirmaciones = () => vi.mocked(pedir).mock.calls.filter(([ruta]) => /\/confirmar\/$/.test(String(ruta)));
+const llamadasA = (accion: Accion) =>
+  vi.mocked(pedir).mock.calls.filter(([ruta]) => String(ruta).endsWith(`/${accion}/`));
+const confirmaciones = () => llamadasA('confirmar');
+const rechazos = () => llamadasA('rechazar');
 
 function diferida<T>() {
   let resolver!: (valor: T) => void;
@@ -62,15 +70,21 @@ function diferida<T>() {
 
 const montar = (alTerminar = vi.fn()) => ({
   alTerminar,
-  ...renderHook(() => useConfirmacionCandidatos({ alTerminar }), { wrapper: Proveedores }),
+  ...renderHook(() => useDecisionesDeCandidatos({ alTerminar }), { wrapper: Proveedores }),
 });
-const confirmar = (resultado: ReturnType<typeof montar>['result'], candidatos: CandidatoDetectado[]) =>
-  act(async () => resultado.current.confirmar(candidatos));
+type Montaje = ReturnType<typeof montar>['result'];
+
+const confirmar = (resultado: Montaje, candidatos: CandidatoDetectado[]) => act(async () => resultado.current.confirmar(candidatos));
+const rechazar = (resultado: Montaje, candidatos: CandidatoDetectado[]) => act(async () => resultado.current.rechazar(candidatos));
 
 /** Empieza una tanda y no espera a que termine: para las pruebas cuya respuesta sigue pendiente. */
-const iniciarConfirmacion = (resultado: ReturnType<typeof montar>['result'], candidatos: CandidatoDetectado[]) =>
+const iniciarConfirmacion = (resultado: Montaje, candidatos: CandidatoDetectado[]) =>
   act(async () => {
     void resultado.current.confirmar(candidatos);
+  });
+const iniciarRechazo = (resultado: Montaje, candidatos: CandidatoDetectado[]) =>
+  act(async () => {
+    void resultado.current.rechazar(candidatos);
   });
 
 const entraOtraSesion = () =>
@@ -94,7 +108,7 @@ describe('confirmar cobros (S3-CH-08)', () => {
     simularRed({});
     const { result } = montar();
 
-    expect(result.current.enCurso).toBe(false);
+    expect(result.current.accionEnCurso).toBeNull();
     expect(result.current.resultado).toBeNull();
   });
 
@@ -107,9 +121,10 @@ describe('confirmar cobros (S3-CH-08)', () => {
     expect(confirmaciones().map(([ruta]) => ruta)).toEqual(['/candidatos/c-1/confirmar/', '/candidatos/c-2/confirmar/']);
     expect(confirmaciones().every(([, opciones]) => (opciones as { method: string }).method === 'POST')).toBe(true);
     expect(result.current.resultado).toEqual({
+      accion: 'confirmar',
       resultados: [
-        { id: 'c-1', nombre: 'Spotify', tipo: 'confirmado' },
-        { id: 'c-2', nombre: 'Netflix', tipo: 'confirmado' },
+        { id: 'c-1', nombre: 'Spotify', tipo: 'hecho' },
+        { id: 'c-2', nombre: 'Netflix', tipo: 'hecho' },
       ],
     });
     expect(alTerminar).toHaveBeenCalledTimes(1);
@@ -122,23 +137,23 @@ describe('confirmar cobros (S3-CH-08)', () => {
 
     await iniciarConfirmacion(result, [SPOTIFY]);
 
-    expect(result.current.enCurso).toBe(true);
+    expect(result.current.accionEnCurso).toBe('confirmar');
     expect(result.current.resultado).toBeNull();
     expect(alTerminar).not.toHaveBeenCalled();
 
     await act(async () => respuesta.resolver({ id: 'c-1', estado: 'confirmado' }));
-    expect(result.current.enCurso).toBe(false);
-    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'confirmado' }]);
+    expect(result.current.accionEnCurso).toBeNull();
+    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'hecho' }]);
   });
 
-  it('un cobro que el servidor ya tenía confirmado (200 repetido) cuenta como confirmado, sin crear otro', async () => {
+  it('un cobro que el servidor ya tenía confirmado (200 repetido) cuenta como hecho, sin crear otro', async () => {
     simularRed({});
     const { result } = montar();
 
     await confirmar(result, [SPOTIFY]);
     await confirmar(result, [SPOTIFY]);
 
-    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'confirmado' }]);
+    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'hecho' }]);
     expect(confirmaciones()).toHaveLength(2);
   });
 
@@ -148,8 +163,66 @@ describe('confirmar cobros (S3-CH-08)', () => {
 
     await confirmar(result, []);
 
-    expect(pedir).not.toHaveBeenCalledWith(expect.stringContaining('/confirmar/'), expect.anything());
+    expect(confirmaciones()).toHaveLength(0);
     expect(result.current.resultado).toBeNull();
+    expect(alTerminar).not.toHaveBeenCalled();
+  });
+});
+
+describe('rechazar cobros (S3-CH-09)', () => {
+  it('manda un POST a rechazar por cada cobro, sin tocar las confirmaciones', async () => {
+    simularRed({});
+    const { result, alTerminar } = montar();
+
+    await rechazar(result, [SPOTIFY, NETFLIX]);
+
+    expect(rechazos().map(([ruta]) => ruta)).toEqual(['/candidatos/c-1/rechazar/', '/candidatos/c-2/rechazar/']);
+    expect(rechazos().every(([, opciones]) => (opciones as { method: string }).method === 'POST')).toBe(true);
+    expect(confirmaciones()).toHaveLength(0);
+    expect(result.current.resultado).toEqual({
+      accion: 'rechazar',
+      resultados: [
+        { id: 'c-1', nombre: 'Spotify', tipo: 'hecho' },
+        { id: 'c-2', nombre: 'Netflix', tipo: 'hecho' },
+      ],
+    });
+    expect(alTerminar).toHaveBeenCalledTimes(1);
+  });
+
+  it('mientras llegan las respuestas figura rechazando, y nada se da por rechazado antes de que el servidor responda', async () => {
+    const respuesta = diferida<unknown>();
+    simularRed({ 'c-1': respuesta.promesa });
+    const { result, alTerminar } = montar();
+
+    await iniciarRechazo(result, [SPOTIFY]);
+
+    expect(result.current.accionEnCurso).toBe('rechazar');
+    expect(result.current.resultado).toBeNull();
+    expect(alTerminar).not.toHaveBeenCalled();
+
+    await act(async () => respuesta.resolver({ id: 'c-1', estado: 'rechazado' }));
+    expect(result.current.accionEnCurso).toBeNull();
+    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'hecho' }]);
+  });
+
+  it('un rechazo repetido (200 otra vez) cuenta como hecho, sin error', async () => {
+    simularRed({});
+    const { result } = montar();
+
+    await rechazar(result, [SPOTIFY]);
+    await rechazar(result, [SPOTIFY]);
+
+    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'hecho' }]);
+    expect(rechazos()).toHaveLength(2);
+  });
+
+  it('una lista vacía no manda nada', async () => {
+    simularRed({});
+    const { result, alTerminar } = montar();
+
+    await rechazar(result, []);
+
+    expect(rechazos()).toHaveLength(0);
     expect(alTerminar).not.toHaveBeenCalled();
   });
 });
@@ -173,6 +246,7 @@ describe('fallos parciales (S3-CH-08)', () => {
     ['un 404', new ErrorDeApi('No encontrado.', 404), MENSAJE_COBRO_NO_ENCONTRADO],
     ['un 500', new ErrorDeApi('Error interno.', 500), MENSAJE_ERROR_AL_CONFIRMAR],
     ['un 409 con un código que no se conoce', new ErrorDeApi('Otro.', 409, { codigo: ['codigo_nuevo'] }), MENSAJE_ERROR_AL_CONFIRMAR],
+    ['un 409 de rechazar', new ErrorDeApi('Ya confirmado.', 409, { codigo: ['candidato_ya_confirmado'] }), MENSAJE_ERROR_AL_CONFIRMAR],
   ])('%s da su mensaje', async (_descripcion, error, mensajeEsperado) => {
     simularRed({ 'c-1': error });
     const { result } = montar();
@@ -191,8 +265,8 @@ describe('fallos parciales (S3-CH-08)', () => {
     expect(confirmaciones()).toHaveLength(3);
     expect(result.current.resultado?.resultados.map(({ id, tipo }) => [id, tipo])).toEqual([
       ['c-1', 'fallido'],
-      ['c-2', 'confirmado'],
-      ['c-3', 'confirmado'],
+      ['c-2', 'hecho'],
+      ['c-3', 'hecho'],
     ]);
     expect(alTerminar).toHaveBeenCalledTimes(1);
   });
@@ -207,7 +281,49 @@ describe('fallos parciales (S3-CH-08)', () => {
   });
 });
 
-describe('doble envío y resultado (S3-CH-08)', () => {
+describe('fallos parciales (S3-CH-09)', () => {
+  it('un 409 candidato_ya_confirmado dice que ya está confirmado, sin repetir el texto técnico del servidor', async () => {
+    simularRed({ 'c-1': new ErrorDeApi('Texto técnico del servidor.', 409, { codigo: ['candidato_ya_confirmado'] }) });
+    const { result } = montar();
+
+    await rechazar(result, [SPOTIFY]);
+
+    expect(result.current.resultado).toEqual({
+      accion: 'rechazar',
+      resultados: [{ id: 'c-1', nombre: 'Spotify', tipo: 'fallido', mensaje: MENSAJE_YA_CONFIRMADO }],
+    });
+  });
+
+  it.each([
+    ['sin red', new TypeError('Failed to fetch'), MENSAJE_SIN_RED],
+    ['un 404', new ErrorDeApi('No encontrado.', 404), MENSAJE_COBRO_NO_ENCONTRADO],
+    ['un 500', new ErrorDeApi('Error interno.', 500), MENSAJE_ERROR_AL_RECHAZAR],
+    ['un 409 con un código que no se conoce', new ErrorDeApi('Otro.', 409, { codigo: ['codigo_nuevo'] }), MENSAJE_ERROR_AL_RECHAZAR],
+    ['un 409 de confirmar', new ErrorDeApi('Rechazado.', 409, { codigo: ['candidato_rechazado'] }), MENSAJE_ERROR_AL_RECHAZAR],
+  ])('%s al rechazar da su mensaje', async (_descripcion, error, mensajeEsperado) => {
+    simularRed({ 'c-1': error });
+    const { result } = montar();
+
+    await rechazar(result, [SPOTIFY]);
+
+    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-1', nombre: 'Spotify', tipo: 'fallido', mensaje: mensajeEsperado }]);
+  });
+
+  it('el rechazo de un cobro no frena a los demás', async () => {
+    simularRed({ 'c-1': new ErrorDeApi('Ya confirmado.', 409, { codigo: ['candidato_ya_confirmado'] }) });
+    const { result, alTerminar } = montar();
+
+    await rechazar(result, [SPOTIFY, NETFLIX]);
+
+    expect(result.current.resultado?.resultados.map(({ id, tipo }) => [id, tipo])).toEqual([
+      ['c-1', 'fallido'],
+      ['c-2', 'hecho'],
+    ]);
+    expect(alTerminar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('doble envío y resultado (S3-CH-08 y S3-CH-09)', () => {
   it('un segundo envío mientras la tanda sigue en curso no manda otra confirmación', async () => {
     const respuesta = diferida<unknown>();
     simularRed({ 'c-1': respuesta.promesa });
@@ -222,6 +338,21 @@ describe('doble envío y resultado (S3-CH-08)', () => {
     await act(async () => respuesta.resolver({ id: 'c-1' }));
   });
 
+  it('mientras confirma no se puede rechazar: una sola tanda a la vez entre las dos acciones', async () => {
+    const respuesta = diferida<unknown>();
+    simularRed({ 'c-1': respuesta.promesa });
+    const { result } = montar();
+    await iniciarConfirmacion(result, [SPOTIFY]);
+
+    await act(async () => {
+      result.current.rechazar([NETFLIX]);
+    });
+
+    expect(rechazos()).toHaveLength(0);
+    expect(result.current.accionEnCurso).toBe('confirmar');
+    await act(async () => respuesta.resolver({ id: 'c-1' }));
+  });
+
   it('terminada la tanda se puede confirmar otra', async () => {
     simularRed({});
     const { result } = montar();
@@ -230,17 +361,17 @@ describe('doble envío y resultado (S3-CH-08)', () => {
     await confirmar(result, [NETFLIX]);
 
     expect(confirmaciones()).toHaveLength(2);
-    expect(result.current.resultado?.resultados).toEqual([{ id: 'c-2', nombre: 'Netflix', tipo: 'confirmado' }]);
+    expect(result.current.resultado).toEqual({ accion: 'confirmar', resultados: [{ id: 'c-2', nombre: 'Netflix', tipo: 'hecho' }] });
   });
 
-  it('empezar otra tanda borra el resultado de la anterior', async () => {
+  it('empezar otra tanda borra el resultado de la anterior, aunque sea de la otra acción', async () => {
     const segunda = diferida<unknown>();
     simularRed({ 'c-2': segunda.promesa });
     const { result } = montar();
     await confirmar(result, [SPOTIFY]);
     expect(result.current.resultado).not.toBeNull();
 
-    await iniciarConfirmacion(result, [NETFLIX]);
+    await iniciarRechazo(result, [NETFLIX]);
 
     expect(result.current.resultado).toBeNull();
     await act(async () => segunda.resolver({ id: 'c-2' }));
@@ -249,7 +380,7 @@ describe('doble envío y resultado (S3-CH-08)', () => {
   it('cerrar el resultado lo quita', async () => {
     simularRed({});
     const { result } = montar();
-    await confirmar(result, [SPOTIFY]);
+    await rechazar(result, [SPOTIFY]);
 
     act(() => result.current.cerrarResultado());
 
@@ -257,7 +388,7 @@ describe('doble envío y resultado (S3-CH-08)', () => {
   });
 });
 
-describe('cambio de sesión con la confirmación en vuelo (regla de sesión de Integra III)', () => {
+describe('cambio de sesión con la decisión en vuelo (regla de sesión de Integra III)', () => {
   it('la respuesta de A que llega con B ya dentro no se muestra ni avisa que terminó', async () => {
     const respuestaDeA = diferida<unknown>();
     simularRed({ 'c-1': respuestaDeA.promesa });
@@ -270,18 +401,35 @@ describe('cambio de sesión con la confirmación en vuelo (regla de sesión de I
 
     expect(result.current.resultado).toBeNull();
     expect(alTerminar).not.toHaveBeenCalled();
-    expect(result.current.enCurso).toBe(false);
+    expect(result.current.accionEnCurso).toBeNull();
   });
 
-  it('con la sesión ya cambiada no se manda ninguna confirmación', async () => {
+  it('un rechazo de A que llega con B ya dentro tampoco se muestra ni avisa que terminó', async () => {
+    const respuestaDeA = diferida<unknown>();
+    simularRed({ 'c-1': respuestaDeA.promesa });
+    const { result, alTerminar } = montar();
+    await iniciarRechazo(result, [SPOTIFY]);
+    await waitFor(() => expect(rechazos()).toHaveLength(1));
+
+    await entraOtraSesion();
+    await act(async () => respuestaDeA.resolver({ id: 'c-1', estado: 'rechazado' }));
+
+    expect(result.current.resultado).toBeNull();
+    expect(alTerminar).not.toHaveBeenCalled();
+    expect(result.current.accionEnCurso).toBeNull();
+  });
+
+  it('con la sesión ya cambiada no se manda ninguna decisión', async () => {
     simularRed({});
     const { result } = montar();
     await entraOtraSesion();
 
     await confirmar(result, [SPOTIFY]);
+    await rechazar(result, [NETFLIX]);
 
     expect(confirmaciones()).toHaveLength(0);
-    expect(result.current.enCurso).toBe(false);
+    expect(rechazos()).toHaveLength(0);
+    expect(result.current.accionEnCurso).toBeNull();
   });
 
   it('un fallo de A que llega tarde tampoco aparece en la vista de B', async () => {

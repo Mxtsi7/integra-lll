@@ -93,6 +93,13 @@ const CODIGOS_DE_CONFIRMACION_RECHAZADA = ['candidato_rechazado', 'servicio_sin_
 export type CodigoConfirmacionRechazada = (typeof CODIGOS_DE_CONFIRMACION_RECHAZADA)[number];
 
 /**
+ * Por qué el servidor no rechaza un cobro (409, S3-FE-16). Solo hay uno: un cobro
+ * confirmado ya creó suscripciones y cobros, y deshacerlos no es rechazarlo.
+ */
+const CODIGOS_DE_RECHAZO_NO_PERMITIDO = ['candidato_ya_confirmado'] as const;
+export type CodigoRechazoNoPermitido = (typeof CODIGOS_DE_RECHAZO_NO_PERMITIDO)[number];
+
+/**
  * POST /api/candidatos/<id>/confirmar/ (S3-FE-15). Responde 200 con el candidato
  * `confirmado`. Es idempotente: repetirlo devuelve el mismo candidato y no
  * agrega otra orden. Confirmar NO crea todavía la suscripción ni el cobro: deja
@@ -103,12 +110,31 @@ export async function confirmarCandidato(id: string): Promise<CandidatoDetectado
 }
 
 /**
+ * POST /api/candidatos/<id>/rechazar/ (S3-FE-16). Responde 200 con el candidato
+ * `rechazado`. Es idempotente: repetirlo devuelve la misma decisión y no toca
+ * suscripciones ni cobros.
+ */
+export async function rechazarCandidato(id: string): Promise<CandidatoDetectado> {
+  return await pedir(`/candidatos/${encodeURIComponent(id)}/rechazar/`, { method: 'POST' });
+}
+
+/**
  * El código de un 409 de confirmar, o null si el error no es uno de ellos. El
  * servidor manda `{ codigo, detail }`; `pedir` deja el `detail` como mensaje y
  * el `codigo` entre los campos.
  */
 export function codigoDeConfirmacionRechazada(error: unknown): CodigoConfirmacionRechazada | null {
+  return codigoDeUnConflicto(error, CODIGOS_DE_CONFIRMACION_RECHAZADA);
+}
+
+/** El código de un 409 de rechazar, o null. La misma forma que el de confirmar. */
+export function codigoDeRechazoNoPermitido(error: unknown): CodigoRechazoNoPermitido | null {
+  return codigoDeUnConflicto(error, CODIGOS_DE_RECHAZO_NO_PERMITIDO);
+}
+
+/** El `codigo` de un 409 si es uno de los conocidos; cualquier otra cosa da null. */
+function codigoDeUnConflicto<T extends string>(error: unknown, conocidos: readonly T[]): T | null {
   if (!(error instanceof ErrorDeApi) || error.status !== 409) return null;
   const codigo = error.campos?.codigo?.[0];
-  return CODIGOS_DE_CONFIRMACION_RECHAZADA.find((conocido) => conocido === codigo) ?? null;
+  return conocidos.find((conocido) => conocido === codigo) ?? null;
 }

@@ -4,7 +4,7 @@ import { formatearFecha, formatearMonto, TAMANO_PAGINA_CANDIDATOS, type Candidat
 import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
 import type { CargaCandidatos } from './cargaCandidatos';
-import type { ConfirmacionDeCandidatos, ResultadoConfirmacion } from './confirmacionCandidatos';
+import type { AccionDeCandidato, DecisionesDeCandidatos, ResultadoDecisiones } from './decisionesCandidatos';
 import styles from './ListaCandidatos.module.css';
 import { sePuedeDecidir, type SeleccionDeCandidatos } from './seleccionCandidatos';
 
@@ -15,8 +15,8 @@ interface ListaCandidatosProps {
   alReintentar: () => void;
   /** Sin esto la lista no tiene casillas ni barra de selección (S3-CH-07). */
   seleccion?: SeleccionDeCandidatos;
-  /** Sin esto la lista no confirma ni muestra resultados (S3-CH-08). Necesita la selección. */
-  confirmacion?: ConfirmacionDeCandidatos;
+  /** Sin esto la lista no confirma ni rechaza, ni muestra resultados (S3-CH-08 y S3-CH-09). Necesita la selección. */
+  decisiones?: DecisionesDeCandidatos;
 }
 
 /**
@@ -24,7 +24,7 @@ interface ListaCandidatosProps {
  * lo que le llega: no sabe de dónde vienen los datos (eso lo hace useCandidatos),
  * así que se prueba con datos inventados.
  */
-export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, seleccion, confirmacion }: ListaCandidatosProps) {
+export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, seleccion, decisiones }: ListaCandidatosProps) {
   // La sección queda montada en todos los estados. «Anterior», «Siguiente» y
   // «Reintentar» desaparecen mientras se carga: sin esto el foco caería al
   // inicio de la página y quien usa teclado tendría que recorrerla otra vez.
@@ -40,13 +40,17 @@ export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, 
     llevarElFocoALaLista();
   };
 
-  // El botón se deshabilita mientras se confirma y «Cerrar» desaparece al usarse: el foco queda en la lista.
+  // Los botones se deshabilitan mientras una tanda corre y «Cerrar» desaparece al usarse: el foco queda en la lista.
   const confirmar = () => {
-    confirmacion?.alConfirmar();
+    decisiones?.alConfirmar();
+    llevarElFocoALaLista();
+  };
+  const rechazar = () => {
+    decisiones?.alRechazar();
     llevarElFocoALaLista();
   };
   const cerrarResultado = () => {
-    confirmacion?.alCerrarResultado();
+    decisiones?.alCerrarResultado();
     llevarElFocoALaLista();
   };
 
@@ -58,7 +62,7 @@ export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, 
       aria-busy={carga.tipo === 'cargando'}
       className={styles.lista}
     >
-      {confirmacion?.resultado && <ResultadoDeConfirmacion resultado={confirmacion.resultado} alCerrar={cerrarResultado} />}
+      {decisiones?.resultado && <ResultadoDeDecisiones resultado={decisiones.resultado} alCerrar={cerrarResultado} />}
       {carga.tipo === 'cargando' && (
         <p role="status" className={styles.espera}>
           Cargando los cobros encontrados…
@@ -71,7 +75,7 @@ export function ListaCandidatos({ carga, pagina, alCambiarPagina, alReintentar, 
       {carga.tipo === 'listo' && carga.datos.count > 0 && (
         <>
           {seleccion && seleccion.cantidadSeleccionable > 0 && (
-            <BarraDeSeleccion seleccion={seleccion} confirmacion={confirmacion} alConfirmar={confirmar} />
+            <BarraDeSeleccion seleccion={seleccion} decisiones={decisiones} alConfirmar={confirmar} alRechazar={rechazar} />
           )}
           <ol className={styles.items}>
             {carga.datos.results.map((candidato) => (
@@ -141,15 +145,20 @@ function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado
   );
 }
 
-/** S3-CH-07: elegir todos los de la página, cuántos hay elegidos y cuántos de ellos no se pueden confirmar. */
+/**
+ * S3-CH-07: elegir todos los de la página, cuántos hay elegidos y cuántos de ellos no se pueden confirmar.
+ * S3-CH-08 y S3-CH-09: los botones de confirmar y rechazar.
+ */
 function BarraDeSeleccion({
   seleccion,
-  confirmacion,
+  decisiones,
   alConfirmar,
+  alRechazar,
 }: {
   seleccion: SeleccionDeCandidatos;
-  confirmacion?: ConfirmacionDeCandidatos;
+  decisiones?: DecisionesDeCandidatos;
   alConfirmar: () => void;
+  alRechazar: () => void;
 }) {
   const casillaDePagina = useRef<HTMLInputElement>(null);
   const cuantos = seleccion.seleccionados.size;
@@ -157,6 +166,8 @@ function BarraDeSeleccion({
   const hayAlgunos = cuantos > 0 && !estanTodos;
   const confirmables = seleccion.idsParaConfirmar.length;
   const sinProveedor = cuantos - confirmables;
+  const accionEnCurso = decisiones?.accionEnCurso ?? null;
+  const hayTandaEnCurso = accionEnCurso !== null;
 
   // `indeterminate` no es un atributo de HTML: solo se puede poner por la propiedad.
   useEffect(() => {
@@ -179,41 +190,92 @@ function BarraDeSeleccion({
         {textoDelConteo(cuantos, sinProveedor)}
       </span>
       {cuantos > 0 && (
-        <Boton variante="sutil" tamano="s" onClick={limpiar} disabled={confirmacion?.enCurso}>
+        <Boton variante="sutil" tamano="s" onClick={limpiar} disabled={hayTandaEnCurso}>
           Limpiar selección
         </Boton>
       )}
-      {confirmacion && (
-        <Boton tamano="s" onClick={alConfirmar} disabled={confirmables === 0} cargando={confirmacion.enCurso}>
-          {textoDelBotonConfirmar(confirmacion.enCurso, confirmables)}
-        </Boton>
+      {decisiones && (
+        <>
+          <Boton
+            tamano="s"
+            onClick={alConfirmar}
+            disabled={confirmables === 0 || hayTandaEnCurso}
+            cargando={accionEnCurso === 'confirmar'}
+          >
+            {textoDelBoton('confirmar', accionEnCurso === 'confirmar', confirmables)}
+          </Boton>
+          <Boton
+            variante="secundario"
+            tamano="s"
+            onClick={alRechazar}
+            disabled={cuantos === 0 || hayTandaEnCurso}
+            cargando={accionEnCurso === 'rechazar'}
+          >
+            {textoDelBoton('rechazar', accionEnCurso === 'rechazar', cuantos)}
+          </Boton>
+        </>
       )}
     </div>
   );
 }
 
-function textoDelBotonConfirmar(enCurso: boolean, confirmables: number): string {
-  if (enCurso) return 'Confirmando…';
-  if (confirmables === 0) return 'Confirmar';
-  return confirmables === 1 ? 'Confirmar 1 cobro' : `Confirmar ${confirmables} cobros`;
+const VERBO_DEL_BOTON: Record<AccionDeCandidato, { infinitivo: string; gerundio: string }> = {
+  confirmar: { infinitivo: 'Confirmar', gerundio: 'Confirmando…' },
+  rechazar: { infinitivo: 'Rechazar', gerundio: 'Rechazando…' },
+};
+
+function textoDelBoton(accion: AccionDeCandidato, esLaQueCorre: boolean, cuantos: number): string {
+  const { infinitivo, gerundio } = VERBO_DEL_BOTON[accion];
+  if (esLaQueCorre) return gerundio;
+  if (cuantos === 0) return infinitivo;
+  return cuantos === 1 ? `${infinitivo} 1 cobro` : `${infinitivo} ${cuantos} cobros`;
 }
 
+interface TextosDelResultado {
+  etiqueta: string;
+  /** Cómo se nombra un cobro que quedó hecho. */
+  hecho: string;
+  /** El verbo en infinitivo, para «No se pudo confirmar…». */
+  verbo: string;
+  /** El verbo en pasado, para «Confirmaste 2 cobros.». */
+  dichoEnPasado: string;
+  /** Lo que queda pendiente después de la acción; null si no queda nada pendiente. */
+  pendiente: string | null;
+}
+
+const TEXTOS_DEL_RESULTADO: Record<AccionDeCandidato, TextosDelResultado> = {
+  confirmar: {
+    etiqueta: 'Resultado de la confirmación',
+    hecho: 'confirmado',
+    verbo: 'confirmar',
+    dichoEnPasado: 'Confirmaste',
+    pendiente: 'Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.',
+  },
+  rechazar: {
+    etiqueta: 'Resultado del rechazo',
+    hecho: 'rechazado',
+    verbo: 'rechazar',
+    dichoEnPasado: 'Rechazaste',
+    pendiente: null,
+  },
+};
+
 /**
- * S3-CH-08: qué pasó con cada cobro. Solo se dice «confirmado» de los que el servidor respondió 200, y se
- * aclara que la orden queda pendiente: confirmar todavía no crea la suscripción ni el cobro.
+ * Qué pasó con cada cobro. Solo se dice «confirmado» o «rechazado» de los que el servidor
+ * respondió 200; con fallos se anuncia como alerta, y sin ellos como aviso que no interrumpe.
  */
-function ResultadoDeConfirmacion({ resultado, alCerrar }: { resultado: ResultadoConfirmacion; alCerrar: () => void }) {
+function ResultadoDeDecisiones({ resultado, alCerrar }: { resultado: ResultadoDecisiones; alCerrar: () => void }) {
+  const textos = TEXTOS_DEL_RESULTADO[resultado.accion];
   const total = resultado.resultados.length;
-  const confirmados = resultado.resultados.filter((cobro) => cobro.tipo === 'confirmado').length;
-  const huboFallos = confirmados < total;
+  const hechos = resultado.resultados.filter((cobro) => cobro.tipo === 'hecho').length;
+  const huboFallos = hechos < total;
   return (
-    // Con fallos se anuncia como alerta; sin ellos, como aviso que no interrumpe.
-    <div role={huboFallos ? 'alert' : 'status'} aria-label="Resultado de la confirmación" className={styles.resultado}>
-      <p className={styles.resumenResultado}>{resumenDelResultado(confirmados, total)}</p>
+    <div role={huboFallos ? 'alert' : 'status'} aria-label={textos.etiqueta} className={styles.resultado}>
+      <p className={styles.resumenResultado}>{resumenDelResultado(textos, hechos, total)}</p>
       <ul className={styles.resultados}>
         {resultado.resultados.map((cobro) => (
           <li key={cobro.id}>
-            <strong>{cobro.nombre}:</strong> {cobro.tipo === 'confirmado' ? 'confirmado' : cobro.mensaje}
+            <strong>{cobro.nombre}:</strong> {cobro.tipo === 'hecho' ? textos.hecho : cobro.mensaje}
           </li>
         ))}
       </ul>
@@ -224,11 +286,14 @@ function ResultadoDeConfirmacion({ resultado, alCerrar }: { resultado: Resultado
   );
 }
 
-function resumenDelResultado(confirmados: number, total: number): string {
-  if (confirmados === 0) return total === 1 ? 'No se pudo confirmar el cobro.' : 'No se pudo confirmar ningún cobro.';
-  const pendiente = 'Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.';
-  if (confirmados === total) return `${confirmados === 1 ? 'Confirmaste 1 cobro.' : `Confirmaste ${confirmados} cobros.`} ${pendiente}`;
-  return `Confirmaste ${confirmados} de ${total} cobros; el resto no se pudo. ${pendiente}`;
+function resumenDelResultado(textos: TextosDelResultado, hechos: number, total: number): string {
+  if (hechos === 0) return total === 1 ? `No se pudo ${textos.verbo} el cobro.` : `No se pudo ${textos.verbo} ningún cobro.`;
+  const pendiente = textos.pendiente ? ` ${textos.pendiente}` : '';
+  if (hechos === total) {
+    const cuantos = hechos === 1 ? `${textos.dichoEnPasado} 1 cobro` : `${textos.dichoEnPasado} ${hechos} cobros`;
+    return `${cuantos}.${pendiente}`;
+  }
+  return `${textos.dichoEnPasado} ${hechos} de ${total} cobros; el resto no se pudo.${pendiente}`;
 }
 
 function textoDelConteo(cuantos: number, sinProveedor: number): string {
