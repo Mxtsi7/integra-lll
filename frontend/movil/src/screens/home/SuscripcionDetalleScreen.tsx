@@ -8,9 +8,14 @@ import {
   formatearHoras,
   formatearMonto,
   getSuscripcion,
+  getUsos,
+  registrarUso,
+  type RegistroUso,
   type Suscripcion,
 } from '@ojoalgasto/shared';
 import { ConfirmarRetiroModal } from './ConfirmarRetiroModal';
+import { HistorialUsoMovil, type EstadoHistorialUso } from './HistorialUsoMovil';
+import { RegistrarUsoModal } from './RegistrarUsoModal';
 import { Loading } from '../../components/estados/Loading';
 import { NetworkError } from '../../components/estados/NetworkError';
 import { NavButton } from '../components/NavButton';
@@ -37,6 +42,8 @@ export interface SuscripcionDetalleViewProps {
   onEditar?: (suscripcion: Suscripcion) => void;
   onEliminar?: (suscripcion: Suscripcion) => void;
   onRegistrarUso?: (suscripcion: Suscripcion) => void;
+  estadoHistorial?: EstadoHistorialUso;
+  onReintentarHistorial?: () => void;
 }
 
 /**
@@ -51,6 +58,8 @@ export function SuscripcionDetalleView({
   onEditar,
   onEliminar,
   onRegistrarUso,
+  estadoHistorial = { tipo: 'listo', usos: [] },
+  onReintentarHistorial,
 }: SuscripcionDetalleViewProps) {
   if (estado.tipo === 'cargando') {
     return (
@@ -273,6 +282,10 @@ export function SuscripcionDetalleView({
             onPress={() => onRegistrarUso?.(suscripcion)}
             style={styles.botonAccion}
           />
+          <HistorialUsoMovil
+            estado={estadoHistorial}
+            onReintentar={onReintentarHistorial ?? (() => {})}
+          />
         </View>
 
         {/* Acciones principales de suscripción (SE-24 y SE-26) */}
@@ -313,6 +326,10 @@ export interface SuscripcionDetalleContainerProps {
   onEditar?: (suscripcion: Suscripcion) => void;
   onEliminar?: (suscripcion: Suscripcion) => void;
   onRegistrarUso?: (suscripcion: Suscripcion) => void;
+  onRegistrarUsoApi?: (id: string, payload: { minutos: number; fecha?: string }) => Promise<Suscripcion>;
+  onUsoRegistrado?: (suscripcionActualizada: Suscripcion) => void;
+  onCargarHistorial?: (id: string) => Promise<RegistroUso[]>;
+  estadoHistorialInicial?: EstadoHistorialUso;
 }
 
 export default function SuscripcionDetalleScreen({
@@ -325,11 +342,20 @@ export default function SuscripcionDetalleScreen({
   onEditar,
   onEliminar,
   onRegistrarUso,
+  onRegistrarUsoApi = registrarUso,
+  onUsoRegistrado,
+  onCargarHistorial = getUsos,
+  estadoHistorialInicial,
 }: (HomeScreenProps<'SuscripcionDetalle'> & SuscripcionDetalleContainerProps) | SuscripcionDetalleContainerProps) {
   const id = route?.params?.id ?? '';
 
   const [estado, setEstado] = useState<EstadoDetalle>(
     estadoInicial ?? { tipo: 'cargando' }
+  );
+
+  // Estado del historial de uso (SE-30)
+  const [estadoHistorial, setEstadoHistorial] = useState<EstadoHistorialUso>(
+    estadoHistorialInicial ?? { tipo: 'cargando' }
   );
 
   // Estados para modal de confirmación y retiro (SE-26)
@@ -338,10 +364,46 @@ export default function SuscripcionDetalleScreen({
   const [errorRetiro, setErrorRetiro] = useState<string | null>(null);
   const eliminandoRef = useRef(false);
 
+  // Estados para modal de registro de minutos de uso (SE-28)
+  const [mostrarModalUso, setMostrarModalUso] = useState(false);
+  const [registrandoUso, setRegistrandoUso] = useState(false);
+  const registrandoUsoRef = useRef(false);
+
   // Contador de generación e id activo para invalidar respuestas atrasadas y proteger contra desmontaje
   const generacionRef = useRef(0);
+  const generacionHistorialRef = useRef(0);
   const idActualRef = useRef(id);
   idActualRef.current = id;
+
+  const cargarHistorial = useCallback(
+    async (idObjetivo: string) => {
+      if (!idObjetivo) {
+        setEstadoHistorial({ tipo: 'listo', usos: [] });
+        return;
+      }
+      generacionHistorialRef.current += 1;
+      const generacionHistorialActual = generacionHistorialRef.current;
+      const generacionActual = generacionRef.current;
+      const sigueVigente = () =>
+        generacionRef.current === generacionActual &&
+        generacionHistorialRef.current === generacionHistorialActual &&
+        idActualRef.current === idObjetivo;
+
+      setEstadoHistorial({ tipo: 'cargando' });
+      try {
+        const usos = await onCargarHistorial(idObjetivo);
+        if (!sigueVigente()) return;
+        setEstadoHistorial({ tipo: 'listo', usos });
+      } catch {
+        if (!sigueVigente()) return;
+        setEstadoHistorial({
+          tipo: 'error',
+          mensaje: 'No pudimos cargar el historial de uso.',
+        });
+      }
+    },
+    [onCargarHistorial]
+  );
 
   const cargarDatos = useCallback(
     async (idObjetivo: string) => {
@@ -354,6 +416,7 @@ export default function SuscripcionDetalleScreen({
       if (!idObjetivo) {
         if (sigueVigente()) {
           setEstado({ tipo: 'no-encontrada' });
+          setEstadoHistorial({ tipo: 'listo', usos: [] });
         }
         return;
       }
@@ -361,6 +424,8 @@ export default function SuscripcionDetalleScreen({
       if (sigueVigente()) {
         setEstado({ tipo: 'cargando' });
       }
+
+      void cargarHistorial(idObjetivo);
 
       try {
         const suscripcion = await onCargarSuscripcion(idObjetivo);
@@ -406,6 +471,7 @@ export default function SuscripcionDetalleScreen({
       // Al cambiar id o desmontar el componente, se avanza la generación
       // para descartar inmediatamente cualquier respuesta pendiente en vuelo.
       generacionRef.current += 1;
+      generacionHistorialRef.current += 1;
     };
   }, [id, estadoInicial, cargarDatos, navigation]);
 
@@ -433,6 +499,44 @@ export default function SuscripcionDetalleScreen({
     if (isDeleting) return;
     setMostrarModalRetiro(false);
     setErrorRetiro(null);
+  };
+
+  const manejarRegistrarUso = (sub: Suscripcion) => {
+    onRegistrarUso?.(sub);
+    setMostrarModalUso(true);
+  };
+
+  const cerrarModalUso = () => {
+    if (registrandoUsoRef.current || registrandoUso) return;
+    setMostrarModalUso(false);
+  };
+
+  const ejecutarRegistrarUso = async (
+    minutos: number,
+    fecha?: string
+  ): Promise<Suscripcion> => {
+    if (estado.tipo !== 'listo') {
+      throw new Error('No hay suscripción activa para registrar uso');
+    }
+    if (registrandoUsoRef.current) {
+      throw new Error('Ya hay un registro de uso en curso para esta suscripción');
+    }
+    const idSuscripcion = estado.suscripcion.id;
+    registrandoUsoRef.current = true;
+    setRegistrandoUso(true);
+
+    try {
+      const actualizada = await onRegistrarUsoApi(idSuscripcion, { minutos, fecha });
+      if (idActualRef.current === idSuscripcion) {
+        setEstado({ tipo: 'listo', suscripcion: actualizada });
+        onUsoRegistrado?.(actualizada);
+        void cargarHistorial(idSuscripcion);
+      }
+      return actualizada;
+    } finally {
+      registrandoUsoRef.current = false;
+      setRegistrandoUso(false);
+    }
   };
 
   const ejecutarRetiro = async () => {
@@ -476,8 +580,21 @@ export default function SuscripcionDetalleScreen({
         onReintentar={() => void cargarDatos(id)}
         onEditar={manejarEditar}
         onEliminar={manejarEliminar}
-        onRegistrarUso={onRegistrarUso}
+        onRegistrarUso={manejarRegistrarUso}
+        estadoHistorial={estadoHistorial}
+        onReintentarHistorial={() => void cargarHistorial(id)}
       />
+      {mostrarModalUso && estado.tipo === 'listo' && (
+        <RegistrarUsoModal
+          visible={mostrarModalUso}
+          idSuscripcion={estado.suscripcion.id}
+          nombreSuscripcion={estado.suscripcion.nombre}
+          onRegistrar={ejecutarRegistrarUso}
+          onCancelar={cerrarModalUso}
+          bloqueado={registrandoUso || isDeleting}
+          sigueVigente={() => idActualRef.current === estado.suscripcion.id}
+        />
+      )}
       {mostrarModalRetiro && estado.tipo === 'listo' && (
         <ConfirmarRetiroModal
           visible={mostrarModalRetiro}
