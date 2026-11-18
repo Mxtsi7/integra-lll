@@ -29,6 +29,7 @@ export {
   reactivarSuscripcion,
   registrarUso,
   getUsos,
+  getHistorialUso,
   type RegistroUso,
   type SuscripcionPayload,
   type SuscripcionPayloadParcial,

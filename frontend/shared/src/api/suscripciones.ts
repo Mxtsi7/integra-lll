@@ -282,6 +282,9 @@ export async function getUsos(id: string): Promise<RegistroUso[]> {
   return pedir<RegistroUso[]>(`/suscripciones/${id}/uso/`);
 }
 
+/** Alias semántico para getUsos (CH-15 / SE-30). */
+export const getHistorialUso = getUsos;
+
 /**
  * POST /suscripciones/<id>/uso/ -> 200 OK / 400 / 404.
  * Registra minutos de uso manual (CU-23 / RF-04 / RF-15 / RF-16).
