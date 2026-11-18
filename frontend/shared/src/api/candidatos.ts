@@ -1,4 +1,4 @@
-import { pedir, type Paginado } from './cliente';
+import { ErrorDeApi, pedir, type Paginado } from './cliente';
 
 /** De dónde salió el cobro: el CSV de una importación o un correo (S3-FE-14). */
 export type OrigenCandidato = 'csv' | 'correo';
@@ -80,4 +80,35 @@ export async function getCandidatos({
   if (estado) consulta.set('estado', estado);
   if (importacion) consulta.set('importacion', importacion);
   return await pedir(`/candidatos/?${consulta.toString()}`);
+}
+
+/**
+ * Por qué el servidor no confirma un cobro (409). Los códigos son estables
+ * (S3-FE-15):
+ * - `candidato_rechazado`: ya se descartó; para confirmarlo hay que volver a importar el archivo.
+ * - `servicio_sin_resolver`: no se reconoció el proveedor.
+ * - `tipo_sin_regla`: no hay regla para el tipo de mensaje.
+ */
+const CODIGOS_DE_CONFIRMACION_RECHAZADA = ['candidato_rechazado', 'servicio_sin_resolver', 'tipo_sin_regla'] as const;
+export type CodigoConfirmacionRechazada = (typeof CODIGOS_DE_CONFIRMACION_RECHAZADA)[number];
+
+/**
+ * POST /api/candidatos/<id>/confirmar/ (S3-FE-15). Responde 200 con el candidato
+ * `confirmado`. Es idempotente: repetirlo devuelve el mismo candidato y no
+ * agrega otra orden. Confirmar NO crea todavía la suscripción ni el cobro: deja
+ * la orden en cola, y el candidato lo dice con `aplicacion: 'pendiente'`.
+ */
+export async function confirmarCandidato(id: string): Promise<CandidatoDetectado> {
+  return await pedir(`/candidatos/${encodeURIComponent(id)}/confirmar/`, { method: 'POST' });
+}
+
+/**
+ * El código de un 409 de confirmar, o null si el error no es uno de ellos. El
+ * servidor manda `{ codigo, detail }`; `pedir` deja el `detail` como mensaje y
+ * el `codigo` entre los campos.
+ */
+export function codigoDeConfirmacionRechazada(error: unknown): CodigoConfirmacionRechazada | null {
+  if (!(error instanceof ErrorDeApi) || error.status !== 409) return null;
+  const codigo = error.campos?.codigo?.[0];
+  return CODIGOS_DE_CONFIRMACION_RECHAZADA.find((conocido) => conocido === codigo) ?? null;
 }
