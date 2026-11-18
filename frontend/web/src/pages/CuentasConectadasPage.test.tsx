@@ -193,3 +193,48 @@ describe("Cuentas conectadas (CH-23)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("No pudimos conectar con el servidor.");
   });
 });
+it("desconecta con confirmación ejecutando DELETE una sola vez y actualizando el estado", async () => {
+    const inicial = cuenta({ id: "c1", estado: "conectada", estado_legible: "Conectada" });
+    const revocada = cuenta({ id: "c1", estado: "desconectada", estado_legible: "Desconectada" });
+    const onDesconectar = vi.fn().mockResolvedValue(revocada);
+
+    await montar({
+      cargarCuentas: async () => [inicial],
+      onDesconectar,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Desconectar" }));
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar desconexión" }));
+    });
+
+    expect(onDesconectar).toHaveBeenCalledTimes(1);
+    expect(onDesconectar).toHaveBeenCalledWith("c1");
+    expect(screen.getByRole("list", { name: "Tus cuentas conectadas" })).toHaveTextContent("Desconectada");
+  });
+
+  it("permite reautorizar una cuenta que requiere reautorización", async () => {
+    const pendiente = cuenta({
+      id: "c2",
+      estado: "requiere_reautorizacion",
+      estado_legible: "Requiere reautorización",
+      necesita_reautorizacion: true,
+    });
+    const onReautorizar = vi.fn().mockResolvedValue("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+    const redirigir = vi.fn();
+
+    await montar({
+      cargarCuentas: async () => [pendiente],
+      onReautorizar,
+      redirigir,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Volver a autorizar" }));
+    });
+
+    expect(onReautorizar).toHaveBeenCalledWith("gmail");
+    expect(redirigir).toHaveBeenCalledWith("https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+  });
