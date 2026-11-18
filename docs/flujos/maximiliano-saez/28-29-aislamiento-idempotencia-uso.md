@@ -7,8 +7,9 @@ comprueba destino, identidad, consentimiento y contrato antes de llamar a
 `app/uso_recolectores/persistencia.py`. Esa función vuelve a leer y bloquea la
 suscripción dentro de una transacción, y crea un `EventoUsoRecibido` con cuerpo
 normalizado, usuario interno, organización, recolector, fecha local, destino,
-correlación, hora original de recepción y marca durable de proyección pendiente.
-El servicio responde 201 únicamente tras confirmar la fila.
+correlación y hora original de recepción. El escritor calcula la proyección
+exacta y limpia la marca de proyección pendiente en esa misma transacción.
+El servicio responde 201 tras confirmar el hecho y su proyección.
 
 La clave única de PostgreSQL es organización + usuario + recolector + event_id.
 La suscripción queda guardada como destino inmutable, pero no cambia el ámbito
@@ -18,11 +19,11 @@ violación de otra restricción no se presenta como duplicado: solo se maneja la
 restricción nombrada `uso_rx_evento_clave_unica`, y después se relee el hecho.
 El 404 por suscripción ajena sucede antes de buscar la clave.
 
-`EventoUsoRecibido` es una fuente durable pendiente, no la proyección de
-`RegistroUso` ni un mensaje de RabbitMQ. No publica el evento incompatible con
-el contrato del productor de Víctor. `app/eliminacion.py` añade la fila al
-protocolo de purga por organización, valida que su suscripción pertenezca al
-mismo tenant y la elimina antes de la suscripción.
+`EventoUsoRecibido` conserva los hechos que alimentan
+[la proyección exacta y RegistroUso](30-persistencia-uso.md). La publicación a
+Analytics por RabbitMQ sigue siendo una integración aparte.
+`app/eliminacion.py` incorpora los hechos y sus proyecciones a la purga por
+organización y valida los destinos antes de eliminarlos.
 
 ## Pruebas y límites
 
@@ -32,12 +33,10 @@ dos solicitudes simultáneas. La prueba concurrente exige que el motor sea
 PostgreSQL y usa conexiones independientes. `tests/test_eliminacion.py` verifica
 que la purga borra estos hechos solo para la organización afectada.
 
-Las pruebas de API configuran un callback de consentimiento sintético porque
-`main` no ofrece una autoridad vigente de consentimiento. En configuración real
-la ausencia de ese proveedor conserva el 403 de cierre seguro. La asociación a
-Analytics, la proyección a minutos, el transporte y la política de retención
-siguen pendientes. El identificador interno de usuario sigue siendo el entero
-del Gateway; no se transforma al UUID requerido por el DTO de Víctor.
+Las pruebas de API configuran un proveedor de consentimiento sintético. La
+ausencia de una autoridad real conserva el 403. Quedan pendientes el recorrido
+con bearer y consentimiento real, la publicación a Analytics y la política de
+retención. La persistencia usa el identificador entero que entrega el Gateway.
 
 Desde `services/subscriptions`, ejecutar:
 

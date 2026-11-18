@@ -21,9 +21,16 @@ Tras validar, el flujo llama a `USO_VERIFICAR_CONSENTIMIENTO` con suscripción,
 usuario y evento. Si no existe una autoridad configurada o no confirma
 consentimiento vigente, devuelve 403. Verifica además que la zona coincide con
 la zona común de informes configurada. Finalmente delega en
-`USO_PERSISTIR_EVENTO`; si falta un receptor durable, devuelve 503 y no acusa
-recepción. La persistencia, idempotencia y respuesta 201/200/409 corresponden
-a las ramas siguientes MX-28/29.
+`USO_PERSISTIR_EVENTO`, configurado en esta entrega para guardar el hecho en
+PostgreSQL y proyectar el uso exacto dentro de la misma transacción. El nuevo
+evento obtiene 201, el reintento idéntico obtiene 200 con el acuse original y
+el conflicto de contenido o destino obtiene 409. Si se desconfigura el escritor,
+el receptor devuelve 503 sin acusar recepción.
+
+Los flujos de [idempotencia](28-29-aislamiento-idempotencia-uso.md),
+[lectura exacta](30-persistencia-uso.md) y
+[cobertura y envío](31-19-cobertura-sincronizacion.md) detallan las entregas
+incorporadas a esta misma rama.
 
 ## Errores y límites
 
@@ -34,19 +41,20 @@ incompatible, zona desconocida, intervalo inválido o datos de identidad del
 cliente se rechazan con 400. Consentimiento no confirmado devuelve 403 y
 almacenamiento no configurado devuelve 503.
 
-En `main` no existe todavía una autoridad de consentimiento de telemetría ni
-un almacenamiento durable para este contrato. El callback de consentimiento
-usado en pruebas es un doble; no implica consentimiento real. La zona de
-informe común requiere acuerdo explícito. El esquema se sirve desde el paquete
-`shared` para evitar una segunda copia en la imagen del servicio; el archivo en
-`docs/contratos` referencia esa fuente canónica.
+Falta conectar una autoridad real de consentimiento de telemetría. Las pruebas
+inyectan un proveedor sintético. Queda por verificar el recorrido con bearer
+por Gateway y consentimiento vigente. El esquema canónico vive en el paquete
+`shared` y el archivo en `docs/contratos` lo referencia.
 
 ## Cómo probar
 
 Desde `services/subscriptions`, ejecutar
-`python -m pytest tests/test_recepcion_uso.py -q` y
-`python manage.py check`. Las pruebas de integración del servicio deben usar
-PostgreSQL. Las pruebas de esta rama cubren fixtures canónicas, mutaciones
-inválidas, identidad requerida, aislamiento de destino, cierre seguro sin
-consentimiento ni almacenamiento y validación anterior al callback. No
-acreditan todavía persistencia de uso ni integración real con consentimiento.
+`python manage.py check` y, con PostgreSQL:
+
+```sh
+python -m pytest tests/test_recepcion_uso.py tests/test_persistencia_uso.py tests/test_proyeccion_uso_recolector.py -q
+```
+
+Las pruebas cubren contrato, rechazo de fechas fuera de rango, aislamiento de
+identidad y destino, cierre seguro sin consentimiento, acuses idempotentes,
+persistencia, lectura exacta y cobertura.
