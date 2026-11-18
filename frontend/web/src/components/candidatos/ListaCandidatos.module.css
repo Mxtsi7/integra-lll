@@ -78,6 +78,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* S3-CH-08: el resultado de la última tanda de confirmaciones. */
+.resultado {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-m);
+  font-size: 13px;
+  color: var(--tinta);
+}
+
+.resumenResultado {
+  margin: 0;
+  font-weight: 600;
+}
+
+.resultados {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tinta-2);
+}
+
 .cabecera {
   display: flex;
   flex-wrap: wrap;
