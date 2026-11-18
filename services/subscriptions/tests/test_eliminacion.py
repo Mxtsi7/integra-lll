@@ -7,7 +7,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from app.models import (
-    Cobro, HallazgoCobro, Proveedor, RegistroUso, ResumenOrganizacion, Subscription,
+    Cobro, EventoUsoRecibido, HallazgoCobro, Proveedor, RegistroUso, ResumenOrganizacion, Subscription,
     TrabajoDerivado, TransicionEstado,
 )
 from app.models import OutboxEvento, Presupuesto
@@ -79,15 +79,22 @@ def test_cascade_local_inconsistente_no_borra_datos_ajenos(monkeypatch):
 def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
     monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
     org, otra, operacion = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    proveedor = Proveedor.objects.create(nombre="Proveedor")
+    propias = {tenant: suscripcion(tenant, proveedor) for tenant in (org, otra)}
     for tenant in (org, otra):
         Presupuesto.objects.create(organizacion_id=tenant, mes="2026-10", moneda="CLP", monto=1000)
         OutboxEvento.objects.create(
             organizacion_id=tenant, evento="suscripcion.creada",
             correlation_id=uuid.uuid4(), datos={"nombre": "Dato privado"},
         )
+        EventoUsoRecibido.objects.create(
+            organizacion_id=tenant, usuario_id=42, recolector_id=uuid.uuid4(),
+            event_id=uuid.uuid4(), suscripcion=propias[tenant], cuerpo={},
+            fecha_local="2026-11-09",
+        )
     for _ in range(2):
         assert llamada(org, operacion, **cabeceras_eliminacion("subscriptions", org, operacion)).status_code == 204
-    for modelo in (Presupuesto, OutboxEvento):
+    for modelo in (Presupuesto, OutboxEvento, EventoUsoRecibido):
         assert not modelo.objects.filter(organizacion_id=org).exists()
         assert modelo.objects.filter(organizacion_id=otra).count() == 1
 
