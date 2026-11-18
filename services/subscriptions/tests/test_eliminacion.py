@@ -91,6 +91,7 @@ def test_limpieza_borra_outbox_y_presupuestos_solo_del_tenant(monkeypatch):
         EventoUsoRecibido.objects.create(
             organizacion_id=tenant, usuario_id=42, recolector_id=uuid.uuid4(),
             event_id=uuid.uuid4(), suscripcion=propias[tenant], cuerpo={},
+            inicio="2026-11-09T12:00:00Z", fin="2026-11-09T12:01:00Z",
             fecha_local="2026-11-09",
         )
         ProyeccionUsoRecolector.objects.create(

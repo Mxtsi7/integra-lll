@@ -733,6 +733,8 @@ class EventoUsoRecibido(ModeloTenant):
         Subscription, on_delete=models.CASCADE, related_name="eventos_uso_recibidos",
     )
     cuerpo = models.JSONField()
+    inicio = models.DateTimeField()
+    fin = models.DateTimeField()
     fecha_local = models.DateField()
     recibido_en = models.DateTimeField(default=timezone.now, editable=False)
     proyeccion_pendiente = models.BooleanField(default=True)
@@ -750,6 +752,8 @@ class EventoUsoRecibido(ModeloTenant):
                          name="uso_rx_cobertura_dia_idx"),
             models.Index(fields=("organizacion_id", "usuario_id", "suscripcion", "fecha_local"),
                          name="uso_rx_proyeccion_dia_idx"),
+            models.Index(fields=("organizacion_id", "usuario_id", "suscripcion", "fecha_local", "recolector_id", "inicio"),
+                         name="uso_rx_lectura_cobertura_idx"),
         ]
 
 

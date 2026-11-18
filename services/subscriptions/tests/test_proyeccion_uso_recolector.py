@@ -141,3 +141,11 @@ def test_lectura_exacta_recupera_uso_aceptado(destino, segundos):
     assert APIClient().get(ruta, headers={**cabeceras, 'X-Organizacion-Id': str(uuid4())}).status_code == 404
     assert APIClient().get(ruta, headers={**cabeceras, 'X-Usuario-Id': ''}).status_code == 403
 
+
+def test_cobertura_rechaza_fecha_imposible(destino):
+    respuesta = APIClient().get(
+        f'/api/suscripciones/{destino.id}/uso/cobertura/?fecha=2026-02-31',
+        headers={'X-Organizacion-Id': str(destino.organizacion_id), 'X-Usuario-Id': '42'},
+    )
+    assert respuesta.status_code == 400
+    assert 'fecha' in respuesta.data
