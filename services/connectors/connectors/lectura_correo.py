@@ -20,8 +20,10 @@ Ningún lector guarda nada ni cambia la cuenta.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import re
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 
@@ -91,9 +93,16 @@ class CuentaNoDisponible(ErrorDeLectura):
 
 class AutorizacionRechazada(ErrorDeLectura):
     """El proveedor dijo que el token ya no sirve o no alcanza (401, o 403
-    de permisos). Lo resuelve S3-FE-19: renovar o pedir reconexión."""
+    de permisos). Lo resuelve S3-FE-19: renovar o pedir reconexión.
+
+    Lleva CON QUÉ credenciales se hizo la petición que falló: la versión y
+    una huella del token, nunca el token. Sin eso, un 401 que llega tarde de
+    una autorización vieja se le atribuía a la nueva (revisión de #180).
+    """
 
     codigo = "autorizacion_rechazada"
+    credenciales_version: int | None = None
+    huella_token: str | None = None
 
 
 class ErrorTransitorio(ErrorDeLectura):
@@ -170,6 +179,13 @@ class MensajeCorreo:
     texto: str = dataclasses.field(repr=False)
     #: True si el texto se cortó en `LARGO_MAXIMO_TEXTO`.
     texto_truncado: bool = False
+    #: De qué buzón salió: `gmail` u `outlook`.
+    proveedor_correo: str = ""
+    #: El Message-ID del correo (RFC 5322), sin los `<>`. Es la identidad
+    #: del mensaje que fija el contrato de candidatos (S3-FE-06): no cambia
+    #: si el usuario lo mueve de carpeta y es el mismo en Gmail y en
+    #: Outlook. Vacío si el correo no trae uno usable.
+    message_id: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,6 +203,52 @@ class PaginaDeMensajes:
     #: Para pedir la página siguiente; `None` si no hay más.
     siguiente_pagina: str | None
     omitidos: tuple[MensajeOmitido, ...] = ()
+
+
+def huella_de_token(token) -> str:
+    """sha256 del token: sirve para saber si es EL MISMO sin guardarlo ni
+    dejarlo en una traza."""
+    return hashlib.sha256(str(token).encode("utf-8")).hexdigest()
+
+
+@contextmanager
+def atribuir_rechazo(cuenta, token):
+    """Anota en la `AutorizacionRechazada` que salga de este bloque con qué
+    credenciales se pidió."""
+    try:
+        yield
+    except AutorizacionRechazada as rechazo:
+        rechazo.credenciales_version = cuenta.credenciales_version
+        rechazo.huella_token = huella_de_token(token)
+        raise
+
+
+#: Un Message-ID que pase de esto no es uno de verdad (RFC 5322 limita la
+#: línea a 998 caracteres).
+_LARGO_MAXIMO_MESSAGE_ID = 998
+
+
+def normalizar_message_id(valor) -> str:
+    """`<abc@ejemplo.com>` → `abc@ejemplo.com`, o "" si no es usable.
+
+    Usable es: un solo identificador, sin espacios ni controles, con `@` y
+    con algo a cada lado. No se cambian mayúsculas: la parte izquierda
+    distingue mayúsculas, y dos correos distintos no pueden terminar con la
+    misma identidad por normalizar de más.
+    """
+    if not isinstance(valor, str):
+        return ""
+    texto = valor.strip()
+    if texto.startswith("<") and texto.endswith(">"):
+        texto = texto[1:-1].strip()
+    if not texto or len(texto) > _LARGO_MAXIMO_MESSAGE_ID or not texto.isprintable():
+        return ""
+    if any(c.isspace() or c in "<>" for c in texto):
+        return ""
+    izquierda, arroba, derecha = texto.rpartition("@")
+    if not arroba or not izquierda or not derecha:
+        return ""
+    return texto
 
 
 def validar_limite(limite) -> None:
