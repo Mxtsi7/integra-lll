@@ -1,6 +1,7 @@
 import { formatearFechaHora, type EstadoImportacion, type Importacion } from '@ojoalgasto/shared';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import { CobrosDeLaImportacion } from '../components/candidatos/CobrosDeLaImportacion';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
@@ -81,6 +82,13 @@ function DetalleImportacion({ importacion: imp, problema, onReintentar }: Detall
       )}
 
       {imp.estado === 'completada' && <Candidatos importacion={imp} />}
+      {/* S3-CH-06: lo que sí se leyó, aparte de lo que no. Cada bloque con lo suyo, y los dos se ven a la vez. */}
+      {imp.estado === 'completada' && imp.candidatos_detectados > 0 && (
+        <div className={styles.cobros}>
+          <h3 className={styles.subtitulo}>Cobros encontrados</h3>
+          <CobrosDeLaImportacion importacionId={imp.id} />
+        </div>
+      )}
       {imp.errores_totales > 0 && <ErroresPorFila importacion={imp} />}
     </section>
   );
@@ -156,11 +164,19 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
 
 function ErroresPorFila({ importacion: imp }: { importacion: Importacion }) {
   const resto = imp.errores_totales - imp.errores.length;
+  // Un archivo se corrige y se vuelve a subir; una lectura de correo no tiene nada que corregir.
+  const sePuedeCorregir = imp.origen === 'csv';
   return (
     <div className={styles.errores}>
       <h3 className={styles.subtitulo}>
         {imp.errores_totales === 1 ? '1 problema' : `${imp.errores_totales.toLocaleString('es-CL')} problemas`}
       </h3>
+      {/* Un cobro que ya se encontró no se duplica: su identificador depende del cobro, no del archivo. */}
+      {sePuedeCorregir && (
+        <p className={styles.detalle}>
+          Corrige estas filas en tu archivo y vuelve a subirlo: un cobro que ya se encontró no se duplica.
+        </p>
+      )}
       <ul className={styles.listaErrores}>
         {imp.errores.map((error, indice) => (
           <li key={`${error.fila ?? 'x'}-${indice}`}>
@@ -171,6 +187,11 @@ function ErroresPorFila({ importacion: imp }: { importacion: Importacion }) {
       </ul>
       {/* FE-08 guarda solo los primeros; el total es el real. */}
       {resto > 0 && <p className={styles.detalle}>Y {resto.toLocaleString('es-CL')} más.</p>}
+      {resto > 0 && sePuedeCorregir && (
+        <p className={styles.detalle}>
+          Aquí solo ves las primeras filas con problemas. Cuando corrijas estas y vuelvas a subir el archivo, verás las que falten.
+        </p>
+      )}
     </div>
   );
 }

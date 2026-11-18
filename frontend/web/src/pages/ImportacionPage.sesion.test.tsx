@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ErrorDeApi,
+  getCandidatos,
   getImportacion,
   getMisImportaciones,
   getUsuarioActual,
@@ -24,11 +25,12 @@ import { ImportacionesPage } from "./ImportacionesPage";
 // simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getImportacion: vi.fn(), getMisImportaciones: vi.fn(), getUsuarioActual: vi.fn() };
+  return { ...real, getCandidatos: vi.fn(), getImportacion: vi.fn(), getMisImportaciones: vi.fn(), getUsuarioActual: vi.fn() };
 });
 const getMock = vi.mocked(getImportacion);
 const listarMock = vi.mocked(getMisImportaciones);
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
+const candidatosMock = vi.mocked(getCandidatos);
 
 const PERSONA_A: Usuario = { id: "7", nombre: "Ana", correo: "ana@ejemplo.com", rol: "titular", organizacion_id: "org-a", plan: "gratuito" };
 const PERSONA_B: Usuario = { ...PERSONA_A, id: "8", nombre: "Bruno", correo: "bruno@ejemplo.com", organizacion_id: "org-b" };
@@ -147,6 +149,7 @@ beforeEach(() => {
   consultasDetalle = [];
   // /usuarios/me/ e importaciones responden según el token, como el backend:
   // para B, la importación de A es de otra organización (404).
+  candidatosMock.mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
   getUsuarioActualMock.mockReset().mockImplementation(async () => (deB() ? PERSONA_B : PERSONA_A));
   getMock.mockReset().mockImplementation(async () => {
     consultasDetalle.push(obtenerAccessToken() === TOKEN_B ? "B" : "A");
