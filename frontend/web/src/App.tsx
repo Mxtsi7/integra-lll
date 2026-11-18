@@ -12,6 +12,7 @@ import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { AlertasPage } from './pages/AlertasPage';
 import { AsistentePage } from './pages/AsistentePage';
+import { InformesPage } from './pages/InformesPage';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
 import { CatalogosLayout } from './context/CatalogosContext';
@@ -115,7 +116,8 @@ export function App() {
               <Route path="/alertas" element={<AlertasPage />} />
               {/* S3-CH-14 y S3-CH-15: el chat con el asistente financiero (VI-22). */}
               <Route path="/asistente" element={<AsistentePage />} />
-              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* S3-CH-25: el gasto por mes y la descarga de cobros (VI-06 y VI-25). */}
+              <Route path="/informes" element={<InformesPage />} />
             </Route>
 
           </Route>

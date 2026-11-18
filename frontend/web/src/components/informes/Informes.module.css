@@ -1,0 +1,274 @@
+/* Informes (S3-CH-25): el mes y la moneda, las cifras, el gráfico y la descarga. */
+
+.informe {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- Mes y moneda ---- */
+
+.selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tituloPeriodo {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--tinta);
+}
+
+.controles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.grupoMes {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flecha {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-s);
+  background: var(--vidrio);
+  color: var(--tinta);
+  cursor: pointer;
+}
+
+.flecha:hover {
+  border-color: var(--vidrio-borde-fuerte);
+}
+
+.flecha:focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.moneda {
+  min-width: 200px;
+}
+
+/* ---- Estados ---- */
+
+.estadoCarga {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.vacio {
+  margin: 0;
+  padding: 24px 0;
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+/* ---- Cifras del mes ---- */
+
+.resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.cifra {
+  padding: 16px;
+}
+
+.cifraTitulo {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--tinta-2);
+}
+
+.cifraValor {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--tinta);
+}
+
+.cifraAyuda {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--tinta-3);
+}
+
+/* ---- Gráfico ---- */
+
+.grafico {
+  margin: 0 0 16px;
+}
+
+.barras {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 180px;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid var(--vidrio-borde);
+}
+
+.columna {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 100%;
+}
+
+.pila {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  max-width: 56px;
+  overflow: hidden;
+  border-radius: 6px 6px 0 0;
+}
+
+.columnaElegida .pila {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.real,
+.proyectado {
+  flex-basis: 0;
+}
+
+.real {
+  background: var(--acento);
+}
+
+/* Rayado, no solo un color más claro: se distingue sin depender del color. */
+.proyectado {
+  background: repeating-linear-gradient(135deg, var(--acento) 0 4px, transparent 4px 8px);
+  opacity: 0.7;
+}
+
+.etiquetas {
+  display: flex;
+  gap: 12px;
+  padding: 6px 4px 0;
+}
+
+.etiquetas span {
+  flex: 1;
+  font-size: 12px;
+  text-align: center;
+  color: var(--tinta-2);
+}
+
+.etiquetaElegida {
+  font-weight: 800;
+  color: var(--tinta);
+}
+
+.leyenda {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.claveReal::before,
+.claveProyectado::before {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  content: '';
+}
+
+.claveReal::before {
+  background: var(--acento);
+}
+
+.claveProyectado::before {
+  background: repeating-linear-gradient(135deg, var(--acento) 0 2px, transparent 2px 4px);
+  outline: 1px solid var(--acento);
+}
+
+/* ---- Tabla del detalle ---- */
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  color: var(--tinta);
+}
+
+.tablaTitulo {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.tabla th,
+.tabla td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--vidrio-borde);
+  text-align: right;
+}
+
+.tabla th:first-child {
+  text-align: left;
+}
+
+.tabla thead th {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--tinta-2);
+}
+
+.tabla tbody th {
+  font-weight: 600;
+}
+
+.tabla tr[aria-current='true'] th,
+.tabla tr[aria-current='true'] td {
+  font-weight: 800;
+  background: var(--vidrio-2);
+}
+
+/* ---- Descarga ---- */
+
+.descarga {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.avisoDescarga {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+}
+
+.avisoDescarga[role='alert'] {
+  color: var(--coral);
+}
