@@ -9,6 +9,7 @@ import {
   type ConsultaSuscripciones,
   type EstadoCarga,
   type Moneda,
+  type OrdenSuscripciones,
   type Suscripcion,
   type SuscripcionesPaginadas,
   type Usuario,
@@ -52,6 +53,9 @@ export interface HomeViewProps {
   onCambiarFecha?: (fecha: string) => void;
   onLimpiarFiltros?: () => void;
   hayFiltrosActivos?: boolean;
+  // Orden (SE-29)
+  orden?: OrdenSuscripciones;
+  onCambiarOrden?: (orden: OrdenSuscripciones) => void;
   // Paginación (SE-19)
   totalGeneral?: number;
   hayMas?: boolean;
@@ -80,6 +84,8 @@ export function HomeView({
   onCambiarFecha,
   onLimpiarFiltros,
   hayFiltrosActivos = false,
+  orden,
+  onCambiarOrden,
   totalGeneral,
   hayMas = false,
   cargandoMas = false,
@@ -130,8 +136,10 @@ export function HomeView({
           <FiltrosSuscripcionesMovil
             filtroEstado={filtroEstado}
             filtroFecha={filtroFecha}
+            orden={orden}
             onCambiarEstado={onCambiarEstado}
             onCambiarFecha={onCambiarFecha ?? (() => {})}
+            onCambiarOrden={onCambiarOrden}
             onLimpiarFiltros={onLimpiarFiltros ?? (() => {})}
             hayFiltrosActivos={hayFiltrosActivos}
             totalResultados={
@@ -151,7 +159,7 @@ export function HomeView({
               ? {
                   titulo: 'Ninguna suscripción coincide',
                   descripcion:
-                    describirCriterioActivo(filtroEstado, filtroFecha) ||
+                    describirCriterioActivo(filtroEstado, filtroFecha, orden) ||
                     'No se encontraron suscripciones con los filtros aplicados.',
                   accion: {
                     etiqueta: 'Limpiar filtros',
@@ -294,11 +302,12 @@ export interface HomeScreenPropsContainer {
   onCargarResumen?: (
     consulta?: ConsultaSuscripciones,
   ) => Promise<{ moneda: Moneda; total: number }[]>;
+  orden?: OrdenSuscripciones;
 }
 
 /**
  * Contenedor principal de HomeScreen.
- * Conecta autenticación, navegación, paginación real (SE-19) y filtros por servidor (SE-27).
+ * Conecta autenticación, navegación, paginación real (SE-19), filtros por servidor (SE-27) y ordenamiento (SE-29).
  */
 export default function HomeScreen({
   navigation,
@@ -309,6 +318,7 @@ export default function HomeScreen({
   onLogout,
   resumenGlobal: propResumenGlobal,
   onCargarResumen,
+  orden: propOrden,
 }: (HomeScreenProps<'HomeScreen'> & HomeScreenPropsContainer) | HomeScreenPropsContainer) {
   let authUsuario: Usuario | null = null;
   let authCerrarSesion: (() => Promise<void>) | undefined;
@@ -331,6 +341,9 @@ export default function HomeScreen({
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todas');
   const [filtroFecha, setFiltroFecha] = useState<string>('');
 
+  // Estado de ordenamiento (SE-29)
+  const [orden, setOrden] = useState<OrdenSuscripciones | undefined>(propOrden);
+
   // Estados de paginación (SE-19)
   const [paginaActual, setPaginaActual] = useState(1);
   const [hayMas, setHayMas] = useState(false);
@@ -345,7 +358,8 @@ export default function HomeScreen({
 
   const hayFiltrosActivos =
     filtroEstado !== 'todas' ||
-    (filtroFecha.trim() !== '' && esFechaReal(filtroFecha.trim()));
+    (filtroFecha.trim() !== '' && esFechaReal(filtroFecha.trim())) ||
+    orden !== undefined;
 
   const construirConsulta = useCallback((): ConsultaSuscripciones => {
     const consulta: ConsultaSuscripciones = {};
@@ -356,8 +370,11 @@ export default function HomeScreen({
     if (fechaTrim && esFechaReal(fechaTrim)) {
       consulta.fecha_cobro = fechaTrim;
     }
+    if (orden !== undefined) {
+      consulta.orden = orden;
+    }
     return consulta;
-  }, [filtroEstado, filtroFecha]);
+  }, [filtroEstado, filtroFecha, orden]);
 
   const cargarPaginaInicial = useCallback(async () => {
     generacionRef.current += 1;
@@ -483,14 +500,15 @@ export default function HomeScreen({
       usuarioPrevioRef.current = usuarioActivo?.id;
       setFiltroEstado('todas');
       setFiltroFecha('');
+      setOrden(undefined);
     }
   }, [usuarioActivo?.id]);
 
-  // Carga reactiva ante cambios de filtro (SE-27) y cambio de usuario
+  // Carga reactiva ante cambios de filtro (SE-27), orden (SE-29) y cambio de usuario
   useEffect(() => {
     if (estadoInicial) return;
     void cargarPaginaInicial();
-  }, [filtroEstado, filtroFecha, usuarioActivo?.id, cargarPaginaInicial, estadoInicial]);
+  }, [filtroEstado, filtroFecha, orden, usuarioActivo?.id, cargarPaginaInicial, estadoInicial]);
 
   // Invalidación y recarga ante foco
   useEffect(() => {
@@ -530,9 +548,14 @@ export default function HomeScreen({
     setFiltroFecha(nuevaFecha);
   }, []);
 
+  const manejarCambiarOrden = useCallback((nuevoOrden: OrdenSuscripciones) => {
+    setOrden(nuevoOrden);
+  }, []);
+
   const manejarLimpiarFiltros = useCallback(() => {
     setFiltroEstado('todas');
     setFiltroFecha('');
+    setOrden(undefined);
   }, []);
 
   return (
@@ -547,6 +570,8 @@ export default function HomeScreen({
       filtroFecha={filtroFecha}
       onCambiarEstado={manejarCambiarEstado}
       onCambiarFecha={manejarCambiarFecha}
+      orden={orden}
+      onCambiarOrden={manejarCambiarOrden}
       onLimpiarFiltros={manejarLimpiarFiltros}
       hayFiltrosActivos={hayFiltrosActivos}
       totalGeneral={totalGeneral}
