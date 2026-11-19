@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from email.utils import parseaddr
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.mail import BadHeaderError, EmailMessage
 from django.core.validators import validate_email
 
@@ -176,8 +176,9 @@ class CanalCorreo:
             raise ErrorDeEnvio("sin_confirmacion", f"el backend informó {aceptados} aceptados", permanente=False)
         return {
             "message_id": envio.message_id,
-            # Deja a la vista con qué se mandó: en las pruebas dice `locmem`,
-            # que es un buzón en memoria y no un proveedor.
+            # Deja a la vista con qué se mandó. Fuera de las pruebas solo puede
+            # ser uno de EMAIL_BACKENDS_CON_PROVEEDOR (`exigir_proveedor`); en
+            # ellas dice `locmem`, que es un buzón en memoria.
             "backend": settings.EMAIL_BACKEND,
         }
 
@@ -191,3 +192,26 @@ CANALES = {
 def disponible(canal: str) -> bool:
     """Tiene con qué mandarse y la configuración lo habilita."""
     return canal in CANALES and canal in settings.CANALES_HABILITADOS
+
+
+#: El buzón en memoria que pone pytest-django. Solo cuenta como proveedor en
+#: las pruebas, que lo agregan a `EMAIL_BACKENDS_CON_PROVEEDOR`.
+BACKEND_DE_PRUEBAS = "django.core.mail.backends.locmem.EmailBackend"
+
+
+def exigir_proveedor(canal: str) -> None:
+    """Se niega a mandar un correo con un backend que no entrega a nadie.
+
+    Con dummy, console o filebased, `send()` devuelve 1 y no sale nada: la
+    entrega quedaría «aceptada por el proveedor», contaría para la cuota y
+    no se reintentaría nunca. Es un error de configuración, no de la
+    entrega, así que no se anota en la fila: se lanza ANTES de tocarla, la
+    entrega queda como estaba y sale cuando se corrija el backend.
+    """
+    if canal != CanalCorreo.nombre:
+        return
+    if settings.EMAIL_BACKEND not in settings.EMAIL_BACKENDS_CON_PROVEEDOR:
+        raise ImproperlyConfigured(
+            f"EMAIL_BACKEND={settings.EMAIL_BACKEND} no entrega a ningún proveedor "
+            "(ver EMAIL_BACKENDS_CON_PROVEEDOR): no se despacha"
+        )

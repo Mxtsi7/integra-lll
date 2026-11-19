@@ -366,6 +366,9 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
             ])
             return DIFERIDA
 
+        # Antes de cambiar nada: con un backend que no entrega, la entrega se
+        # queda como estaba y la corrida falla a la vista.
+        canales.exigir_proveedor(entrega.canal)
         canal = canales.CANALES[entrega.canal]
         try:
             destino = canal.destino(entrega.organizacion_id, entrega.usuario_id)
@@ -496,10 +499,16 @@ def despachar(*, ahora: dt.datetime | None = None, limite: int = LIMITE_POR_CORR
     """Atiende hasta `limite` entregas elegibles, las más antiguas primero.
 
     `ahora` fija el reloj de toda la corrida (para reproducir un instante);
-    sin él, cada entrega usa la hora real en que se atiende.
+    sin él, cada entrega usa la hora real en que se atiende. Ese reloj es
+    también el del reclamo: con un `ahora` en el pasado el reclamo ya está
+    vencido para los demás workers, y con uno en el futuro no vence nunca.
+    Por eso el comando acepta `--ahora` solo con el buzón de pruebas.
     """
     if limite < 1:
         raise ValueError("el límite es de al menos 1")
+    if canales.disponible(canales.CanalCorreo.nombre):
+        # Se niega antes de tocar la primera entrega, no a mitad de corrida.
+        canales.exigir_proveedor(canales.CanalCorreo.nombre)
     corte = ahora or timezone.now()
     pendientes = list(
         elegibles(corte)

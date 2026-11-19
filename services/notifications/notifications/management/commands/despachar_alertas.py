@@ -2,7 +2,7 @@
 
     python manage.py despachar_alertas                 # con el reloj real
     python manage.py despachar_alertas --limite 50
-    python manage.py despachar_alertas --ahora 2026-11-21T23:00:00-03:00
+    python manage.py despachar_alertas --ahora 2026-11-21T23:00:00-03:00   # solo en pruebas
 
 Correrlo de más no duplica nada: cada entrega se reclama bajo bloqueo antes
 de mandarse, y dos corridas a la vez se reparten las entregas en vez de
@@ -10,15 +10,30 @@ mandarlas dos veces (ver `notifications/entregas.py`). Está pensado para
 correr después de `generar_alertas`, cada pocos minutos; dónde se programe
 (CronJob o beat) es una decisión aparte y no cambia esto.
 
+Se niega a correr (y no toca ninguna entrega) si el correo está habilitado
+con un backend que no entrega a un proveedor: dummy, console, filebased o
+locmem darían la entrega por aceptada sin que saliera nada. Ver
+`EMAIL_BACKENDS_CON_PROVEEDOR` en los settings.
+
+`--ahora` es para reproducir un instante en pruebas, con el buzón en memoria
+(locmem), y se rechaza con cualquier otro backend: el reloj de `--ahora` es
+también el del reclamo. Con una hora en el pasado, el reclamo nace vencido
+para el cron que corre con la hora real, que vuelve a tomar la entrega y
+manda el mismo correo dos veces; con una en el futuro, si el proceso muere,
+el reclamo no vence nunca. Y la aceptación quedaría anotada a una hora que
+no es la real, desordenando la cuota del día.
+
 La salida dice cuántas quedaron en cada estado y lista las que no se
 aceptaron con su código, sin la dirección ni el contenido. Las agotadas van
 también a stderr: son las que ya no se van a reintentar solas.
 """
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from notifications import entregas
+from notifications import canales, entregas
 from notifications.reloj import instante_de_opcion
 
 #: El orden en que se informan los desenlaces.
@@ -53,9 +68,17 @@ class Command(BaseCommand):
     def handle(self, *args, **opciones):
         if opciones["limite"] < 1:
             raise CommandError("--limite debe ser positivo")
+        if opciones["ahora"] and settings.EMAIL_BACKEND != canales.BACKEND_DE_PRUEBAS:
+            raise CommandError(
+                "--ahora es solo para pruebas (EMAIL_BACKEND locmem): con un proveedor "
+                "real el reclamo usaría ese reloj y otro worker podría mandar el mismo correo"
+            )
         ahora = instante_de_opcion(opciones["ahora"]) if opciones["ahora"] else None
 
-        resumen = entregas.despachar(ahora=ahora, limite=opciones["limite"])
+        try:
+            resumen = entregas.despachar(ahora=ahora, limite=opciones["limite"])
+        except ImproperlyConfigured as error:
+            raise CommandError(str(error)) from error
 
         partes = [f"{resumen[clave]} {texto}" for clave, texto in DESENLACES if resumen[clave]]
         self.stdout.write(

@@ -27,6 +27,7 @@ import zoneinfo
 from io import StringIO
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
@@ -529,6 +530,46 @@ class TestNoEntregadaSinAceptacion:
         entrega = la_entrega()
         assert (entrega.estado, entrega.codigo_error) == (Estado.REINTENTO, "sin_confirmacion")
         assert entrega.aceptada_en is None
+
+    @pytest.mark.parametrize("backend", [
+        "django.core.mail.backends.dummy.EmailBackend",
+        "django.core.mail.backends.console.EmailBackend",
+        "django.core.mail.backends.filebased.EmailBackend",
+    ])
+    def test_un_backend_sin_proveedor_no_despacha_ni_toca_la_entrega(self, settings, backend):
+        """Con estos `send()` devuelve 1 sin que salga nada. Antes: aceptada
+        «por el proveedor», sin proveedor, y nunca se reintentaba."""
+        settings.EMAIL_BACKEND = backend
+        persona("42")
+        nueva_alerta()
+        with pytest.raises(ImproperlyConfigured, match="no entrega a ningún proveedor"):
+            entregas.despachar(ahora=a_las(10))
+        entrega = la_entrega()
+        assert (entrega.estado, entrega.intentos, entrega.evidencia) == (Estado.PENDIENTE, 0, {})
+
+    def test_el_buzon_en_memoria_no_es_proveedor_fuera_de_las_pruebas(self, settings, mailoutbox):
+        settings.EMAIL_BACKENDS_CON_PROVEEDOR = ["django.core.mail.backends.smtp.EmailBackend"]
+        persona("42")
+        nueva_alerta()
+        with pytest.raises(ImproperlyConfigured):
+            entregas.despachar(ahora=a_las(10))
+        assert la_entrega().estado == Estado.PENDIENTE
+        assert mailoutbox == []
+
+    def test_por_omision_solo_smtp_es_proveedor(self):
+        """El valor de los settings, no el que las pruebas amplían."""
+        from notifications_config import settings as configuracion
+
+        assert configuracion.EMAIL_BACKENDS_CON_PROVEEDOR == ["django.core.mail.backends.smtp.EmailBackend"]
+
+    def test_atender_una_sola_tampoco_la_da_por_aceptada(self, settings):
+        """La barrera está también en el reclamo, no solo al empezar la corrida."""
+        settings.EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
+        persona("42")
+        nueva_alerta()
+        with pytest.raises(ImproperlyConfigured):
+            entregas.atender(la_entrega().pk, ahora=a_las(10))
+        assert (la_entrega().estado, la_entrega().intentos) == (Estado.PENDIENTE, 0)
 
     def test_mientras_se_manda_no_es_aceptada(self, monkeypatch):
         persona("42")
@@ -1057,6 +1098,27 @@ class TestComando:
     def test_rechaza_opciones_mal_escritas(self, opciones, mensaje):
         with pytest.raises(CommandError, match=mensaje):
             call_command("despachar_alertas", **opciones)
+
+    def test_con_un_backend_sin_proveedor_falla_y_no_escribe_el_correo(self, settings, capsys):
+        """Con console, además, el correo completo quedaba en el log."""
+        settings.EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+        persona("42")
+        nueva_alerta()
+        with pytest.raises(CommandError, match="no entrega a ningún proveedor"):
+            call_command("despachar_alertas", stdout=StringIO())
+        assert la_entrega().estado == Estado.PENDIENTE
+        salida = capsys.readouterr()
+        assert "ana@ejemplo.cl" not in salida.out + salida.err
+
+    def test_ahora_se_rechaza_con_un_proveedor_real(self, settings):
+        """Con un `--ahora` pasado, el reclamo nacía vencido para el cron real
+        y otro worker mandaba el mismo correo otra vez."""
+        settings.EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+        persona("42")
+        nueva_alerta()
+        with pytest.raises(CommandError, match="--ahora es solo para pruebas"):
+            call_command("despachar_alertas", ahora="2026-11-21T10:00:00-03:00", stdout=StringIO())
+        assert (la_entrega().estado, la_entrega().intentos) == (Estado.PENDIENTE, 0)
 
     def test_despachar_rechaza_un_limite_imposible(self):
         with pytest.raises(ValueError):

@@ -114,6 +114,16 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=5)
 
+# Los backends cuya aceptación es la de un proveedor. Con SMTP, `send()`
+# devuelve 1 solo si el servidor respondió 250. dummy, console y filebased
+# devuelven 1 sin que salga nada (console, además, escribe el correo completo
+# en el log) y locmem es un buzón en memoria: con cualquiera de ellos una
+# entrega quedaría «aceptada por el proveedor» sin proveedor, así que
+# `despachar_alertas` se niega a correr. No sale de una variable a propósito:
+# agregar un backend es decidir que su respuesta vale como aceptación, y eso
+# se revisa en una PR. Las pruebas agregan locmem (`conftest.py`).
+EMAIL_BACKENDS_CON_PROVEEDOR = ["django.core.mail.backends.smtp.EmailBackend"]
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
