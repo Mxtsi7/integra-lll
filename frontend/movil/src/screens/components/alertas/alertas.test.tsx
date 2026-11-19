@@ -195,4 +195,170 @@ describe('Centro de alertas móvil (AN-10 y AN-24)', () => {
     await waitFor(() => expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull());
     expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
   });
+
+  it('un GET en segundo plano iniciado antes del marcado no restaura la alerta leída ni el contador viejo, pero conserva alertas nuevas', async () => {
+    let avisarFoco: () => void = () => {};
+    const alVolverAPantalla = (recargar: () => void) => {
+      avisarFoco = recargar;
+      return () => {};
+    };
+
+    let resolverGetSegundoPlano!: (valor: ReturnType<typeof pagina>) => void;
+    let resolverContadorSegundoPlano!: (valor: { pendientes: number; total: number }) => void;
+    const getAlertas = vi
+      .fn()
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof pagina>>((res) => {
+            resolverGetSegundoPlano = res;
+          }),
+      );
+    const getContadorAlertas = vi
+      .fn()
+      .mockResolvedValueOnce({ pendientes: 1, total: 1 })
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ pendientes: number; total: number }>((res) => {
+            resolverContadorSegundoPlano = res;
+          }),
+      );
+
+    render(<CentroAlertas api={crearApi({ getAlertas, getContadorAlertas })} alVolverAPantalla={alVolverAPantalla} />);
+    await screen.findByTestId('alerta-nueva-a1');
+
+    // 1. Foco dispara GET A en segundo plano y queda pendiente.
+    avisarFoco();
+    expect(getAlertas).toHaveBeenCalledTimes(2);
+
+    // 2. Mientras GET A está en vuelo, el usuario marca a1 como leída.
+    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
+    await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer'));
+    expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull();
+
+    // 3. GET A resuelve con la instantánea vieja (a1 pendiente) más una alerta nueva a2 pendiente.
+    resolverGetSegundoPlano(pagina([crearAlerta('a2', true), crearAlerta('a1', true)]));
+    resolverContadorSegundoPlano({ pendientes: 2, total: 2 });
+
+    await waitFor(() => expect(screen.getByTestId('alerta-a2')).toBeTruthy());
+    // a1 sigue leída y el badge refleja solo a2 (1 sin leer, no 2).
+    expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('1 sin leer');
+  });
+
+  it('páginas en vuelo y marcar todas reconcilian lecturas anteriores sin restaurar pendientes', async () => {
+    let resolverPagina2!: (valor: ReturnType<typeof pagina>) => void;
+    const getAlertas = vi
+      .fn()
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)], true))
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof pagina>>((res) => {
+            resolverPagina2 = res;
+          }),
+      )
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', false), crearAlerta('a2', false)]));
+    const getContadorAlertas = vi
+      .fn()
+      .mockResolvedValueOnce({ pendientes: 2, total: 2 })
+      .mockResolvedValue({ pendientes: 0, total: 2 });
+
+    render(<CentroAlertas api={crearApi({ getAlertas, getContadorAlertas })} />);
+    await screen.findByTestId('alerta-a1');
+
+    // 1. Inicia carga de página 2 (en vuelo).
+    fireEvent.click(screen.getByTestId('cargar-mas-alertas'));
+    expect(getAlertas).toHaveBeenCalledWith({ pagina: 2 });
+
+    // 2. Marca todas como leídas antes de que resuelva página 2.
+    fireEvent.click(screen.getByTestId('marcar-todas-leidas'));
+    await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer'));
+
+    // 3. Resuelve página 2 con a2 todavía pendiente en la instantánea vieja.
+    resolverPagina2(pagina([crearAlerta('a2', true)], false));
+    await waitFor(() => expect(screen.getByTestId('alerta-a2')).toBeTruthy());
+    expect(screen.queryByTestId('alerta-nueva-a2')).toBeNull();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
+  });
+
+  it('al cambiar de "Todas" a "Sin leer" durante el POST, la alerta desaparece al confirmarse y el badge queda coherente', async () => {
+    let resolverPost!: (alerta: Alerta) => void;
+    const marcarAlertaLeida = vi.fn().mockImplementation(
+      () =>
+        new Promise<Alerta>((res) => {
+          resolverPost = res;
+        }),
+    );
+    const getAlertas = vi
+      .fn()
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true), crearAlerta('a2', false)]))
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]));
+
+    render(<CentroAlertas api={crearApi({ getAlertas, marcarAlertaLeida })} />);
+    await screen.findByTestId('alerta-a1');
+
+    // 1. Inicia POST en "Todas" y queda pendiente.
+    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
+    expect(marcarAlertaLeida).toHaveBeenCalledTimes(1);
+
+    // 2. Cambia a "Sin leer"; su GET devuelve a1 todavía pendiente.
+    fireEvent.click(screen.getByTestId('filtro-sin-leer'));
+    await waitFor(() => expect(getAlertas).toHaveBeenLastCalledWith({ pagina: 1, lectura: 'pendiente' }));
+    expect(await screen.findByTestId('alerta-a1')).toBeTruthy();
+
+    // 3. Resuelve el POST: debe aplicar el filtro vigente ("Sin leer") y quitar a1 de la lista.
+    resolverPost(crearAlerta('a1', false));
+    await waitFor(() => expect(screen.queryByTestId('alerta-a1')).toBeNull());
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
+  });
+
+  it('al cambiar de "Sin leer" a "Todas" durante el POST y al desmontar, aplica el filtro vigente y no falla al salir', async () => {
+    let resolverPost!: (alerta: Alerta) => void;
+    const marcarAlertaLeida = vi.fn().mockImplementation(
+      () =>
+        new Promise<Alerta>((res) => {
+          resolverPost = res;
+        }),
+    );
+    const getAlertas = vi
+      .fn()
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
+      .mockResolvedValueOnce(pagina([crearAlerta('a1', true), crearAlerta('a2', false)]));
+
+    const { unmount } = render(<CentroAlertas api={crearApi({ getAlertas, marcarAlertaLeida })} />);
+    fireEvent.click(await screen.findByTestId('filtro-sin-leer'));
+    await screen.findByTestId('alerta-a1');
+
+    // 1. Inicia POST en "Sin leer" y cambia a "Todas".
+    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
+    fireEvent.click(screen.getByTestId('filtro-todas'));
+    await waitFor(() => expect(getAlertas).toHaveBeenLastCalledWith({ pagina: 1 }));
+    await screen.findByTestId('alerta-a2');
+
+    // 2. Resuelve POST: en "Todas", a1 permanece visible como leída y baja el badge.
+    resolverPost(crearAlerta('a1', false));
+    await waitFor(() => expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull());
+    expect(screen.getByTestId('alerta-a1')).toBeTruthy();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
+
+    // 3. Cierre/desmontaje durante otro POST pendiente no provoca errores.
+    let resolverPostSalida!: (alerta: Alerta) => void;
+    marcarAlertaLeida.mockImplementationOnce(
+      () =>
+        new Promise<Alerta>((res) => {
+          resolverPostSalida = res;
+        }),
+    );
+    const apiSalida = crearApi({
+      getAlertas: vi.fn().mockResolvedValue(pagina([crearAlerta('a3', true)])),
+      marcarAlertaLeida,
+    });
+    unmount();
+    const vista2 = render(<CentroAlertas api={apiSalida} />);
+    fireEvent.click(await vista2.findByTestId('marcar-leida-a3'));
+    vista2.unmount();
+    resolverPostSalida(crearAlerta('a3', false));
+    await Promise.resolve();
+  });
 });
