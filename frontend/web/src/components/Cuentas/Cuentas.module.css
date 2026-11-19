@@ -82,3 +82,34 @@
     grid-template-columns: 1fr;
   }
 }
+/* Acciones por cuenta (AN-17) y retorno OAuth (AN-16) */
+
+.cuentaDerecha {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cuentaAcciones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.modalPie {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.retornoBloque {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 0;
+}
