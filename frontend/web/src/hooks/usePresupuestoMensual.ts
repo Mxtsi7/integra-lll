@@ -68,7 +68,7 @@ export function usePresupuestoMensual(mes: string, moneda: string) {
   const [resultado, setResultado] = useState<{ pedido: string; carga: CargaDePresupuesto } | null>(null);
   const [panel, setPanel] = useState<PanelDelPresupuesto>(() => panelCerrado(pedido));
   const pedidoVigente = useRef(pedido);
-  const pedidoGuardandose = useRef<string | null>(null);
+  const pedidosGuardandose = useRef(new Set<string>());
 
   useEffect(() => {
     pedidoVigente.current = pedido;
@@ -113,8 +113,8 @@ export function usePresupuestoMensual(mes: string, moneda: string) {
   /** `monto` ya viene leído y validado (texto decimal con punto). Con el mismo mes y moneda guarda de a uno. */
   const guardar = useCallback(
     async (monto: string) => {
-      if (pedidoGuardandose.current === pedido) return;
-      pedidoGuardandose.current = pedido;
+      if (pedidosGuardandose.current.has(pedido)) return;
+      pedidosGuardandose.current.add(pedido);
       const esDeEstaVista = () => capturarSesion() === sesion && pedidoVigente.current === pedido;
       setPanel({ pedido, edicion: { tipo: 'guardando' }, montoGuardado: null });
       try {
@@ -126,7 +126,7 @@ export function usePresupuestoMensual(mes: string, moneda: string) {
         if (!esDeEstaVista()) return;
         setPanel({ pedido, edicion: { tipo: 'abierta', error: mensajeAlGuardar(error) }, montoGuardado: null });
       } finally {
-        if (pedidoGuardandose.current === pedido) pedidoGuardandose.current = null;
+        pedidosGuardandose.current.delete(pedido);
       }
     },
     [mes, moneda, pedido, capturarSesion, sesion],

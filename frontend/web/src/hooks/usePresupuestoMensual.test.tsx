@@ -527,6 +527,55 @@ describe('cambio de mes o de sesión con un guardado pendiente (regla de sesión
     ]);
   });
 
+  it('volver a noviembre con su guardado todavía pendiente no manda otro guardado de noviembre', async () => {
+    simularRed({
+      comparar: async (mes) => comparacionDe({ mes }),
+      guardar: (cuerpo) => (cuerpo.monto === '1000' ? new Promise(() => {}) : Promise.resolve(guardadoDe(cuerpo.monto))),
+    });
+    const { result, rerender } = montar('2026-11');
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    act(() => result.current.abrirEdicion());
+    act(() => void result.current.guardar('1000'));
+
+    rerender({ mes: '2026-12', moneda: 'CLP' });
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    act(() => result.current.abrirEdicion());
+    act(() => void result.current.guardar('2000'));
+
+    rerender({ mes: '2026-11', moneda: 'CLP' });
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    act(() => result.current.abrirEdicion());
+    await act(async () => result.current.guardar('3000'));
+
+    expect(guardados().map(([, opciones]) => opciones?.body)).toEqual([
+      { mes: '2026-11', moneda: 'CLP', monto: '1000' },
+      { mes: '2026-12', moneda: 'CLP', monto: '2000' },
+    ]);
+  });
+
+  it('cuando el guardado de noviembre termina, guardar en noviembre vuelve a salir', async () => {
+    const respuestaDeA = diferida<unknown>();
+    simularRed({
+      comparar: async (mes) => comparacionDe({ mes }),
+      guardar: (cuerpo) => (cuerpo.monto === '1000' ? respuestaDeA.promesa : Promise.resolve(guardadoDe(cuerpo.monto))),
+    });
+    const { result, rerender } = montar('2026-11');
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    act(() => result.current.abrirEdicion());
+    act(() => void result.current.guardar('1000'));
+    rerender({ mes: '2026-12', moneda: 'CLP' });
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    rerender({ mes: '2026-11', moneda: 'CLP' });
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+    await act(async () => respuestaDeA.resolver(guardadoDe('1000.00')));
+    await waitFor(() => expect(result.current.carga.tipo).toBe('listo'));
+
+    act(() => result.current.abrirEdicion());
+    await act(async () => result.current.guardar('3000'));
+
+    expect(guardados().map(([, opciones]) => opciones?.body?.monto)).toEqual(['1000', '3000']);
+  });
+
   it('la respuesta de A que llega después de entrar B no se muestra', async () => {
     const respuestaDeA = diferida<unknown>();
     simularRed({ comparar: () => respuestaDeA.promesa });
