@@ -1127,15 +1127,23 @@ class TestComando:
             call_command("despachar_alertas", **opciones)
 
     def test_con_un_backend_sin_proveedor_falla_y_no_escribe_el_correo(self, settings, capsys):
-        """Con console, además, el correo completo quedaba en el log."""
+        """Con console, además, el correo completo quedaba en el log. La
+        entrega ya es elegible con el reloj real: sin la barrera, saldría."""
         settings.EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
         persona("42")
-        nueva_alerta()
+        nueva_alerta(ahora=dt.datetime.now(tz=SANTIAGO) - dt.timedelta(minutes=1))
         with pytest.raises(CommandError, match="no entrega a ningún proveedor"):
             call_command("despachar_alertas", stdout=StringIO())
-        assert la_entrega().estado == Estado.PENDIENTE
+        assert (la_entrega().estado, la_entrega().intentos) == (Estado.PENDIENTE, 0)
         salida = capsys.readouterr()
         assert "ana@ejemplo.cl" not in salida.out + salida.err
+
+    def test_se_niega_aunque_no_haya_nada_que_despachar(self, settings):
+        """La configuración se mira al empezar, no recién con la primera
+        entrega: una corrida vacía con un backend falso también falla."""
+        settings.EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
+        with pytest.raises(CommandError, match="no entrega a ningún proveedor"):
+            call_command("despachar_alertas", stdout=StringIO())
 
     def test_ahora_se_rechaza_con_un_proveedor_real(self, settings):
         """Con un `--ahora` pasado, el reclamo nacía vencido para el cron real
