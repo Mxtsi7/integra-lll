@@ -279,6 +279,20 @@ class TestCandidatoTrazableYPendiente:
         assert candidato.servicio_resultado == "ambiguo"
         assert candidato.servicio_texto == "Apple"
 
+    def test_un_remitente_desconocido_deja_su_nombre_en_servicio_texto(self, importacion, cuenta):
+        """El nombre visible SÍ se guarda cuando de él se intentó sacar el
+        servicio: es lo que la persona ve para resolverlo. El documento 30
+        decía lo contrario (revisión de S3-FE-09)."""
+        guardar_pagina(importacion, pagina(mensaje(
+            cuenta, remitente="Juan Pérez Soto <juan.perez@gmail.com>", asunto="Tu recibo",
+            texto="Total: CLP 9.990\nFecha: 2026-10-01",
+        )))
+
+        candidato = el_unico_candidato()
+        assert (candidato.servicio, candidato.servicio_resultado) == (None, "desconocido")
+        assert candidato.servicio_texto == "Juan Pérez Soto"
+        assert candidato.evidencia["remitente"] == "juan.perez@gmail.com"
+
     def test_el_ejemplo_de_correo_del_contrato_sale_del_productor_real(self, cuenta):
         """El ejemplo de S3-MX-25 se armó a mano con `Candidato`. Aquí sale
         de un correo, por las tres piezas de lectura, y tiene que coincidir."""
