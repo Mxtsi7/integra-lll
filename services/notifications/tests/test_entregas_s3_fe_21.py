@@ -379,6 +379,16 @@ class TestCorreoAceptado:
         assert entrega.message_id == f"<alerta-{entrega.pk}@ojoalgasto.cl>"
         assert mailoutbox[0].from_email == "avisos@ojoalgasto.cl"
 
+    def test_el_message_id_sale_bien_formado_con_un_remitente_con_nombre(self, settings, mailoutbox):
+        """Antes: «<alerta-…@ojoalgasto.cl>>», con el «>» del nombre visible."""
+        settings.DEFAULT_FROM_EMAIL = "Ojo al Gasto <no-responder@ojoalgasto.cl>"
+        persona("42")
+        nueva_alerta()
+        entregas.despachar(ahora=a_las(10))
+        entrega = la_entrega()
+        assert entrega.message_id == f"<alerta-{entrega.pk}@ojoalgasto.cl>"
+        assert mailoutbox[0].message()["Message-ID"] == entrega.message_id
+
     def test_aceptada_no_se_vuelve_a_mandar(self, mailoutbox):
         persona("42")
         nueva_alerta()

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import smtplib
 from dataclasses import dataclass
+from email.utils import parseaddr
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -124,8 +125,14 @@ class CanalCorreo:
         return direccion
 
     def message_id(self, entrega_id) -> str:
-        """Determinístico: el mismo en cada intento de la misma entrega."""
-        dominio = settings.DEFAULT_FROM_EMAIL.rpartition("@")[2] or "ojoalgasto.local"
+        """Determinístico: el mismo en cada intento de la misma entrega.
+
+        El dominio sale de la DIRECCIÓN del remitente: `DEFAULT_FROM_EMAIL`
+        puede traer nombre visible («Ojo al Gasto <no-responder@…>»), y
+        cortar el texto entero en la arroba dejaba el «>» pegado al dominio.
+        """
+        _, direccion = parseaddr(settings.DEFAULT_FROM_EMAIL)
+        dominio = direccion.rpartition("@")[2] or "ojoalgasto.local"
         return f"<alerta-{entrega_id}@{dominio}>"
 
     def enviar(self, envio: Envio) -> dict:
