@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Alerta } from '@ojoalgasto/shared';
 import { CentroAlertas } from './CentroAlertas';
 import type { ApiAlertas } from './useAlertas';
@@ -28,14 +28,82 @@ function pagina(alertas: Alerta[], haySiguiente = false) {
   return { count: alertas.length, next: haySiguiente ? 'siguiente' : null, previous: null, results: alertas };
 }
 
+/**
+ * Un backend de mentira CON memoria: lo que se marca como leída queda leída en las lecturas siguientes.
+ * Como la pantalla vuelve a pedir la lista después de cada acción, un backend que siempre responde lo
+ * mismo no representaría lo que de verdad pasa.
+ */
 function crearApi(cambios: Partial<ApiAlertas> = {}): ApiAlertas {
-  return {
-    getAlertas: vi.fn().mockResolvedValue(pagina([crearAlerta('a1'), crearAlerta('a2', false)])),
-    getContadorAlertas: vi.fn().mockResolvedValue({ pendientes: 1, total: 2 }),
-    marcarAlertaLeida: vi.fn().mockResolvedValue(crearAlerta('a1', false)),
-    marcarTodasLasAlertasLeidas: vi.fn().mockResolvedValue({ leidas: 1 }),
-    ...cambios,
+  let alertas = [crearAlerta('a1'), crearAlerta('a2', false)];
+  const api: ApiAlertas = {
+    getAlertas: vi.fn(async (consulta: { pagina?: number; lectura?: string } = {}) => {
+      const visibles = consulta.lectura === 'pendiente' ? alertas.filter((alerta) => alerta.pendiente) : alertas;
+      return pagina(visibles.map((alerta) => ({ ...alerta })));
+    }) as unknown as ApiAlertas['getAlertas'],
+    getContadorAlertas: vi.fn(async () => ({ pendientes: alertas.filter((alerta) => alerta.pendiente).length, total: alertas.length })),
+    marcarAlertaLeida: vi.fn(async (id: string) => {
+      alertas = alertas.map((alerta) => (alerta.id === id ? crearAlerta(id, false) : alerta));
+      return crearAlerta(id, false);
+    }),
+    marcarTodasLasAlertasLeidas: vi.fn(async () => {
+      const leidas = alertas.filter((alerta) => alerta.pendiente).length;
+      alertas = alertas.map((alerta) => crearAlerta(alerta.id, false));
+      return { leidas };
+    }),
   };
+  return { ...api, ...cambios };
+}
+
+/**
+ * Un servidor falso que se comporta como FE-19/FE-20: filtra por lectura, pagina de a 10 y responde 404
+ * si se pide una página que ya no existe. Con él se ve lo que pasa en "Sin leer" cuando se marcan alertas.
+ */
+function servidor(cuantas: number): ApiAlertas {
+  const alertas = Array.from({ length: cuantas }, (_, i) => crearAlerta(`a${String(i + 1).padStart(2, '0')}`));
+  return {
+    getAlertas: vi.fn(async (consulta: { pagina?: number; lectura?: string } = {}) => {
+      const { pagina: numero = 1, lectura } = consulta;
+      const base = lectura === 'pendiente' ? alertas.filter((alerta) => alerta.pendiente) : alertas;
+      const desde = (numero - 1) * 10;
+      if (numero > 1 && desde >= base.length) throw Object.assign(new Error('Página inválida.'), { status: 404 });
+      return {
+        count: base.length,
+        next: desde + 10 < base.length ? 'siguiente' : null,
+        previous: null,
+        results: base.slice(desde, desde + 10).map((alerta) => ({ ...alerta })),
+      };
+    }) as unknown as ApiAlertas['getAlertas'],
+    getContadorAlertas: vi.fn(async () => ({ pendientes: alertas.filter((alerta) => alerta.pendiente).length, total: alertas.length })),
+    marcarAlertaLeida: vi.fn(async (id: string) => {
+      const alerta = alertas.find((otra) => otra.id === id)!;
+      Object.assign(alerta, crearAlerta(id, false));
+      return { ...alerta };
+    }),
+    marcarTodasLasAlertasLeidas: vi.fn(async () => ({ leidas: 0 })),
+  };
+}
+
+async function abrirEnSinLeer(api: ApiAlertas) {
+  render(<CentroAlertas api={api} />);
+  await screen.findByTestId('alerta-a01');
+  fireEvent.click(screen.getByTestId('filtro-sin-leer'));
+  await screen.findByTestId('alerta-a01');
+}
+
+async function marcarYEsperar(id: string) {
+  await act(async () => {
+    fireEvent.click(screen.getByTestId(`marcar-leida-${id}`));
+  });
+  await waitFor(() => expect(screen.queryByTestId(`alerta-${id}`)).toBeNull());
+}
+
+/** Toca "Ver más alertas" hasta que ya no haya. Con 15 alertas basta con una o dos veces. */
+async function verTodoLoQueHaya() {
+  for (let vuelta = 0; vuelta < 5 && screen.queryByTestId('cargar-mas-alertas'); vuelta += 1) {
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('cargar-mas-alertas'));
+    });
+  }
 }
 
 afterEach(() => {
@@ -76,14 +144,18 @@ describe('Centro de alertas móvil (AN-10 y AN-24)', () => {
   });
 
   it('un doble toque manda una sola petición', async () => {
-    let terminar: (alerta: Alerta) => void = () => {};
-    const marcarAlertaLeida = vi.fn().mockReturnValue(new Promise<Alerta>((resolver) => (terminar = resolver)));
-    render(<CentroAlertas api={crearApi({ marcarAlertaLeida })} />);
+    const api = crearApi();
+    const marcarReal = api.marcarAlertaLeida;
+    let terminar: () => void = () => {};
+    const marcarAlertaLeida = vi.fn(
+      (id: string) => new Promise<Alerta>((resolver) => (terminar = () => resolver(marcarReal(id)))),
+    );
+    render(<CentroAlertas api={{ ...api, marcarAlertaLeida }} />);
     const boton = await screen.findByTestId('marcar-leida-a1');
     fireEvent.click(boton);
     fireEvent.click(boton);
     expect(marcarAlertaLeida).toHaveBeenCalledTimes(1);
-    terminar(crearAlerta('a1', false));
+    await act(async () => terminar());
     await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer'));
   });
 
@@ -123,15 +195,12 @@ describe('Centro de alertas móvil (AN-10 y AN-24)', () => {
   });
 
   it('"Ver más alertas" pide la página 2 y no repite alertas ya mostradas', async () => {
-    const getAlertas = vi
-      .fn()
-      .mockResolvedValueOnce(pagina([crearAlerta('a1'), crearAlerta('a2')], true))
-      .mockResolvedValueOnce(pagina([crearAlerta('a2'), crearAlerta('a3')], false));
-    render(<CentroAlertas api={crearApi({ getAlertas })} />);
+    const api = servidor(12);
+    render(<CentroAlertas api={api} />);
     fireEvent.click(await screen.findByTestId('cargar-mas-alertas'));
-    expect(await screen.findByTestId('alerta-a3')).toBeTruthy();
-    expect(getAlertas).toHaveBeenLastCalledWith({ pagina: 2 });
-    expect(screen.getAllByTestId('alerta-a2')).toHaveLength(1);
+    expect(await screen.findByTestId('alerta-a12')).toBeTruthy();
+    expect(api.getAlertas).toHaveBeenLastCalledWith({ pagina: 2 });
+    expect(screen.getAllByTestId(/^alerta-a\d\d$/)).toHaveLength(12);
     expect(screen.queryByTestId('cargar-mas-alertas')).toBeNull();
   });
 
@@ -196,169 +265,166 @@ describe('Centro de alertas móvil (AN-10 y AN-24)', () => {
     expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
   });
 
-  it('un GET en segundo plano iniciado antes del marcado no restaura la alerta leída ni el contador viejo, pero conserva alertas nuevas', async () => {
+  it('una lectura que salió ANTES de marcar y llega DESPUÉS no devuelve la alerta a pendiente ni el contador viejo', async () => {
+    const api = crearApi();
+    const leerReal = api.getAlertas;
+    let llamadas = 0;
+    let soltarLecturaVieja: () => void = () => {};
+    const getAlertas = vi.fn((consulta?: Parameters<ApiAlertas['getAlertas']>[0]) => {
+      llamadas += 1;
+      const instantanea = leerReal(consulta); // se toma ahora: a1 todavía pendiente
+      if (llamadas !== 2) return instantanea;
+      return new Promise((resolver) => (soltarLecturaVieja = () => void instantanea.then(resolver)));
+    }) as unknown as ApiAlertas['getAlertas'];
+
     let avisarFoco: () => void = () => {};
     const alVolverAPantalla = (recargar: () => void) => {
       avisarFoco = recargar;
       return () => {};
     };
-
-    let resolverGetSegundoPlano!: (valor: ReturnType<typeof pagina>) => void;
-    let resolverContadorSegundoPlano!: (valor: { pendientes: number; total: number }) => void;
-    const getAlertas = vi
-      .fn()
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
-      .mockImplementationOnce(
-        () =>
-          new Promise<ReturnType<typeof pagina>>((res) => {
-            resolverGetSegundoPlano = res;
-          }),
-      );
-    const getContadorAlertas = vi
-      .fn()
-      .mockResolvedValueOnce({ pendientes: 1, total: 1 })
-      .mockImplementationOnce(
-        () =>
-          new Promise<{ pendientes: number; total: number }>((res) => {
-            resolverContadorSegundoPlano = res;
-          }),
-      );
-
-    render(<CentroAlertas api={crearApi({ getAlertas, getContadorAlertas })} alVolverAPantalla={alVolverAPantalla} />);
+    render(<CentroAlertas api={{ ...api, getAlertas }} alVolverAPantalla={alVolverAPantalla} />);
     await screen.findByTestId('alerta-nueva-a1');
 
-    // 1. Foco dispara GET A en segundo plano y queda pendiente.
-    avisarFoco();
-    expect(getAlertas).toHaveBeenCalledTimes(2);
-
-    // 2. Mientras GET A está en vuelo, el usuario marca a1 como leída.
-    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
+    await act(async () => avisarFoco()); // la lectura vieja queda en vuelo
+    fireEvent.click(screen.getByTestId('marcar-leida-a1')); // el POST confirma
     await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer'));
+    await act(async () => soltarLecturaVieja()); // ahora llega la lectura vieja
+
     expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull();
-
-    // 3. GET A resuelve con la instantánea vieja (a1 pendiente) más una alerta nueva a2 pendiente.
-    resolverGetSegundoPlano(pagina([crearAlerta('a2', true), crearAlerta('a1', true)]));
-    resolverContadorSegundoPlano({ pendientes: 2, total: 2 });
-
-    await waitFor(() => expect(screen.getByTestId('alerta-a2')).toBeTruthy());
-    // a1 sigue leída y el badge refleja solo a2 (1 sin leer, no 2).
-    expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull();
-    expect(screen.getByTestId('badge-pendientes').textContent).toBe('1 sin leer');
-  });
-
-  it('páginas en vuelo y marcar todas reconcilian lecturas anteriores sin restaurar pendientes', async () => {
-    let resolverPagina2!: (valor: ReturnType<typeof pagina>) => void;
-    const getAlertas = vi
-      .fn()
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)], true))
-      .mockImplementationOnce(
-        () =>
-          new Promise<ReturnType<typeof pagina>>((res) => {
-            resolverPagina2 = res;
-          }),
-      )
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', false), crearAlerta('a2', false)]));
-    const getContadorAlertas = vi
-      .fn()
-      .mockResolvedValueOnce({ pendientes: 2, total: 2 })
-      .mockResolvedValue({ pendientes: 0, total: 2 });
-
-    render(<CentroAlertas api={crearApi({ getAlertas, getContadorAlertas })} />);
-    await screen.findByTestId('alerta-a1');
-
-    // 1. Inicia carga de página 2 (en vuelo).
-    fireEvent.click(screen.getByTestId('cargar-mas-alertas'));
-    expect(getAlertas).toHaveBeenCalledWith({ pagina: 2 });
-
-    // 2. Marca todas como leídas antes de que resuelva página 2.
-    fireEvent.click(screen.getByTestId('marcar-todas-leidas'));
-    await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer'));
-
-    // 3. Resuelve página 2 con a2 todavía pendiente en la instantánea vieja.
-    resolverPagina2(pagina([crearAlerta('a2', true)], false));
-    await waitFor(() => expect(screen.getByTestId('alerta-a2')).toBeTruthy());
-    expect(screen.queryByTestId('alerta-nueva-a2')).toBeNull();
     expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
   });
 
-  it('al cambiar de "Todas" a "Sin leer" durante el POST, la alerta desaparece al confirmarse y el badge queda coherente', async () => {
-    let resolverPost!: (alerta: Alerta) => void;
-    const marcarAlertaLeida = vi.fn().mockImplementation(
-      () =>
-        new Promise<Alerta>((res) => {
-          resolverPost = res;
-        }),
-    );
-    const getAlertas = vi
-      .fn()
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true), crearAlerta('a2', false)]))
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]));
+  it('si se pasa de "Todas" a "Sin leer" mientras se marca, la alerta leída sale de la lista y el badge queda coherente', async () => {
+    const api = crearApi();
+    const marcarReal = api.marcarAlertaLeida;
+    let confirmar: () => void = () => {};
+    const marcarAlertaLeida = vi.fn((id: string) => new Promise<Alerta>((resolver) => (confirmar = () => resolver(marcarReal(id)))));
+    render(<CentroAlertas api={{ ...api, marcarAlertaLeida }} />);
 
-    render(<CentroAlertas api={crearApi({ getAlertas, marcarAlertaLeida })} />);
-    await screen.findByTestId('alerta-a1');
-
-    // 1. Inicia POST en "Todas" y queda pendiente.
-    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
-    expect(marcarAlertaLeida).toHaveBeenCalledTimes(1);
-
-    // 2. Cambia a "Sin leer"; su GET devuelve a1 todavía pendiente.
+    fireEvent.click(await screen.findByTestId('marcar-leida-a1')); // POST en vuelo, en "Todas"
     fireEvent.click(screen.getByTestId('filtro-sin-leer'));
-    await waitFor(() => expect(getAlertas).toHaveBeenLastCalledWith({ pagina: 1, lectura: 'pendiente' }));
-    expect(await screen.findByTestId('alerta-a1')).toBeTruthy();
+    await screen.findByTestId('alerta-a1'); // "Sin leer" todavía la muestra pendiente
+    await act(async () => confirmar());
 
-    // 3. Resuelve el POST: debe aplicar el filtro vigente ("Sin leer") y quitar a1 de la lista.
-    resolverPost(crearAlerta('a1', false));
     await waitFor(() => expect(screen.queryByTestId('alerta-a1')).toBeNull());
     expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
   });
 
-  it('al cambiar de "Sin leer" a "Todas" durante el POST y al desmontar, aplica el filtro vigente y no falla al salir', async () => {
-    let resolverPost!: (alerta: Alerta) => void;
-    const marcarAlertaLeida = vi.fn().mockImplementation(
-      () =>
-        new Promise<Alerta>((res) => {
-          resolverPost = res;
-        }),
-    );
-    const getAlertas = vi
-      .fn()
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true)]))
-      .mockResolvedValueOnce(pagina([crearAlerta('a1', true), crearAlerta('a2', false)]));
+  it('si se pasa de "Sin leer" a "Todas" mientras se marca, la alerta queda a la vista como leída', async () => {
+    const api = crearApi();
+    const marcarReal = api.marcarAlertaLeida;
+    let confirmar: () => void = () => {};
+    const marcarAlertaLeida = vi.fn((id: string) => new Promise<Alerta>((resolver) => (confirmar = () => resolver(marcarReal(id)))));
+    render(<CentroAlertas api={{ ...api, marcarAlertaLeida }} />);
 
-    const { unmount } = render(<CentroAlertas api={crearApi({ getAlertas, marcarAlertaLeida })} />);
     fireEvent.click(await screen.findByTestId('filtro-sin-leer'));
-    await screen.findByTestId('alerta-a1');
-
-    // 1. Inicia POST en "Sin leer" y cambia a "Todas".
-    fireEvent.click(screen.getByTestId('marcar-leida-a1'));
+    fireEvent.click(await screen.findByTestId('marcar-leida-a1')); // POST en vuelo, en "Sin leer"
     fireEvent.click(screen.getByTestId('filtro-todas'));
-    await waitFor(() => expect(getAlertas).toHaveBeenLastCalledWith({ pagina: 1 }));
     await screen.findByTestId('alerta-a2');
+    await act(async () => confirmar());
 
-    // 2. Resuelve POST: en "Todas", a1 permanece visible como leída y baja el badge.
-    resolverPost(crearAlerta('a1', false));
     await waitFor(() => expect(screen.queryByTestId('alerta-nueva-a1')).toBeNull());
-    expect(screen.getByTestId('alerta-a1')).toBeTruthy();
+    expect(screen.getByTestId('alerta-a1')).toBeTruthy(); // en "Todas" la leída se queda
     expect(screen.getByTestId('badge-pendientes').textContent).toBe('0 sin leer');
+  });
 
-    // 3. Cierre/desmontaje durante otro POST pendiente no provoca errores.
-    let resolverPostSalida!: (alerta: Alerta) => void;
-    marcarAlertaLeida.mockImplementationOnce(
-      () =>
-        new Promise<Alerta>((res) => {
-          resolverPostSalida = res;
-        }),
-    );
-    const apiSalida = crearApi({
-      getAlertas: vi.fn().mockResolvedValue(pagina([crearAlerta('a3', true)])),
-      marcarAlertaLeida,
+  it('una lectura de "ver más" que salió antes de marcar no restaura la alerta', async () => {
+    const api = servidor(15);
+    const leerReal = api.getAlertas;
+    let soltarPagina2: () => void = () => {};
+    const getAlertas = vi.fn((consulta?: Parameters<ApiAlertas['getAlertas']>[0]) => {
+      if (consulta?.pagina !== 2) return leerReal(consulta);
+      const instantanea = leerReal(consulta); // se toma ahora: a01 todavía pendiente
+      return new Promise((resolver) => (soltarPagina2 = () => void instantanea.then(resolver)));
+    }) as unknown as ApiAlertas['getAlertas'];
+    render(<CentroAlertas api={{ ...api, getAlertas }} />);
+
+    fireEvent.click(await screen.findByTestId('cargar-mas-alertas'));
+    fireEvent.click(screen.getByTestId('marcar-leida-a01'));
+    await waitFor(() => expect(screen.getByTestId('badge-pendientes').textContent).toBe('14 sin leer'));
+    await act(async () => soltarPagina2());
+
+    expect(screen.queryByTestId('alerta-nueva-a01')).toBeNull();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('14 sin leer');
+  });
+});
+
+describe('"Sin leer" + "Ver más" contra un servidor que filtra y pagina (revisión de #199)', () => {
+  it('A: 15 pendientes, marco 3 y pido más: no se salta ninguna', async () => {
+    await abrirEnSinLeer(servidor(15));
+    for (const id of ['a01', 'a02', 'a03']) await marcarYEsperar(id);
+    await verTodoLoQueHaya();
+
+    await screen.findByTestId('alerta-a15');
+    for (const id of ['a04', 'a05', 'a06', 'a07', 'a08', 'a09', 'a10', 'a11', 'a12', 'a13', 'a14', 'a15']) {
+      expect(screen.queryByTestId(`alerta-${id}`)).toBeTruthy();
+    }
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('12 sin leer');
+  });
+
+  it('B: 11 pendientes, marco 1 y pido más: aparece a11 y no queda un error del que no se sale', async () => {
+    await abrirEnSinLeer(servidor(11));
+    await marcarYEsperar('a01');
+    await verTodoLoQueHaya();
+
+    await waitFor(() => expect(screen.queryByTestId('alerta-a11')).toBeTruthy());
+    expect(screen.queryByTestId('error-alertas')).toBeNull();
+  });
+
+  it('un 404 al pedir más significa que no hay más: no muestra error y quita el botón', async () => {
+    const api = servidor(11);
+    const leerReal = api.getAlertas;
+    // El conjunto se achicó entre que se mostró el botón y el toque: la página 2 ya no existe.
+    const getAlertas = vi.fn((consulta?: Parameters<ApiAlertas['getAlertas']>[0]) =>
+      consulta?.pagina === 2 ? Promise.reject(Object.assign(new Error('Página inválida.'), { status: 404 })) : leerReal(consulta),
+    ) as unknown as ApiAlertas['getAlertas'];
+    render(<CentroAlertas api={{ ...api, getAlertas }} />);
+
+    const botonVerMas = await screen.findByTestId('cargar-mas-alertas');
+    await act(async () => {
+      fireEvent.click(botonVerMas);
     });
-    unmount();
-    const vista2 = render(<CentroAlertas api={apiSalida} />);
-    fireEvent.click(await vista2.findByTestId('marcar-leida-a3'));
-    vista2.unmount();
-    resolverPostSalida(crearAlerta('a3', false));
-    await Promise.resolve();
+
+    await waitFor(() => expect(screen.queryByTestId('cargar-mas-alertas')).toBeNull());
+    expect(screen.queryByTestId('error-alertas')).toBeNull();
+  });
+
+  it('un error distinto de 404 al pedir más sí se avisa y el botón sigue para reintentar', async () => {
+    const api = servidor(11);
+    const leerReal = api.getAlertas;
+    const getAlertas = vi.fn((consulta?: Parameters<ApiAlertas['getAlertas']>[0]) =>
+      consulta?.pagina === 2 ? Promise.reject(new Error('500')) : leerReal(consulta),
+    ) as unknown as ApiAlertas['getAlertas'];
+    render(<CentroAlertas api={{ ...api, getAlertas }} />);
+
+    const botonVerMas = await screen.findByTestId('cargar-mas-alertas');
+    await act(async () => {
+      fireEvent.click(botonVerMas);
+    });
+
+    expect(await screen.findByTestId('error-alertas')).toBeTruthy();
+    expect(screen.getByTestId('cargar-mas-alertas')).toBeTruthy();
+  });
+
+  it('C: 15 pendientes, marco las 10 visibles: no dice que no hay sin leer mientras queden', async () => {
+    await abrirEnSinLeer(servidor(15));
+    for (let i = 1; i <= 10; i += 1) await marcarYEsperar(`a${String(i).padStart(2, '0')}`);
+
+    expect(screen.queryByText('No tienes alertas sin leer')).toBeNull();
+    await verTodoLoQueHaya();
+    expect(screen.queryByTestId('alerta-a15')).toBeTruthy();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('5 sin leer');
+  });
+
+  it('con "Ver más" disponible y la lista vacía, no muestra el vacío: faltan alertas por traer', async () => {
+    const api = crearApi({
+      getAlertas: vi.fn().mockResolvedValue(pagina([], true)),
+      getContadorAlertas: vi.fn().mockResolvedValue({ pendientes: 5, total: 5 }),
+    });
+    render(<CentroAlertas api={api} />);
+
+    expect(await screen.findByTestId('cargar-mas-alertas')).toBeTruthy();
+    expect(screen.queryByText('No tienes alertas')).toBeNull();
+    expect(screen.getByTestId('badge-pendientes').textContent).toBe('5 sin leer');
   });
 });

@@ -53,7 +53,8 @@ export function CentroAlertas({ api, alVolverAPantalla }: CentroAlertasProps) {
       <ContenidoConEstado
         estado={estado}
         onReintentar={() => void cargar()}
-        esVacio={(datos) => datos.alertas.length === 0}
+        // Con "Ver más" disponible la lista no está vacía: faltan alertas por traer.
+        esVacio={(datos) => datos.alertas.length === 0 && !datos.hayMas}
         vacio={{
           titulo: filtro === 'sin_leer' ? 'No tienes alertas sin leer' : 'No tienes alertas',
           descripcion: 'Cuando haya un cobro próximo o un cambio en tus suscripciones, te avisamos aquí.',
