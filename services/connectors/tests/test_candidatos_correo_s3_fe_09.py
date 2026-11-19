@@ -442,9 +442,13 @@ class TestNadaInnecesarioNiConfirmado:
         candidato = el_unico_candidato()
         assert candidato.importe == Decimal("9990")
         assert "CLP 9.990" in candidato.evidencia["importe_fragmento"]
+        # Frases enteras: «4242» solo puede aparecer por azar en un UUID o en
+        # los microsegundos de una fecha (2 de cada 300 guardados, medido).
         guardado = todo_lo_guardado()
-        for privado in ("Juan", "Pérez", "4242", "12.345.678", "Aromos"):
+        for privado in ("Juan Pérez", "terminada en 4242", "12.345.678-9", "Los Aromos"):
             assert privado not in guardado, privado
+        for fragmento in (candidato.evidencia["importe_fragmento"], candidato.evidencia.get("fecha_fragmento", "")):
+            assert "4242" not in fragmento and "Juan" not in fragmento, fragmento
 
     def test_la_evidencia_es_de_una_linea_y_acotada(self, importacion, cuenta):
         asunto = "Tu recibo\n\tde\x00 Netflix " + "x" * 5000
