@@ -141,8 +141,9 @@ Esa guarda solo corta un ciclo de un paso, y por eso una corrida se reinicia
 **una vez como mucho**. La revisión de #189 (ronda 3) mostró que, con la
 tercera página rechazada siempre, la corrida volvía al inicio cada dos
 llamadas, para siempre, sin un error y sin que la marca avanzara. Con la
-`@odata.nextLink` de Outlook pasaba de verdad: la URL con `$skip` es fija, y
-al reiniciar se volvía a generar la misma que Graph rechazaba. Ahora el
+`@odata.nextLink` de Outlook era lo esperable: la URL con `$skip` es fija y al
+reiniciar se volvía a generar la misma (la revisión lo reprodujo con un Graph
+falso que la rechazaba siempre). Ahora el
 avance anota `reiniciada_en_corrida` al reiniciar y la limpia cuando la
 corrida termina. Un segundo rechazo en la misma corrida sale como
 `ErrorDelProveedor` con código `cursor_rechazado_otra_vez`, sin procesar ni
@@ -158,6 +159,8 @@ porque vienen de la corrida guardada y no de una falla pasajera:
 | `cursor_rechazado_otra_vez` | el proveedor rechazó una página de una corrida que ya se había reiniciado una vez |
 | `reinicio_sin_avance` | al reiniciar, el proveedor entregó como siguiente la misma página que acababa de rechazar |
 | `ValueError` del lector | la página guardada no es una que el lector reconozca |
+| `pagina_sin_avance` (Outlook) | Graph dice que hay más y, desde la página guardada, no entrega nada nuevo (documento 24) |
+| `demasiados_en_un_segundo` (Outlook) | más de 99 correos recibidos en el mismo segundo; vuelve igual en una corrida nueva mientras esos correos sigan en la ventana, y se arregla en el lector |
 | otro `ErrorDelProveedor` que vuelve igual | la página guardada falla siempre por otra cosa (por ejemplo, un JSON que nunca se puede leer) |
 
 En todos la cuenta queda **detenida**: la marca no avanza, no se procesa nada
@@ -231,7 +234,7 @@ eso hacían falta.
 | El modelo | `AvanceDeLectura` en `models.py`, migraciones `0010_avance_de_lectura` y `0011_avance_reiniciada_en_corrida` |
 | Sacar una cuenta detenida | `descartar_corrida` en `avance_lectura.py` |
 | Borrarlo con la organización | `eliminacion.py`, antes que la cuenta |
-| Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (29) y `test_carrera_avance_lectura_postgres.py` (2, con dos conexiones a PostgreSQL) |
+| Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (39) y `test_carrera_avance_lectura_postgres.py` (2, con dos conexiones a PostgreSQL); las del cursor de Outlook, también en `test_lector_outlook.py` |
 | El rechazo del cursor | `CursorRechazado` en `lectura_correo.py`; lo levanta `lector_gmail.py` |
 | La página siguiente de Outlook, por fecha | `_Cursor` y `_cursor_siguiente` en `lector_outlook.py` |
 | El filtro de palabras de Outlook | `FiltroCorreos.coincide` en `lectura_correo.py` |
@@ -276,3 +279,15 @@ cada una hizo fallar al menos una prueba:
 - en `coincide`, sin NFKC, ignorar los remitentes, no aceptar subdominios o
   aceptar cualquier sufijo (`notnetflix.com` como `netflix.com`);
 - que Gmail vuelva a recortar en silencio.
+
+En la tercera ronda se rompió 25 veces más, y cada una hizo fallar al menos
+una prueba. La primera de cada grupo es la que reproduce el hallazgo: sin la
+corrección, la prueba falla.
+
+- **Un reinicio por corrida** (7): quitar la guarda, no anotar el reinicio, no
+  limpiar la marca al terminar; en `descartar_corrida`, no limpiar el tope o
+  la marca, buscar sin la organización o mover `leido_hasta`.
+- **Outlook por fecha** (15): las del documento 24, de seguir otra vez la
+  `nextLink` a no truncar la fracción del segundo.
+- **El filtro y el HTML** (3): mirar solo el crudo, solo el texto, o no
+  reconocer el HTML.

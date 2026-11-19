@@ -176,7 +176,7 @@ cuenta. El lector tampoco renueva el token; el comando sí (S3-FE-19, documento 
 | El lector | `services/connectors/connectors/lector_outlook.py` |
 | Lo común con Gmail | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_outlook.py` |
-| Las pruebas | `services/connectors/tests/test_lector_outlook.py` (95) |
+| Las pruebas | `services/connectors/tests/test_lector_outlook.py` (110) |
 
 ## Cómo se comprobaron las pruebas
 
@@ -198,3 +198,15 @@ HTML a texto, aceptar una fecha sin zona, entre otras.
 Al principio dos no fallaban: un chequeo de puerto que el del `netloc` ya
 cubría (se sacó) y una validación del filtro que la otra traducción tapaba (se
 agregó la prueba que llama a cada una por separado).
+
+En la revisión de #189 (ronda 3) la validación de la `nextLink` se sacó, porque
+ya no se pide ninguna; las URL de esas pruebas siguen, ahora como páginas que
+el lector no armó. Se rompió el código 18 veces más y cada vez falló al menos
+una prueba: volver a seguir la `nextLink`, cortar en el último segundo y no en
+el siguiente, cortar en el más nuevo de la página, no saltar los vistos, no
+sumar los de antes cuando la página entera cae en el mismo segundo, pedir solo
+`limite` o pedir sin tope, quitar la guarda del cursor que no avanza o la del
+tope de un segundo, correr ese tope en uno, contar como vistos los de toda la
+página, aceptar un cursor de otra ventana, dejar que un cursor amplíe el
+`hasta`, aceptar vistos repetidos, no truncar la fracción del segundo, y en el
+filtro mirar solo el HTML crudo, solo el texto, o no reconocer el HTML.

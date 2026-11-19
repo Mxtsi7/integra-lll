@@ -158,7 +158,7 @@ texto no, porque esta salida termina en una PR o en una captura.
 | El lector, lo propio de Google | `services/connectors/connectors/lector_gmail.py` |
 | Lo común con Outlook: la cuenta, los errores, el filtro, el HTML | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_gmail.py` |
-| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (88) |
+| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (95) |
 
 ## Cómo se comprobaron las pruebas
 
