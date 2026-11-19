@@ -17,10 +17,21 @@ from decimal import Decimal
 
 import pytest
 
+from connectors import tipo_de_aviso
 from connectors.datos_del_cobro import AMBIGUO, AUSENTE, CONFIRMADO, SUPUESTO, datos_de, leer_numero
 from connectors.lectura_correo import MensajeCorreo
 
 RECIBIDO = datetime(2026, 10, 3, 12, 0, tzinfo=tz.utc)
+
+#: Las frases con que S3-FE-08 reconoce un cobro anunciado. Fuera quedan los
+#: «recordatorio»: no dicen de qué es la fecha que traen, que puede ser la
+#: del propio aviso («Recordatorio de pago — 28 de octubre de 2026»).
+FRASES_QUE_ANUNCIAN_UN_COBRO = sorted(
+    frase
+    for tipo in (tipo_de_aviso.AVISO_DE_COBRO, tipo_de_aviso._PROXIMO_CICLO)
+    for frase in tipo_de_aviso.EVIDENCIA[tipo]
+    if "recordatorio" not in frase and "reminder" not in frase
+)
 
 
 def datos(texto, asunto=""):
@@ -268,6 +279,27 @@ class TestFechaDelProximoCiclo:
 
     def test_sin_fecha_del_proximo_cobro_queda_ausente(self):
         assert datos("Total: CLP 9.990").fecha_proximo_cobro.estado == AUSENTE
+
+    @pytest.mark.parametrize("frase", FRASES_QUE_ANUNCIAN_UN_COBRO)
+    def test_cada_frase_de_aviso_de_s3_fe_08_marca_su_fecha(self, frase):
+        """S3-FE-09 toma la fecha de un aviso SOLO de `fecha_proximo_cobro`:
+        si FE-08 reconoce el aviso por una frase que FE-07 no marca, el aviso
+        se queda sin fecha (revisión de S3-FE-09)."""
+        d = datos(f"{frase.capitalize()} el 2026-11-05")
+        assert (d.fecha_proximo_cobro.valor, d.fecha_proximo_cobro.estado) == (date(2026, 11, 5), CONFIRMADO)
+        assert d.fecha.estado == SUPUESTO
+
+    @pytest.mark.parametrize("texto", [
+        "Lo intentaremos de nuevo el 5 de noviembre de 2026.",
+        "Volveremos a intentar el cobro el 5 de noviembre de 2026.",
+        "Reintentaremos el pago el 5 de noviembre de 2026.",
+        "Próximo intento: 5 de noviembre de 2026",
+        "We'll retry your payment on November 5, 2026",
+    ])
+    def test_el_reintento_de_un_pago_fallido_no_es_la_fecha_del_intento(self, texto):
+        d = datos("No pudimos procesar tu pago de CLP 9.990.\n" + texto)
+        assert d.fecha.estado == SUPUESTO
+        assert d.fecha_proximo_cobro.valor == date(2026, 11, 5)
 
 
 class TestElDiaDeRecepcion:

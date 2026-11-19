@@ -121,10 +121,20 @@ _FECHA_EN_DMY = re.compile(rf"(?<!\d)(\d{{1,2}})\s+({_MES})\.?,?\s+(\d{{4}})(?!\
 #: Lo que dice que una fecha es la del PRÓXIMO ciclo, no la de este cobro.
 #: Se mira antes que las etiquetas de fecha, porque «Next billing date»
 #: también contiene «billing date». Lo encontró la revisión de #184.
+#:
+#: Tiene que cubrir las frases con que S3-FE-08 reconoce un aviso
+#: («Realizaremos el cobro…», «Upcoming payment», «Your trial ends»): en un
+#: aviso, S3-FE-09 usa SOLO esta fecha, y una frase de aviso que no la marca
+#: deja el aviso sin fecha. Y el reintento que anuncia un pago fallido
+#: («Lo intentaremos de nuevo el 5 de noviembre») tampoco es la fecha del
+#: intento que falló. Las dos cosas las encontró la revisión de S3-FE-09.
 _ETIQUETAS_DE_PROXIMO = re.compile(
-    r"\b(?:pr[oó]xim[oa]s?\s+(?:cobro|pago|cargo|renovaci[oó]n|facturaci[oó]n|factura|vencimiento)|"
+    r"\b(?:pr[oó]xim[oa]s?\s+(?:cobro|pago|cargo|intento|renovaci[oó]n|facturaci[oó]n|factura|vencimiento)|"
     r"se\s+renovar[aá]|renueva|vence|vencimiento|fecha\s+l[ií]mite|next\s+(?:billing|payment|charge|renewal)|"
-    r"se\s+cobrar[aá]|cobraremos|vamos\s+a\s+cobrar|renews?|will\s+renew|will\s+be\s+charged|due\s+(?:date|on)|valid\s+until|expires?)\b",
+    r"se\s+cobrar[aá]|cobraremos|vamos\s+a\s+cobrar|renews?|will\s+renew|will\s+be\s+charged|due\s+(?:date|on)|valid\s+until|expires?|"
+    r"realizaremos\s+el\s+cobro|se\s+realizar[aá]\s+el\s+cobro|(?:prueba\s+gratuita|per[ií]odo\s+de\s+prueba)\s+termina|"
+    r"upcoming\s+(?:payment|charge|renewal)|trial\s+(?:ends|ending)|will\s+be\s+renewed|"
+    r"(?:re)?intentaremos|volveremos\s+a\s+intentar|nuevo\s+intento|retry|try\s+again)\b",
     re.IGNORECASE,
 )
 
