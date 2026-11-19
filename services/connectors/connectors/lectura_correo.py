@@ -11,7 +11,7 @@ porque lo consumen las mismas tarjetas:
   con un `codigo` estable para S3-FE-18 (reintentos) y S3-FE-19 (renovar o
   pedir reconexión);
 - **qué se filtra** (`FiltroCorreos`), validado antes de que cada lector lo
-  traduzca a la sintaxis de su proveedor;
+  traduzca a la sintaxis de su proveedor o lo aplique de este lado;
 - y **cómo se pasa un HTML a texto**.
 
 Ningún lector guarda nada ni cambia la cuenta.
@@ -22,10 +22,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
+from typing import Iterable
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -134,8 +136,9 @@ class FiltroCorreos:
     """Qué correos interesan. Todo opcional; por omisión, los que parecen
     cobros, de cualquier fecha y remitente. `hasta` es exclusivo.
 
-    Cada lector lo traduce a la búsqueda de su proveedor, después de
-    `validar()`.
+    Cada lector lo usa después de `validar()`: Gmail lo traduce entero a su
+    búsqueda; Outlook le pide a Graph solo las fechas y aplica las palabras y
+    los remitentes con `coincide`.
     """
 
     desde: datetime | None = None
@@ -163,6 +166,48 @@ class FiltroCorreos:
         if self.hasta and recibido_en >= self.hasta:
             return False
         return True
+
+    def coincide(self, *, direccion: str, textos: Iterable[str]) -> bool:
+        """¿Un mensaje de `direccion` (la del remitente) con estos `textos`
+        (asunto, cuerpo, quien lo envía) pasa las palabras de cobro y los
+        remitentes del filtro?
+
+        Es para el proveedor que no puede filtrarlos de su lado sin truncar:
+        la búsqueda por palabras de Graph (`$search`) entrega 1000 resultados
+        como mucho, así que Outlook enumera la ventana por fecha y filtra aquí
+        (revisión de #189).
+
+        Es más amplia que la búsqueda de un proveedor, a propósito: la palabra
+        vale como fragmento, sin distinguir mayúsculas ni cómo se escribió el
+        acento. Un correo que sobra lo descarta S3-FE-08; uno que falta no se
+        ve nunca.
+        """
+        if self.remitentes and not any(_es_de(direccion, remitente) for remitente in self.remitentes):
+            return False
+        if not self.solo_cobros:
+            return True
+        contenido = " ".join(_comparable(texto) for texto in textos if isinstance(texto, str))
+        return any(palabra in contenido for palabra in _PALABRAS_COMPARABLES)
+
+
+def _comparable(texto: str) -> str:
+    """Minúsculas y acentos compuestos de una sola forma (NFKC), para que
+    `SUSCRIPCIÓN` escrita con el acento aparte siga siendo `suscripción`."""
+    return unicodedata.normalize("NFKC", texto).casefold()
+
+
+_PALABRAS_COMPARABLES = tuple(_comparable(palabra) for palabra in PALABRAS_DE_COBRO)
+
+
+def _es_de(direccion, remitente: str) -> bool:
+    """¿`direccion` es `remitente` (una dirección) o es de ese dominio o de
+    uno suyo (`info@account.netflix.com` es de `netflix.com`)?"""
+    if not isinstance(direccion, str):
+        return False
+    direccion, remitente = direccion.strip().casefold(), remitente.casefold()
+    if "@" in remitente:
+        return direccion == remitente
+    return direccion.endswith("@" + remitente) or direccion.endswith("." + remitente)
 
 
 @dataclasses.dataclass(frozen=True)

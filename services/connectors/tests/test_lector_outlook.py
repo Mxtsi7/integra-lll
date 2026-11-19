@@ -34,7 +34,6 @@ from connectors.lector_outlook import (
     ErrorDelProveedor,
     ErrorTransitorio,
     FiltroCorreos,
-    busqueda_outlook,
     es_pagina_de_graph,
     filtro_fechas_outlook,
     leer_mensajes,
@@ -434,45 +433,94 @@ class TestRechazoYErrores:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Filtros: $search para palabras y remitentes, $filter para fechas
+# Filtros: las fechas van en $filter; palabras y remitentes, de este lado
 # ══════════════════════════════════════════════════════════════════════
+#
+# Sin `$search`: entrega 1000 resultados como mucho y ordena por fecha de
+# envío, así que no sirve para saber que se leyó una ventana entera
+# (revisión de #189). La prueba con más de 1000 coincidencias está en
+# `test_avance_lectura_s3_fe_03_05.py`.
+
+
+#: Un remitente que no dice nada de cobros, ni en el nombre ni en la dirección.
+NEUTRO = ("Avisos", "avisos@servicio.cl")
 
 
 class TestFiltros:
-    def test_por_omision_busca_palabras_de_cobro(self, claves, graph):
+    def test_por_omision_no_busca_con_search_y_ordena_por_recepcion(self, claves, graph):
         cuenta = outlook()
         leer(cuenta)
         params = graph.peticiones[0]["params"]
-        assert params["$search"].startswith('"(recibo OR factura') and params["$search"].endswith(')"')
-        assert "$orderby" not in params and "$filter" not in params  # $search no los admite
+        assert "$search" not in params
+        assert params["$orderby"] == "receivedDateTime desc"
+        assert "$filter" not in params  # sin fechas no hay qué filtrar
 
-    def test_remitentes(self):
-        assert busqueda_outlook(FiltroCorreos(remitentes=("netflix.com", "a@b.cl"), solo_cobros=False)) == (
-            "(from:netflix.com OR from:a@b.cl)"
-        )
-
-    def test_palabras_y_remitentes(self):
-        busqueda = busqueda_outlook(FiltroCorreos(remitentes=("netflix.com",)))
-        assert busqueda.endswith(") AND (from:netflix.com)")
-
-    @pytest.mark.parametrize("remitente", ['a" OR "x', "a) OR (b", "-netflix.com"])
-    def test_un_remitente_que_rompe_la_busqueda(self, claves, graph, remitente):
-        cuenta = outlook()
-        with pytest.raises(ValueError):
-            leer(cuenta, filtro=FiltroCorreos(remitentes=(remitente,)))
-        assert graph.peticiones == []
-
-    def test_sin_palabras_las_fechas_van_en_filter_y_ordenado(self, claves, graph):
+    def test_las_fechas_van_en_filter_y_ordenado(self, claves, graph):
         cuenta = outlook()
         desde = datetime(2026, 10, 1, 3, 0, tzinfo=tz.utc)
         hasta = datetime(2026, 11, 1, tzinfo=tz(timedelta(hours=-3)))
-        leer(cuenta, filtro=FiltroCorreos(desde=desde, hasta=hasta, solo_cobros=False))
+        leer(cuenta, filtro=FiltroCorreos(desde=desde, hasta=hasta))
         params = graph.peticiones[0]["params"]
         assert params["$filter"] == "receivedDateTime ge 2026-10-01T03:00:00Z and receivedDateTime lt 2026-11-01T03:00:00Z"
         assert params["$orderby"] == "receivedDateTime desc"
         assert "$search" not in params
 
-    def test_con_palabras_las_fechas_se_aplican_de_este_lado(self, claves, graph):
+    def test_lo_que_no_es_un_cobro_se_descarta_de_este_lado_y_no_es_un_omitido(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(
+            mensaje_graph("hola", asunto="Hola", texto="¿Nos vemos el viernes?", remitente=("Ana", "ana@correo.cl")),
+            mensaje_graph("en-el-cuerpo", asunto="Aviso", texto="Tu FACTURA del mes", remitente=NEUTRO),
+            mensaje_graph("acento-aparte", asunto="Aviso", texto="Tu SUSCRIPCIO\u0301N se renovó", remitente=NEUTRO),
+            mensaje_graph("en-el-nombre", asunto="Aviso", texto="", remitente=("Cobros Netflix", "x@netflix.com")),
+            mensaje_graph("en-la-direccion", asunto="Aviso", texto="", remitente=("Netflix", "billing@netflix.com")),
+            mensaje_graph("sin-fecha-y-no-es-cobro", asunto="Hola", texto="", recibido=None,
+                          remitente=("Ana", "ana@correo.cl")),
+            mensaje_graph("sin-fecha-y-es-cobro", recibido=None),
+            siguiente=SIGUIENTE,
+        ))
+        pagina = leer(cuenta)
+        assert [m.id_mensaje for m in pagina.mensajes] == [
+            "en-el-cuerpo", "acento-aparte", "en-el-nombre", "en-la-direccion",
+        ]
+        # Solo el cobro que no se pudo armar se informa; el que no era un
+        # cobro no le importa a nadie.
+        assert [o.id_mensaje for o in pagina.omitidos] == ["sin-fecha-y-es-cobro"]
+        assert pagina.siguiente_pagina == SIGUIENTE
+
+    def test_una_pagina_sin_cobros_sigue_teniendo_pagina_siguiente(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("hola", asunto="Hola", texto="", remitente=("Ana", "a@b.cl")),
+                             siguiente=SIGUIENTE))
+        pagina = leer(cuenta)
+        assert (pagina.mensajes, pagina.siguiente_pagina) == ((), SIGUIENTE)
+
+    def test_sin_solo_cobros_pasa_todo(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("hola", asunto="Hola", texto="", remitente=("Ana", "a@b.cl"))))
+        assert [m.id_mensaje for m in leer(cuenta, filtro=FiltroCorreos(solo_cobros=False)).mensajes] == ["hola"]
+
+    def test_remitentes_por_direccion_o_por_dominio(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(
+            mensaje_graph("dominio", remitente=("Netflix", "info@netflix.com")),
+            mensaje_graph("subdominio", remitente=("Netflix", "Info@Account.Netflix.com")),
+            mensaje_graph("direccion", remitente=("Spotify", "a@b.cl")),
+            mensaje_graph("parecido", remitente=("Falso", "info@notnetflix.com")),
+            mensaje_graph("otro", remitente=("Microsoft", "billing@microsoft.com")),
+        ))
+        filtro = FiltroCorreos(remitentes=("netflix.com", "a@b.cl"))
+        assert [m.id_mensaje for m in leer(cuenta, filtro=filtro).mensajes] == ["dominio", "subdominio", "direccion"]
+
+    @pytest.mark.parametrize("remitente", ['a" OR "x', "a) OR (b", "-netflix.com"])
+    def test_un_remitente_que_no_es_direccion_ni_dominio(self, claves, graph, remitente):
+        cuenta = outlook()
+        with pytest.raises(ValueError):
+            leer(cuenta, filtro=FiltroCorreos(remitentes=(remitente,)))
+        assert graph.peticiones == []
+
+    def test_si_graph_entrega_algo_fuera_de_las_fechas_no_pasa(self, claves, graph):
+        """Graph filtra al segundo; aquí se aplica la hora exacta, y lo que
+        quede fuera no es un omitido."""
         cuenta = outlook()
         graph.responde(lista(
             mensaje_graph("antes", recibido="2026-09-30T23:59:59Z"),
@@ -482,12 +530,11 @@ class TestFiltros:
         filtro = FiltroCorreos(desde=datetime(2026, 10, 1, tzinfo=tz.utc), hasta=datetime(2026, 11, 1, tzinfo=tz.utc))
         pagina = leer(cuenta, filtro=filtro)
         assert [m.id_mensaje for m in pagina.mensajes] == ["dentro"]
-        assert pagina.omitidos == ()  # quedar fuera del rango no es un problema
+        assert pagina.omitidos == ()
 
-    @pytest.mark.parametrize("arma", [busqueda_outlook, filtro_fechas_outlook])
-    def test_cada_traduccion_valida_por_su_cuenta(self, arma):
+    def test_el_filtro_de_fechas_valida_por_su_cuenta(self):
         with pytest.raises(ValueError):
-            arma(FiltroCorreos(remitentes=('a" OR "x',)))
+            filtro_fechas_outlook(FiltroCorreos(remitentes=('a" OR "x',)))
 
     def test_sin_fechas_no_hay_filter(self):
         assert filtro_fechas_outlook(FiltroCorreos()) == ""
@@ -531,7 +578,8 @@ class TestMensaje:
 
     def test_un_elemento_que_no_es_un_mensaje(self, claves, graph):
         cuenta = outlook()
-        graph.responde(lista("no", {"id": None}, {"id": "x" * 600, "receivedDateTime": "2026-10-01T00:00:00Z"},
+        graph.responde(lista("no", {"id": None, "subject": "Tu recibo"},
+                             {"id": "x" * 600, "receivedDateTime": "2026-10-01T00:00:00Z", "subject": "Tu recibo"},
                              mensaje_graph("bueno")))
         pagina = leer(cuenta)
         assert [m.id_mensaje for m in pagina.mensajes] == ["bueno"]

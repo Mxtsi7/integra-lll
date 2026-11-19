@@ -12,8 +12,10 @@ Gmail y Outlook con `requests` reemplazado, para ver que el `pageToken` y la
 `@odata.nextLink` viajan bien.
 """
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone as tz
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 from django.utils import timezone
@@ -352,3 +354,173 @@ class TestConLosLectoresReales:
         resultado = lote(lector_outlook, c, Procesado())
         assert resultado.reiniciada and resultado.corrida_terminada
         assert pedidos == [lector_outlook.URL_MENSAJES, siguiente, lector_outlook.URL_MENSAJES]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #189, P1 — Outlook con más de 1000 coincidencias
+# ══════════════════════════════════════════════════════════════════════
+#
+# `$search` de Graph entrega 1000 resultados como mucho y los ordena por fecha
+# de ENVÍO (https://learn.microsoft.com/en-us/graph/search-query-parameter).
+# Si el lector buscaba con `$search`, que no viniera `@odata.nextLink` no
+# quería decir que la ventana se hubiera leído entera, y la marca avanzaba
+# igual.
+
+
+class BuzonDeGraph:
+    """Un buzón de Outlook detrás de un Graph falso que respeta lo que importa
+    aquí, tal como lo documenta Microsoft:
+
+    - `$filter` por `receivedDateTime` (`ge`/`lt`), `$orderby receivedDateTime
+      desc`, `$top`, y la página siguiente con `$skip`, sin tope;
+    - `$search`: ordena por fecha de envío y entrega 1000 como mucho.
+
+    Puede fallar una petición (un 503) para ver que un corte a mitad de
+    camino tampoco adelanta la marca.
+    """
+
+    TOPE_DE_SEARCH = 1000
+
+    def __init__(self, mensajes, *, falla_en_la_peticion=None):
+        self.mensajes = mensajes
+        self.consultas = []
+        self.falla_en_la_peticion = falla_en_la_peticion
+
+    def get(self, url, params=None, headers=None, timeout=None, allow_redirects=False):
+        if params is None:
+            # Una página siguiente: la consulta entera va en la URL.
+            consulta = {clave: valores[0] for clave, valores in parse_qs(urlsplit(url).query).items()}
+        else:
+            consulta = {clave: str(valor) for clave, valor in params.items()}
+        self.consultas.append(consulta)
+        if len(self.consultas) == self.falla_en_la_peticion:
+            return _Respuesta(503, {"error": {"code": "ServiceUnavailable", "message": "..."}})
+
+        if "$search" in consulta:
+            elegidos = sorted((m for m in self.mensajes if _menciona_un_cobro(m)),
+                              key=lambda m: m["sentDateTime"], reverse=True)[:self.TOPE_DE_SEARCH]
+        else:
+            desde, hasta = _rango_del_filter(consulta.get("$filter", ""))
+            elegidos = sorted((m for m in self.mensajes if desde <= _instante(m["receivedDateTime"]) < hasta),
+                              key=lambda m: m["receivedDateTime"], reverse=True)
+        top, salto = int(consulta.get("$top", 10)), int(consulta.get("$skip", 0))
+        cuerpo = {"value": elegidos[salto:salto + top]}
+        if salto + top < len(elegidos):
+            cuerpo["@odata.nextLink"] = lector_outlook.URL_MENSAJES + "?" + urlencode({**consulta, "$skip": salto + top})
+        return _Respuesta(200, cuerpo)
+
+
+def _instante(texto):
+    return datetime.fromisoformat(texto)
+
+
+def _rango_del_filter(filtro):
+    desde = re.search(r"receivedDateTime ge (\S+)", filtro)
+    hasta = re.search(r"receivedDateTime lt (\S+)", filtro)
+    return (_instante(desde.group(1)) if desde else datetime.min.replace(tzinfo=tz.utc),
+            _instante(hasta.group(1)) if hasta else datetime.max.replace(tzinfo=tz.utc))
+
+
+def _menciona_un_cobro(crudo):
+    contenido = f"{crudo['subject']} {crudo['body']['content']}".lower()
+    return any(palabra in contenido for palabra in ("recibo", "factura", "suscripción", "cobro"))
+
+
+def _fecha_graph(instante):
+    return instante.astimezone(tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def correo_graph(id_mensaje, *, recibido, enviado, asunto="Tu recibo", texto="Cobro mensual: $8.990"):
+    return {
+        "id": id_mensaje, "internetMessageId": f"<{id_mensaje}@ejemplo.com>", "conversationId": f"c-{id_mensaje}",
+        "receivedDateTime": _fecha_graph(recibido), "sentDateTime": _fecha_graph(enviado), "subject": asunto,
+        "from": {"emailAddress": {"name": "Ejemplo", "address": "avisos@ejemplo.com"}},
+        "body": {"contentType": "text", "content": texto},
+    }
+
+
+def buzon_con_mas_de_mil_cobros():
+    """El buzón de la aceptación de la revisión: más de 1000 cobros dentro de
+    la ventana inicial, con fechas de envío desordenadas respecto de las de
+    recepción, y correos fuera de la ventana o que no son cobros.
+
+    Devuelve los mensajes y los identificadores que la corrida TIENE que
+    entregar."""
+    inicio = LUNES - VENTANA_INICIAL
+    mensajes, elegibles = [], set()
+    for i in range(1150):
+        recibido = inicio + timedelta(minutes=37 + i * 112)
+        # El envío se desordena: hasta 9 días antes de la recepción, en un
+        # orden que no es el de llegada. A los primeros los deja enviados
+        # antes de la ventana aunque llegaron dentro: también se leen.
+        enviado = recibido - timedelta(hours=(i * 53) % 217)
+        asunto, texto = ("Tu recibo", "Cobro mensual") if i % 3 else ("Aviso", "Tu SUSCRIPCIÓN se renovó")
+        mensajes.append(correo_graph(f"dentro-{i}", recibido=recibido, enviado=enviado, asunto=asunto, texto=texto))
+        elegibles.add(f"dentro-{i}")
+    for i in range(300):
+        recibido = inicio + timedelta(minutes=11 + i * 431)
+        mensajes.append(correo_graph(f"no-es-cobro-{i}", recibido=recibido, enviado=recibido,
+                                     asunto="Hola", texto="¿Nos vemos el viernes?"))
+    for i in range(40):
+        # Recibidos antes de la ventana: ya no se leen.
+        recibido = inicio - timedelta(hours=1 + i * 7)
+        mensajes.append(correo_graph(f"antes-{i}", recibido=recibido, enviado=recibido - timedelta(minutes=5)))
+    for i in range(40):
+        # Enviados dentro de la ventana pero recibidos después del tope: son
+        # de la corrida siguiente. Por envío, son de los más nuevos.
+        recibido = LUNES + timedelta(minutes=1 + i)
+        mensajes.append(correo_graph(f"despues-{i}", recibido=recibido, enviado=LUNES - timedelta(minutes=30 - i % 20)))
+    # Los bordes: `desde` entra, `hasta` no.
+    mensajes.append(correo_graph("borde-desde", recibido=inicio, enviado=inicio - timedelta(days=2)))
+    elegibles.add("borde-desde")
+    mensajes.append(correo_graph("borde-hasta", recibido=LUNES, enviado=LUNES - timedelta(days=1)))
+    return mensajes, elegibles
+
+
+class TestOutlookConMasDeMilCoincidencias:
+    def _leer_hasta_terminar(self, c, procesado, *, o_hasta_un_error=False):
+        resultados = []
+        for _ in range(200):
+            try:
+                resultado = lote(lector_outlook, c, procesado, limite=100)
+            except ErrorTransitorio:
+                if o_hasta_un_error:
+                    return resultados
+                raise
+            resultados.append(resultado)
+            if resultado.corrida_terminada:
+                return resultados
+            # Mientras la corrida no termina, la marca no se mueve.
+            assert avance(c).leido_hasta is None
+        pytest.fail("la corrida no terminó en 200 páginas")
+
+    def test_todos_los_elegibles_se_entregan_antes_de_avanzar_la_marca(self, claves, monkeypatch):
+        c = cuenta(proveedor="outlook", correo="p@outlook.com")
+        mensajes, elegibles = buzon_con_mas_de_mil_cobros()
+        assert len(elegibles) > BuzonDeGraph.TOPE_DE_SEARCH
+        buzon = BuzonDeGraph(mensajes)
+        monkeypatch.setattr(lector_outlook.requests, "get", buzon.get)
+        procesado = Procesado()
+
+        resultados = self._leer_hasta_terminar(c, procesado)
+
+        assert resultados[-1].corrida_terminada and avance(c).leido_hasta == LUNES
+        assert sorted(procesado.ids) == sorted(elegibles), "faltan o sobran correos al avanzar la marca"
+        assert len(procesado.ids) == len(set(procesado.ids)), "un correo se entregó dos veces en la misma corrida"
+        assert all("$search" not in consulta for consulta in buzon.consultas)
+
+    def test_un_corte_a_mitad_de_camino_no_adelanta_la_marca(self, claves, monkeypatch):
+        c = cuenta(proveedor="outlook", correo="p@outlook.com")
+        mensajes, elegibles = buzon_con_mas_de_mil_cobros()
+        buzon = BuzonDeGraph(mensajes, falla_en_la_peticion=7)
+        monkeypatch.setattr(lector_outlook.requests, "get", buzon.get)
+        procesado = Procesado()
+
+        antes_del_corte = self._leer_hasta_terminar(c, procesado, o_hasta_un_error=True)
+        assert len(antes_del_corte) == 6
+        a = avance(c)
+        assert (a.leido_hasta, a.corrida_hasta) == (None, LUNES) and a.pagina, "el corte movió la marca"
+
+        self._leer_hasta_terminar(c, procesado)
+        assert avance(c).leido_hasta == LUNES
+        assert sorted(procesado.ids) == sorted(elegibles)

@@ -14,10 +14,14 @@ errores— vive en `lectura_correo.py`. Aquí queda lo que es de Microsoft.
   `https://graph.microsoft.com/v1.0/me/messages`. Una URL que apunte a otro
   sitio se rechaza: si no, quien pueda poner una `pagina` podría llevarse el
   token a su servidor.
-- **La búsqueda por palabras (`$search`) no ordena ni entiende de horas.** Por
-  eso, cuando hay palabras o remitentes, las fechas se aplican de este lado
-  con `FiltroCorreos.admite`. Sin palabras ni remitentes, las fechas van en
-  `$filter` y el orden en `$orderby`, que Graph sí resuelve exacto.
+- **No se usa la búsqueda por palabras (`$search`).** Entrega 1000
+  resultados como mucho y los ordena por fecha de envío: que no venga
+  `@odata.nextLink` no quiere decir que se leyó todo, y S3-FE-05 avanza la
+  marca justo con eso (revisión de #189). Por eso se enumera la ventana con
+  `$filter` por fecha de recepción y `$orderby`, que Graph pagina sin tope, y
+  las palabras de cobro y los remitentes se aplican de este lado con
+  `FiltroCorreos.coincide`. Cuesta traer también los correos que no son
+  cobros; es el precio de no perder ninguno.
 - **El cuerpo se pide en texto** (`Prefer: outlook.body-content-type="text"`).
   La documentación dice también que la lista lo entrega solo en HTML, así que
   si llega HTML se pasa a texto igual.
@@ -76,18 +80,6 @@ _ESPERA_MAXIMA = 3600
 
 
 # ── la búsqueda, la página y la cuenta ──────────────────────────────────────
-
-
-def busqueda_outlook(filtro: FiltroCorreos) -> str:
-    """El texto de `$search` (sin las comillas de afuera), o "" si el filtro
-    no pide palabras ni remitentes. Las fechas NO van aquí: ver el módulo."""
-    filtro.validar()
-    partes: list[str] = []
-    if filtro.solo_cobros:
-        partes.append("(" + " OR ".join(PALABRAS_DE_COBRO) + ")")
-    if filtro.remitentes:
-        partes.append("(" + " OR ".join(f"from:{r}" for r in filtro.remitentes) + ")")
-    return " AND ".join(partes)
 
 
 def _fecha_odata(valor: datetime) -> str:
@@ -180,7 +172,11 @@ def leer_mensajes(
 
     `pagina` es el `siguiente_pagina` de la llamada anterior. Si se pasa, ya
     trae la consulta completa: el filtro y el límite se vuelven a validar
-    pero no se reenvían, y el mismo filtro se usa para descartar fechas.
+    pero no se reenvían, y el mismo filtro se aplica a lo que llega
+    (palabras, remitentes y fechas). Hay que pasar el mismo de la primera.
+
+    Una página puede venir sin ningún mensaje y con página siguiente: en ese
+    tramo de la ventana no había cobros.
 
     ── Una página se procesa entera ─────────────────────────────────────
     El tamaño de una página que se sigue lo fija su `$top`, no el `limite`
@@ -192,7 +188,6 @@ def leer_mensajes(
     """
     validar_limite(limite)
     filtro = filtro or FiltroCorreos()
-    busqueda = busqueda_outlook(filtro)
     fechas = filtro_fechas_outlook(filtro)
     if pagina is not None and not es_pagina_de_graph(pagina):
         raise ValueError("`pagina` no es una página de mensajes de Microsoft Graph.")
@@ -204,15 +199,12 @@ def leer_mensajes(
         if pagina:
             cuerpo = _pedir(pagina, token, None)
         else:
-            parametros = {"$top": limite, "$select": _CAMPOS}
-            if busqueda:
-                parametros["$search"] = f'"{busqueda}"'
-            else:
-                if fechas:
-                    parametros["$filter"] = fechas
-                # Graph exige que lo que va en `$orderby` aparezca antes en
-                # `$filter` (si no, `InefficientFilter`): aquí es la misma fecha.
-                parametros["$orderby"] = "receivedDateTime desc"
+            # Sin `$search`: ver el módulo. Graph exige que lo que va en
+            # `$orderby` aparezca antes en `$filter` (si no,
+            # `InefficientFilter`): aquí es la misma fecha.
+            parametros = {"$top": limite, "$select": _CAMPOS, "$orderby": "receivedDateTime desc"}
+            if fechas:
+                parametros["$filter"] = fechas
             cuerpo = _pedir(URL_MENSAJES, token, parametros)
 
         crudos = cuerpo.get("value")
@@ -226,16 +218,20 @@ def leer_mensajes(
 
         mensajes: list[MensajeCorreo] = []
         omitidos: list[MensajeOmitido] = []
-        # Con `$search`, Graph no aplica las fechas: se aplican aquí.
-        revisar_fechas = bool(busqueda) and bool(filtro.desde or filtro.hasta)
         for crudo in crudos:
+            # Lo que no es un cobro (o no es de esos remitentes) se descarta
+            # antes de armarlo: si le falta la fecha, tampoco es un omitido.
+            if isinstance(crudo, dict) and not _coincide(filtro, crudo):
+                continue
             try:
                 mensaje = _mensaje(cuenta.pk, crudo)
             except ValueError as exc:
                 identificador = crudo.get("id") if isinstance(crudo, dict) else None
                 omitidos.append(MensajeOmitido(str(identificador)[:64], str(exc)[:120]))
                 continue
-            if revisar_fechas and not filtro.admite(mensaje.recibido_en):
+            # Graph ya filtró las fechas, pero a la hora redondeada al
+            # segundo; aquí se aplican exactas. Quedar fuera no es un omitido.
+            if not filtro.admite(mensaje.recibido_en):
                 continue
             mensajes.append(mensaje)
 
@@ -326,6 +322,20 @@ def _reintentar_en(respuesta) -> int | None:
 
 
 # ── armar el mensaje ────────────────────────────────────────────────────────
+
+
+def _coincide(filtro: FiltroCorreos, crudo: dict) -> bool:
+    """Las palabras y los remitentes del filtro, sobre el mensaje tal como lo
+    entrega Graph: asunto, cuerpo y quien lo envía (nombre y dirección, como
+    los miraba `$search`)."""
+    remitente = crudo["from"].get("emailAddress") if isinstance(crudo.get("from"), dict) else None
+    remitente = remitente if isinstance(remitente, dict) else {}
+    cuerpo = crudo.get("body") if isinstance(crudo.get("body"), dict) else {}
+    direccion = str(remitente.get("address") or "")
+    return filtro.coincide(
+        direccion=direccion,
+        textos=(crudo.get("subject"), cuerpo.get("content"), remitente.get("name"), direccion),
+    )
 
 
 def _mensaje(cuenta_id, crudo) -> MensajeCorreo:

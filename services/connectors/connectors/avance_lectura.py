@@ -25,6 +25,12 @@ llegue después lo toma la corrida siguiente.
 La primera corrida de una cuenta mira `VENTANA_INICIAL` hacia atrás, no el
 buzón entero.
 
+Que no haya página siguiente tiene que querer decir que se agotó la ventana:
+es lo único que adelanta la marca. Por eso ningún lector puede terminar antes
+sin avisar. Outlook enumera la ventana por fecha en vez de buscar con
+`$search`, que Graph corta en 1000 resultados, y ninguno de los dos recorta
+una página (revisión de #189, P1).
+
 ── Procesar y guardar, juntos ──────────────────────────────────────────────
 `procesar(pagina_de_mensajes)` corre dentro de la misma transacción que
 mueve el cursor. Si falla, la transacción se revierte, el cursor no se mueve

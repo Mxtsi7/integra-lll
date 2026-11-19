@@ -338,12 +338,20 @@ class TestPaginacionYLimites:
         assert google.peticiones[0]["params"]["maxResults"] == 10
         assert pagina.siguiente_pagina is None  # Gmail no mandó otra: era la última
 
-    def test_no_trae_mas_mensajes_que_el_limite(self, claves, google):
+    def test_si_gmail_devuelve_mas_de_lo_pedido_no_se_recorta(self, claves, google):
+        """Antes se quedaba con 3 y el `nextPageToken` ya apuntaba después de
+        los 5: los otros 2 se perdían sin aviso y S3-FE-03 avanzaba la marca
+        igual (revisión de #189). Es un error explícito, como en Outlook."""
         cuenta = gmail()
         google.con_mensajes(*(mensaje_gmail(f"m{i}") for i in range(5)))
-        pagina = leer(cuenta, limite=3)
-        assert len(pagina.mensajes) == 3
-        assert len(google.peticiones) == 1 + 3
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 3"):
+            leer(cuenta, limite=3)
+        assert len(google.peticiones) == 1  # ni un mensaje pedido
+
+    def test_con_lo_pedido_justo_no_hay_error(self, claves, google):
+        cuenta = gmail()
+        google.con_mensajes(*(mensaje_gmail(f"m{i}") for i in range(3)))
+        assert len(leer(cuenta, limite=3).mensajes) == 3
 
     @pytest.mark.parametrize("limite", [0, -1, LIMITE_MAXIMO + 1, True, "5", 2.5])
     def test_limite_fuera_de_rango_no_llega_a_google(self, claves, google, limite):

@@ -20,7 +20,7 @@ Microsoft.
 |---|---|---|
 | Peticiones por página | 1 + una por mensaje | **1**: el cuerpo viene en la lista |
 | Página siguiente | un token corto (`pageToken`) | **una URL completa** (`@odata.nextLink`) |
-| Búsqueda | `q`, con fechas exactas | `$search` para palabras y remitentes; las fechas, aparte |
+| Búsqueda | `q`, con fechas exactas | las fechas en `$filter`; palabras y remitentes, de este lado (sin `$search`) |
 | Cuerpo | partes MIME | `body`, pedido en texto (`Prefer: outlook.body-content-type="text"`) |
 
 ## La página siguiente es una URL, y lleva el token
@@ -60,20 +60,34 @@ Ahora:
 
 ## Filtros
 
-Graph no acepta `$search` junto con `$orderby`, y la búsqueda por palabras
-ordena por fecha de envío y no entiende de horas. Por eso hay dos caminos:
+**No se usa `$search`.** Graph la limita a 1000 resultados y los ordena por
+fecha de envío ([documentación](https://learn.microsoft.com/en-us/graph/search-query-parameter)):
+que no venga `@odata.nextLink` no quiere decir que se leyó todo. S3-FE-05
+avanza su marca justo con eso, y con más de 1000 cobros en la ventana se
+perdían los que quedaban fuera, para siempre. Lo encontró la revisión de
+#189. Ahora hay un solo camino:
 
-- **Con palabras de cobro o remitentes** (lo normal): van en `$search`, como
-  `"(recibo OR factura OR …) AND (from:netflix.com)"`. Las fechas se aplican
-  **de este lado** con `FiltroCorreos.admite`, a la hora exacta.
-- **Sin palabras ni remitentes**: las fechas van en `$filter`
-  (`receivedDateTime ge … and receivedDateTime lt …`, en UTC) y el orden en
-  `$orderby`, que Graph resuelve exacto. Lo que va en `$orderby` aparece antes
+- **Las fechas van en `$filter`** (`receivedDateTime ge … and
+  receivedDateTime lt …`, en UTC) y el orden en `$orderby receivedDateTime
+  desc`. Graph pagina eso **sin tope**. Lo que va en `$orderby` aparece antes
   en `$filter`, como exige Graph; si no, responde `InefficientFilter`.
+- **Las palabras de cobro y los remitentes se aplican de este lado**, con
+  `FiltroCorreos.coincide`, sobre el asunto, el cuerpo y quien envía (nombre
+  y dirección). Es más amplio que `$search`: la palabra vale como fragmento,
+  sin mayúsculas y con el acento escrito de cualquier forma. Un remitente
+  vale por dirección exacta o por dominio, también un subdominio
+  (`info@account.netflix.com` es de `netflix.com`).
+- Las fechas se vuelven a mirar aquí, a la hora exacta: Graph filtra al
+  segundo.
 
-Un mensaje que queda fuera del rango de fechas **no** va a `omitidos`: no es
-un problema, es el filtro. Si se pasa `pagina`, hay que pasar el mismo filtro,
-porque es el que se usa para descartar fechas.
+El costo: se traen también los correos de la ventana que no son cobros. Una
+página puede venir **sin mensajes y con página siguiente**: en ese tramo no
+había cobros.
+
+Un mensaje que no es cobro, o que queda fuera del rango, **no** va a
+`omitidos`: no es un problema, es el filtro. Uno que menciona un cobro y no
+se puede armar (sin fecha, sin identificador) sí. Si se pasa `pagina`, hay
+que pasar el mismo filtro, porque es el que se aplica a lo que llega.
 
 ## Lo que responde Graph
 

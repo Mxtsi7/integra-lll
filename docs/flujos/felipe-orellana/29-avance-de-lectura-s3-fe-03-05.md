@@ -39,6 +39,44 @@ El solape existe porque Gmail filtra por segundos. Releer unos pocos correos
 del borde es mejor que perder uno; la llave única de candidatos no los
 duplica.
 
+## Sin página siguiente tiene que querer decir «se leyó todo»
+
+La marca avanza cuando el lector dice que no hay más páginas. Eso vale solo
+si ningún lector puede terminar antes **sin avisar**. La revisión de #189
+(P1) encontró que Outlook sí podía: buscaba las palabras de cobro con
+`$search`, que Graph corta en 1000 resultados ordenados por fecha de
+**envío**. Con 1001 cobros en los 90 días de la primera corrida, la lista
+terminaba sin `@odata.nextLink`, la marca avanzaba al tope y lo que faltaba
+quedaba atrás, fuera del solape de 10 minutos: perdido para siempre.
+
+Ahora:
+
+- **Outlook enumera la ventana por fecha**: `$filter` por
+  `receivedDateTime` y `$orderby`, que Graph pagina sin tope, y las palabras
+  y los remitentes se aplican de este lado (`FiltroCorreos.coincide`). El
+  detalle está en el documento 24.
+- **Gmail no recorta**: si devuelve más mensajes de los pedidos es un error,
+  no un recorte callado (el `nextPageToken` ya apuntaba después de los que
+  sobraban). Su búsqueda `q` filtra del lado de Google y pagina sin tope
+  documentado.
+- **Un corte a mitad de camino** (un error, un 503) deja la marca donde
+  estaba y la página guardada: se retoma desde ahí.
+
+La prueba de aceptación es la que pidió la revisión: más de 1000 cobros en
+la ventana, fechas de envío desordenadas respecto de las de recepción,
+correos fuera de la ventana y que no son cobros, contra un Graph falso que
+respeta el tope de `$search`. Todos los elegibles se entregan antes de que la
+marca avance, y ninguno dos veces. Con el lector anterior faltaban 192.
+
+**Lo que esto no cubre** (riesgo inferido de cómo pagina Graph, no
+reproducido): la `@odata.nextLink` de la lista de mensajes avanza con
+`$skip`. Si durante una corrida se borra **definitivamente** un correo de la
+ventana que ya se leyó (vaciar «Elementos eliminados»), los que siguen se
+corren un lugar y el del borde de la página puede quedar sin leer. Moverlo de
+carpeta no lo corre: la lista es de todo el buzón. Cerrarlo pide paginar por
+fecha en vez de por posición, o la consulta delta de Graph; queda anotado
+como pendiente.
+
 ## Procesar y mover el cursor, juntos
 
 `procesar(pagina)` corre **dentro** de la transacción que mueve el cursor. Si
