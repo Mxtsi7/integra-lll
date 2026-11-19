@@ -1080,3 +1080,77 @@ class OutboxEvento(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.evento}.v{self.version} ({'publicado' if self.publicado_en else 'pendiente'})"
+
+
+class AvanceDeLectura(ModeloTenant):
+    """Hasta dónde se leyó una cuenta de correo (S3-FE-03 Gmail, S3-FE-05 Outlook).
+
+    Una lectura se hace en **corridas**. Cada corrida cubre los mensajes
+    recibidos entre `leido_hasta` (lo ya procesado) y `corrida_hasta` (el
+    momento en que empezó), y se recorre página por página. Los proveedores
+    listan del más nuevo al más viejo, así que la marca `leido_hasta` solo
+    puede avanzar cuando la corrida TERMINA; mientras tanto lo que avanza es
+    `pagina`, el cursor del proveedor dentro de la corrida.
+
+    Por eso un fallo a mitad de camino no pierde nada (se retoma desde la
+    última página guardada) y no relee para siempre (la corrida tiene tope).
+    El detalle está en `avance_lectura.py`.
+    """
+
+    cuenta = models.OneToOneField(
+        CuentaConectada,
+        on_delete=models.CASCADE,
+        related_name="avance_de_lectura",
+        verbose_name="Cuenta",
+    )
+
+    leido_hasta = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Leído hasta",
+        help_text=(
+            "Todo lo recibido antes de este momento ya se procesó. Vacío si la "
+            "cuenta nunca completó una corrida."
+        ),
+    )
+
+    corrida_hasta = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Tope de la corrida en curso",
+        help_text="Vacío si no hay una corrida a medias.",
+    )
+
+    # Un `pageToken` de Gmail o el cursor por fecha del lector de Outlook. No
+    # es un secreto: no lleva el token de acceso.
+    pagina = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Página siguiente de la corrida",
+    )
+
+    corridas_completadas = models.PositiveIntegerField(default=0)
+
+    reinicios_por_pagina_invalida = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Cuántas veces el proveedor rechazó la página guardada y la corrida "
+            "volvió a su primera página. Se informa, no se esconde."
+        ),
+    )
+
+    reiniciada_en_corrida = models.BooleanField(
+        default=False,
+        help_text=(
+            "La corrida en curso ya volvió una vez a su primera página. Un "
+            "segundo rechazo en la misma corrida es un error, no otro reinicio."
+        ),
+    )
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "avance_de_lectura"
+        verbose_name = "Avance de lectura"
+        verbose_name_plural = "Avances de lectura"
+
+    def __str__(self) -> str:
+        return f"{self.cuenta_id}: leído hasta {self.leido_hasta or '—'}"

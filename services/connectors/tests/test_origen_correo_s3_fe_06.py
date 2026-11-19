@@ -227,7 +227,7 @@ class TestLosLectoresTraenElMessageId:
             pedido.update(params or {})
             return _Respuesta({"value": [{
                 "id": "AAMk=", "internetMessageId": "<BN6PR@namprd.outlook.com>",
-                "receivedDateTime": "2026-10-01T11:00:00Z", "subject": "x", "from": {}, "body": {}}]})
+                "receivedDateTime": "2026-10-01T11:00:00Z", "subject": "Tu recibo", "from": {}, "body": {}}]})
 
         monkeypatch.setattr(lector_outlook.requests, "get", get)
         (leido,) = lector_outlook.leer_mensajes(organizacion_id=cuenta.organizacion_id, cuenta_id=cuenta.pk).mensajes
