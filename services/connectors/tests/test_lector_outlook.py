@@ -618,6 +618,29 @@ class TestFiltros:
             "20261001T110001Z", "hola", "en-el-cuerpo", "acento-aparte", "en-el-nombre", "en-la-direccion",
         )
 
+    @pytest.mark.parametrize("cuerpo", [
+        "<p>Tu suscripci&oacute;n se renov&oacute; el 16/11. Total: $5.990</p>",
+        "<p>Renovaci&#243;n de tu plan. Total: $5.990</p>",
+        "<p>Renovaci&#xF3;n de tu plan. Total: $5.990</p>",
+    ], ids=["entidad-con-nombre", "entidad-numerica", "entidad-hexadecimal"])
+    def test_un_cuerpo_html_con_el_acento_escrito_como_entidad_es_un_cobro(self, claves, graph, cuerpo):
+        """Revisión de #189, ronda 3 (P3): el filtro miraba el HTML crudo, y
+        `suscripci&oacute;n` no contiene `suscripción`. El mensaje se perdía
+        sin quedar ni entre los omitidos."""
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("html", asunto="Novedades de tu cuenta Premium", texto=cuerpo,
+                                           tipo="html", remitente=NEUTRO)))
+        pagina = leer(cuenta)
+        assert [m.id_mensaje for m in pagina.mensajes] == ["html"]
+
+    def test_en_un_cuerpo_html_tambien_cuenta_lo_que_no_se_ve(self, claves, graph):
+        """Se busca en el crudo y en el texto: una palabra que solo está en el
+        HTML (un enlace, un `alt`) también deja pasar el mensaje."""
+        cuenta = outlook()
+        cuerpo = '<p>Hola</p><a href="https://cuenta.servicio.cl/billing">Ver detalle</a>'
+        graph.responde(lista(mensaje_graph("enlace", asunto="Novedades", texto=cuerpo, tipo="html", remitente=NEUTRO)))
+        assert [m.id_mensaje for m in leer(cuenta).mensajes] == ["enlace"]
+
     def test_una_pagina_sin_cobros_sigue_teniendo_pagina_siguiente(self, claves, graph):
         cuenta = outlook()
         graph.responde(lista(mensaje_graph("hola", asunto="Hola", texto="", remitente=("Ana", "a@b.cl")),

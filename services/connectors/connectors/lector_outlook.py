@@ -381,17 +381,27 @@ def _reintentar_en(respuesta) -> int | None:
 
 
 def _coincide(filtro: FiltroCorreos, crudo: dict) -> bool:
-    """Las palabras y los remitentes del filtro, sobre el mensaje tal como lo
-    entrega Graph: asunto, cuerpo y quien lo envía (nombre y dirección, como
-    los miraba `$search`)."""
+    """Las palabras y los remitentes del filtro, sobre lo mismo que mira
+    `$search` sin propiedad según Graph: asunto, cuerpo y quien lo envía
+    (nombre y dirección). Ni destinatarios ni adjuntos.
+
+    Un cuerpo HTML se mira dos veces: crudo, por lo que no se ve (un enlace,
+    un `alt`), y pasado a texto, porque un acento puede venir como entidad
+    (`suscripci&oacute;n`) y en el crudo la palabra no está (revisión de
+    #189, ronda 3)."""
     remitente = crudo["from"].get("emailAddress") if isinstance(crudo.get("from"), dict) else None
     remitente = remitente if isinstance(remitente, dict) else {}
     cuerpo = crudo.get("body") if isinstance(crudo.get("body"), dict) else {}
+    contenido = cuerpo.get("content") if isinstance(cuerpo.get("content"), str) else ""
     direccion = str(remitente.get("address") or "")
-    return filtro.coincide(
-        direccion=direccion,
-        textos=(crudo.get("subject"), cuerpo.get("content"), remitente.get("name"), direccion),
-    )
+    textos = [crudo.get("subject"), contenido, remitente.get("name"), direccion]
+    if _es_html(cuerpo):
+        textos.append(html_a_texto(contenido))
+    return filtro.coincide(direccion=direccion, textos=textos)
+
+
+def _es_html(cuerpo: dict) -> bool:
+    return str(cuerpo.get("contentType") or "").lower() == "html"
 
 
 def _mensaje(cuenta_id, crudo) -> MensajeCorreo:
@@ -406,7 +416,7 @@ def _mensaje(cuenta_id, crudo) -> MensajeCorreo:
 
     cuerpo = crudo.get("body") if isinstance(crudo.get("body"), dict) else {}
     contenido = cuerpo.get("content") if isinstance(cuerpo.get("content"), str) else ""
-    if str(cuerpo.get("contentType") or "").lower() == "html":
+    if _es_html(cuerpo):
         contenido = html_a_texto(contenido)
     texto, truncado = recortar(contenido.strip())
 

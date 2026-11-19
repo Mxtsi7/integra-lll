@@ -102,10 +102,21 @@ perdían los que quedaban fuera, para siempre. Lo encontró la revisión de
   desc`. Graph pagina eso **sin tope**. Lo que va en `$orderby` aparece antes
   en `$filter`, como exige Graph; si no, responde `InefficientFilter`.
 - **Las palabras de cobro y los remitentes se aplican de este lado**, con
-  `FiltroCorreos.coincide`, sobre el asunto, el cuerpo y quien envía (nombre
-  y dirección). Es más amplio que `$search`: la palabra vale como fragmento,
-  sin mayúsculas y con el acento escrito de cualquier forma. Un remitente
-  vale por dirección exacta o por dominio, también un subdominio
+  `FiltroCorreos.coincide`, sobre lo mismo que mira `$search` cuando no se le
+  dice qué propiedad buscar: según la
+  [documentación](https://learn.microsoft.com/en-us/graph/search-query-parameter),
+  remitente, asunto y cuerpo. Ni destinatarios ni nombres de adjuntos: la
+  búsqueda de antes eran palabras sueltas, sin `to:` ni `attachment:`, así que
+  tampoco los miraba. Si una cuenta real mostrara otra cosa, ahí el filtro
+  sería más estrecho.
+- En eso que mira, el filtro es más permisivo que `$search`: la palabra vale
+  como fragmento, sin mayúsculas, y un acento compuesto vale lo mismo que uno
+  escrito aparte (NFKC). Un **cuerpo HTML se mira dos veces**: crudo, por lo
+  que no se ve (un enlace, un `alt`), y pasado a texto, porque un acento puede
+  venir como entidad (`suscripci&oacute;n`, `Renovaci&#243;n`) y en el crudo
+  la palabra no está. Antes se miraba solo el crudo y ese cobro se perdía sin
+  quedar entre los omitidos (revisión de #189, ronda 3).
+- Un remitente vale por dirección exacta o por dominio, también un subdominio
   (`info@account.netflix.com` es de `netflix.com`).
 - Las fechas se vuelven a mirar aquí, a la hora exacta: Graph filtra al
   segundo.

@@ -199,10 +199,16 @@ class FiltroCorreos:
         como mucho, así que Outlook enumera la ventana por fecha y filtra aquí
         (revisión de #189).
 
-        Es más amplia que la búsqueda de un proveedor, a propósito: la palabra
-        vale como fragmento, sin distinguir mayúsculas ni cómo se escribió el
-        acento. Un correo que sobra lo descarta S3-FE-08; uno que falta no se
-        ve nunca.
+        Sobre lo que recibe es más permisiva que la búsqueda de un proveedor,
+        a propósito: la palabra vale como fragmento, sin distinguir mayúsculas,
+        y un acento compuesto vale lo mismo que uno escrito aparte (NFKC). Un
+        correo que sobra lo descarta S3-FE-08; uno que falta no se ve nunca.
+
+        Lo que NO hace es decidir qué textos mirar: solo ve los que le pasan.
+        Un acento escrito como entidad HTML (`&oacute;`) no lo reconoce; quien
+        tenga HTML tiene que pasar también el texto. Y si no le pasan los
+        destinatarios o los adjuntos, no los mira: ahí es más estrecha que una
+        búsqueda que sí los mire (ver `lector_outlook._coincide`).
         """
         if self.remitentes and not any(_es_de(direccion, remitente) for remitente in self.remitentes):
             return False
