@@ -19,7 +19,11 @@ guarda nada.
 | `ausente` | no venía y no hay respaldo |
 
 Cada campo trae además el `fragmento` de texto del que salió, para la
-evidencia del candidato (S3-FE-09).
+evidencia del candidato (S3-FE-09). Es una ventana alrededor del dato, no la
+línea: hasta 30 caracteres antes y 20 después, sin cruzar el fin de su frase
+o inciso y sin cortar palabras. Un HTML de un solo párrafo queda en una sola
+línea, con el nombre, el RUT o la tarjeta de la persona al lado del monto; la
+revisión de S3-FE-09 encontró que guardar la línea guardaba eso.
 
 ## Lo que queda para revisión
 

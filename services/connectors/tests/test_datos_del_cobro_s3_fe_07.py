@@ -290,3 +290,37 @@ class TestParentesisConCodigoDespues:
 
     def test_el_fragmento_es_el_de_la_linea(self):
         assert datos("Total: ($9.990 CLP)").importe.fragmento == "Total: ($9.990 CLP)"
+
+
+class TestElFragmentoEsUnaVentana:
+    """El fragmento es para la evidencia de S3-FE-09: el dato y un poco de lo
+    que lo rodea, nunca la línea. Un HTML de un párrafo es una sola línea, y
+    antes el fragmento eran sus primeros 200 caracteres (revisión de S3-FE-09)."""
+
+    PARRAFO = ("Hola Juan Pérez, gracias por tu pago de CLP 9.990 del 1 de octubre de 2026 "
+               "con la tarjeta terminada en 4242.")
+
+    def test_una_linea_corta_queda_entera(self):
+        d = datos("Fecha de cobro: 1 de octubre de 2026\nTotal: CLP 9.990")
+        assert (d.importe.fragmento, d.fecha.fragmento) == ("Total: CLP 9.990", "Fecha de cobro: 1 de octubre de 2026")
+
+    def test_en_un_parrafo_no_cruza_el_inciso_ni_corta_palabras(self):
+        d = datos(self.PARRAFO)
+        assert d.importe.fragmento == "gracias por tu pago de CLP 9.990 del 1 de octubre de"
+        assert d.fecha.fragmento == "por tu pago de CLP 9.990 del 1 de octubre de 2026 con la tarjeta"
+
+    def test_el_dato_siempre_esta_aunque_venga_al_final_de_una_linea_larga(self):
+        relleno = "Detalle de tu plan y de tus beneficios del mes. " * 10
+        d = datos(relleno + "Total: CLP 9.990")
+        assert d.importe.fragmento == "Total: CLP 9.990"
+
+    def test_el_punto_de_los_miles_no_corta(self):
+        d = datos("Te cobraremos USD 1.234,50 el 5 de noviembre de 2026.")
+        assert d.fecha_proximo_cobro.fragmento == "Te cobraremos USD 1.234,50 el 5 de noviembre de 2026."
+
+    def test_tiene_tope(self):
+        d = datos(("x" * 500) + " Total: CLP 9.990 " + ("y" * 500))
+        assert d.importe.fragmento == "Total: CLP 9.990"
+        d = datos(("palabra " * 60) + "CLP 9.990 " + ("otra " * 60))
+        assert "CLP 9.990" in d.importe.fragmento
+        assert len(d.importe.fragmento) <= 30 + len("CLP 9.990") + 20

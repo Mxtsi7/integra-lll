@@ -26,7 +26,7 @@ from rest_framework.test import APIClient
 
 from connectors import candidatos_correo
 from connectors.candidatos_correo import ImportacionNoDisponible, guardar_pagina, leer
-from connectors.lectura_correo import MensajeCorreo, MensajeOmitido, PaginaDeMensajes
+from connectors.lectura_correo import MensajeCorreo, MensajeOmitido, PaginaDeMensajes, html_a_texto
 from connectors.models import CobroCandidato, CuentaConectada, Importacion, OutboxEvento
 from connectors.origen_correo import identificador_de, identificador_del_proveedor
 from connectors.serializers import CobroCandidatoSerializer
@@ -361,6 +361,26 @@ class TestNadaInnecesarioNiConfirmado:
         assert "K7Q-PRIVADO" not in guardado
         assert "Plan Estándar" not in guardado
         assert CobroCandidato.objects.count() == 1 and importacion.errores_totales == 1
+
+    @pytest.mark.parametrize("texto", [
+        # Lo que deja `html_a_texto` de un HTML de un solo párrafo: una línea.
+        html_a_texto("<p>Hola Juan Pérez, gracias por tu pago de CLP 9.990 del 1 de octubre de 2026 "
+                     "con la tarjeta terminada en 4242.</p>"),
+        "Gracias por tu pago. Hola Juan Pérez, RUT 12.345.678-9, tarjeta terminada en 4242, "
+        "dirección Los Aromos 123. Detalle del plan… Total: CLP 9.990",
+    ], ids=["html-de-un-parrafo", "texto-de-un-parrafo"])
+    def test_un_cuerpo_de_una_sola_linea_no_se_guarda_entero(self, importacion, cuenta, texto):
+        """Antes el fragmento eran los primeros 200 caracteres de la línea:
+        con el HTML, el cuerpo entero; con el texto, el RUT, la tarjeta y la
+        dirección, pero no el monto (revisión de S3-FE-09)."""
+        guardar_pagina(importacion, pagina(mensaje(cuenta, texto=texto)))
+
+        candidato = el_unico_candidato()
+        assert candidato.importe == Decimal("9990")
+        assert "CLP 9.990" in candidato.evidencia["importe_fragmento"]
+        guardado = todo_lo_guardado()
+        for privado in ("Juan", "Pérez", "4242", "12.345.678", "Aromos"):
+            assert privado not in guardado, privado
 
     def test_la_evidencia_es_de_una_linea_y_acotada(self, importacion, cuenta):
         asunto = "Tu recibo\n\tde\x00 Netflix " + "x" * 5000

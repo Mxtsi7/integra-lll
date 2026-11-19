@@ -135,12 +135,49 @@ _ETIQUETAS_DE_FECHA = re.compile(
 )
 
 
+#: Lo que se guarda alrededor de un dato en su `fragmento`: lo justo para
+#: ver de dónde salió («Total: CLP 9.990»), no la línea entera. Un correo
+#: HTML de un solo párrafo es UNA línea, y ahí al lado del monto pueden venir
+#: el nombre, el RUT o la tarjeta de la persona. Antes se guardaban los
+#: primeros 200 caracteres de la línea: a veces el cuerpo entero, y a veces
+#: sin el monto. Lo encontró la revisión de S3-FE-09.
+CONTEXTO_ANTES = 30
+CONTEXTO_DESPUES = 20
+#: Dónde termina una frase o un inciso: la ventana no lo cruza. El punto y
+#: la coma, solo cuando les sigue un espacio, para no cortar dentro de
+#: «9.990» ni de «1.234,50».
+_FIN_DE_INCISO = re.compile(r"[.,;](?=\s)|[!?|•·…]|\s[-–—]\s")
+
+
+def _ventana(linea: str, inicio: int, fin: int) -> str:
+    """El dato `linea[inicio:fin]` con un poco de lo que lo rodea: hasta
+    `CONTEXTO_ANTES` caracteres antes y `CONTEXTO_DESPUES` después, sin
+    pasar de su frase o inciso y sin dejar una palabra cortada."""
+    desde = max(0, inicio - CONTEXTO_ANTES)
+    antes = linea[desde:inicio]
+    if desde > 0 and not linea[desde - 1].isspace():
+        antes = re.sub(r"^\S*", "", antes)
+    cortes = list(_FIN_DE_INCISO.finditer(antes))
+    if cortes:
+        antes = antes[cortes[-1].end():]
+
+    hasta = fin + CONTEXTO_DESPUES
+    despues = linea[fin:hasta]
+    if hasta < len(linea) and not linea[hasta].isspace():
+        despues = re.sub(r"\S*$", "", despues)
+    corte = _FIN_DE_INCISO.search(despues)
+    if corte:
+        despues = despues[:corte.start()]
+    return (antes + linea[inicio:fin] + despues).strip()
+
+
 @dataclasses.dataclass(frozen=True)
 class Campo:
     valor: object
     estado: str
     motivo: str = ""
-    #: El pedazo de texto del que salió, para la evidencia (S3-FE-09).
+    #: El dato y lo que lo rodea en su línea (`_ventana`), para la evidencia
+    #: (S3-FE-09). Nunca la línea entera.
     fragmento: str = ""
 
     @property
@@ -270,8 +307,8 @@ def _montos(texto: str) -> list[_Monto]:
             valor, decimales = leido
             if valor <= 0 or valor > IMPORTE_MAXIMO:
                 continue
-            encontrados.append(_Monto(valor, decimales, token, _etiqueta(linea, m.start()), linea.strip()[:200],
-                                      negativo=_es_negativo(linea, m, fin)))
+            encontrados.append(_Monto(valor, decimales, token, _etiqueta(linea, m.start()),
+                                      _ventana(linea, m.start(), fin), negativo=_es_negativo(linea, m, fin)))
     return encontrados
 
 
@@ -334,30 +371,31 @@ def _fecha_valida(anio: int, mes: int, dia: int) -> date | None:
         return None
 
 
-def _fechas_de(linea: str) -> list[tuple[set[date], str]]:
-    """Cada fecha de la línea como el CONJUNTO de lecturas posibles."""
-    lecturas: list[tuple[set[date], str]] = []
+def _fechas_de(linea: str) -> list[tuple[set[date], re.Match]]:
+    """Cada fecha de la línea como el CONJUNTO de lecturas posibles, con
+    dónde calzó (para el texto crudo y la ventana de la evidencia)."""
+    lecturas: list[tuple[set[date], re.Match]] = []
     for m in _FECHA_ISO.finditer(linea):
         f = _fecha_valida(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         if f:
-            lecturas.append(({f}, m.group(0)))
+            lecturas.append(({f}, m))
     for m in _FECHA_ES.finditer(linea):
         f = _fecha_valida(int(m.group(3)), _MESES[m.group(2).lower()], int(m.group(1)))
         if f:
-            lecturas.append(({f}, m.group(0)))
+            lecturas.append(({f}, m))
     for m in _FECHA_EN_MDY.finditer(linea):
         f = _fecha_valida(int(m.group(3)), _MESES[m.group(1).lower()], int(m.group(2)))
         if f:
-            lecturas.append(({f}, m.group(0)))
+            lecturas.append(({f}, m))
     for m in _FECHA_EN_DMY.finditer(linea):
         f = _fecha_valida(int(m.group(3)), _MESES[m.group(2).lower()], int(m.group(1)))
         if f:
-            lecturas.append(({f}, m.group(0)))
+            lecturas.append(({f}, m))
     for m in _FECHA_NUMERICA.finditer(linea):
         a, b, anio = int(m.group(1)), int(m.group(3)), int(m.group(4))
         posibles = {f for f in (_fecha_valida(anio, b, a), _fecha_valida(anio, a, b)) if f}
         if posibles:
-            lecturas.append((posibles, m.group(0)))
+            lecturas.append((posibles, m))
     return lecturas
 
 
@@ -390,8 +428,8 @@ def _fechas(texto: str, recibido: date) -> tuple[Campo, Campo]:
     """
     etiquetadas, sueltas, proximas = [], [], []
     for linea in texto.splitlines():
-        for posibles, crudo in _fechas_de(linea):
-            fila = (posibles, crudo, linea.strip()[:200])
+        for posibles, m in _fechas_de(linea):
+            fila = (posibles, m.group(0), _ventana(linea, m.start(), m.end()))
             if _ETIQUETAS_DE_PROXIMO.search(linea):
                 proximas.append(fila)
             elif _ETIQUETAS_DE_FECHA.search(linea):

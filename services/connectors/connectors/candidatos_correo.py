@@ -54,9 +54,12 @@ queda como `tipo_incierto`: puede ser un cobro escrito de otra forma.
 ── La evidencia ────────────────────────────────────────────────────────────
 Lo mínimo para encontrar el correo y entender cada dato sin volver a leerlo:
 de qué buzón y cuenta salió, su Message-ID y el `id` del proveedor, cuándo
-llegó, remitente y asunto, y la línea de la que salió cada dato. Nunca el
-cuerpo entero, ni adjuntos, ni nada de la autorización. Todo pasa por
-`_acotado`: sin caracteres de control y con un largo máximo.
+llegó, remitente y asunto, y el pedazo de texto alrededor de cada dato
+(«Total: CLP 9.990»): la ventana de S3-FE-07, que no cruza su frase y no pasa
+de 30 caracteres antes y 20 después. Nunca la línea entera —un HTML de un
+párrafo es una sola línea—, ni el cuerpo, ni adjuntos, ni nada de la
+autorización. Todo pasa por `_acotado`: sin caracteres de control y con un
+largo máximo.
 
 ── No confirma nada ─────────────────────────────────────────────────────────
 No crea suscripciones ni cobros, no escribe en el outbox y no mueve la
@@ -103,7 +106,8 @@ FECHA_DE_RECEPCION = "recepcion"
 
 # ── Topes de la evidencia ────────────────────────────────────────────────
 #: Lo que se muestra de un asunto y de cada fragmento. Los fragmentos ya
-#: salen de S3-FE-07 cortados en 200; se acotan igual por si cambia.
+#: salen de S3-FE-07 como una ventana corta (`datos_del_cobro._ventana`);
+#: se acotan igual por si cambia.
 LARGO_TEXTO = 200
 #: Una dirección de correo no pasa de 254 (RFC 5321).
 LARGO_DIRECCION = 254
