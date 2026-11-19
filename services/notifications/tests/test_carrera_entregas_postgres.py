@@ -23,6 +23,8 @@ que B esté ESPERANDO (`granted = false`) o que haya terminado sin mandar.
    cuenta: B queda diferida. Dos en el día, no tres.
 4. Limpieza de la organización o de la persona mientras A tiene a la persona
    bloqueada: espera y termina, sin interbloqueo.
+5. A retoma una entrega cuyo reclamo venció y llega tarde el resultado del
+   reclamo viejo: espera a A y no se anota (`tardia`).
 
 `transaction=True` porque pytest-django envuelve cada prueba en una
 transacción que no se confirma y otra conexión no vería nada. Solo contra
