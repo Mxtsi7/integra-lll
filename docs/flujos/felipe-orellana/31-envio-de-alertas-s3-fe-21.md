@@ -5,16 +5,28 @@ externo que la quiere, y `despachar_alertas` las manda por correo. Cada
 entrega termina con la **evidencia del proveedor** o con un **error con
 código**. Crear la fila, diferirla o reclamarla no la da por entregada.
 
-| Criterio de la tarjeta | Dónde se cumple |
-|---|---|
-| Una entrega tiene evidencia del proveedor o error explícito | `aceptada` lleva `aceptada_en` y `evidencia` (Message-ID y backend). `fallida`, `agotada` y `reintento` llevan `codigo_error` y `detalle_error` |
-| No se declara entregada solo por encolarla | nace `pendiente`; pasa a `aceptada` solo si el backend de correo devolvió 1 sin excepción, que con SMTP significa un 250 del servidor |
-| Reintentos controlados | 5 intentos con espera de 1 min, 5 min, 30 min y 2 h; solo errores transitorios; después, `agotada` |
-| Preferencias, cuota y descanso | se planifica con las preferencias de FE-21 y se vuelven a mirar al mandar; descanso de 22:00 a 08:00 y 2 por día para push (RN-08 y RN-09) |
+> **No cierra la tarjeta.** Es la parte independiente de una tarjeta [DEP].
+> Hoy no puede salir ningún correo en ningún entorno: **no hay de dónde sacar
+> la dirección de correo de las personas** (ver «De dónde sale la dirección»)
+> y **nadie programa el despachador**, a propósito, hasta que eso se resuelva.
+> Tampoco se mandó ningún correo real.
 
-## El canal acordado
+| Criterio de la tarjeta | Dónde se cumple | ¿Demostrado? |
+|---|---|---|
+| Una entrega tiene evidencia del proveedor o error explícito | `aceptada` lleva `aceptada_en` y `evidencia` (Message-ID y backend). `fallida`, `agotada` y `reintento` llevan `codigo_error` y `detalle_error` | En pruebas, con `locmem` y con un servidor SMTP local. Falta la corrida con un proveedor real |
+| No se declara entregada solo por encolarla | nace `pendiente`; pasa a `aceptada` solo si el backend SMTP devolvió 1 sin excepción, o sea, con un 250. Con un backend que no entrega, no se despacha | Sí, en pruebas |
+| Evidencia enlazada; revisión y validación del receptor | — | **No**: falta la PR, la corrida real y que Maxi y auth validen canal y fuente de direcciones |
 
-Es el **correo**. Lo que lo respalda:
+Del alcance: **reintentos acotados** (5 intentos con espera de 1 min, 5 min,
+30 min y 2 h; después `agotada`) y **respeto de preferencias** (las de cada
+persona, incluida su anticipación, o las de omisión si nunca guardó; se miran
+al planificar y al mandar). **Descanso y cuota** existen para push (RN-08 y
+RN-09), pero solo se prueban con un doble porque el push no tiene proveedor.
+
+## El canal
+
+Es el **correo**. No hay un acuerdo escrito propio de S3-FE-21; lo que lo
+respalda, y que tiene que validar quien recibe la entrega:
 
 - **RF-09** (`docs/investigacion/requisitos-vigentes.md`): «El correo siempre
   está disponible como canal; el push es adicional en el móvil. Si no hay
@@ -29,7 +41,15 @@ Se manda con el backend de correo de Django y **las mismas variables que usa
 auth** para recuperar la contraseña: `EMAIL_BACKEND`, `EMAIL_HOST`,
 `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`,
 `EMAIL_USE_SSL`, `EMAIL_TIMEOUT` y `DEFAULT_FROM_EMAIL`, con los mismos
-valores por omisión. No hay variables nuevas.
+valores por omisión. No hay variables de entorno nuevas.
+
+**Solo el SMTP cuenta como proveedor.** `EMAIL_BACKENDS_CON_PROVEEDOR`
+(settings, no variable de entorno) trae solo el backend SMTP. Con dummy,
+console o filebased, `send()` devuelve 1 sin que salga nada, y con console el
+correo completo queda en el log; `locmem` es un buzón en memoria. Con
+cualquiera de ellos `despachar_alertas` **se niega a correr** y no toca
+ninguna entrega: quedan como estaban y salen cuando se corrija el backend.
+Las pruebas agregan `locmem` a esa lista en `conftest.py`.
 
 **El push no tiene proveedor.** ADR-006 lo acordó con el servicio de
 notificaciones de Expo, pero no hay credenciales ni registro de dispositivos.
@@ -37,53 +57,103 @@ Una entrega por push termina `fallida` con `canal_no_disponible`, aunque
 `CANALES_HABILITADOS` incluya `push`. No se simula: un push "enviado" sin
 proveedor sería declarar entregado algo que no salió.
 
+## De dónde sale la dirección
+
+**No hay contrato acordado: hay un conflicto abierto.** El correo de una
+persona vive en el esquema de auth, y ningún servicio consulta el de otro
+(ADR-002). Las dos opciones:
+
+| Opción | A favor | En contra |
+|---|---|---|
+| `usuario.creado` con `email`, como lo describe el catálogo (`shared/events/catalogo.md`, «Publica auth»). `DireccionCorreo` es la forma de lo que guardaría ese consumidor | ya está en el catálogo | MX-21 dice «No transportar tokens, contraseñas, correos ni cuerpos de mensajes». Guarda una copia de los correos en notifications |
+| Una consulta interna firmada a auth al momento de reclamar, como la de la limpieza (MX-07) | no guarda correos acá ni choca con MX-21; la dirección es siempre la vigente | auth no la expone; un auth caído deja el correo en reintento |
+
+Lo deciden Maxi y quien lleve auth. Mi propuesta es la consulta firmada. Si
+se elige, cambian solo `CanalCorreo.destino` (a dónde) y
+`PreferenciaNotificacion.de_la_organizacion` (quiénes son las personas), y
+`DireccionCorreo` se retira.
+
+Mientras tanto **nadie llena `DireccionCorreo`** fuera de las pruebas, y una
+entrega por correo sin dirección termina `fallida` con `sin_direccion`.
+
 ## El recorrido
 
 ```
 generar_alertas ── crea la alerta ──▶ planificar(): una EntregaAlerta por
-                   (misma transacción)  persona y canal externo encendido
+                   (misma transacción)  persona y canal externo que la quiere
                                                    │ pendiente
-despachar_alertas ─▶ elegibles ─▶ reclamar() ── transacción corta, bajo bloqueo ──┐
-                                  1. bloquea la preferencia de la persona         │
-                                  2. relee la entrega con el filtro de elegibles  │
-                                  3. ¿sigue queriéndola? ¿canal disponible?       │
-                                  4. ¿descanso? ¿cuota?          ──▶ diferida     │
-                                  5. ¿dirección?                 ──▶ fallida      │
-                                  6. enviando + reclamo_id + reclamada_hasta ◀────┘
+despachar_alertas ─▶ ¿backend con proveedor? ── no ──▶ se niega, no toca nada
+                   │ sí
+                   ▼
+                   elegibles ─▶ reclamar() ── transacción corta, bajo bloqueo ──┐
+                                1. bloquea la preferencia de la persona (si hay) │
+                                2. relee la entrega con el filtro de elegibles   │
+                                3. ¿la sigue queriendo? ¿en su anticipación?     │
+                                   ¿canal disponible?          ──▶ descartada   │
+                                4. ¿descanso? ¿cuota?          ──▶ diferida     │
+                                5. ¿dirección? ¿mensaje válido? ──▶ fallida     │
+                                6. enviando + reclamo_id + reclamada_hasta ◀────┘
                                                    │ commit
-                                  canal.enviar() ── fuera de la transacción
+                                canal.enviar() ── fuera de la transacción
                                                    │
-                     aceptada ◀── anotar() si el reclamo sigue siendo el mismo ──▶ reintento · fallida · agotada
+                   aceptada ◀── anotar() si el reclamo sigue siendo el mismo ──▶ reintento · fallida · agotada
 ```
 
-**A quién.** A cada persona con una `PreferenciaNotificacion` en la
-organización que quiere ese tipo de aviso, una fila por canal externo
-encendido (`por_email`, `por_push`). `en_la_app` no tiene fila: la alerta
-misma es esa entrega (FE-19). Una organización que nunca guardó preferencias
-ve la alerta en la aplicación (el generador usa las de omisión), pero no
-tiene ninguna persona a quien escribirle.
+## A quién
+
+A cada **persona conocida** de la organización que quiere ese tipo de aviso,
+una fila por canal externo encendido (`por_email`, `por_push`). `en_la_app`
+no tiene fila: la alerta misma es esa entrega (FE-19).
+
+- **Conocida** es tener fila de preferencias o dirección de correo
+  (`PreferenciaNotificacion.de_la_organizacion`).
+- **Quien nunca guardó preferencias** recibe con las de omisión: la fila nace
+  con el primer GET de Ajustes, pero las de omisión (correo encendido, push
+  apagado, 3 días) son las que la pantalla le muestra como suyas. Se usan sin
+  guardarse. El generador mira a las mismas personas: su ventana de 3 días
+  entra en las ventanas de aviso de la organización.
+- **La anticipación es de cada persona.** La alerta de cobro es de la
+  organización y lleva la ventana más cercana que pidió alguien. Con A en 3
+  días y B en 7, la alerta de 7 días es la de B: a A no se le escribe hasta
+  que falten 3. Y **cada persona recibe un aviso por cobro y canal**: cuando
+  falten 3 días, B ya recibió el suyo y no se le manda otro. Si la ventana de
+  B no alcanzó a generarse (una suscripción creada a 2 días del cobro), la de
+  3 es su primer aviso y le llega.
+- Una organización sin ninguna persona conocida ve la alerta en la aplicación,
+  pero no tiene a quién escribirle.
 
 **Las preferencias se miran dos veces**: al planificar y al mandar. Si la
 persona apagó el canal o el tipo entre medio, la entrega queda `descartada`
-con `motivo = preferencia_apagada` y no sale. Si apagó el correo, no se le
-manda correo aunque el push no esté disponible: la preferencia manda (ver las
+con `motivo = preferencia_apagada`. Si no tiene fila, valen las de omisión, y
+si esas no piden el canal el motivo es `preferencia_por_omision`. Si achicó
+la anticipación (de 7 a 3 días) queda `fuera_de_anticipacion`, y la alerta de
+su nueva ventana sí le llega: una descartada no cuenta como aviso recibido.
+
+Si la persona apagó el correo y pidió solo push, **no se le manda correo**
+aunque el push no esté disponible. HU-03 dice que «sin dispositivo push la
+recibo igualmente por correo»; queda como pregunta para Maxi (ver las
 decisiones).
 
 ## Los estados
 
-| Estado | Qué significa | ¿Se vuelve a intentar? |
-|---|---|---|
-| `pendiente` | Planificada, nunca intentada | sí, desde `proximo_intento_en` |
-| `enviando` | Un worker la reclamó y está hablando con el proveedor | solo si el reclamo vence |
-| `aceptada` | El proveedor la aceptó: hay evidencia | no |
-| `diferida` | Descanso o cuota; `motivo` dice cuál | sí, en `proximo_intento_en` |
-| `reintento` | Error transitorio; espera progresiva | sí, en `proximo_intento_en` |
-| `fallida` | Error permanente | no |
-| `agotada` | Se acabaron los 5 intentos | no |
-| `descartada` | Ya no corresponde (preferencia apagada o borrada) | no |
+| Estado | Grupo | Qué significa | ¿Se vuelve a intentar? |
+|---|---|---|---|
+| `pendiente` | en espera | Planificada, nunca intentada | sí, desde `proximo_intento_en` |
+| `diferida` | en espera | Descanso o cuota; `motivo` dice cuál | sí, en `proximo_intento_en` |
+| `reintento` | en espera | Error transitorio; espera progresiva | sí, en `proximo_intento_en` |
+| `enviando` | en vuelo | Un worker la reclamó y está hablando con el proveedor | solo si el reclamo vence |
+| `aceptada` | terminal | El proveedor la aceptó: hay evidencia | no |
+| `fallida` | terminal | Error permanente | no |
+| `agotada` | terminal | Se acabaron los 5 intentos | no |
+| `descartada` | terminal | Ya no corresponde: `motivo` dice por qué | no |
 
-`intentos` cuenta solo las veces que se habló con el proveedor: diferir no
-gasta un intento, y fallar por falta de dirección tampoco.
+`EntregaAlerta.EN_ESPERA` es el filtro de `elegibles()` y
+`EntregaAlerta.TERMINALES` son los de los que no se sale. Las pruebas exigen
+que los dos grupos y `enviando` cubran todos los estados sin repetir.
+
+`intentos` cuenta las veces que se reclamó para mandarla. Diferirla no gasta
+un intento, y tampoco fallar antes de reclamar: sin dirección, dirección
+inválida, canal sin proveedor o un mensaje que no se puede armar.
 
 ## Errores
 
@@ -100,12 +170,20 @@ gasta un intento, y fallar por falta de dirección tampoco.
 | Un error que el canal no supo clasificar | `inesperado` (con el tipo) | transitorio |
 | Sin dirección conocida | `sin_direccion` | permanente, sin intento |
 | Dirección guardada que no es un correo | `direccion_invalida` | permanente, sin intento |
+| Un encabezado con salto de línea | `mensaje_invalido` | permanente, sin intento |
 | Canal sin proveedor o deshabilitado | `canal_no_disponible` | permanente, sin intento |
+| Backend de correo que no entrega (dummy, console…) | — | no se despacha: error de configuración, la entrega no se toca |
 
 Permanente es solo lo que dice algo **del destinatario o del mensaje** con un
 5xx: mandarlo igual otra vez da lo mismo. Remitente y autenticación también
 pueden venir con 5xx, pero son de nuestra configuración y se arreglan sin
 tocar el mensaje, así que se reintentan.
+
+El título de la alerta viene del nombre de la suscripción, que nadie limpia de
+saltos de línea. El asunto se arma **en una sola línea**. Si aun así un
+encabezado no se puede armar, se descubre **antes de reclamar**: queda
+`fallida` con `mensaje_invalido`, sin gastar un intento ni abrir la conexión
+SMTP. Antes eran 5 reintentos como `inesperado` hasta `agotada`.
 
 Un corte o un silencio **después** de mandar el mensaje no se da por
 entregado ni por perdido: el servidor pudo haberlo procesado. Va a
@@ -114,6 +192,10 @@ idempotencia del canal que pide MX-21 para las entregas externas. `smtplib`
 convierte el tiempo agotado esperando una respuesta en
 `SMTPServerDisconnected`, así que ese caso sale como `conexion` con
 `timed out` en el detalle.
+
+El Message-ID es `<alerta-{id de la entrega}@{dominio del remitente}>`. El
+dominio sale de la **dirección** de `DEFAULT_FROM_EMAIL`, que puede traer
+nombre visible («Ojo al Gasto <no-responder@…>»).
 
 `detalle_error` guarda la respuesta del servidor, recortada a 300
 caracteres. En los logs y en la salida del comando va solo el id de la
@@ -156,6 +238,12 @@ El correo no tiene franja ni cuota: ninguna regla se la fija. Están en
   contador».
 - Cuentan las aceptadas del día y las que están `enviando` con reclamo
   vigente, porque todavía no se sabe si salen. Un reclamo vencido no cuenta.
+  El costo queda para FE-22: si la cuota se completa solo con una en vuelo y
+  esa después falla, la diferida espera hasta mañana a las 09:00 aunque ese
+  día haya salido una sola. Lo exacto sería diferirla hasta que venza ese
+  reclamo.
+- Sin fila de preferencias no hay push (`por_push` nace apagado), así que la
+  cuota siempre se cuenta bajo el bloqueo de la fila de la persona.
 - La zona es la del servicio, `America/Santiago`: ningún modelo guarda la de
   cada persona. Va en `entregas.zona_de()` para que FE-22 la cambie en un
   solo lugar.
@@ -177,6 +265,11 @@ después la **entrega**, releída con el filtro de elegibles. Así:
 - el envío va **después** del commit: un servidor lento no deja filas
   bloqueadas.
 
+El reloj del reclamo es el `ahora` de la corrida. Por eso `--ahora` se acepta
+**solo con el buzón de pruebas**: con un proveedor real, un `--ahora` en el
+pasado dejaba el reclamo vencido para el cron que corre con la hora real, que
+volvía a tomar la entrega y mandaba el mismo correo otra vez.
+
 Las dos limpiezas (la de la organización y la de la persona) borran
 preferencias antes que entregas, el mismo orden que el despachador. Con el
 orden contrario, una limpieza y un reclamo de la misma persona se esperan el
@@ -187,21 +280,39 @@ las mutaciones.
 
 | En las pruebas | Qué es | Qué acredita |
 |---|---|---|
-| backend `locmem` | buzón de Django en memoria; no entrega nada | qué se manda y qué se anota. La evidencia lo dice: `backend = …locmem.EmailBackend` |
+| backend `locmem` | buzón de Django en memoria; no entrega nada. Solo en las pruebas cuenta como proveedor (`conftest.py`) | qué se manda y qué se anota. La evidencia lo dice: `backend = …locmem.EmailBackend` |
 | `ServidorSMTP` (`tests/smtp_de_prueba.py`) | servidor SMTP local que responde lo que se le pida | el backend SMTP real y `smtplib` frente a 250, 550, 451, 554, 452, 553, un corte, un silencio y un puerto cerrado |
 | `DobleDePush` | doble de push declarado como tal | la política de descanso y cuota |
 
 **Entrega real** es el backend SMTP con las credenciales del Gmail
 provisorio que usa auth en producción. **No se mandó ningún correo real** en
-esta tarea. Para hacerlo hace falta una dirección en `DireccionCorreo`, que
-hoy nadie llena (ver lo que falta).
+esta tarea.
+
+Una corrida real acotada demuestra el **proveedor**, no la fuente de
+direcciones, y hay que presentarla así. En una base de desarrollo, nunca la
+de producción, y con una dirección propia cargada a mano:
+
+```bash
+export EMAIL_HOST=smtp.gmail.com EMAIL_PORT=587 EMAIL_USE_TLS=True \
+       EMAIL_HOST_USER='<gmail provisorio>' EMAIL_HOST_PASSWORD='<clave de aplicación>' \
+       DEFAULT_FROM_EMAIL='<gmail provisorio>'
+python manage.py shell -c "from notifications.models import DireccionCorreo; \
+  DireccionCorreo.objects.create(organizacion_id='<org>', usuario_id='<usuario>', email='<correo propio>')"
+python manage.py generar_alertas
+python manage.py despachar_alertas
+```
+
+La evidencia es la fila `aceptada` con su `message_id` y, en el buzón de
+enviados, `rfc822msgid:<alerta-…>` con la captura. No comprobé si Gmail
+conserva el Message-ID que ponemos; si lo reemplaza, el correo se busca por
+asunto y hora, y eso hay que anotarlo.
 
 ## Lo que se guarda
 
 | Tabla | Qué | Se borra con |
 |---|---|---|
-| `entrega_alerta` | una fila por (alerta, persona, canal): estado, intentos, espera, reclamo, `destino`, `message_id`, evidencia y último error | la organización, la persona y la alerta |
-| `direccion_correo` | (organización, persona) → correo | la organización y la persona |
+| `entrega_alerta` | una fila por (alerta, persona, canal): estado, motivo, intentos, espera, reclamo, `destino`, `message_id`, evidencia y último error | la organización, la persona y la alerta |
+| `direccion_correo` | (organización, persona) → correo. Hoy no la llena nadie | la organización y la persona |
 
 `destino` guarda la dirección del último intento. Es dato personal, y por eso
 la limpieza de la persona se lleva sus entregas además de sus preferencias.
@@ -214,7 +325,7 @@ justifica con un plan sobre datos reales, que todavía no hay.
 ```bash
 python manage.py despachar_alertas                 # con el reloj real, hasta 200
 python manage.py despachar_alertas --limite 50
-python manage.py despachar_alertas --ahora 2026-11-21T23:00:00-03:00
+python manage.py despachar_alertas --ahora 2026-11-21T23:00:00-03:00   # solo en pruebas
 ```
 
 ```
@@ -222,24 +333,41 @@ python manage.py despachar_alertas --ahora 2026-11-21T23:00:00-03:00
   · entrega 5b1c…  [email] fallida: sin_direccion (intento 0)
 ```
 
-Las agotadas también van a stderr. `--ahora` se entiende igual que en
-`generar_alertas`: la lectura quedó en `notifications/reloj.py` para los dos.
-Hoy no lo programa nadie, ni en el compose ni en el clúster (ver lo que
-falta).
+Las agotadas también van a stderr. Con un backend que no entrega, falla con
+«EMAIL_BACKEND=… no entrega a ningún proveedor» antes de tocar nada.
+`--ahora` se lee igual que en `generar_alertas` (`notifications/reloj.py`),
+pero aquí se rechaza fuera del buzón de pruebas.
+
+**Hoy no lo programa nadie, a propósito.** Sin fuente de direcciones, cada
+correo que tome quedaría `fallida` con `sin_direccion` para siempre:
+programarlo antes destruye entregas que podrían salir después. Cuando haya
+fuente, el plan es:
+
+- correrlo en el **mismo** CronJob de `k8s/tandas/alertas-notifications.yaml`,
+  después de `generar_alertas`, y no en uno aparte: la tanda está en 12 de 12
+  pods con el generador corriendo, y `k8s/pruebas/presupuesto.py` cobra un pod
+  por CronJob;
+- pasarle `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS` y `DEFAULT_FROM_EMAIL`, y
+  los secretos `EMAIL_HOST_USER` y `EMAIL_HOST_PASSWORD` como en
+  `k8s/10-auth.yaml`, **solo a ese contenedor**: la API y el consumidor de
+  notifications no mandan correos (regla 10);
+- antes de habilitarlo por primera vez, mirar las entregas `pendiente`
+  antiguas: saldrían avisos de cobros que ya pasaron, y anularlas es de
+  S3-FE-22.
 
 ## Dónde está
 
 | Pieza | Archivo |
 |---|---|
-| Modelos y migración | `services/notifications/notifications/models.py` → `EntregaAlerta`, `DireccionCorreo`; `migrations/0008_entregas_de_alertas.py` |
+| Modelos y migración | `services/notifications/notifications/models.py` → `EntregaAlerta`, `DireccionCorreo`, `PreferenciaNotificacion.de_la_organizacion`; `migrations/0008_entregas_de_alertas.py` |
 | Planificar, reclamar, anotar y despachar | `notifications/entregas.py` |
-| El canal de correo y la clasificación SMTP | `notifications/canales.py` |
+| El canal de correo, la clasificación SMTP y la barrera de proveedor | `notifications/canales.py` |
 | Descanso y cuota, sin base ni reloj | `notifications/politica_envio.py` |
-| Las entregas nacen con la alerta | `notifications/generador.py` → `_crear_una_vez` |
+| Las entregas nacen con la alerta; las mismas personas para las ventanas | `notifications/generador.py` → `_crear_una_vez`, `_preferencias` |
 | Las limpiezas | `notifications/eliminacion.py` |
 | El comando | `notifications/management/commands/despachar_alertas.py` |
-| Las variables de correo | `notifications_config/settings.py` |
-| Las pruebas | `tests/test_entregas_s3_fe_21.py` (84) y `tests/test_carrera_entregas_postgres.py` (6, con dos conexiones a PostgreSQL) |
+| Las variables de correo y `EMAIL_BACKENDS_CON_PROVEEDOR` | `notifications_config/settings.py` |
+| Las pruebas | `tests/test_entregas_s3_fe_21.py` (120) y `tests/test_carrera_entregas_postgres.py` (6, con dos conexiones a PostgreSQL); `conftest.py` agrega `locmem` como proveedor solo en pruebas |
 
 ## Cómo se comprobaron las pruebas
 
@@ -253,8 +381,8 @@ A con un `monkeypatch` en el punto exacto (dentro del reclamo, hablando con el
 proveedor, contando la cuota, entre los dos bloqueos) y exigen que B aparezca
 en `pg_locks` con `granted = false`, o que termine sin mandar nada.
 
-Se rompió el código a propósito **31 veces** y al final cada vez falló al
-menos una prueba. Entre otras:
+**Primera vuelta: 31 mutaciones**, y al final cada una hizo fallar al menos
+una prueba. Entre otras:
 
 - quitar el bloqueo de la persona, o el de la entrega releída;
 - dejar que una entrega `enviando` con reclamo vigente sea elegible;
@@ -271,27 +399,57 @@ menos una prueba. Entre otras:
   que la limpieza de la persona no se lleve sus entregas o su dirección;
 - que el generador no planifique, o que planifique sin mirar el canal.
 
-Al principio dos no fallaban: quitar el bloqueo de la entrega releída, y no
-contar las que están saliendo (eso último solo lo veía la prueba de carrera
-en PostgreSQL). Agregué la carrera del resultado tardío y dos pruebas de
-cuota con una conexión.
+**Segunda vuelta, sobre lo corregido tras la revisión: 20 mutaciones, 20
+detectadas.** Planificar sin mirar la anticipación, sin descontar a los ya
+avisados, contando las descartadas o sin mirar la fecha del cobro; `<` en vez
+de `<=`; no volver a mirar la anticipación al mandar; dejar fuera a las
+personas sin fila, en la planificación o en el generador; descartar a quien
+no tiene fila, o anotarlo como `preferencia_apagada`; el Message-ID cortando
+el remitente entero; el asunto sin limpiar; no validar el mensaje antes de
+reclamar, o tratar `BadHeaderError` como inesperado; aceptar cualquier
+backend, no negarse al empezar la corrida o no exigirlo en el reclamo;
+aceptar `--ahora` con cualquier backend; y sacar `reintento` de los estados
+en espera o meter `descartada`.
+
+Una la detectaba una prueba por una razón lateral: «no negarse al empezar» la
+pillaba la prueba del comando con console solo porque su entrega todavía no
+era elegible con el reloj real. Hice elegible esa entrega y agregué una
+prueba explícita de que la corrida se niega aunque no haya nada que mandar.
 
 ## Decisiones para revisar
 
-- **El canal acordado es el correo**, por RF-09, FE-21, `.env.example` y
-  ADR-006. No hay un acuerdo escrito de S3-FE-21 aparte de eso.
-- **De dónde sale la dirección.** El catálogo dice que auth publica
-  `usuario.creado` con `email` y que notifications lo escucha;
-  `DireccionCorreo` es lo que guardaría ese consumidor. Pero MX-21 dice «no
-  transportar […] correos» en los mensajes. Hay que elegir entre ese evento,
-  una consulta interna a auth firmada como las de eliminación, u otra cosa.
+- **El canal es el correo**, por RF-09, FE-21, `.env.example` y ADR-006. No
+  hay un acuerdo escrito de S3-FE-21 aparte de eso: lo valida Maxi.
+- **De dónde sale la dirección**: conflicto abierto entre el catálogo y MX-21.
+  Propongo la consulta firmada a auth; lo deciden Maxi y quien lleve auth.
+- **El despachador no se programa** hasta tener fuente de direcciones; el plan
+  está en «El comando».
+- **Anticipación por persona: «dentro de su anticipación y un aviso por
+  cobro»**, no «solo si su anticipación es la de la alerta». Con la igualdad,
+  B (7 días) no recibía nada si su ventana no alcanzó a generarse (suscripción
+  creada a 2 días del cobro). Un aviso por cobro se cuenta por suscripción y
+  fecha de cobro, sin contar las descartadas.
+- **Sin fila de preferencias valen las de omisión**, en la planificación, en
+  el envío y en las ventanas del generador. Eso cambia una cosa de FE-17: con
+  personas conocidas sin fila, su ventana de 3 días entra en las de la
+  organización aunque otras personas tengan fila.
+- **Solo el SMTP es proveedor**, en una lista en settings y no en una
+  variable: agregar otro backend es decidir que su respuesta vale como
+  aceptación, y eso se revisa en una PR.
+- **`--ahora` solo en pruebas**, en vez de usar el reloj real para el reclamo
+  y `--ahora` para lo demás. Mezclar dos relojes en la misma corrida obligaba
+  a rehacer las pruebas de reclamo vencido y de cuota, y `--ahora` no tiene uso
+  con un proveedor real: el correo no tiene franja ni cuota.
 - **Remitente y autenticación se reintentan** aunque vengan con 5xx.
-- **Si la persona apagó el correo, no hay respaldo por correo** aunque el push
-  no esté disponible. RF-09 dice «se envía igual por correo»; se leyó como
-  "si tiene el correo encendido".
+- **Solo push y sin dispositivo: no hay correo.** HU-03 y RF-09 dicen «se
+  envía igual por correo»; lo leí como "si tiene el correo encendido", porque
+  si no el interruptor del correo de FE-21 no serviría mientras no exista el
+  push. **Maxi, ¿vale la lectura literal?** Si vale, `planificar()` crea la
+  entrega de correo cuando `canales.disponible("push")` es falso.
 - **Descanso y cuota solo para push**, con los valores de RN-08 y RN-09 fijos
   en código. Falta el orden de prioridad de RN-08 (fin de prueba antes que
-  cobro): dentro de una corrida salen por antigüedad.
+  cobro): dentro de una corrida salen por antigüedad. La cuota con entregas
+  en vuelo que después fallan queda para FE-22.
 - **Las entregas nacen en el generador.** Cuando FE-24 emita
   `alerta.activada`, el consumidor de `notifications.entregas.v2` llama a
   `planificar()` en lugar del generador; la restricción única lo hace
@@ -299,19 +457,15 @@ cuota con una conexión.
 
 ## Lo que falta para cerrar
 
-- **Quién llena `DireccionCorreo`.** Sin eso, en cualquier entorno, cada
-  correo termina `fallida` con `sin_direccion`. Depende de auth (publicar
-  `usuario.creado` o exponer la consulta) y de resolver el choque con MX-21.
-- **Una corrida real** contra el Gmail provisorio, con la captura del correo
-  recibido y su Message-ID. No se hizo.
-- **Programar el despachador.** En el compose no corre, igual que
-  `generar_alertas`. En el clúster haría falta un CronJob junto a
-  `k8s/tandas/alertas-notifications.yaml` y, en los pods de notifications de
-  la tanda, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `DEFAULT_FROM_EMAIL`
-  y los secretos `EMAIL_HOST_USER` y `EMAIL_HOST_PASSWORD`, como en
-  `k8s/10-auth.yaml`. No se tocaron los manifiestos.
-- **FE-22**: cuota, franja y zona horaria por persona, y el orden de
-  prioridad de RN-08.
+- **La fuente de direcciones**, acordada con Maxi y auth. Sin eso, en
+  cualquier entorno, cada correo termina `fallida` con `sin_direccion`.
+- **Una corrida real** con el Gmail provisorio, con la captura del correo y su
+  Message-ID enlazados en la PR.
+- **Programar el despachador** con las variables y secretos de correo solo en
+  su contenedor (plan en «El comando»).
+- **Respuesta de Maxi** sobre el respaldo por correo de HU-03.
+- **FE-22**: cuota, franja y zona horaria por persona, el orden de prioridad
+  de RN-08 y la cuota con entregas en vuelo.
 - **El push**: proveedor (Expo) y registro de dispositivos.
 - **S3-FE-22**: anular las entregas pendientes de una alerta que quedó
-  obsoleta (suscripción cancelada o con otra fecha).
+  obsoleta (suscripción cancelada, con otra fecha o un cobro que ya pasó).

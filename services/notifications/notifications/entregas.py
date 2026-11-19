@@ -186,6 +186,11 @@ def _ya_avisados_del_mismo_cobro(alerta: Alerta) -> set[tuple[str, str]]:
 def planificar(alerta: Alerta, *, ahora: dt.datetime | None = None) -> int:
     """Una entrega por persona y canal externo encendido. Devuelve cuántas.
 
+    Las personas son las de `PreferenciaNotificacion.de_la_organizacion`
+    (con las de omisión si no guardaron nada). Al aviso de cobro, además, se
+    le aplica la anticipación de cada una, y no se repite para quien ya tiene
+    entrega por otra ventana del mismo cobro.
+
     Se llama dentro de la transacción que crea la alerta: o quedan las dos
     cosas o ninguna. Con la restricción única, planificar dos veces la misma
     alerta no duplica (`ignore_conflicts`), y se devuelve un conteo
@@ -257,6 +262,12 @@ def _enviadas_en(entrega: EntregaAlerta, ahora):
     Las `enviando` de reclamo vigente cuentan aunque no se sepa todavía si
     salen: si no contaran, dos workers que reclaman a la vez dos entregas de
     la misma persona verían las dos el mismo número y pasarían las dos.
+
+    El costo, que queda para FE-22: si la cuota se completa solo con una en
+    vuelo y esa después falla, la que se difirió espera hasta mañana a las
+    09:00 aunque ese día haya salido una sola. Lo exacto sería diferirla
+    hasta que venza el reclamo de la que está en vuelo. Hoy afecta solo al
+    push, que no tiene proveedor.
     """
     def contar(inicio, fin) -> int:
         return (
