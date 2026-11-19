@@ -92,6 +92,28 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Cuando el push exista, se agrega acá y nadie tiene que volver a elegirlo.
 CANALES_HABILITADOS = env.list("CANALES_HABILITADOS", default=["email", "in_app"])
 
+# ── Correo de las alertas (S3-FE-21) ─────────────────────────────────
+# Las MISMAS variables y valores por omisión que auth
+# (`services/auth/config/settings.py`), que ya manda el correo de
+# recuperación de contraseña: un solo buzón de envío y una sola sección en
+# `.env.example` («Correo (servicios auth y notifications)»). TLS y SSL son
+# alternativas: se activa solo una.
+#
+# SMTP por omisión y no el backend de consola: el de consola escribe el
+# correo completo en los logs del contenedor. Las pruebas usan el de memoria
+# (`locmem`), que pytest-django pone solo; ese no entrega nada.
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="no-responder@ojoalgasto.cl")
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend"
+)
+EMAIL_HOST = env("EMAIL_HOST", default="localhost")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
+EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=5)
+
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",

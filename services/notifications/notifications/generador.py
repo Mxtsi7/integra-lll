@@ -57,6 +57,7 @@ from django.utils import timezone
 
 from shared.borrado.bloqueo import bloquear_organizacion
 
+from . import entregas
 from .models import Alerta, PreferenciaNotificacion, SuscripcionVigilada
 
 #: Espacio de los ids determinísticos. Cambiarlo haría que todas las
@@ -144,7 +145,7 @@ def alguien_quiere_fin_de_prueba(organizacion_id) -> bool:
     )
 
 
-def _crear_una_vez(**campos) -> tuple[Alerta | None, str]:
+def _crear_una_vez(*, ahora: dt.datetime, **campos) -> tuple[Alerta | None, str]:
     """Crea la alerta si su ventana no tiene una. (alerta, desenlace).
 
     ── Por qué la guarda de borrado va ACÁ ──────────────────────────────────
@@ -157,6 +158,12 @@ def _crear_una_vez(**campos) -> tuple[Alerta | None, str]:
     Con el estado bloqueado en ESTA transacción, la limpieza —que lo toma FOR
     UPDATE— espera a que cierre y después borra también esta alerta; o ya
     cerró, y entonces `eliminada` es True y no se crea nada.
+
+    ── Las entregas nacen con la alerta (S3-FE-21) ──────────────────────────
+    En la misma transacción: o quedan la alerta y sus entregas, o ninguna.
+    `planificar` va FUERA del punto de retorno de la restricción única, para
+    que un `IntegrityError` suyo no se lea como "esta ventana ya avisó" y se
+    propague, que es lo que corresponde.
     """
     with transaction.atomic():
         if bloquear_organizacion(campos["organizacion_id"], compartido=True).eliminada:
@@ -166,11 +173,13 @@ def _crear_una_vez(**campos) -> tuple[Alerta | None, str]:
         # puede confundirse con "esta ventana ya avisó".
         try:
             with transaction.atomic():
-                return Alerta.objects.create(**campos), CREADA
+                alerta = Alerta.objects.create(**campos)
         except IntegrityError:
             # La restricción única (organización, evento_id): esta ventana ya
             # avisó. Es el camino normal de la segunda corrida del día.
             return None, REPETIDA
+        entregas.planificar(alerta, ahora=ahora)
+        return alerta, CREADA
 
 
 def _texto_monto(suscripcion: SuscripcionVigilada) -> str:
@@ -222,6 +231,7 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
         candidatas = [d for d in anticipaciones[org] if faltan <= d]
         for dias in sorted(candidatas)[:1]:
             alerta, desenlace = _crear_una_vez(
+                ahora=ahora,
                 organizacion_id=org,
                 tipo=Alerta.Tipo.PROXIMO_COBRO,
                 titulo=f"{suscripcion.nombre or 'Una suscripción'} se cobra "
@@ -281,6 +291,7 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
         candidatas = [v for v in VENTANAS_FIN_PRUEBA if horas <= v]
         for ventana in sorted(candidatas)[:1]:
             alerta, desenlace = _crear_una_vez(
+                ahora=ahora,
                 organizacion_id=org,
                 tipo=Alerta.Tipo.FIN_PRUEBA,
                 titulo=f"La prueba de {suscripcion.nombre or 'una suscripción'} termina en menos de {ventana} h",
