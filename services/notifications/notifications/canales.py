@@ -36,7 +36,7 @@ from email.utils import parseaddr
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.mail import EmailMessage
+from django.core.mail import BadHeaderError, EmailMessage
 from django.core.validators import validate_email
 
 from .models import DireccionCorreo
@@ -135,17 +135,39 @@ class CanalCorreo:
         dominio = direccion.rpartition("@")[2] or "ojoalgasto.local"
         return f"<alerta-{entrega_id}@{dominio}>"
 
-    def enviar(self, envio: Envio) -> dict:
-        """Manda el correo. Devuelve la evidencia o lanza `ErrorDeEnvio`."""
-        mensaje = EmailMessage(
+    def _mensaje(self, envio: Envio) -> EmailMessage:
+        return EmailMessage(
             subject=envio.asunto,
             body=envio.cuerpo,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[envio.destino],
             headers={"Message-ID": envio.message_id},
         )
+
+    def validar(self, envio: Envio) -> None:
+        """Arma el mensaje sin mandarlo. Lanza `ErrorDeEnvio` si no se puede.
+
+        Un encabezado con salto de línea (`BadHeaderError`) falla igual en
+        cada intento, sin llegar a hablar con el servidor: es permanente, y
+        se descubre ANTES de reclamar, para que no gaste un intento ni abra
+        la conexión SMTP cinco veces para nada.
+        """
         try:
-            aceptados = mensaje.send(fail_silently=False)
+            self._mensaje(envio).message()
+        except BadHeaderError:
+            raise ErrorDeEnvio(
+                "mensaje_invalido", "un encabezado del correo trae un salto de línea", permanente=True,
+            ) from None
+
+    def enviar(self, envio: Envio) -> dict:
+        """Manda el correo. Devuelve la evidencia o lanza `ErrorDeEnvio`."""
+        try:
+            aceptados = self._mensaje(envio).send(fail_silently=False)
+        except BadHeaderError:
+            # `validar` ya lo descarta; si llega acá, mismo diagnóstico.
+            raise ErrorDeEnvio(
+                "mensaje_invalido", "un encabezado del correo trae un salto de línea", permanente=True,
+            ) from None
         except (smtplib.SMTPException, OSError) as error:
             raise clasificar_smtp(error) from None
         if aceptados != 1:

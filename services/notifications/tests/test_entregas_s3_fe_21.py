@@ -96,6 +96,9 @@ class DobleDePush:
     def message_id(self, entrega_id):
         return f"push-de-prueba-{entrega_id}"
 
+    def validar(self, envio):
+        pass
+
     def enviar(self, envio):
         self.enviados.append(envio)
         return {"doble": "push de prueba, no entrega nada"}
@@ -438,6 +441,41 @@ class TestErrorExplicito:
         nueva_alerta()
         entregas.despachar(ahora=a_las(10))
         assert la_entrega().codigo_error == "canal_no_disponible"
+        assert mailoutbox == []
+
+    def test_un_titulo_con_salto_de_linea_sale_en_una_linea(self, mailoutbox):
+        """El nombre de la suscripción no se limpia de saltos de línea. Antes:
+        BadHeaderError, 5 reintentos como «inesperado» y agotada."""
+        persona("42")
+        alerta = nueva_alerta()
+        Alerta.objects.filter(pk=alerta.pk).update(titulo="Netflix\nse cobra\r\nen 3 días")
+        assert entregas.despachar(ahora=a_las(10))[entregas.ACEPTADA] == 1
+        assert mailoutbox[0].subject == "Netflix se cobra en 3 días · Ojo al Gasto"
+
+    def test_un_encabezado_invalido_falla_sin_gastar_intento(self, monkeypatch, mailoutbox):
+        """Determinístico: repetirlo da lo mismo. Se descubre antes de
+        reclamar, sin abrir la conexión con el servidor."""
+        persona("42")
+        nueva_alerta()
+        real = entregas._envio
+
+        def con_salto(entrega, destino):
+            envio = real(entrega, destino)
+            return canales.Envio(envio.destino, "Netflix\nse cobra", envio.cuerpo, envio.message_id)
+
+        monkeypatch.setattr(entregas, "_envio", con_salto)
+        assert entregas.despachar(ahora=a_las(10))[entregas.FALLIDA] == 1
+        entrega = la_entrega()
+        assert (entrega.estado, entrega.codigo_error, entrega.intentos) == (
+            Estado.FALLIDA, "mensaje_invalido", 0)
+        assert mailoutbox == []
+        assert entregas.despachar(ahora=a_las(20)).conteo == {}
+
+    def test_el_canal_tampoco_lo_reintenta_si_llega_a_mandarlo(self, mailoutbox):
+        envio = canales.Envio("ana@ejemplo.cl", "Netflix\nse cobra", "cuerpo", "<alerta-x@ejemplo.cl>")
+        with pytest.raises(ErrorDeEnvio) as error:
+            canales.CanalCorreo().enviar(envio)
+        assert (error.value.codigo, error.value.permanente) == ("mensaje_invalido", True)
         assert mailoutbox == []
 
     def test_un_error_permanente_no_se_reintenta(self, monkeypatch, mailoutbox):

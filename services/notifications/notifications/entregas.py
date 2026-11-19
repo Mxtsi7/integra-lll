@@ -277,9 +277,13 @@ def _enviadas_en(entrega: EntregaAlerta, ahora):
 
 def _envio(entrega: EntregaAlerta, destino: str) -> Envio:
     alerta = entrega.alerta
+    # El título viene del nombre de la suscripción, que nadie limpia de
+    # saltos de línea, y un salto de línea en el Asunto es un encabezado
+    # inválido. En una línea, con espacios simples.
+    titulo = " ".join(alerta.titulo.split())
     return Envio(
         destino=destino,
-        asunto=f"{alerta.titulo} · Ojo al Gasto",
+        asunto=f"{titulo} · Ojo al Gasto",
         cuerpo=(
             f"{alerta.mensaje}\n\n"
             "Recibes este aviso porque lo tienes activado en Ajustes > Alertas "
@@ -372,6 +376,13 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
                 "sin_direccion", "no se conoce a dónde mandarle a esta persona", permanente=True,
             ))
 
+        entrega.message_id = entrega.message_id or canal.message_id(entrega.pk)
+        envio = _envio(entrega, destino)
+        try:
+            canal.validar(envio)
+        except ErrorDeEnvio as error:
+            return _cerrar(entrega, FALLIDA, ahora, error=error)
+
         entrega.estado = Estado.ENVIANDO
         entrega.motivo = ""
         entrega.reclamo_id = uuid.uuid4()
@@ -379,7 +390,6 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
         entrega.intentos += 1
         entrega.ultimo_intento_en = ahora
         entrega.destino = destino
-        entrega.message_id = entrega.message_id or canal.message_id(entrega.pk)
         entrega.save(update_fields=[
             "estado", "motivo", "reclamo_id", "reclamada_hasta", "intentos",
             "ultimo_intento_en", "destino", "message_id", "actualizado_en",
@@ -389,7 +399,7 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
             reclamo_id=entrega.reclamo_id,
             canal=entrega.canal,
             intentos=entrega.intentos,
-            envio=_envio(entrega, destino),
+            envio=envio,
         )
 
 

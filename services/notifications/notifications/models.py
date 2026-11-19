@@ -608,7 +608,7 @@ class EntregaAlerta(ModeloTenant):
     # ── intentos ─────────────────────────────────────────────────────
     intentos = models.PositiveSmallIntegerField(
         default=0,
-        help_text="Veces que se habló con el proveedor. Diferirla no cuenta.",
+        help_text="Veces que se reclamó para mandarla al proveedor. Diferirla o descartar un mensaje inválido no cuenta.",
     )
     proximo_intento_en = models.DateTimeField(
         help_text="Desde cuándo puede intentarse (pendiente, diferida o en reintento).",

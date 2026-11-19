@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
                 ('canal', models.CharField(choices=[('email', 'Correo'), ('push', 'Push')], max_length=8)),
                 ('estado', models.CharField(choices=[('pendiente', 'Pendiente'), ('enviando', 'Enviando'), ('aceptada', 'Aceptada por el proveedor'), ('diferida', 'Diferida'), ('reintento', 'En reintento'), ('fallida', 'Fallida'), ('agotada', 'Reintentos agotados'), ('descartada', 'Descartada')], default='pendiente', max_length=12)),
                 ('motivo', models.CharField(blank=True, default='', help_text='Por qué quedó diferida o descartada: descanso, cuota_diaria, preferencia_apagada, preferencia_por_omision, fuera_de_anticipacion.', max_length=24)),
-                ('intentos', models.PositiveSmallIntegerField(default=0, help_text='Veces que se habló con el proveedor. Diferirla no cuenta.')),
+                ('intentos', models.PositiveSmallIntegerField(default=0, help_text='Veces que se reclamó para mandarla al proveedor. Diferirla o descartar un mensaje inválido no cuenta.')),
                 ('proximo_intento_en', models.DateTimeField(help_text='Desde cuándo puede intentarse (pendiente, diferida o en reintento).')),
                 ('ultimo_intento_en', models.DateTimeField(blank=True, null=True)),
                 ('reclamo_id', models.UUIDField(blank=True, help_text='Identifica el reclamo vigente. El resultado de un envío solo se anota si el reclamo sigue siendo el mismo: un worker cuyo reclamo venció no pisa lo que anotó el que lo retomó.', null=True)),
