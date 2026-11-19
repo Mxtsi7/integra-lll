@@ -24,6 +24,7 @@ from connectors import lector_gmail, lector_outlook
 from connectors.avance_lectura import SOLAPE, VENTANA_INICIAL, leer_siguiente_lote
 from connectors.lectura_correo import (
     CuentaNoDisponible,
+    CursorRechazado,
     ErrorDelProveedor,
     ErrorTransitorio,
     MensajeCorreo,
@@ -232,13 +233,14 @@ class TestCuentasSeparadas:
 
 
 class TestCursorInvalido:
-    @pytest.mark.parametrize("rechazo", [
-        ErrorDelProveedor("Gmail rechazó la consulta (400, invalidArgument)."),
-        ValueError("`pagina` no es una página de mensajes de Microsoft Graph."),
-    ])
-    def test_vuelve_al_inicio_de_la_misma_corrida(self, claves, rechazo):
+    """Solo un rechazo EXPLÍCITO del cursor (`CursorRechazado`) reinicia la
+    corrida; cualquier otro error sale con el avance intacto (revisión de
+    #189, P2). Con los lectores reales, más abajo."""
+
+    def test_vuelve_al_inicio_de_la_misma_corrida(self, claves):
         c = cuenta()
-        lector = LectorFalso({None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1, 2)], "vencido": rechazo})
+        lector = LectorFalso({None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1, 2)],
+                              "vencido": CursorRechazado("Gmail rechazó la página siguiente (400).")})
         procesado = Procesado()
         lote(lector, c, procesado)
 
@@ -251,13 +253,33 @@ class TestCursorInvalido:
         assert [l["filtro"].hasta for l in lector.llamadas] == [LUNES, LUNES, LUNES]
         assert [l["pagina"] for l in lector.llamadas] == [None, "vencido", None]
 
+    @pytest.mark.parametrize("error", [
+        ErrorDelProveedor("Gmail respondió algo que no es JSON."),
+        ErrorDelProveedor("La API de Gmail no está habilitada.", codigo="api_deshabilitada"),
+        ValueError("`pagina` no es una página de mensajes de Microsoft Graph."),
+    ], ids=["json-ilegible", "api-deshabilitada", "pagina-que-el-lector-no-reconoce"])
+    def test_otro_error_con_pagina_guardada_sale_tal_cual_y_no_reinicia(self, claves, error):
+        c = cuenta()
+        lector = LectorFalso({None: pagina(c, 1, siguiente="tok-2"), "tok-2": error})
+        procesado = Procesado()
+        lote(lector, c, procesado)
+
+        for _ in range(3):  # ni a la primera ni a la tercera: no hay bucle
+            with pytest.raises(type(error)):
+                lote(lector, c, procesado)
+
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta) == ("tok-2", 0, None)
+        assert procesado.ids == ["m1"], "se volvió a procesar la primera página"
+        assert [l["pagina"] for l in lector.llamadas] == [None, "tok-2", "tok-2", "tok-2"]
+
     def test_releer_entrega_los_mismos_mensajes_con_la_misma_identidad(self, claves):
         """Lo que se relee tras un reinicio trae la misma identidad (el
         Message-ID, S3-FE-06), que es la llave única de los candidatos: no se
         duplica. Nada se borra: el avance solo sube su contador."""
         c = cuenta()
         lector = LectorFalso({None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1, 2)],
-                              "vencido": ErrorDelProveedor("400")})
+                              "vencido": CursorRechazado("400")})
         identidades = []
 
         def procesar(lote_):
@@ -269,20 +291,40 @@ class TestCursorInvalido:
 
     def test_sin_pagina_guardada_el_error_no_es_del_cursor(self, claves):
         c = cuenta()
-        lector = LectorFalso({None: ErrorDelProveedor("La API de Gmail no está habilitada.")})
-        with pytest.raises(ErrorDelProveedor):
+        lector = LectorFalso({None: CursorRechazado("400")})
+        with pytest.raises(CursorRechazado):
             lote(lector, c, Procesado())
         assert avance(c).reinicios_por_pagina_invalida == 0
         assert len(lector.llamadas) == 1
 
     def test_si_el_reinicio_falla_al_procesar_no_cuenta(self, claves):
         c = cuenta()
-        lector = LectorFalso({None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1)], "vencido": ErrorDelProveedor("400")})
+        lector = LectorFalso({None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1)],
+                              "vencido": CursorRechazado("400")})
         lote(lector, c, Procesado())
         with pytest.raises(RuntimeError):
             lote(lector, c, Procesado(fallar=1))
         a = avance(c)
         assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta) == ("vencido", 0, None)
+
+    def test_si_al_reiniciar_vuelve_el_mismo_cursor_rechazado_no_se_guarda_ni_se_procesa(self, claves):
+        """El proveedor rechaza la página B y, al empezar de nuevo, entrega
+        otra vez B como siguiente: reiniciar no lleva a ninguna parte. Sin
+        esto, cada llamada procesaría la primera página y volvería a guardar
+        B, respondiendo éxito para siempre."""
+        c = cuenta()
+        lector = LectorFalso({None: pagina(c, 1, siguiente="B"), "B": CursorRechazado("400")})
+        procesado = Procesado()
+        lote(lector, c, procesado)
+
+        with pytest.raises(ErrorDelProveedor) as error:
+            lote(lector, c, procesado)
+
+        assert error.value.codigo == "reinicio_sin_avance"
+        assert isinstance(error.value.__cause__, CursorRechazado)
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta) == ("B", 0, None)
+        assert procesado.ids == ["m1"]
 
 
 class TestDosWorkers:
@@ -313,6 +355,8 @@ class _Respuesta:
         self.headers = {}
 
     def json(self):
+        if isinstance(self._cuerpo, Exception):
+            raise self._cuerpo
         return self._cuerpo
 
 
@@ -524,3 +568,122 @@ class TestOutlookConMasDeMilCoincidencias:
         self._leer_hasta_terminar(c, procesado)
         assert avance(c).leido_hasta == LUNES
         assert sorted(procesado.ids) == sorted(elegibles)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #189, P2 — solo un rechazo explícito del cursor reinicia
+# ══════════════════════════════════════════════════════════════════════
+#
+# La aceptación de la revisión: con un cursor B válido que falla por otra
+# cosa (un JSON ilegible) y una primera página A buena, el error sale, B se
+# conserva y no sube el contador de reinicios. Un rechazo explícito del
+# cursor sí reinicia.
+
+NO_ES_JSON = ValueError("Expecting value: line 1 column 1 (char 0)")
+
+
+class TestSoloUnRechazoDelCursorReinicia:
+    def _gmail(self, monkeypatch, respuestas_de_la_lista, detalles=None):
+        """Gmail con una lista de respuestas para `messages.list` y, si hace
+        falta, el detalle de cada mensaje."""
+        pedidos = []
+
+        def get(url, params=None, headers=None, timeout=None):
+            pedidos.append({"url": url, **dict(params or {})})
+            if url == lector_gmail.URL_MENSAJES:
+                return respuestas_de_la_lista.pop(0)
+            return detalles[url.rsplit("/", 1)[1]]
+
+        monkeypatch.setattr(lector_gmail.requests, "get", get)
+        return pedidos
+
+    def test_gmail_cursor_valido_con_json_ilegible_sale_el_error_y_se_conserva(self, claves, monkeypatch):
+        c = cuenta()
+        pedidos = self._gmail(monkeypatch, [
+            _Respuesta(200, {"messages": [], "nextPageToken": "B"}),
+            _Respuesta(200, NO_ES_JSON),
+            # Si se reiniciara, esta primera página A volvería a servir:
+            _Respuesta(200, {"messages": [], "nextPageToken": "B"}),
+        ])
+        lote(lector_gmail, c, Procesado())
+
+        with pytest.raises(ErrorDelProveedor, match="no es JSON") as error:
+            lote(lector_gmail, c, Procesado())
+
+        assert not isinstance(error.value, CursorRechazado)
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta) == ("B", 0, None)
+        assert [p.get("pageToken") for p in pedidos] == [None, "B"], "se volvió a la primera página"
+
+    def test_gmail_cursor_valido_con_el_detalle_de_un_mensaje_ilegible_tampoco_reinicia(self, claves, monkeypatch):
+        c = cuenta()
+        pedidos = self._gmail(monkeypatch, [
+            _Respuesta(200, {"messages": [], "nextPageToken": "B"}),
+            _Respuesta(200, {"messages": [{"id": "m7", "threadId": "m7"}]}),
+        ], detalles={"m7": _Respuesta(200, NO_ES_JSON)})
+        lote(lector_gmail, c, Procesado())
+
+        with pytest.raises(ErrorDelProveedor, match="no es JSON"):
+            lote(lector_gmail, c, Procesado())
+
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida) == ("B", 0)
+        assert [p.get("pageToken") for p in pedidos if p["url"] == lector_gmail.URL_MENSAJES] == [None, "B"]
+
+    def test_gmail_rechazo_explicito_del_page_token_si_reinicia(self, claves, monkeypatch):
+        c = cuenta()
+        pedidos = self._gmail(monkeypatch, [
+            _Respuesta(200, {"messages": [], "nextPageToken": "B"}),
+            _Respuesta(400, {"error": {"code": 400, "message": "Invalid pageToken", "status": "INVALID_ARGUMENT",
+                                       "errors": [{"reason": "invalid"}]}}),
+            _Respuesta(200, {"messages": []}),
+        ])
+        lote(lector_gmail, c, Procesado())
+
+        resultado = lote(lector_gmail, c, Procesado())
+
+        assert resultado.reiniciada and resultado.corrida_terminada
+        assert avance(c).reinicios_por_pagina_invalida == 1
+        assert [p.get("pageToken") for p in pedidos] == [None, "B", None]
+
+    def _outlook(self, monkeypatch, *respuestas):
+        pedidos = []
+        respuestas = list(respuestas)
+
+        def get(url, params=None, headers=None, timeout=None, allow_redirects=False):
+            pedidos.append(url)
+            return respuestas.pop(0)
+
+        monkeypatch.setattr(lector_outlook.requests, "get", get)
+        return pedidos
+
+    def test_outlook_next_link_valida_con_json_ilegible_sale_el_error_y_se_conserva(self, claves, monkeypatch):
+        c = cuenta(proveedor="outlook", correo="p@outlook.com")
+        siguiente = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24skip=25"
+        pedidos = self._outlook(
+            monkeypatch,
+            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
+            _Respuesta(200, NO_ES_JSON),
+            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
+        )
+        lote(lector_outlook, c, Procesado())
+
+        with pytest.raises(ErrorDelProveedor, match="no es JSON"):
+            lote(lector_outlook, c, Procesado())
+
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida) == (siguiente, 0)
+        assert pedidos == [lector_outlook.URL_MENSAJES, siguiente]
+
+    def test_outlook_410_en_la_next_link_si_reinicia(self, claves, monkeypatch):
+        c = cuenta(proveedor="outlook", correo="p@outlook.com")
+        siguiente = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24skip=25"
+        self._outlook(
+            monkeypatch,
+            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
+            _Respuesta(410, {"error": {"code": "SyncStateNotFound", "message": "..."}}),
+            _Respuesta(200, {"value": []}),
+        )
+        lote(lector_outlook, c, Procesado())
+        resultado = lote(lector_outlook, c, Procesado())
+        assert resultado.reiniciada and avance(c).reinicios_por_pagina_invalida == 1

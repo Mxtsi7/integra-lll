@@ -11,7 +11,7 @@ lector (documentos 23 y 24).
 | FE-03: reanudar no relee indefinidamente ni pierde mensajes tras un fallo | corridas con tope fijo, y el cursor se mueve en la misma transacción que procesa |
 | FE-03: cuentas distintas conservan cursores separados | un `AvanceDeLectura` por cuenta (uno a uno) |
 | FE-05: reiniciar retoma el avance correcto | se retoma desde la última página guardada |
-| FE-05: un cursor inválido no elimina evidencia ni provoca duplicados | la corrida vuelve a su primera página sin borrar nada; lo releído trae la misma identidad (Message-ID) |
+| FE-05: un cursor inválido no elimina evidencia ni provoca duplicados | si el proveedor lo rechaza explícitamente, la corrida vuelve a su primera página sin borrar nada y lo releído trae la misma identidad (Message-ID); cualquier otro error sale con el avance intacto |
 
 ```
 leer_siguiente_lote(lector_gmail | lector_outlook, organizacion_id, cuenta_id, procesar)
@@ -86,15 +86,37 @@ lee la misma página. El cursor nunca queda por delante de lo procesado.
 ## Una página que el proveedor ya no acepta (FE-05)
 
 Un `pageToken` o una `@odata.nextLink` pueden vencer. Si el proveedor la
-rechaza (`ErrorDelProveedor`), o si ya no tiene forma de página de ese
-proveedor (`ValueError` del lector), la corrida vuelve a su **primera
-página, con el mismo tope**:
+**rechaza explícitamente**, el lector levanta `CursorRechazado` (código
+`cursor_rechazado`, en `lectura_correo.py`, hija de `ErrorDelProveedor`) y la
+corrida vuelve a su **primera página, con el mismo tope**:
 
 - no se borra nada: el avance solo sube `reinicios_por_pagina_invalida`;
 - se releen mensajes ya vistos, pero con la **misma identidad** (el
   Message-ID, S3-FE-06), que es la llave única de los candidatos: no se
   duplican;
 - si no había página guardada, el error no es del cursor y sale tal cual.
+
+Qué cuenta como rechazo explícito: la petición llevaba el cursor y el
+proveedor la rechazó como mal hecha. Lo único que cambia entre esa petición
+y la primera página, que el proveedor sí aceptó, es el cursor.
+
+| Proveedor | Rechazo del cursor |
+|---|---|
+| Gmail | 400 a `messages.list` con `pageToken` |
+| Outlook | 400 o 410 al seguir una `@odata.nextLink` |
+
+**Todo lo demás sale tal cual, con el avance intacto y sin contar un
+reinicio**: un JSON ilegible, una lista mal formada, el detalle de un mensaje
+que no se pudo leer, la API sin habilitar, una página que el propio lector no
+reconoce (`ValueError`). Antes se reiniciaba con cualquier
+`ErrorDelProveedor` o `ValueError`. La revisión de #189 (P2) mostró el
+problema: con una página B válida que fallaba por otra cosa, se procesaba de
+nuevo la primera, se volvía a guardar B y la llamada respondía éxito; la
+siguiente hacía lo mismo, para siempre, sin que nadie viera el error.
+
+Y si al reiniciar el proveedor entrega como página siguiente **la misma que
+acaba de rechazar**, reiniciar no lleva a ninguna parte: no se procesa ni se
+guarda nada y sale `ErrorDelProveedor` con código `reinicio_sin_avance`.
 
 ## Dos workers con la misma cuenta
 

@@ -39,11 +39,22 @@ lote» es eso: el cursor nunca queda por delante de lo procesado.
 
 ── Una página que el proveedor ya no acepta (FE-05) ────────────────────────
 Un `pageToken` o una `@odata.nextLink` pueden vencer. Si el proveedor la
-rechaza, la corrida vuelve a su **primera** página con el mismo tope: se
-releen mensajes ya vistos, pero no se pierde ninguno, y no se borra nada. Que
-releer no duplique es de la llave única de candidatos (organización, origen,
-identificador), que en correo es el Message-ID (S3-FE-06). Se cuenta en
-`reinicios_por_pagina_invalida`.
+rechaza (`CursorRechazado`, y solo eso), la corrida vuelve a su **primera**
+página con el mismo tope: se releen mensajes ya vistos, pero no se pierde
+ninguno, y no se borra nada. Que releer no duplique es de la llave única de
+candidatos (organización, origen, identificador), que en correo es el
+Message-ID (S3-FE-06). Se cuenta en `reinicios_por_pagina_invalida`.
+
+Cualquier otro error con una página guardada —un JSON ilegible, una lista
+mal formada, el detalle de un mensaje que no se pudo leer, una página que el
+lector no reconoce (`ValueError`)— sale tal cual, con el avance intacto y sin
+contar un reinicio. Antes se reiniciaba con cualquier `ErrorDelProveedor`, y
+una página buena que fallaba por otra cosa se cambiaba por la primera una y
+otra vez, respondiendo éxito (revisión de #189, P2).
+
+Si al reiniciar el proveedor entrega como página siguiente la misma que
+acaba de rechazar, reiniciar no lleva a ninguna parte: no se procesa ni se
+guarda nada y sale un error.
 
 ── Dos workers con la misma cuenta ─────────────────────────────────────────
 El cursor se lee al empezar y se vuelve a mirar, con la fila tomada, antes de
@@ -64,7 +75,7 @@ from typing import Callable
 from django.db import transaction
 from django.utils import timezone
 
-from .lectura_correo import ErrorDelProveedor, FiltroCorreos, PaginaDeMensajes
+from .lectura_correo import CursorRechazado, ErrorDelProveedor, FiltroCorreos, PaginaDeMensajes
 from .models import AvanceDeLectura, CuentaConectada
 from .renovacion import leer_con_renovacion
 
@@ -131,14 +142,19 @@ def leer_siguiente_lote(
     reiniciada = False
     try:
         pagina = leer_con_renovacion(lector, organizacion_id=organizacion_id, cuenta_id=cuenta_id, **lectura)
-    except (ErrorDelProveedor, ValueError):
+    except CursorRechazado as rechazo:
         if not avance.pagina:
             # Sin página guardada no hay cursor que culpar: el error es otro.
             raise
-        # La página guardada ya no sirve (venció, o no es una página de este
-        # proveedor). Se vuelve al inicio de la MISMA corrida.
+        # El proveedor rechazó la página guardada. Se vuelve al inicio de la
+        # MISMA corrida.
         lectura["pagina"] = None
         pagina = leer_con_renovacion(lector, organizacion_id=organizacion_id, cuenta_id=cuenta_id, **lectura)
+        if pagina.siguiente_pagina == avance.pagina:
+            raise ErrorDelProveedor(
+                "El proveedor entrega como página siguiente la misma que acaba de rechazar: reiniciar no avanza.",
+                codigo="reinicio_sin_avance",
+            ) from rechazo
         reiniciada = True
 
     with transaction.atomic():

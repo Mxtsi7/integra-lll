@@ -128,6 +128,26 @@ class ErrorDelProveedor(ErrorDeLectura):
     codigo = "error_del_proveedor"
 
 
+class CursorRechazado(ErrorDelProveedor):
+    """El proveedor rechazó la página siguiente que se le mandó (un
+    `pageToken` de Gmail, una `@odata.nextLink` de Graph): venció o ya no la
+    reconoce. Seguir con ella no sirve; empezar de nuevo la consulta, sí.
+
+    Es lo único que reinicia una corrida de S3-FE-05. Cualquier otro
+    `ErrorDelProveedor` —un JSON ilegible, una lista mal formada, el detalle
+    de un mensaje que no se pudo leer— no dice nada del cursor y sale tal
+    cual, con el avance intacto. Antes se reiniciaba con cualquiera, y una
+    página válida que fallaba por otra cosa se reemplazaba una y otra vez por
+    la primera sin avisar (revisión de #189, P2).
+
+    Lo levanta el lector solo cuando la petición llevaba un cursor y el
+    proveedor la rechazó como petición mal hecha: lo único que cambia entre
+    esa petición y la primera página, que el proveedor sí aceptó, es el
+    cursor."""
+
+    codigo = "cursor_rechazado"
+
+
 # ── lo que se pide y lo que se devuelve ─────────────────────────────────────
 
 

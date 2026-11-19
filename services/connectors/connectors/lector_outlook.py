@@ -44,6 +44,7 @@ from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe
     PALABRAS_DE_COBRO,
     AutorizacionRechazada,
     CuentaNoDisponible,
+    CursorRechazado,
     ErrorDeLectura,
     ErrorDelProveedor,
     ErrorTransitorio,
@@ -77,6 +78,11 @@ _SIN_BUZON = {"MailboxNotEnabledForRESTAPI", "MailboxNotSupportedForRESTAPI", "R
 
 #: Tope para `Retry-After`: un valor absurdo no deja un worker dormido un día.
 _ESPERA_MAXIMA = 3600
+
+#: Cómo rechaza Graph una página siguiente que ya no sirve: como petición mal
+#: hecha (400) o como algo que ya no existe (410, lo que usa para un estado de
+#: sincronización vencido). Solo cuenta si se seguía una página.
+_CURSOR_RECHAZADO = {400, 410}
 
 
 # ── la búsqueda, la página y la cuenta ──────────────────────────────────────
@@ -295,6 +301,10 @@ def _pedir(url: str, token: str, parametros: dict | None) -> dict:
             codigo="cuota_excedida" if estado == 429 else "falla_del_proveedor",
             reintentar_en=_reintentar_en(respuesta),
         )
+    if parametros is None and estado in _CURSOR_RECHAZADO:
+        # Se seguía una `@odata.nextLink` que Graph armó con una consulta que
+        # ya aceptó: lo que rechaza es la página (S3-FE-05).
+        raise CursorRechazado(f"Graph rechazó la página siguiente ({detalle}).")
     raise ErrorDelProveedor(f"Graph rechazó la consulta ({detalle}).")
 
 

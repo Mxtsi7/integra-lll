@@ -56,6 +56,7 @@ from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe
     PALABRAS_DE_COBRO,
     AutorizacionRechazada,
     CuentaNoDisponible,
+    CursorRechazado,
     ErrorDeLectura,
     ErrorDelProveedor,
     ErrorTransitorio,
@@ -244,6 +245,10 @@ def _pedir(url: str, token: str, parametros: dict) -> dict:
         )
     if estado == 404 and url != URL_MENSAJES:
         raise _MensajeYaNoExiste()
+    if estado == 400 and url == URL_MENSAJES and parametros.get("pageToken"):
+        # La lista con la misma consulta ya se aceptó en la primera página:
+        # lo que Google rechaza es el `pageToken` (S3-FE-05).
+        raise CursorRechazado(f"Gmail rechazó la página siguiente (400{', ' + razon if razon else ''}).")
     if estado == 429:
         raise ErrorTransitorio("Gmail pidió bajar el ritmo (429).", codigo="cuota_excedida")
     if estado >= 500:

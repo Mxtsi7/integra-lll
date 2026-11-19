@@ -31,6 +31,7 @@ from connectors.lector_outlook import (
     URL_MENSAJES,
     AutorizacionRechazada,
     CuentaNoDisponible,
+    CursorRechazado,
     ErrorDelProveedor,
     ErrorTransitorio,
     FiltroCorreos,
@@ -407,7 +408,38 @@ class TestRechazoYErrores:
         self._falla(graph, _Respuesta(estado, ValueError("html")), ErrorTransitorio, "falla_del_proveedor")
 
     def test_400_es_permanente(self, claves, graph):
-        self._falla(graph, _Respuesta(400, error_graph("InefficientFilter")), ErrorDelProveedor, "error_del_proveedor")
+        error = self._falla(graph, _Respuesta(400, error_graph("InefficientFilter")), ErrorDelProveedor,
+                            "error_del_proveedor")
+        assert not isinstance(error, CursorRechazado)  # no se seguía ninguna página
+
+    @pytest.mark.parametrize("estado, codigo_graph", [(400, "ErrorInvalidRequest"), (410, "SyncStateNotFound")])
+    def test_un_rechazo_de_la_pagina_siguiente_es_el_cursor_rechazado(self, claves, graph, estado, codigo_graph):
+        """Es lo único con que S3-FE-05 reinicia una corrida (revisión de
+        #189, P2): Graph armó esa página con una consulta que ya aceptó."""
+        cuenta = outlook()
+        graph.responde(_Respuesta(estado, error_graph(codigo_graph)))
+        with pytest.raises(CursorRechazado) as error:
+            leer(cuenta, pagina=SIGUIENTE)
+        assert error.value.codigo == "cursor_rechazado"
+        assert TOKEN not in str(error.value) and "skip" not in str(error.value)
+
+    @pytest.mark.parametrize("respuesta", [
+        _Respuesta(200, ValueError("no es JSON")),
+        _Respuesta(200, ["una", "lista"]),
+        _Respuesta(200, {"value": "no es una lista"}),
+        _Respuesta(404, error_graph("ErrorItemNotFound")),
+        _Respuesta(404, error_graph("MailboxNotEnabledForRESTAPI")),
+    ], ids=["no-es-json", "no-es-objeto", "value-no-es-lista", "404", "sin-buzon"])
+    def test_otro_error_en_la_pagina_siguiente_no_es_un_cursor_rechazado(self, claves, graph, respuesta):
+        cuenta = outlook()
+        graph.responde(respuesta)
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, pagina=SIGUIENTE)
+        assert not isinstance(error.value, CursorRechazado)
+
+    def test_un_410_en_la_primera_pagina_no_es_un_cursor_rechazado(self, claves, graph):
+        error = self._falla(graph, _Respuesta(410, error_graph("Gone")), ErrorDelProveedor, "error_del_proveedor")
+        assert not isinstance(error, CursorRechazado)
 
     def test_codigo_de_graph_con_texto_raro_no_se_copia(self, claves, graph):
         error = self._falla(graph, _Respuesta(400, error_graph(f"x {TOKEN}")), ErrorDelProveedor, "error_del_proveedor")
