@@ -5,10 +5,12 @@ mandarlo. Lo demás —preferencias, descanso, cuota, reintentos, qué se anota�
 lo decide `entregas.py`, igual para todos.
 
 ── El correo ────────────────────────────────────────────────────────────────
-Es el canal acordado: RF-09 dice que «el correo siempre está disponible como
-canal; el push es adicional en el móvil», `CANALES_HABILITADOS` trae `email`
-por omisión desde FE-21, y `.env.example` ya tiene la sección «Correo
-(servicios auth y notifications)». Se manda con el backend de correo de
+Es el canal que respaldan los documentos: RF-09 dice que «el correo siempre
+está disponible como canal; el push es adicional en el móvil»,
+`CANALES_HABILITADOS` trae `email` por omisión desde FE-21, y `.env.example`
+ya tiene la sección «Correo (servicios auth y notifications)». No hay un
+acuerdo escrito propio de S3-FE-21: lo valida quien recibe la entrega. De
+dónde sale la DIRECCIÓN tampoco está acordado (ver `DireccionCorreo`). Se manda con el backend de correo de
 Django y las MISMAS variables que usa auth para recuperar la contraseña
 (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`,
 `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `EMAIL_TIMEOUT`, `DEFAULT_FROM_EMAIL`).

@@ -500,17 +500,30 @@ class EventoRecibido(ModeloTenant):
 class DireccionCorreo(ModeloTenant):
     """A qué dirección escribirle a cada persona (S3-FE-21).
 
-    ── De dónde sale ────────────────────────────────────────────────────────
+    ── De dónde sale: NO HAY CONTRATO ACORDADO ──────────────────────────────
     El correo de una persona vive en el esquema de `auth` y ningún servicio
-    consulta el de otro (ADR-002). El catálogo ya acordó cómo llega:
-    `usuario.creado`, que publica auth con `usuario_id`, `email` y `rol` y
-    que escucha notifications (`shared/events/catalogo.md`, «Publica auth»).
-    Esta tabla es lo que guarda ese consumidor.
+    consulta el de otro (ADR-002). Las dos fuentes posibles están abiertas:
 
-    HOY NADIE LA LLENA: auth todavía no publica `usuario.creado` y el
-    consumidor no existe. Mientras tanto, una entrega por correo sin fila
-    acá termina en `fallida` con `sin_direccion`: un error explícito, no un
-    envío inventado ni una entrega dada por hecha.
+    · `usuario.creado`. El catálogo (`shared/events/catalogo.md`, «Publica
+      auth») lo describe con `usuario_id`, `email` y `rol`, escuchado por
+      notifications, y esta tabla es la forma de lo que guardaría ese
+      consumidor. Pero MX-21 (`docs/arquitectura/MX-21-contratos-rabbitmq.md`,
+      «Transporte y tratamiento de fallos») dice «No transportar tokens,
+      contraseñas, correos ni cuerpos de mensajes». Las dos reglas no pueden
+      valer a la vez: es un conflicto, no un acuerdo.
+    · Una consulta interna firmada a auth al momento de reclamar, como la de
+      la limpieza (MX-07). No guarda correos acá ni choca con MX-21, pero
+      auth no la expone.
+
+    Lo deciden Maxi y quien lleve auth. Si gana la consulta, cambian
+    `CanalCorreo.destino` y `PreferenciaNotificacion.de_la_organizacion`, y
+    esta tabla se retira.
+
+    HOY NADIE LA LLENA, fuera de las pruebas. Mientras tanto, una entrega por
+    correo sin fila acá termina en `fallida` con `sin_direccion`: un error
+    explícito, no un envío inventado ni una entrega dada por hecha. Por lo
+    mismo, `despachar_alertas` no debe programarse antes de resolver esto:
+    cada correo que tome quedaría fallido para siempre.
 
     Es dato personal: se borra con la persona (limpieza de usuario) y con la
     organización, igual que las preferencias.
