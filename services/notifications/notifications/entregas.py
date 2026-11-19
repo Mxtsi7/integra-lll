@@ -231,7 +231,7 @@ class Reclamo:
 def elegibles(ahora: dt.datetime):
     """Las que se pueden intentar ahora, incluidas las de un reclamo vencido."""
     return EntregaAlerta.objects.filter(
-        Q(estado__in=[Estado.PENDIENTE, Estado.DIFERIDA, Estado.REINTENTO], proximo_intento_en__lte=ahora)
+        Q(estado__in=EntregaAlerta.EN_ESPERA, proximo_intento_en__lte=ahora)
         | Q(estado=Estado.ENVIANDO, reclamada_hasta__lte=ahora)
     )
 

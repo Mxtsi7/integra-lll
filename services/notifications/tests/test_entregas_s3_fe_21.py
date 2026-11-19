@@ -680,6 +680,33 @@ class TestReintentos:
         assert "ana@ejemplo.cl" not in salida.getvalue() + errores.getvalue()
 
 
+class TestEstados:
+    """En espera, saliendo o terminada: cada estado está en un solo grupo."""
+
+    def test_los_grupos_cubren_todos_los_estados_sin_repetir(self):
+        en_espera, terminales = set(EntregaAlerta.EN_ESPERA), set(EntregaAlerta.TERMINALES)
+        assert not en_espera & terminales
+        assert Estado.ENVIANDO not in en_espera | terminales
+        assert en_espera | terminales | {Estado.ENVIANDO} == set(Estado)
+
+    @pytest.mark.parametrize("estado", EntregaAlerta.TERMINALES)
+    def test_de_un_estado_terminal_no_se_sale(self, estado, mailoutbox):
+        persona("42")
+        nueva_alerta()
+        EntregaAlerta.objects.update(estado=estado, proximo_intento_en=a_las(9))
+        assert not entregas.elegibles(a_las(10)).exists()
+        assert entregas.despachar(ahora=a_las(10)).conteo == {}
+        assert mailoutbox == []
+
+    @pytest.mark.parametrize("estado", EntregaAlerta.EN_ESPERA)
+    def test_uno_en_espera_se_intenta_cuando_llega_su_hora(self, estado):
+        persona("42")
+        nueva_alerta()
+        EntregaAlerta.objects.update(estado=estado, proximo_intento_en=a_las(10))
+        assert not entregas.elegibles(a_las(9, 59)).exists()
+        assert entregas.elegibles(a_las(10)).count() == 1
+
+
 class TestReclamoVencido:
     """El worker murió con la entrega en `enviando`."""
 

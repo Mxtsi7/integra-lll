@@ -575,7 +575,13 @@ class EntregaAlerta(ModeloTenant):
         # Ya no corresponde mandarla: la persona apagó el aviso o el canal.
         DESCARTADA = "descartada", "Descartada"
 
-    #: Los estados de los que ya no se sale.
+    #: Las que esperan su `proximo_intento_en` para intentarse. Es el filtro
+    #: de `entregas.elegibles()`, junto con las `enviando` de reclamo vencido.
+    EN_ESPERA = (Estado.PENDIENTE, Estado.DIFERIDA, Estado.REINTENTO)
+    #: Los estados de los que ya no se sale. Con `EN_ESPERA` y `ENVIANDO`
+    #: cubren todos los estados sin repetir ninguno, y ninguno es elegible:
+    #: lo exigen las pruebas, para que un estado nuevo no quede fuera de los
+    #: dos grupos sin que nadie lo note.
     TERMINALES = (Estado.ACEPTADA, Estado.FALLIDA, Estado.AGOTADA, Estado.DESCARTADA)
 
     alerta = models.ForeignKey(
