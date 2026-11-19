@@ -81,10 +81,18 @@ def identificador_de(mensaje: MensajeCorreo) -> str:
     """El identificador estable del mensaje. Ver la cabecera del módulo."""
     if mensaje.message_id:
         return PREFIJO_MESSAGE_ID + hashlib.sha256(mensaje.message_id.encode("utf-8")).hexdigest()
-    if not mensaje.proveedor_correo or not mensaje.id_mensaje:
+    return identificador_del_proveedor(mensaje.proveedor_correo, mensaje.cuenta_id, mensaje.id_mensaje)
+
+
+def identificador_del_proveedor(proveedor_correo: str, cuenta_id, id_mensaje: str) -> str:
+    """El respaldo sin Message-ID: único dentro de un buzón, por eso lleva la
+    cuenta. Aparte porque S3-FE-09 también lo usa para identificar un mensaje
+    que la lista nombró pero no se pudo leer (`MensajeOmitido`), que no trae
+    más que el `id` del proveedor."""
+    if not proveedor_correo or not id_mensaje:
         raise ValueError("el mensaje no trae ni Message-ID ni identificador del proveedor")
-    llave = f"{mensaje.cuenta_id}\x1f{mensaje.id_mensaje}"
-    return f"{mensaje.proveedor_correo}:" + hashlib.sha256(llave.encode("utf-8")).hexdigest()
+    llave = f"{cuenta_id}\x1f{id_mensaje}"
+    return f"{proveedor_correo}:" + hashlib.sha256(llave.encode("utf-8")).hexdigest()
 
 
 def _partes_del_remitente(remitente: str) -> tuple[str, str, str]:

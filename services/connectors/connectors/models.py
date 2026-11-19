@@ -638,17 +638,30 @@ class Importacion(ModeloTenant):
             self.terminada_en = ahora
         return True
 
-    def anotar_error(self, codigo: str, mensaje: str, fila: int | None = None) -> None:
+    def anotar_error(
+        self,
+        codigo: str,
+        mensaje: str,
+        fila: int | None = None,
+        *,
+        identificador_origen: str | None = None,
+    ) -> None:
         """Suma un error. Guarda los primeros y cuenta todos.
 
         No guarda: el llamador decide cuándo persistir, porque anotar fila por
         fila haría un UPDATE por error.
+
+        `identificador_origen` lo pasa solo la lectura de correo (S3-FE-09):
+        un correo no tiene fila, y es lo que le permite no anotar dos veces el
+        mismo mensaje si una página se vuelve a leer. Sin él, la entrada queda
+        con las tres claves de siempre.
         """
         self.errores_totales += 1
         if len(self.errores) < self.MAXIMO_ERRORES:
-            self.errores.append(
-                {"codigo": codigo, "mensaje": mensaje[:200], "fila": fila}
-            )
+            error = {"codigo": codigo, "mensaje": mensaje[:200], "fila": fila}
+            if identificador_origen is not None:
+                error["identificador_origen"] = identificador_origen
+            self.errores.append(error)
 
     def confirmar_candidatos(self, *, cuando=None) -> bool:
         """Marca que la persona aceptó los candidatos (lo usará FE-11).
@@ -971,6 +984,33 @@ class CobroCandidato(ModeloTenant):
                 "El candidato se confirmó mientras se procesaba el rechazo."
             )
         return bool(cambiadas)
+
+    @classmethod
+    def guardar_sin_duplicar(cls, filas) -> None:
+        """Inserta las que no existan, en el orden de la llave única (S3-FE-17).
+
+        La usan los dos lectores: el CSV (S3-FE-10) y el correo (S3-FE-09).
+
+        ── `ignore_conflicts` ───────────────────────────────────────────────
+        La unicidad de (organización, origen, identificador) es lo que hace
+        idempotente volver a leer: un reintento choca con sus propias filas y
+        no las duplica, y un cobro que ya estaba —propuesto, confirmado o
+        rechazado— no se vuelve a proponer. No dice cuántas insertó: quien
+        necesite el número lo cuenta después.
+
+        ── En el orden de la llave, no en el de la lectura ─────────────────
+        Dos lecturas que se traslapan comparten cobros, y pueden traerlos en
+        orden contrario. Si cada worker insertara en su orden, uno tomaría X y
+        esperaría Y mientras el otro tomó Y y espera X: PostgreSQL mata a uno
+        y esa lectura entera se revierte. Insertando todos en el MISMO orden
+        el que llega segundo espera al primero y ya no hay ciclo. Lo encontró
+        la revisión de #171.
+        """
+        ordenadas = sorted(
+            filas,
+            key=lambda fila: (str(fila.organizacion_id), fila.origen, fila.identificador_origen),
+        )
+        cls.objects.bulk_create(ordenadas, ignore_conflicts=True)
 
     @classmethod
     def desde_candidato(cls, candidato, *, importacion: Importacion) -> "CobroCandidato":
