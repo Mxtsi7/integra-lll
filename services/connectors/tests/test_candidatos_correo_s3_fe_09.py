@@ -121,7 +121,7 @@ class TestCandidatoTrazableYPendiente:
         assert candidato.importe == Decimal("9990") and candidato.moneda == "CLP"
         # La del cobro, no la del próximo ciclo ni la de recepción.
         assert candidato.fecha == date(2026, 10, 1)
-        assert resultado.candidatos_nuevos == 1
+        assert (resultado.candidatos_nuevos, resultado.ya_guardados) == (1, 0)
         importacion.refresh_from_db()
         assert (importacion.candidatos_detectados, importacion.filas_procesadas) == (1, 1)
 
@@ -455,10 +455,14 @@ class TestIdempotencia:
         primero = mensaje(cuenta, id_mensaje="en-recibidos", message_id="recibo-1@netflix.com")
         copia = mensaje(cuenta, id_mensaje="en-otra-carpeta", message_id="recibo-1@netflix.com")
 
+        lectura = leer(pagina(primero, copia), organizacion_id=str(ORG_A), cuenta_id=cuenta.pk,
+                       proveedor_correo="gmail")
         resultado = guardar_pagina(importacion, pagina(primero, copia))
 
+        assert [c.evidencia["id_mensaje"] for c in lectura.candidatos] == ["en-recibidos"]
         assert el_unico_candidato().evidencia["id_mensaje"] == "en-recibidos"
-        assert resultado.candidatos_nuevos == 1
+        # La copia no es un candidato "que ya estaba": es el mismo correo.
+        assert (resultado.candidatos_nuevos, resultado.ya_guardados) == (1, 0)
 
     def test_un_candidato_rechazado_no_se_vuelve_a_proponer(self, importacion, cuenta):
         guardar_pagina(importacion, pagina(mensaje(cuenta)))
