@@ -649,6 +649,27 @@ class TestCuotaDelPush:
         assert alerta.entregas.get(usuario_id="43").estado == Estado.ACEPTADA
         assert alerta.entregas.get(usuario_id="42").estado == Estado.DIFERIDA
 
+    def test_las_que_estan_saliendo_cuentan_para_la_cuota(self, push):
+        """Una reclamada que todavía no informa resultado puede salir: si no
+        contara, un segundo worker mandaría la tercera del día."""
+        persona("42", por_email=False, por_push=True)
+        self.aceptadas(a_las(10))
+        saliendo = nueva_alerta(ahora=a_las(15)).entregas.get()
+        otra = nueva_alerta(ahora=a_las(15)).entregas.get()
+        assert isinstance(entregas.reclamar(saliendo.pk, ahora=a_las(15)), entregas.Reclamo)
+        assert entregas.atender(otra.pk, ahora=a_las(15)) == entregas.DIFERIDA
+        otra.refresh_from_db()
+        assert otra.motivo == "cuota_diaria"
+
+    def test_un_reclamo_vencido_no_cuenta_para_la_cuota(self, push):
+        persona("42", por_email=False, por_push=True)
+        self.aceptadas(a_las(10))
+        muerta = nueva_alerta(ahora=a_las(15)).entregas.get()
+        otra = nueva_alerta(ahora=a_las(15)).entregas.get()
+        entregas.reclamar(muerta.pk, ahora=a_las(15))
+        vencido = a_las(15) + entregas.DURACION_RECLAMO
+        assert entregas.atender(otra.pk, ahora=vencido) == entregas.ACEPTADA
+
     def test_el_correo_no_tiene_cuota(self, mailoutbox):
         persona("42")
         for hora in (10, 11, 12, 13):

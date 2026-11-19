@@ -276,3 +276,34 @@ def test_una_limpieza_mientras_A_tiene_a_la_persona_no_se_traba(monkeypatch, lim
     # A alcanzó a reclamarla antes de la limpieza y la mandó; lo que anote
     # después cae sobre una fila que ya no existe y no la recrea.
     assert hilo_a.resultado in (entregas.ACEPTADA, entregas.TARDIA)
+
+
+def test_un_resultado_tardio_espera_al_que_retoma_y_no_lo_pisa(monkeypatch, buzon):
+    """El reclamo de un worker venció y A la está retomando. Llega tarde el
+    resultado del primero: tiene que esperar a A (la entrega está bloqueada)
+    y, cuando entra, el reclamo ya no es el suyo. Sin el bloqueo de la
+    entrega, el resultado viejo se anotaba y A lo pisaba con `enviando`."""
+    persona("42")
+    nueva_alerta()
+    viejo = entregas.reclamar(la_entrega().pk, ahora=a_las(10))
+    freno = Freno()
+    monkeypatch.setattr(canales.CanalCorreo, "destino", freno.envolver(canales.CanalCorreo.destino))
+    vence = a_las(10) + entregas.DURACION_RECLAMO
+
+    hilo_a = Hilo("A", lambda: entregas.atender(viejo.entrega_id, ahora=vence))
+    hilo_b = Hilo("B", lambda: entregas.anotar_aceptada(viejo, {"message_id": "viejo"}, ahora=vence))
+    try:
+        hilo_a.start()
+        assert freno.llego.wait(ESPERA), "A nunca llegó a retomarla"
+        hilo_b.start()
+        hasta_que_espere(hilo_b, "a que A suelte la entrega")
+    finally:
+        freno.soltar.set()
+    terminar(hilo_a, hilo_b)
+
+    assert hilo_b.resultado == entregas.TARDIA
+    assert hilo_a.resultado == entregas.ACEPTADA
+    entrega = la_entrega()
+    assert (entrega.estado, entrega.intentos) == (Estado.ACEPTADA, 2)
+    assert entrega.evidencia["message_id"] == entrega.message_id != "viejo"
+    assert len(buzon) == 1
