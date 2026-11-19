@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatearFecha, formatearMonto, TAMANO_PAGINA_CANDIDATOS, type CandidatoDetectado } from '@ojoalgasto/shared';
 import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
+import { Modal } from '../ui/Modal';
 import type { CargaCandidatos } from './cargaCandidatos';
 import type { AccionDeCandidato, DecisionesDeCandidatos, ResultadoDecisiones } from './decisionesCandidatos';
 import styles from './ListaCandidatos.module.css';
@@ -168,6 +169,8 @@ function BarraDeSeleccion({
   const sinProveedor = cuantos - confirmables;
   const accionEnCurso = decisiones?.accionEnCurso ?? null;
   const hayTandaEnCurso = accionEnCurso !== null;
+  // Rechazar es definitivo y no tiene vuelta: primero se pregunta, y solo Rechazar dentro de la pregunta lo manda.
+  const [preguntandoRechazo, setPreguntandoRechazo] = useState(false);
 
   // `indeterminate` no es un atributo de HTML: solo se puede poner por la propiedad.
   useEffect(() => {
@@ -207,13 +210,37 @@ function BarraDeSeleccion({
           <Boton
             variante="secundario"
             tamano="s"
-            onClick={alRechazar}
+            onClick={() => setPreguntandoRechazo(true)}
             disabled={cuantos === 0 || hayTandaEnCurso}
             cargando={accionEnCurso === 'rechazar'}
           >
             {textoDelBoton('rechazar', accionEnCurso === 'rechazar', cuantos)}
           </Boton>
         </>
+      )}
+      {preguntandoRechazo && (
+        <Modal
+          titulo={`¿${textoDelBoton('rechazar', false, cuantos)}?`}
+          descripcion="No se puede deshacer."
+          tipo="alerta"
+          alCerrar={() => setPreguntandoRechazo(false)}
+        >
+          <div className={styles.confirmacion}>
+            <Boton variante="secundario" tamano="s" data-autofocus onClick={() => setPreguntandoRechazo(false)}>
+              Cancelar
+            </Boton>
+            <Boton
+              variante="peligro"
+              tamano="s"
+              onClick={() => {
+                setPreguntandoRechazo(false);
+                alRechazar();
+              }}
+            >
+              Rechazar
+            </Boton>
+          </div>
+        </Modal>
       )}
     </div>
   );

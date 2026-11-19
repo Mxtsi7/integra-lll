@@ -85,7 +85,7 @@ export async function getCandidatos({
 /**
  * Por qué el servidor no confirma un cobro (409). Los códigos son estables
  * (S3-FE-15):
- * - `candidato_rechazado`: ya se descartó; para confirmarlo hay que volver a importar el archivo.
+ * - `candidato_rechazado`: ya se descartó; desde aquí no se puede confirmar.
  * - `servicio_sin_resolver`: no se reconoció el proveedor.
  * - `tipo_sin_regla`: no hay regla para el tipo de mensaje.
  */

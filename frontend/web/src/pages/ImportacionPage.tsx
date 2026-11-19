@@ -138,6 +138,12 @@ function BarraProgreso({ importacion: imp }: { importacion: Importacion }) {
 
 function Candidatos({ importacion: imp }: { importacion: Importacion }) {
   const anterior = imp.candidatos_detectados;
+  // Una reimportación cuenta solo los cobros nuevos: lo que no es cobro ni error ya estaba importado (doc 22).
+  const yaImportadas = imp.origen === 'csv' ? Math.max(0, (imp.filas_totales ?? 0) - anterior - imp.errores_totales) : 0;
+  const avisoYaImportadas =
+    yaImportadas === 1
+      ? '1 fila ya estaba importada de antes: no se repite.'
+      : `${yaImportadas.toLocaleString('es-CL')} filas ya estaban importadas de antes: no se repiten.`;
   if (imp.candidatos_confirmados) {
     return (
       <p className={styles.candidatos}>
@@ -146,7 +152,11 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
     );
   }
   if (anterior === 0) {
-    return <p className={styles.candidatos}>No encontramos cobros que parezcan suscripciones.</p>;
+    return (
+      <p className={styles.candidatos}>
+        {yaImportadas > 0 ? avisoYaImportadas : 'No encontramos cobros que parezcan suscripciones.'}
+      </p>
+    );
   }
   return (
     <div className={styles.candidatos}>
@@ -154,6 +164,7 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
         Encontramos {anterior === 1 ? '1 cobro posible' : `${anterior.toLocaleString('es-CL')} cobros posibles`}.{' '}
         <strong>Todavía no se creó ni cambió ninguna suscripción:</strong> primero los revisas y los confirmas.
       </p>
+      {yaImportadas > 0 && <p>{avisoYaImportadas}</p>}
       {/* El paso a la previsualización (FE-10) todavía no existe en la web. */}
       <Boton variante="secundario" tamano="s" disabled title="Muy pronto">
         Revisar cobros encontrados

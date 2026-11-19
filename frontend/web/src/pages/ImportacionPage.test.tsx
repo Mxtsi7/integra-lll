@@ -143,7 +143,7 @@ describe("Progreso de una importación (CH-27)", () => {
     expect(screen.getByText(/Confirmaste estos cobros el/)).toBeInTheDocument();
     cleanup();
 
-    getMock.mockResolvedValueOnce({ ...COMPLETADA, candidatos_detectados: 0 });
+    getMock.mockResolvedValueOnce({ ...COMPLETADA, candidatos_detectados: 0, filas_totales: 0 });
     await montar();
     expect(screen.getByText("No encontramos cobros que parezcan suscripciones.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revisar cobros encontrados" })).not.toBeInTheDocument();
@@ -328,6 +328,22 @@ describe("Cobros encontrados y problemas de un archivo (S3-CH-06)", () => {
     expect(candidatosMock).not.toHaveBeenCalled();
     expect(screen.queryByRole("heading", { name: "Cobros encontrados" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "2 problemas" })).toBeInTheDocument();
+  });
+
+  it("una reimportación de 10 filas con 2 cobros nuevos y sin errores dice que 8 filas ya estaban importadas", async () => {
+    getMock.mockResolvedValue({ ...COMPLETADA, filas_totales: 10, candidatos_detectados: 2, errores: [], errores_totales: 0 });
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText("8 filas ya estaban importadas de antes: no se repiten.")).toBeInTheDocument();
+  });
+
+  it("subir dos veces la misma cartola de 10 filas no dice «No encontramos cobros»: dice que las 10 ya estaban", async () => {
+    getMock.mockResolvedValue({ ...COMPLETADA, filas_totales: 10, candidatos_detectados: 0, errores: [], errores_totales: 0 });
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText("10 filas ya estaban importadas de antes: no se repiten.")).toBeInTheDocument();
+    expect(screen.queryByText(/No encontramos cobros/)).not.toBeInTheDocument();
   });
 
   it("mientras la importación sigue en curso no se piden los cobros", async () => {

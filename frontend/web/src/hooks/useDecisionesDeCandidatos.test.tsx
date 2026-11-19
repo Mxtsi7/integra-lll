@@ -9,6 +9,7 @@ import {
   MENSAJE_COBRO_NO_ENCONTRADO,
   MENSAJE_ERROR_AL_CONFIRMAR,
   MENSAJE_ERROR_AL_RECHAZAR,
+  MENSAJE_SIN_ACCESO,
   MENSAJE_YA_CONFIRMADO,
 } from '../components/candidatos/decisionesCandidatos';
 import { AuthProvider } from '../context/AuthContext';
@@ -229,7 +230,7 @@ describe('rechazar cobros (S3-CH-09)', () => {
 
 describe('fallos parciales (S3-CH-08)', () => {
   it.each([
-    ['candidato_rechazado', 'Está rechazado. Para confirmarlo hay que volver a importar el archivo.'],
+    ['candidato_rechazado', 'Ya está rechazado y esa decisión no se puede deshacer desde aquí.'],
     ['servicio_sin_resolver', 'No se reconoció el proveedor, así que no se puede crear la suscripción.'],
     ['tipo_sin_regla', 'No hay una regla para este tipo de cobro.'],
   ])('un 409 %s dice su motivo, sin repetir el texto técnico del servidor', async (codigo, mensajeEsperado) => {
@@ -246,6 +247,8 @@ describe('fallos parciales (S3-CH-08)', () => {
     ['un 404', new ErrorDeApi('No encontrado.', 404), MENSAJE_COBRO_NO_ENCONTRADO],
     ['un 500', new ErrorDeApi('Error interno.', 500), MENSAJE_ERROR_AL_CONFIRMAR],
     ['un 409 con un código que no se conoce', new ErrorDeApi('Otro.', 409, { codigo: ['codigo_nuevo'] }), MENSAJE_ERROR_AL_CONFIRMAR],
+    ['un 403', new ErrorDeApi('Sin permiso.', 403), MENSAJE_SIN_ACCESO],
+    ['un 410 de organización eliminada', new ErrorDeApi('Eliminada.', 410, { codigo: ['organizacion_eliminada'] }), MENSAJE_SIN_ACCESO],
     ['un 409 de rechazar', new ErrorDeApi('Ya confirmado.', 409, { codigo: ['candidato_ya_confirmado'] }), MENSAJE_ERROR_AL_CONFIRMAR],
   ])('%s da su mensaje', async (_descripcion, error, mensajeEsperado) => {
     simularRed({ 'c-1': error });
@@ -298,6 +301,8 @@ describe('fallos parciales (S3-CH-09)', () => {
     ['sin red', new TypeError('Failed to fetch'), MENSAJE_SIN_RED],
     ['un 404', new ErrorDeApi('No encontrado.', 404), MENSAJE_COBRO_NO_ENCONTRADO],
     ['un 500', new ErrorDeApi('Error interno.', 500), MENSAJE_ERROR_AL_RECHAZAR],
+    ['un 403 al rechazar', new ErrorDeApi('Sin permiso.', 403), MENSAJE_SIN_ACCESO],
+    ['un 410 de organización eliminada al rechazar', new ErrorDeApi('Eliminada.', 410, { codigo: ['organizacion_eliminada'] }), MENSAJE_SIN_ACCESO],
     ['un 409 con un código que no se conoce', new ErrorDeApi('Otro.', 409, { codigo: ['codigo_nuevo'] }), MENSAJE_ERROR_AL_RECHAZAR],
     ['un 409 de confirmar', new ErrorDeApi('Rechazado.', 409, { codigo: ['candidato_rechazado'] }), MENSAJE_ERROR_AL_RECHAZAR],
   ])('%s al rechazar da su mensaje', async (_descripcion, error, mensajeEsperado) => {
@@ -351,6 +356,21 @@ describe('doble envío y resultado (S3-CH-08 y S3-CH-09)', () => {
     expect(rechazos()).toHaveLength(0);
     expect(result.current.accionEnCurso).toBe('confirmar');
     await act(async () => respuesta.resolver({ id: 'c-1' }));
+  });
+
+  it('mientras rechaza no se puede confirmar: una sola tanda a la vez entre las dos acciones', async () => {
+    const respuesta = diferida<unknown>();
+    simularRed({ 'c-1': respuesta.promesa });
+    const { result } = montar();
+    await iniciarRechazo(result, [SPOTIFY]);
+
+    await act(async () => {
+      result.current.confirmar([NETFLIX]);
+    });
+
+    expect(confirmaciones()).toHaveLength(0);
+    expect(result.current.accionEnCurso).toBe('rechazar');
+    await act(async () => respuesta.resolver({ id: 'c-1', estado: 'rechazado' }));
   });
 
   it('terminada la tanda se puede confirmar otra', async () => {

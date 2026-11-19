@@ -1,20 +1,19 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CandidatoDetectado } from '@ojoalgasto/shared';
 import { ErrorDeApi, pedir } from '../../../../shared/src/api/cliente';
 import { guardarTokens } from '../../../../shared/src/auth';
 import { AuthProvider } from '../../context/AuthContext';
 import { ToastProvider } from '../../context/ToastContext';
-import { useDecisionesDeCandidatos } from '../../hooks/useDecisionesDeCandidatos';
-import { useSeleccionCandidatos } from '../../hooks/useSeleccionCandidatos';
 import { candidatoDePrueba, paginaDeCandidatosDePrueba } from '../../test/candidatosDePrueba';
 import { crearTokenDePrueba } from '../../test/tokensDePrueba';
 import type { CargaCandidatos } from './cargaCandidatos';
 import type { DecisionesDeCandidatos, ResultadoDecisiones } from './decisionesCandidatos';
 import { ListaCandidatos } from './ListaCandidatos';
+import { RevisionDeCandidatos } from './RevisionDeCandidatos';
 import type { SeleccionDeCandidatos } from './seleccionCandidatos';
 
 // Solo se simula la red (pedir). La lista, la selección y las decisiones son las reales.
@@ -133,15 +132,62 @@ describe('los botones Confirmar y Rechazar, con una decisión inventada (S3-CH-0
       expect(botonRechazar()).toHaveTextContent('Rechazar 1 cobro');
     });
 
-    it('al pulsar Rechazar pide rechazar una vez y el foco queda en la lista', () => {
-      const decisiones = decisionesFalsas();
-      montar({ seleccion: seleccionConIds(['c-1']), decisiones });
+    describe('rechazar pide confirmación antes de mandar nada', () => {
+      const pregunta = () => screen.getByRole('alertdialog', { name: '¿Rechazar 2 cobros?' });
 
-      fireEvent.click(botonRechazar());
+      it('al pulsar Rechazar pregunta cuántos cobros se rechazan y no rechaza nada todavía', () => {
+        const decisiones = decisionesFalsas();
+        montar({ seleccion: seleccionConIds(['c-1', 'c-2']), decisiones });
 
-      expect(decisiones.alRechazar).toHaveBeenCalledTimes(1);
-      expect(decisiones.alConfirmar).not.toHaveBeenCalled();
-      expect(lista()).toHaveFocus();
+        fireEvent.click(botonRechazar());
+
+        expect(within(pregunta()).getByText('No se puede deshacer.')).toBeInTheDocument();
+        expect(decisiones.alRechazar).not.toHaveBeenCalled();
+      });
+
+      it('el foco de la pregunta empieza en Cancelar, no en Rechazar', () => {
+        montar({ seleccion: seleccionConIds(['c-1', 'c-2']) });
+
+        fireEvent.click(botonRechazar());
+
+        expect(within(pregunta()).getByRole('button', { name: 'Cancelar' })).toHaveFocus();
+      });
+
+      it('Cancelar cierra la pregunta sin rechazar y el foco vuelve al botón Rechazar', () => {
+        const decisiones = decisionesFalsas();
+        montar({ seleccion: seleccionConIds(['c-1', 'c-2']), decisiones });
+        botonRechazar().focus();
+        fireEvent.click(botonRechazar());
+
+        fireEvent.click(within(pregunta()).getByRole('button', { name: 'Cancelar' }));
+
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+        expect(decisiones.alRechazar).not.toHaveBeenCalled();
+        expect(botonRechazar()).toHaveFocus();
+      });
+
+      it('Escape también cierra la pregunta sin rechazar', () => {
+        const decisiones = decisionesFalsas();
+        montar({ seleccion: seleccionConIds(['c-1', 'c-2']), decisiones });
+        fireEvent.click(botonRechazar());
+
+        fireEvent.keyDown(document, { key: 'Escape' });
+
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+        expect(decisiones.alRechazar).not.toHaveBeenCalled();
+      });
+
+      it('Rechazar dentro de la pregunta manda el rechazo una sola vez y el foco queda en la lista', () => {
+        const decisiones = decisionesFalsas();
+        montar({ seleccion: seleccionConIds(['c-1', 'c-2']), decisiones });
+        fireEvent.click(botonRechazar());
+
+        fireEvent.click(within(pregunta()).getByRole('button', { name: 'Rechazar' }));
+
+        expect(decisiones.alRechazar).toHaveBeenCalledTimes(1);
+        expect(decisiones.alConfirmar).not.toHaveBeenCalled();
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      });
     });
 
     it('mientras confirma, el botón lo dice; ninguna decisión se puede pulsar ni limpiar la selección', () => {
@@ -197,7 +243,7 @@ describe('los botones Confirmar y Rechazar, con una decisión inventada (S3-CH-0
           resultado: resultadoCon(
             'confirmar',
             hecho('c-1', 'Spotify'),
-            fallido('c-2', 'Netflix', 'Está rechazado. Para confirmarlo hay que volver a importar el archivo.'),
+            fallido('c-2', 'Netflix', 'Ya está rechazado y esa decisión no se puede deshacer desde aquí.'),
           ),
         }),
       });
@@ -206,7 +252,7 @@ describe('los botones Confirmar y Rechazar, con una decisión inventada (S3-CH-0
       expect(alerta).toBe(resultadoDeConfirmar());
       expect(alerta).toHaveTextContent('Confirmaste 1 de 2 cobros; el resto no se pudo.');
       expect(alerta).toHaveTextContent('Spotify: confirmado');
-      expect(alerta).toHaveTextContent('Netflix: Está rechazado. Para confirmarlo hay que volver a importar el archivo.');
+      expect(alerta).toHaveTextContent('Netflix: Ya está rechazado y esa decisión no se puede deshacer desde aquí.');
     });
 
     it.each([
@@ -315,6 +361,8 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
   let estadoEnServidor: Partial<Record<string, 'confirmado' | 'rechazado'>>;
   let fallos: Partial<Record<string, Error>>;
   let pendientes: Partial<Record<string, Promise<unknown>>>;
+  /** Los cobros de la importación tal como los dejó el servidor; la página se lee de aquí. */
+  let cobrosEnElServidor: CandidatoDetectado[];
 
   /** Lo que responde la API real: confirmar no deja rechazar y rechazar no deja confirmar un cobro ya decidido. */
   function respuestaDelServidor(id: string, accion: 'confirmar' | 'rechazar'): Promise<unknown> {
@@ -337,7 +385,11 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     estadoEnServidor = {};
     fallos = {};
     pendientes = {};
+    cobrosEnElServidor = [];
     vi.mocked(pedir).mockReset().mockImplementation((ruta: string) => {
+      if (String(ruta).startsWith('/candidatos/?')) {
+        return Promise.resolve(paginaDeCandidatosDePrueba({ count: cobrosEnElServidor.length, results: cobrosEnElServidor.map(comoLoDejoElServidor) }));
+      }
       const coincidencia = RUTA_DE_DECISION.exec(String(ruta));
       if (coincidencia === null) return Promise.resolve(PERSONA_ACTUAL);
       const [, id, accion] = coincidencia;
@@ -367,31 +419,10 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     return cobro;
   };
 
-  /** La lista de verdad con sus dos hooks. Después de decidir se vuelve a leer lo que el servidor tiene. */
-  function ListaCompleta({ cobros }: { cobros: CandidatoDetectado[] }) {
-    const [carga, setCarga] = useState<CargaCandidatos>(() => conLosCobros(...cobros));
-    const candidatos = carga.tipo === 'listo' ? carga.datos.results : null;
-    const seleccion = useSeleccionCandidatos(candidatos);
-    const { accionEnCurso, resultado, confirmar, rechazar, cerrarResultado } = useDecisionesDeCandidatos({
-      alTerminar: () => setCarga(conLosCobros(...cobros.map(comoLoDejoElServidor))),
-    });
-    const elegidos = (candidatos ?? []).filter((cobro) => seleccion.seleccionados.has(cobro.id));
-    const alConfirmar = () => void confirmar(elegidos.filter((cobro) => seleccion.idsParaConfirmar.includes(cobro.id)));
-    const alRechazar = () => void rechazar(elegidos);
-    return (
-      <ListaCandidatos
-        carga={carga}
-        pagina={1}
-        alCambiarPagina={() => {}}
-        alReintentar={() => {}}
-        seleccion={seleccion}
-        decisiones={{ accionEnCurso, resultado, alConfirmar, alRechazar, alCerrarResultado: cerrarResultado }}
-      />
-    );
-  }
-
+  /** La revisión de verdad: lee la página del servidor y, después de decidir, la vuelve a leer. */
   const montar = async (cobros: CandidatoDetectado[]) => {
-    render(<ListaCompleta cobros={cobros} />, { wrapper: Proveedores });
+    cobrosEnElServidor = cobros;
+    render(<RevisionDeCandidatos importacion="imp-1" />, { wrapper: Proveedores });
     await act(async () => {});
   };
 
@@ -491,6 +522,27 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     await act(async () => responder({ id: 'c-1' }));
   });
 
+  it('un doble clic en Rechazar manda un solo rechazo por cobro, aunque la pregunta ya se haya cerrado', async () => {
+    let responder!: (valor: unknown) => void;
+    pendientes['c-1'] = new Promise((alResponder) => {
+      responder = alResponder;
+    });
+    await montar([SPOTIFY]);
+    fireEvent.click(casillaDe(SPOTIFY));
+    fireEvent.click(botonRechazar());
+
+    await act(async () => {
+      fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rechazar' }));
+    });
+    // Mientras la tanda corre, el botón de la barra está deshabilitado: el segundo clic no llega a enviar nada.
+    await act(async () => {
+      fireEvent.click(botonRechazar());
+    });
+
+    expect(rechazos()).toEqual(['/candidatos/c-1/rechazar/']);
+    await act(async () => responder({ id: 'c-1', estado: 'rechazado' }));
+  });
+
   it('con un fallo parcial el que falló sigue pendiente y seleccionado: se puede reintentar sin volver a elegirlo', async () => {
     fallos['c-2'] = new ErrorDeApi('Error interno.', 500);
     await montar([SPOTIFY, NETFLIX]);
@@ -522,7 +574,7 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     await act(async () => fireEvent.click(botonConfirmar()));
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Spotify: Está rechazado. Para confirmarlo hay que volver a importar el archivo.'),
+      expect(screen.getByRole('alert')).toHaveTextContent('Spotify: Ya está rechazado y esa decisión no se puede deshacer desde aquí.'),
     );
     expect(screen.getByRole('alert')).not.toHaveTextContent('Texto técnico.');
     expect(itemDe('Netflix')).toHaveTextContent('Confirmado');
@@ -545,6 +597,7 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     fireEvent.click(casillaDe(SIN_PROVEEDOR));
 
     await act(async () => fireEvent.click(botonRechazar()));
+    await act(async () => fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rechazar' })));
 
     expect(rechazos()).toEqual(['/candidatos/c-1/rechazar/', '/candidatos/c-3/rechazar/']);
     expect(confirmaciones()).toHaveLength(0);
@@ -557,11 +610,13 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
   });
 
   it('rechazar un cobro que ya está confirmado en el servidor dice que ya está confirmado, y la lista se recarga con su estado real', async () => {
-    estadoEnServidor['c-1'] = 'confirmado';
     await montar([SPOTIFY, NETFLIX]);
+    // Mientras la lista está en pantalla, Spotify ya se confirmó en otra pestaña.
+    estadoEnServidor['c-1'] = 'confirmado';
     fireEvent.click(casillaDeLaPagina());
 
     await act(async () => fireEvent.click(botonRechazar()));
+    await act(async () => fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Rechazar' })));
 
     const alerta = screen.getByRole('alert');
     expect(alerta).toHaveTextContent('Rechazaste 1 de 2 cobros; el resto no se pudo.');

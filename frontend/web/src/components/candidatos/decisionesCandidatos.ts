@@ -32,12 +32,14 @@ export interface DecisionesDeCandidatos {
 }
 
 const MENSAJE_POR_CODIGO_DE_CONFIRMACION: Record<CodigoConfirmacionRechazada, string> = {
-  candidato_rechazado: 'Está rechazado. Para confirmarlo hay que volver a importar el archivo.',
+  candidato_rechazado: 'Ya está rechazado y esa decisión no se puede deshacer desde aquí.',
   servicio_sin_resolver: 'No se reconoció el proveedor, así que no se puede crear la suscripción.',
   tipo_sin_regla: 'No hay una regla para este tipo de cobro.',
 };
 export const MENSAJE_YA_CONFIRMADO = 'Ya está confirmado: desde aquí no se puede rechazar.';
-export const MENSAJE_COBRO_NO_ENCONTRADO = 'Ya no existe: puede que se haya eliminado la importación.';
+export const MENSAJE_COBRO_NO_ENCONTRADO = 'Ya no está disponible. Recarga la lista.';
+/** Un 403 (sin organización o sin permiso en el token) o un 410 (organización eliminada): reintentar no lo arregla. */
+export const MENSAJE_SIN_ACCESO = 'Tu sesión no tiene acceso a este cobro. Vuelve a iniciar sesión.';
 export const MENSAJE_ERROR_AL_CONFIRMAR = 'No se pudo confirmar. Inténtalo de nuevo.';
 export const MENSAJE_ERROR_AL_RECHAZAR = 'No se pudo rechazar. Inténtalo de nuevo.';
 
@@ -45,6 +47,7 @@ export const MENSAJE_ERROR_AL_RECHAZAR = 'No se pudo rechazar. Inténtalo de nue
 function mensajeDeFalloComun(error: unknown, mensajeGeneral: string): string {
   if (error instanceof TypeError) return MENSAJE_SIN_RED;
   if (error instanceof ErrorDeApi && error.status === 404) return MENSAJE_COBRO_NO_ENCONTRADO;
+  if (error instanceof ErrorDeApi && (error.status === 403 || error.status === 410)) return MENSAJE_SIN_ACCESO;
   return mensajeGeneral;
 }
 
