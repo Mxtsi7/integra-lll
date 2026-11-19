@@ -25,6 +25,11 @@ con las de omisión, que son las que la pantalla le muestra como suyas
 organización sin ninguna persona conocida recibe la alerta en la aplicación
 pero no tiene a quién mandarle un correo.
 
+El aviso de cobro, además, respeta la anticipación de CADA persona: la
+alerta es de la organización, pero a quien pidió 3 días no se le escribe con
+la ventana de 7 de otra, y cada persona recibe un solo aviso por cobro y
+canal (`dentro_de_su_anticipacion`, `_ya_avisados_del_mismo_cobro`).
+
 Cuando FE-24 emita `alerta.activada` y exista el consumidor de
 `notifications.entregas.v2`, ese consumidor llama a `planificar()` en vez del
 generador. La restricción única lo hace idempotente ante reentregas.
@@ -107,6 +112,9 @@ TARDIA = "tardia"          # el reclamo venció antes de anotar el resultado
 #: Por qué se descarta una entrega de quien no tiene fila de preferencias:
 #: las de omisión no piden ese canal. No es lo mismo que haberlo apagado.
 MOTIVO_POR_OMISION = "preferencia_por_omision"
+#: Por qué se descarta un aviso de cobro que ya no cae en la anticipación
+#: de la persona (la cambió después de planificar).
+MOTIVO_FUERA_DE_ANTICIPACION = "fuera_de_anticipacion"
 
 
 def zona_de(_usuario_id) -> dt.tzinfo:
@@ -123,6 +131,58 @@ def zona_de(_usuario_id) -> dt.tzinfo:
 # Planificar
 # ═══════════════════════════════════════════════════════════════════════
 
+def dentro_de_su_anticipacion(preferencia: PreferenciaNotificacion, alerta: Alerta) -> bool:
+    """¿El cobro ya entró en la anticipación que pidió ESTA persona?
+
+    La alerta de próximo cobro es de la organización (FE-16): el generador
+    la crea con la ventana más cercana que pidió cualquiera de sus personas.
+    El correo es personal. Con A en 3 días y B en 7, la alerta de 7 días es
+    la ventana de B: a A no se le escribe hasta que falten 3.
+
+    `dias_faltantes` es lo que faltaba cuando se generó la alerta. Que sea
+    menor o igual a la anticipación de la persona equivale a que su ventana
+    sea la de la alerta o una mayor: el generador elige la menor que ya
+    contiene al cobro. Los demás tipos no tienen anticipación por persona.
+    """
+    if alerta.tipo != Alerta.Tipo.PROXIMO_COBRO:
+        return True
+    faltan = (alerta.datos or {}).get("dias_faltantes")
+    if faltan is None:
+        return True
+    return faltan <= preferencia.dias_anticipacion
+
+
+def _ya_avisados_del_mismo_cobro(alerta: Alerta) -> set[tuple[str, str]]:
+    """(persona, canal) que ya tienen una entrega por OTRA alerta del mismo cobro.
+
+    Con A en 3 y B en 7, cuando falten 3 días se genera la alerta de 3, y B
+    también está dentro de su anticipación. Pero a B ya se le planificó la
+    de 7: un cobro, un aviso por persona y canal. Si la ventana de 7 no
+    alcanzó a generarse (una suscripción creada a 2 días del cobro), B no
+    tiene entrega previa y recibe esta, que es la primera que le toca.
+
+    No cuentan las descartadas: no se le mandó nada, porque en ese momento
+    no lo quería (apagó el canal o achicó la anticipación). Si ahora sí,
+    esta es su primera.
+    """
+    if alerta.tipo != Alerta.Tipo.PROXIMO_COBRO or alerta.suscripcion_id is None:
+        return set()
+    fecha_cobro = (alerta.datos or {}).get("fecha_cobro")
+    if fecha_cobro is None:
+        return set()
+    return set(
+        EntregaAlerta.objects.filter(
+            organizacion_id=alerta.organizacion_id,
+            alerta__tipo=alerta.tipo,
+            alerta__suscripcion_id=alerta.suscripcion_id,
+            alerta__datos__fecha_cobro=fecha_cobro,
+        )
+        .exclude(alerta=alerta)
+        .exclude(estado=Estado.DESCARTADA)
+        .values_list("usuario_id", "canal")
+    )
+
+
 def planificar(alerta: Alerta, *, ahora: dt.datetime | None = None) -> int:
     """Una entrega por persona y canal externo encendido. Devuelve cuántas.
 
@@ -133,6 +193,7 @@ def planificar(alerta: Alerta, *, ahora: dt.datetime | None = None) -> int:
     objetos aunque la base los haya descartado.
     """
     ahora = ahora or timezone.now()
+    ya_avisados = _ya_avisados_del_mismo_cobro(alerta)
     filas = [
         EntregaAlerta(
             organizacion_id=alerta.organizacion_id,
@@ -142,8 +203,10 @@ def planificar(alerta: Alerta, *, ahora: dt.datetime | None = None) -> int:
             proximo_intento_en=ahora,
         )
         for preferencia in PreferenciaNotificacion.de_la_organizacion(alerta.organizacion_id)
+        if dentro_de_su_anticipacion(preferencia, alerta)
         for canal in CANALES_EXTERNOS
         if preferencia.debe_avisar(alerta.tipo, canal)
+        and (preferencia.usuario_id, canal) not in ya_avisados
     ]
     if filas:
         EntregaAlerta.objects.bulk_create(filas, ignore_conflicts=True)
@@ -271,6 +334,11 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
         if not preferencia.debe_avisar(entrega.alerta.tipo, entrega.canal):
             # Se mira de nuevo al mandar: pudo apagarlo después de planificar.
             return _cerrar(entrega, DESCARTADA, ahora, motivo=motivo_descarte)
+        if not dentro_de_su_anticipacion(preferencia, entrega.alerta):
+            # Achicó la anticipación después de planificar (de 7 a 3 días):
+            # esta ya no es su ventana. La suya genera su propia alerta, y
+            # esta descartada no le impide recibirla.
+            return _cerrar(entrega, DESCARTADA, ahora, motivo=MOTIVO_FUERA_DE_ANTICIPACION)
         if not canales.disponible(entrega.canal):
             return _cerrar(entrega, FALLIDA, ahora, error=ErrorDeEnvio(
                 "canal_no_disponible",

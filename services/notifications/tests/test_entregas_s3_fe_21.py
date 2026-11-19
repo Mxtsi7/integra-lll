@@ -226,6 +226,83 @@ class TestPersonasSinFilaDePreferencias:
         assert sorted(Alerta.objects.values_list("datos__anticipacion_dias", flat=True)) == [3, 7]
 
 
+class TestAnticipacionDeCadaPersona:
+    """La alerta de cobro es de la organización y lleva la ventana más
+    cercana que pidió alguien; el correo es de cada persona y respeta SU
+    anticipación. A pide 3 días y B pide 7."""
+
+    def personas(self):
+        persona("A", correo="a@ejemplo.cl", dias_anticipacion=3)
+        persona("B", correo="b@ejemplo.cl", dias_anticipacion=7)
+
+    def entregas_de(self, dias):
+        return sorted(
+            EntregaAlerta.objects.filter(alerta__datos__anticipacion_dias=dias)
+            .values_list("usuario_id", "canal")
+        )
+
+    def test_la_ventana_de_otra_persona_no_le_escribe(self, mailoutbox):
+        """El escenario de la revisión: antes salían correos a A y a B."""
+        self.personas()
+        vigilada(cobro=HOY.date() + dt.timedelta(days=7))
+        generar(ahora=HOY)
+        assert self.entregas_de(7) == [("B", "email")]
+        entregas.despachar(ahora=HOY)
+        assert [correo.to for correo in mailoutbox] == [["b@ejemplo.cl"]]
+
+    def test_cada_una_recibe_un_solo_aviso_por_cobro(self, mailoutbox):
+        """A los 3 días sale la ventana de A. B ya recibió la suya: no otra."""
+        self.personas()
+        vigilada(cobro=HOY.date() + dt.timedelta(days=7))
+        generar(ahora=HOY)
+        entregas.despachar(ahora=HOY)
+        cuatro_dias_despues = HOY + dt.timedelta(days=4)
+        generar(ahora=cuatro_dias_despues)
+        assert self.entregas_de(3) == [("A", "email")]
+        entregas.despachar(ahora=cuatro_dias_despues)
+        assert sorted(correo.to[0] for correo in mailoutbox) == ["a@ejemplo.cl", "b@ejemplo.cl"]
+
+    def test_si_su_ventana_no_alcanzo_a_generarse_recibe_la_siguiente(self):
+        """Una suscripción creada a 2 días del cobro: solo existe la ventana
+        de 3. B pidió 7 y ya está dentro: es su primer aviso, le toca."""
+        self.personas()
+        vigilada(cobro=HOY.date() + dt.timedelta(days=2))
+        generar(ahora=HOY)
+        assert self.entregas_de(3) == [("A", "email"), ("B", "email")]
+
+    def test_otro_cobro_de_la_misma_suscripcion_es_otro_aviso(self):
+        self.personas()
+        suscripcion = vigilada(cobro=HOY.date() + dt.timedelta(days=7))
+        generar(ahora=HOY)
+        suscripcion.proximo_cobro = HOY.date() + dt.timedelta(days=37)
+        suscripcion.save()
+        generar(ahora=HOY + dt.timedelta(days=30))
+        assert sorted(EntregaAlerta.objects.values_list("usuario_id", flat=True)) == ["B", "B"]
+
+    def test_si_achica_la_anticipacion_antes_del_envio_se_descarta_y_recibe_la_suya(self, mailoutbox):
+        self.personas()
+        vigilada(cobro=HOY.date() + dt.timedelta(days=7))
+        generar(ahora=HOY)
+        PreferenciaNotificacion.objects.filter(usuario_id="B").update(dias_anticipacion=3)
+        entregas.despachar(ahora=HOY)
+        entrega = la_entrega(usuario="B")
+        assert (entrega.estado, entrega.motivo) == (Estado.DESCARTADA, entregas.MOTIVO_FUERA_DE_ANTICIPACION)
+        assert mailoutbox == []
+
+        cuatro_dias_despues = HOY + dt.timedelta(days=4)
+        generar(ahora=cuatro_dias_despues)
+        assert self.entregas_de(3) == [("A", "email"), ("B", "email")]
+
+    def test_el_fin_de_prueba_no_depende_de_la_anticipacion(self):
+        """FE-18 avisa a las 48 y 24 h a todos: no hay anticipación por persona."""
+        persona("A", correo="a@ejemplo.cl", dias_anticipacion=30)
+        vigilada(estado="prueba", fin_prueba=HOY.date() + dt.timedelta(days=2))
+        generar(ahora=HOY)
+        assert list(EntregaAlerta.objects.values_list("alerta__tipo", "usuario_id")) == [
+            (Alerta.Tipo.FIN_PRUEBA, "A"),
+        ]
+
+
 class TestDesdeElGenerador:
     def test_la_alerta_nueva_trae_sus_entregas_y_no_manda_nada(self, mailoutbox):
         persona("42")

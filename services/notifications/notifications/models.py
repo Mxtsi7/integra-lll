@@ -601,7 +601,7 @@ class EntregaAlerta(ModeloTenant):
         default="",
         help_text=(
             "Por qué quedó diferida o descartada: descanso, cuota_diaria, "
-            "preferencia_apagada, preferencia_por_omision."
+            "preferencia_apagada, preferencia_por_omision, fuera_de_anticipacion."
         ),
     )
 
