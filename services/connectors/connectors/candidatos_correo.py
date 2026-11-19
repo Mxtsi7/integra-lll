@@ -30,16 +30,22 @@ importación:
     sin importe                       importe_no_encontrado
     `$` solo, o dos monedas           moneda_ambigua
     fecha con dos lecturas            fecha_ambigua
-    aviso o fallo sin fecha           fecha_no_indicada
+    aviso sin fecha anunciada,        fecha_no_indicada
+    fallo sin fecha, o recibo o
+    fallo con fecha posterior
+    a su llegada
     la lista lo nombró y no se leyó   mensaje_omitido
 
 La fecha depende del tipo, como dice el contrato común (S3-MX-25,
-`docs/contratos/candidatos-v1.md`): en un aviso es la del cobro ANUNCIADO
-(`fecha_proximo_cobro` de S3-FE-07); en un recibo o un fallo, la del texto.
-Un recibo que no trae fecha usa la de recepción, y lo declara en la evidencia
+`docs/contratos/candidatos-v1.md`): en un aviso es SOLO la del cobro
+ANUNCIADO (`fecha_proximo_cobro` de S3-FE-07), porque otra fecha del texto
+puede ser la del propio aviso; en un recibo o un fallo, la del texto, que no
+puede ser posterior a la llegada del correo (con un día de holgura). Un recibo
+que no trae fecha usa la de recepción, y lo declara en la evidencia
 (`fecha_origen = "recepcion"` y el motivo), que es lo que el contrato permite
-para un recibo. Un aviso sin fecha no: el día en que llegó no es el día en
-que se va a cobrar.
+para un recibo. Un aviso sin fecha anunciada no: el día en que llegó no es el
+día en que se va a cobrar. La recepción es el día en Chile
+(`MensajeCorreo.dia_recibido`), no en UTC.
 
 El servicio es la excepción, también como en el CSV: un servicio ambiguo o
 desconocido NO impide el candidato. Queda con `servicio = None` y el texto
@@ -71,7 +77,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -103,6 +109,14 @@ FECHA_DEL_TEXTO = "texto"
 FECHA_DEL_COBRO_ANUNCIADO = "cobro_anunciado"
 #: El valor que fija el contrato común (S3-MX-25) para un recibo sin fecha.
 FECHA_DE_RECEPCION = "recepcion"
+
+#: Un recibo o un fallo no pueden tener una fecha posterior al día en que
+#: llegó el correo... salvo por la zona del servicio, que puede ir adelantada
+#: respecto de Chile: un cobro hecho en Europa a la 01:00 del 1 llega aquí el
+#: 31 a las 21:00. Más allá de un día, la fecha es de otra cosa (un
+#: reintento, una vigencia) y queda para revisión. Frontera inclusiva: el día
+#: siguiente a la llegada todavía se acepta.
+HOLGURA_FECHA_PASADA = timedelta(days=1)
 
 # ── Topes de la evidencia ────────────────────────────────────────────────
 #: Lo que se muestra de un asunto y de cada fragmento. Los fragmentos ya
@@ -210,12 +224,17 @@ def _moneda(datos: DatosDelCobro) -> str:
     raise _ParaRevision(MONEDA_AMBIGUA, campo.motivo)
 
 
-def _fecha(datos: DatosDelCobro, tipo: str) -> tuple[date, str, Campo]:
+def _fecha(datos: DatosDelCobro, tipo: str, recibido: date) -> tuple[date, str, Campo]:
     """(fecha, de dónde salió, el campo de S3-FE-07 que la dio).
 
-    Un aviso habla de un cobro que todavía no ocurre: su fecha es la del cobro
-    anunciado. Un recibo o un fallo hablan de algo que ya pasó: su fecha es la
-    del texto, nunca la del próximo ciclo.
+    Un aviso habla de un cobro que todavía no ocurre: su fecha es SOLO la del
+    cobro anunciado (`fecha_proximo_cobro`), como fija el contrato. Otra fecha
+    del texto puede ser la del propio aviso («Fecha: 28 de octubre»): sin la
+    anunciada, el aviso queda `fecha_no_indicada`.
+
+    Un recibo o un fallo hablan de algo que ya pasó: su fecha es la del
+    texto, nunca la del próximo ciclo ni una posterior a la llegada del correo
+    (`recibido`, el día en Chile), con `HOLGURA_FECHA_PASADA`.
     """
     if tipo == AVISO_DE_COBRO:
         anunciada = datos.fecha_proximo_cobro
@@ -223,15 +242,20 @@ def _fecha(datos: DatosDelCobro, tipo: str) -> tuple[date, str, Campo]:
             return anunciada.valor, FECHA_DEL_COBRO_ANUNCIADO, anunciada
         if anunciada.estado == AMBIGUO:
             raise _ParaRevision(FECHA_AMBIGUA, anunciada.motivo)
+        raise _ParaRevision(FECHA_NO_INDICADA, "el aviso no dice cuándo se va a cobrar")
     fecha = datos.fecha
     if fecha.confirmado:
+        if fecha.valor > recibido + HOLGURA_FECHA_PASADA:
+            que = "un cobro ya hecho" if tipo == COBRO_REALIZADO else "el intento que falló"
+            raise _ParaRevision(FECHA_NO_INDICADA, (
+                f"la fecha del correo ({fecha.valor.isoformat()}) es posterior a su llegada "
+                f"({recibido.isoformat()}): no puede ser la de {que}"
+            ))
         return fecha.valor, FECHA_DEL_TEXTO, fecha
     if fecha.estado == AMBIGUO:
         raise _ParaRevision(FECHA_AMBIGUA, fecha.motivo)
     if fecha.estado == SUPUESTO and tipo == COBRO_REALIZADO:
         return fecha.valor, FECHA_DE_RECEPCION, fecha
-    if tipo == AVISO_DE_COBRO:
-        raise _ParaRevision(FECHA_NO_INDICADA, "el aviso no dice cuándo se va a cobrar")
     raise _ParaRevision(FECHA_NO_INDICADA, "el correo no dice cuándo se intentó el cobro")
 
 
@@ -289,7 +313,7 @@ def _candidato_de(mensaje: MensajeCorreo, origen: OrigenDelMensaje, *, organizac
         raise _ParaRevision(TIPO_INCIERTO, clasificacion.motivo)
     importe = _importe(datos)
     moneda = _moneda(datos)
-    fecha, fecha_origen, campo_fecha = _fecha(datos, clasificacion.tipo)
+    fecha, fecha_origen, campo_fecha = _fecha(datos, clasificacion.tipo, mensaje.dia_recibido)
     servicio = origen.servicio
     return Candidato(
         origen=ORIGEN_CORREO,

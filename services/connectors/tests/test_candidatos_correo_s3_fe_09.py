@@ -178,6 +178,34 @@ class TestCandidatoTrazableYPendiente:
         assert candidato.evidencia["fecha_origen"] == "cobro_anunciado"
         assert candidato.evidencia["fecha_fragmento"] == "Te cobraremos USD 10.99 el 5 de noviembre de 2026."
 
+    def test_un_aviso_reconocido_por_otra_frase_de_s3_fe_08_tambien_lleva_su_fecha(self, importacion, cuenta):
+        """El aviso usa solo la fecha anunciada: la frase con que S3-FE-08 lo
+        reconoce tiene que marcarla en S3-FE-07."""
+        aviso = mensaje(cuenta, asunto="Tu suscripción a Netflix",
+                        texto="Realizaremos el cobro de CLP 9.990 el 5 de noviembre de 2026.")
+        guardar_pagina(importacion, pagina(aviso))
+
+        candidato = el_unico_candidato()
+        assert candidato.tipo_mensaje == CobroCandidato.TipoMensaje.AVISO_DE_COBRO
+        assert (candidato.fecha, candidato.evidencia["fecha_origen"]) == (date(2026, 11, 5), "cobro_anunciado")
+
+    @pytest.mark.parametrize(("dia", "es_candidato"), [(3, True), (4, False)], ids=["dia-siguiente", "dos-dias-despues"])
+    def test_un_dia_de_holgura_para_la_zona_del_servicio(self, importacion, cuenta, dia, es_candidato):
+        """Llegó el 2 de octubre (hora de Chile). Un recibo fechado el 3 puede
+        venir de un servicio con la hora adelantada; uno fechado el 4, no."""
+        texto = f"Gracias por tu pago.\nFecha de cobro: {dia} de octubre de 2026\nTotal: CLP 9.990"
+        guardar_pagina(importacion, pagina(mensaje(cuenta, texto=texto)))
+
+        importacion.refresh_from_db()
+        if es_candidato:
+            assert el_unico_candidato().fecha == date(2026, 10, dia)
+            assert importacion.errores == []
+        else:
+            assert not CobroCandidato.objects.exists()
+            (error,) = importacion.errores
+            assert error["codigo"] == "fecha_no_indicada"
+            assert "la fecha del correo (2026-10-04) es posterior a su llegada (2026-10-02)" in error["mensaje"]
+
     def test_un_pago_fallido_queda_como_pago_fallido(self, importacion, cuenta):
         fallo = mensaje(cuenta, asunto="Problema con tu pago",
                         texto="No pudimos procesar tu pago de CLP 9.990 del 1 de octubre de 2026.")
@@ -312,6 +340,19 @@ INCIERTOS = [
     pytest.param("Recordatorio de pago", "Te cobraremos CLP 9.990 pronto.", "fecha_no_indicada", id="aviso-sin-fecha"),
     pytest.param("Problema con tu pago", "No pudimos procesar tu pago de CLP 9.990.", "fecha_no_indicada",
                  id="fallo-sin-fecha"),
+    # La fecha del propio aviso no es la del cobro anunciado (revisión de S3-FE-09).
+    pytest.param("Recordatorio de pago", "Fecha: 28 de octubre de 2026\nTe cobraremos CLP 9.990 pronto.",
+                 "fecha_no_indicada", id="aviso-con-la-fecha-del-aviso"),
+    # Ni la del reintento ni una posterior a la llegada son la de lo que ya pasó.
+    pytest.param("Problema con tu pago",
+                 "No pudimos procesar tu pago de CLP 9.990.\nLo intentaremos de nuevo el 5 de noviembre de 2026.",
+                 "fecha_no_indicada", id="fallo-con-la-fecha-del-reintento"),
+    pytest.param("Problema con tu pago",
+                 "No pudimos procesar tu pago de CLP 9.990.\nTu tarjeta será cargada el 5 de noviembre de 2026.",
+                 "fecha_no_indicada", id="fallo-con-fecha-posterior-a-la-llegada"),
+    pytest.param("Tu recibo",
+                 "Gracias por tu pago de CLP 9.990.\nTu plan está activo hasta el 30 de noviembre de 2026.",
+                 "fecha_no_indicada", id="recibo-con-fecha-posterior-a-la-llegada"),
 ]
 
 
