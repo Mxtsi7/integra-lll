@@ -39,6 +39,12 @@ revisión de S3-FE-09 encontró que guardar la línea guardaba eso.
 | `IVA: CLP 1.595` (solo eso) | importe ambiguo: un impuesto no es lo cobrado |
 | sin ninguna fecha | **fecha supuesta**: el día en que llegó el correo, avisado |
 
+El día en que llegó es el de Chile (`TIME_ZONE`, America/Santiago), no el de
+UTC en que lo entregan los lectores: un correo de las 23:30 del 31 de octubre
+en Santiago es del 1 de noviembre en UTC, y la persona lo ve el 31 en su
+buzón. Lo da `MensajeCorreo.dia_recibido`, que usa también S3-FE-09 en el
+mensaje de cada error. Lo encontró la revisión de S3-FE-09.
+
 ## Cuál es el monto cobrado
 
 Un recibo trae varios montos: el precio, el subtotal, el IVA y el total. Se

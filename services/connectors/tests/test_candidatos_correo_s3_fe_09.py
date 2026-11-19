@@ -196,6 +196,29 @@ class TestCandidatoTrazableYPendiente:
         assert candidato.evidencia["fecha_motivo"] == "el correo no dice la fecha del cobro: se usó el día en que llegó"
         assert "fecha_fragmento" not in candidato.evidencia
 
+    @pytest.mark.parametrize(("recibido", "dia_en_chile"), [
+        (datetime(2026, 11, 1, 2, 30, tzinfo=tz.utc), date(2026, 10, 31)),  # horario de verano, UTC-3
+        (datetime(2026, 7, 1, 3, 30, tzinfo=tz.utc), date(2026, 6, 30)),  # horario de invierno, UTC-4
+    ], ids=["verano", "invierno"])
+    def test_el_dia_de_recepcion_es_el_de_chile_y_no_el_de_utc(
+        self, importacion, cuenta, settings, recibido, dia_en_chile,
+    ):
+        """Los lectores entregan la hora en UTC. Un recibo de las 23:30 del 31
+        en Santiago no es del 1 (otro mes), y el error tiene que decir el día
+        que la persona ve en su buzón (revisión de S3-FE-09)."""
+        settings.TIME_ZONE = "America/Santiago"
+        sin_fecha = mensaje(cuenta, id_mensaje="sin-fecha", texto="Gracias por tu pago.\nTotal: CLP 9.990",
+                            recibido_en=recibido)
+        dudoso = mensaje(cuenta, id_mensaje="dudoso", asunto="Tu recibo", texto="Total: $9.990", recibido_en=recibido)
+
+        guardar_pagina(importacion, pagina(sin_fecha, dudoso))
+
+        candidato = el_unico_candidato()
+        assert (candidato.fecha, candidato.evidencia["fecha_origen"]) == (dia_en_chile, "recepcion")
+        importacion.refresh_from_db()
+        (error,) = importacion.errores
+        assert f", recibido el {dia_en_chile.isoformat()}: " in error["mensaje"]
+
     def test_un_recibo_no_toma_la_fecha_del_proximo_ciclo(self, importacion, cuenta):
         texto = "Gracias por tu pago.\nTotal: CLP 9.990\nTu próximo cobro será el 1 de noviembre de 2026."
         guardar_pagina(importacion, pagina(mensaje(cuenta, texto=texto)))

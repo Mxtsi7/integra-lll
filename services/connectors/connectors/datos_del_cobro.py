@@ -451,5 +451,5 @@ def datos_de(mensaje: MensajeCorreo) -> DatosDelCobro:
     """Importe, moneda y fecha del cobro que describe el correo."""
     texto = "\n".join(t for t in (mensaje.asunto, mensaje.texto) if t)
     importe, moneda = _importe_y_moneda(texto)
-    fecha, proxima = _fechas(texto, mensaje.recibido_en.date())
+    fecha, proxima = _fechas(texto, mensaje.dia_recibido)
     return DatosDelCobro(importe=importe, moneda=moneda, fecha=fecha, fecha_proximo_cobro=proxima)

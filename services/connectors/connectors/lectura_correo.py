@@ -24,7 +24,7 @@ import hashlib
 import re
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 
 from django.core.exceptions import ValidationError
@@ -186,6 +186,17 @@ class MensajeCorreo:
     #: si el usuario lo mueve de carpeta y es el mismo en Gmail y en
     #: Outlook. Vacío si el correo no trae uno usable.
     message_id: str = ""
+
+    @property
+    def dia_recibido(self) -> date:
+        """El día en que llegó, en la zona del proyecto (`TIME_ZONE`,
+        America/Santiago), que es el que la persona ve en su buzón.
+
+        `recibido_en` viene en UTC de los dos lectores, y su `.date()` es el
+        día en UTC: un correo de las 23:30 del 31 de octubre en Santiago es
+        del 1 de noviembre en UTC. Lo encontró la revisión de S3-FE-09.
+        """
+        return timezone.localdate(self.recibido_en)
 
 
 @dataclasses.dataclass(frozen=True)

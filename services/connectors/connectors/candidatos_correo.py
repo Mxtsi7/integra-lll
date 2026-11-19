@@ -312,7 +312,7 @@ def _descripcion(mensaje: MensajeCorreo, origen: OrigenDelMensaje) -> str:
     """Cómo encuentra la persona el correo en su buzón."""
     asunto = _acotado(mensaje.asunto, LARGO_EN_ERROR) or "(sin asunto)"
     remitente = _acotado(origen.remitente, LARGO_EN_ERROR) or "remitente desconocido"
-    return f"«{asunto}» de {remitente}, recibido el {mensaje.recibido_en.date().isoformat()}"
+    return f"«{asunto}» de {remitente}, recibido el {mensaje.dia_recibido.isoformat()}"
 
 
 def leer(pagina: PaginaDeMensajes, *, organizacion_id: str, cuenta_id, proveedor_correo: str) -> LecturaDeCorreos:

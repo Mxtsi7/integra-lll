@@ -270,6 +270,17 @@ class TestFechaDelProximoCiclo:
         assert datos("Total: CLP 9.990").fecha_proximo_cobro.estado == AUSENTE
 
 
+class TestElDiaDeRecepcion:
+    def test_es_el_de_chile_y_no_el_de_utc(self, settings):
+        """02:30 UTC del 1 de noviembre son las 23:30 del 31 en Santiago."""
+        settings.TIME_ZONE = "America/Santiago"
+        d = datos_de(MensajeCorreo(
+            cuenta_id=uuid.uuid4(), id_mensaje="1", id_hilo="", remitente="x", asunto="", texto="Total: CLP 9.990",
+            recibido_en=datetime(2026, 11, 1, 2, 30, tzinfo=tz.utc),
+        ))
+        assert (d.fecha.valor, d.fecha.estado) == (date(2026, 10, 31), SUPUESTO)
+
+
 class TestSignoPesosJuntoAOtraMoneda:
     @pytest.mark.parametrize("texto", ["Total: USD 10\nTotal: $10", "Total: USD 10\nTotal: $12"])
     def test_un_signo_solo_no_hereda_la_moneda_de_otro_total(self, texto):
