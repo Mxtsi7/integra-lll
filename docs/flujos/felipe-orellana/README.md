@@ -39,7 +39,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-06** El servicio y el identificador de origen de cada mensaje: Message-ID como identidad y el servicio sin asignarlo a la fuerza | Hecho, 39 pruebas | [26-origen-del-mensaje-s3-fe-06.md](26-origen-del-mensaje-s3-fe-06.md) |
 | **Sprint 3 · S3-FE-07** Importe, moneda y fecha de los correos: precisión exacta y lo ambiguo señalado para revisión | Hecho, 58 pruebas | [27-importe-moneda-y-fecha-s3-fe-07.md](27-importe-moneda-y-fecha-s3-fe-07.md) |
 | **Sprint 3 · S3-FE-08** Recibo pagado, aviso de cobro futuro o pago fallido: un aviso o un fallo nunca sale como cobro | Hecho, 32 pruebas | [28-tipo-de-aviso-s3-fe-08.md](28-tipo-de-aviso-s3-fe-08.md) |
-| **Sprint 3 · S3-FE-03 y S3-FE-05** Guardar hasta dónde se leyó cada cuenta de Gmail y Outlook: corridas con tope, cursor junto con lo procesado y recuperación de una página vencida | Hecho, 19 pruebas | [29-avance-de-lectura-s3-fe-03-05.md](29-avance-de-lectura-s3-fe-03-05.md) |
+| **Sprint 3 · S3-FE-03 y S3-FE-05** Guardar hasta dónde se leyó cada cuenta de Gmail y Outlook: corridas con tope, cursor junto con lo procesado y recuperación de una página vencida | Hecho, 29 pruebas mÃ¡s 2 con dos conexiones a PostgreSQL | [29-avance-de-lectura-s3-fe-03-05.md](29-avance-de-lectura-s3-fe-03-05.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

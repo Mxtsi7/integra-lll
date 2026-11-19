@@ -9,7 +9,10 @@ Criterios:
 La mayoría usa un lector de prueba que entrega páginas programadas: lo que se
 prueba aquí es el cursor, no el proveedor. Al final, los lectores REALES de
 Gmail y Outlook con `requests` reemplazado, para ver que el `pageToken` y la
-`@odata.nextLink` viajan bien.
+`@odata.nextLink` viajan bien, y las aceptaciones de la revisión de #189:
+Outlook con más de 1000 coincidencias (P1) y que solo un rechazo explícito
+del cursor reinicie (P2). Los dos workers con dos conexiones a PostgreSQL
+están en `test_carrera_avance_lectura_postgres.py`.
 """
 
 import re

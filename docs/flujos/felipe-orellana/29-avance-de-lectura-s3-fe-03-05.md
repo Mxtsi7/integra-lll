@@ -8,7 +8,7 @@ lector (documentos 23 y 24).
 
 | Criterio | Dónde se cumple |
 |---|---|
-| FE-03: reanudar no relee indefinidamente ni pierde mensajes tras un fallo | corridas con tope fijo, y el cursor se mueve en la misma transacción que procesa |
+| FE-03: reanudar no relee indefinidamente ni pierde mensajes tras un fallo | corridas con tope fijo, el cursor se mueve en la misma transacción que procesa, y la marca avanza solo con la ventana agotada (sin el tope de `$search`) |
 | FE-03: cuentas distintas conservan cursores separados | un `AvanceDeLectura` por cuenta (uno a uno) |
 | FE-05: reiniciar retoma el avance correcto | se retoma desde la última página guardada |
 | FE-05: un cursor inválido no elimina evidencia ni provoca duplicados | si el proveedor lo rechaza explícitamente, la corrida vuelve a su primera página sin borrar nada y lo releído trae la misma identidad (Message-ID); cualquier otro error sale con el avance intacto |
@@ -124,6 +124,27 @@ El cursor se lee al empezar y se vuelve a mirar, con la fila tomada, antes
 de procesar. Si otro worker lo movió mientras tanto, esta página ya no es la
 que toca: no se procesa nada y el resultado dice `descartado`.
 
+Hay dos pruebas de esto, como en S3-FE-15 y S3-FE-16: una de la **decisión**
+y otra del **mecanismo**.
+
+- `TestDosWorkers`, en el archivo de pruebas de esta tarea, con una sola
+  conexión: el cursor cambia mientras se lee y la página se descarta.
+- `test_carrera_avance_lectura_postgres.py`, con **dos conexiones a
+  PostgreSQL de verdad**: cada worker en su hilo y con su conexión,
+  detenidos con eventos en el punto exacto, sin un `sleep` que decida nada.
+  La revisión de #189 anotó que la primera intercala operaciones en una
+  conexión y no demuestra el bloqueo; esta sí:
+  1. A y B leen el mismo cursor; A toma la fila y se detiene procesando. B
+     quiere tomarla y **espera**: se ve en `pg_locks` con `granted = false`,
+     y B no procesó nada. Al soltar a A, B descarta su página: se procesó
+     una vez.
+  2. A está procesando y B recién empieza: B espera ya al leer el cursor y,
+     cuando A confirma, sigue desde la página que dejó A.
+
+Sin el `select_for_update` de antes de procesar, o sin el del principio,
+falla una de las dos de PostgreSQL y **ninguna** de las de una conexión: por
+eso hacían falta.
+
 ## Lo que no hace todavía
 
 - **Reintentar con espera** un error transitorio: es S3-FE-18. Hoy el error
@@ -139,7 +160,9 @@ que toca: no se procesa nada y el resultado dice `descartado`.
 | El avance | `services/connectors/connectors/avance_lectura.py` |
 | El modelo | `AvanceDeLectura` en `models.py`, migración `0010_avance_de_lectura` |
 | Borrarlo con la organización | `eliminacion.py`, antes que la cuenta |
-| Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (19) |
+| Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (29) y `test_carrera_avance_lectura_postgres.py` (2, con dos conexiones a PostgreSQL) |
+| El rechazo del cursor | `CursorRechazado` en `lectura_correo.py`; lo levantan `lector_gmail.py` y `lector_outlook.py` |
+| El filtro de palabras de Outlook | `FiltroCorreos.coincide` en `lectura_correo.py` |
 
 ## Cómo se comprobaron las pruebas
 
@@ -148,8 +171,8 @@ y los lectores **reales** de Gmail y Outlook (con `requests` reemplazado)
 para ver que el `pageToken` y la `@odata.nextLink` se guardan y se mandan, y
 que una `nextLink` vencida (400 de Graph) reinicia la corrida.
 
-Se rompió el código a propósito 15 veces y cada vez falló al menos una
-prueba:
+En la primera ronda se rompió el código a propósito 15 veces y cada vez
+falló al menos una prueba:
 
 - mover la marca con cada página, o ponerle el momento en que terminó;
 - quitar el solape o la ventana inicial;
@@ -162,3 +185,21 @@ prueba:
 - no contar la corrida;
 - buscar la cuenta sin la organización;
 - no pasar el límite.
+
+En la segunda ronda (revisión de #189) se rompió 22 veces más, y otra vez
+cada una hizo fallar al menos una prueba:
+
+- quitar el `select_for_update` de antes de procesar, o el del principio
+  (solo lo detectan las pruebas con dos conexiones), o no comparar el cursor;
+- volver a reiniciar con cualquier `ErrorDelProveedor` o `ValueError`, o
+  quitar la guarda del mismo cursor rechazado;
+- en Gmail, tomar cualquier 400 de la lista, o cualquier 400, como cursor
+  rechazado, o un JSON ilegible;
+- en Outlook, tomar un 400 o 410 como cursor rechazado sin estar siguiendo
+  una página, no contar el 410, o un JSON ilegible;
+- volver a buscar con `$search`, no filtrar las palabras de este lado, no
+  aplicar las fechas exactas, no mandar el `$filter` o el `$orderby`, no
+  mirar la dirección del remitente;
+- en `coincide`, sin NFKC, ignorar los remitentes, no aceptar subdominios o
+  aceptar cualquier sufijo (`notnetflix.com` como `netflix.com`);
+- que Gmail vuelva a recortar en silencio.
