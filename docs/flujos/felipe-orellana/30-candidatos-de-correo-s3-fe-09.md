@@ -313,9 +313,9 @@ insertar, con su transacción abierta; mientras tanto, B tiene que aparecer en
   lo enseña. Conviene que lo haga antes de que se confirmen candidatos de
   correo.
 
-## Lo que cambió con la revisión
+## Lo que cambió al revisarlo de nuevo
 
-Una revisión independiente de `6384e9d` encontró ocho cosas. Las siete de
+Al revisar de nuevo `6384e9d`, antes de abrir la PR, aparecieron ocho cosas. Las siete de
 código se reprodujeron con una prueba que fallaba antes de corregirlas; la
 octava era de este documento, y su prueba fija lo que el código ya hacía.
 
