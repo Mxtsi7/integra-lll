@@ -39,6 +39,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-06** El servicio y el identificador de origen de cada mensaje: Message-ID como identidad y el servicio sin asignarlo a la fuerza | Hecho, 39 pruebas | [26-origen-del-mensaje-s3-fe-06.md](26-origen-del-mensaje-s3-fe-06.md) |
 | **Sprint 3 · S3-FE-07** Importe, moneda y fecha de los correos: precisión exacta y lo ambiguo señalado para revisión | Hecho, 58 pruebas | [27-importe-moneda-y-fecha-s3-fe-07.md](27-importe-moneda-y-fecha-s3-fe-07.md) |
 | **Sprint 3 · S3-FE-08** Recibo pagado, aviso de cobro futuro o pago fallido: un aviso o un fallo nunca sale como cobro | Hecho, 32 pruebas | [28-tipo-de-aviso-s3-fe-08.md](28-tipo-de-aviso-s3-fe-08.md) |
+| **Sprint 3 · S3-FE-21** Mandar las alertas por correo y anotar entrega o error: evidencia del proveedor, reintentos acotados, y descanso y cuota del push | Implementado, 126 pruebas (6 con dos conexiones a PostgreSQL). No se cierra: falta acordar de dónde sale la dirección de correo (el catálogo choca con MX-21), programar el despachador y una corrida con el Gmail real | [31-envio-de-alertas-s3-fe-21.md](31-envio-de-alertas-s3-fe-21.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

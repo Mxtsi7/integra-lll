@@ -13,6 +13,17 @@ def pytest_configure() -> None:
     django.setup()
 
 
+@pytest.fixture(autouse=True)
+def buzon_en_memoria_como_proveedor(settings):
+    """pytest-django cambia el correo a `locmem`, un buzón en memoria. En las
+    pruebas ese buzón hace de proveedor: lo que se mira es el mensaje que
+    quedó en él, y la evidencia dice `locmem`. Fuera de ellas no cuenta como
+    proveedor (S3-FE-21, `EMAIL_BACKENDS_CON_PROVEEDOR`)."""
+    from notifications.canales import BACKEND_DE_PRUEBAS
+
+    settings.EMAIL_BACKENDS_CON_PROVEEDOR = [*settings.EMAIL_BACKENDS_CON_PROVEEDOR, BACKEND_DE_PRUEBAS]
+
+
 @pytest.fixture(scope="session")
 def django_db_setup(django_db_blocker):
     """Configura la BD de tests: search_path=public para PostgreSQL,
