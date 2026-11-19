@@ -549,6 +549,8 @@ class Importacion(ModeloTenant):
     #: Cuántos errores se guardan. Más que esto no ayuda a nadie a entender
     #: qué pasó, y una respuesta de polling tiene que caber en una pantalla.
     MAXIMO_ERRORES = 20
+    #: Lo que se guarda del `mensaje` de cada error; el resto se corta.
+    LARGO_MENSAJE_DE_ERROR = 200
 
     # ── los dos hitos, separados ─────────────────────────────────────
 
@@ -658,7 +660,7 @@ class Importacion(ModeloTenant):
         """
         self.errores_totales += 1
         if len(self.errores) < self.MAXIMO_ERRORES:
-            error = {"codigo": codigo, "mensaje": mensaje[:200], "fila": fila}
+            error = {"codigo": codigo, "mensaje": mensaje[: self.LARGO_MENSAJE_DE_ERROR], "fila": fila}
             if identificador_origen is not None:
                 error["identificador_origen"] = identificador_origen
             self.errores.append(error)

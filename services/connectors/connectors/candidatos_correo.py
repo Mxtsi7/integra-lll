@@ -132,8 +132,12 @@ LARGO_MESSAGE_ID = 998
 #: Las explicaciones (regla del servicio, motivo, frases de S3-FE-08).
 LARGO_EXPLICACION = 300
 #: Lo que se muestra de un asunto o un remitente en el mensaje de un error,
-#: que entero no pasa de 200 (`Importacion.anotar_error`).
+#: como mucho: si el motivo es largo, les toca menos (`_mensaje_de_error`).
 LARGO_EN_ERROR = 60
+#: El motivo de un error, como mucho. Con este tope al asunto y al remitente
+#: les quedan al menos 24 caracteres a cada uno, más que «(sin asunto)» y
+#: «remitente desconocido».
+LARGO_MOTIVO_EN_ERROR = 120
 
 
 class ImportacionNoDisponible(Exception):
@@ -334,11 +338,23 @@ def _candidato_de(mensaje: MensajeCorreo, origen: OrigenDelMensaje, *, organizac
     )
 
 
-def _descripcion(mensaje: MensajeCorreo, origen: OrigenDelMensaje) -> str:
-    """Cómo encuentra la persona el correo en su buzón."""
-    asunto = _acotado(mensaje.asunto, LARGO_EN_ERROR) or "(sin asunto)"
-    remitente = _acotado(origen.remitente, LARGO_EN_ERROR) or "remitente desconocido"
-    return f"«{asunto}» de {remitente}, recibido el {mensaje.dia_recibido.isoformat()}"
+def _mensaje_de_error(mensaje: MensajeCorreo, origen: OrigenDelMensaje, motivo: str) -> str:
+    """Cómo encuentra la persona el correo en su buzón, y por qué no dio
+    candidato: «asunto» de remitente, recibido el día: motivo.
+
+    `Importacion.anotar_error` corta el mensaje en `LARGO_MENSAJE_DE_ERROR`,
+    y lo que se cortaba era el final: justo el motivo («…y ninguno se
+    distin»). Ahora el motivo va entero (acotado a `LARGO_MOTIVO_EN_ERROR`) y
+    el asunto y el remitente se reparten lo que queda. Lo encontró la
+    revisión de S3-FE-09.
+    """
+    motivo = _acotado(motivo, LARGO_MOTIVO_EN_ERROR)
+    recibido = mensaje.dia_recibido.isoformat()
+    fijo = len(f"«» de , recibido el {recibido}: {motivo}")
+    cada_uno = min(LARGO_EN_ERROR, (Importacion.LARGO_MENSAJE_DE_ERROR - fijo) // 2)
+    asunto = _acotado(mensaje.asunto, cada_uno) or "(sin asunto)"
+    remitente = _acotado(origen.remitente, cada_uno) or "remitente desconocido"
+    return f"«{asunto}» de {remitente}, recibido el {recibido}: {motivo}"
 
 
 def leer(pagina: PaginaDeMensajes, *, organizacion_id: str, cuenta_id, proveedor_correo: str) -> LecturaDeCorreos:
@@ -366,7 +382,7 @@ def leer(pagina: PaginaDeMensajes, *, organizacion_id: str, cuenta_id, proveedor
             errores.append(ErrorDeMensaje(
                 identificador_origen=origen.identificador_origen,
                 codigo=para_revision.codigo,
-                mensaje=f"{_descripcion(mensaje, origen)}: {para_revision.motivo}",
+                mensaje=_mensaje_de_error(mensaje, origen, para_revision.motivo),
             ))
             continue
         if candidato is None:
@@ -389,7 +405,7 @@ def leer(pagina: PaginaDeMensajes, *, organizacion_id: str, cuenta_id, proveedor
         errores.append(ErrorDeMensaje(
             identificador_origen=identificador,
             codigo=MENSAJE_OMITIDO,
-            mensaje=f"Un correo de la lista no se pudo leer: {_acotado(omitido.motivo, 120)}",
+            mensaje=f"Un correo de la lista no se pudo leer: {_acotado(omitido.motivo, LARGO_MOTIVO_EN_ERROR)}",
         ))
 
     return LecturaDeCorreos(

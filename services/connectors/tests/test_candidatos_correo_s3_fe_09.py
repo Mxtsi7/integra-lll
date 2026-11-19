@@ -504,6 +504,35 @@ class TestNadaInnecesarioNiConfirmado:
         assert error["mensaje"].startswith("«Tu recibo yyyy")
         assert len(error["mensaje"]) <= 200
 
+    def test_con_asunto_y_remitente_largos_el_motivo_va_entero(self, importacion, cuenta):
+        """Antes el mensaje se cortaba en 200 por el final, y lo que se
+        perdía era el motivo: «…y ninguno se distin» (revisión de S3-FE-09)."""
+        largo = mensaje(
+            cuenta, asunto="Tu recibo mensual de Netflix: detalle de los cargos del plan Premium de octubre",
+            remitente="Netflix <notificaciones-facturacion@mailer.account.netflix.com>",
+            texto="Total: CLP 9.990\nTotal: CLP 10.990\nFecha: 2026-10-01",
+        )
+        guardar_pagina(importacion, pagina(largo))
+
+        importacion.refresh_from_db()
+        (error,) = importacion.errores
+        assert error["mensaje"].startswith("«Tu recibo mensual")
+        assert ", recibido el 2026-10-02: " in error["mensaje"]
+        assert error["mensaje"].endswith(": hay 2 montos posibles (9990, 10990) y ninguno se distingue")
+        assert len(error["mensaje"]) <= Importacion.LARGO_MENSAJE_DE_ERROR
+
+    def test_un_motivo_larguisimo_tambien_cabe(self, importacion, cuenta):
+        totales = "\n".join(f"Total: CLP {monto}.990" for monto in range(10, 40))
+        guardar_pagina(importacion, pagina(mensaje(cuenta, asunto="Tu recibo " + "z" * 300, texto=totales)))
+
+        importacion.refresh_from_db()
+        (error,) = importacion.errores
+        assert error["codigo"] == "importe_ambiguo"
+        assert len(error["mensaje"]) <= Importacion.LARGO_MENSAJE_DE_ERROR
+        # Lo que dice cuál es el correo sigue ahí, y el motivo termina acotado, no cortado por anotar_error.
+        assert ", recibido el 2026-10-02: hay 30 montos posibles" in error["mensaje"]
+        assert error["mensaje"].endswith("…")
+
     def test_no_confirma_ni_deja_ordenes_ni_cierra_la_importacion(self, importacion, cuenta):
         guardar_pagina(importacion, pagina(mensaje(cuenta)))
 
