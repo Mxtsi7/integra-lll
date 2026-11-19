@@ -42,7 +42,7 @@ class Migration(migrations.Migration):
                 ('usuario_id', models.CharField(help_text='El mismo valor crudo que `PreferenciaNotificacion.usuario_id`.', max_length=64, verbose_name='Usuario')),
                 ('canal', models.CharField(choices=[('email', 'Correo'), ('push', 'Push')], max_length=8)),
                 ('estado', models.CharField(choices=[('pendiente', 'Pendiente'), ('enviando', 'Enviando'), ('aceptada', 'Aceptada por el proveedor'), ('diferida', 'Diferida'), ('reintento', 'En reintento'), ('fallida', 'Fallida'), ('agotada', 'Reintentos agotados'), ('descartada', 'Descartada')], default='pendiente', max_length=12)),
-                ('motivo', models.CharField(blank=True, default='', help_text='Por qué quedó diferida o descartada: descanso, cuota_diaria, preferencia_apagada.', max_length=24)),
+                ('motivo', models.CharField(blank=True, default='', help_text='Por qué quedó diferida o descartada: descanso, cuota_diaria, preferencia_apagada, preferencia_por_omision.', max_length=24)),
                 ('intentos', models.PositiveSmallIntegerField(default=0, help_text='Veces que se habló con el proveedor. Diferirla no cuenta.')),
                 ('proximo_intento_en', models.DateTimeField(help_text='Desde cuándo puede intentarse (pendiente, diferida o en reintento).')),
                 ('ultimo_intento_en', models.DateTimeField(blank=True, null=True)),

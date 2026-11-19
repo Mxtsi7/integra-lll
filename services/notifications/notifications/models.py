@@ -352,6 +352,38 @@ class PreferenciaNotificacion(ModeloTenant):
             return False
         return self.quiere(tipo) and getattr(self, campo)
 
+    @classmethod
+    def de_la_organizacion(cls, organizacion_id) -> list["PreferenciaNotificacion"]:
+        """Las preferencias de cada persona conocida de la organización.
+
+        La fila nace con el primer GET de `/preferencias-alertas/`, o sea,
+        cuando alguien abre Ajustes. Quien nunca lo hizo no tiene fila, pero sí
+        tiene preferencias: las de omisión, que son las que la pantalla le
+        muestra como suyas. Por eso a esa persona se le devuelve una instancia
+        SIN GUARDAR con los valores por omisión, en vez de dejarla fuera.
+
+        "Conocida" es tener fila de preferencias o dirección de correo
+        (`DireccionCorreo`). Si la fuente de direcciones cambia (ver su
+        docstring), este es el único lugar que hay que tocar. La limpieza de
+        la persona borra las dos cosas, así que una persona eliminada no
+        vuelve a aparecer acá.
+
+        Lo usan el generador (qué ventanas de aviso hay) y la planificación
+        de entregas (a quién se le manda): los dos tienen que ver a las
+        mismas personas con las mismas preferencias.
+        """
+        guardadas = list(cls.objects.filter(organizacion_id=organizacion_id).order_by("usuario_id"))
+        con_fila = {preferencia.usuario_id for preferencia in guardadas}
+        sin_fila = (
+            DireccionCorreo.objects.filter(organizacion_id=organizacion_id)
+            .exclude(usuario_id__in=con_fila)
+            .order_by("usuario_id")
+            .values_list("usuario_id", flat=True)
+        )
+        return guardadas + [
+            cls(organizacion_id=organizacion_id, usuario_id=usuario_id) for usuario_id in sin_fila
+        ]
+
     class Meta(ModeloTenant.Meta):
         db_table = "preferencia_notificacion"
         constraints = [
@@ -567,7 +599,10 @@ class EntregaAlerta(ModeloTenant):
         max_length=24,
         blank=True,
         default="",
-        help_text="Por qué quedó diferida o descartada: descanso, cuota_diaria, preferencia_apagada.",
+        help_text=(
+            "Por qué quedó diferida o descartada: descanso, cuota_diaria, "
+            "preferencia_apagada, preferencia_por_omision."
+        ),
     )
 
     # ── intentos ─────────────────────────────────────────────────────

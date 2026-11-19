@@ -16,12 +16,14 @@ Solo `aceptada` es entregada, y solo con la respuesta del proveedor. Crear la
 fila, diferirla o reclamarla no lo es.
 
 ── A quién ──────────────────────────────────────────────────────────────────
-A cada persona de la organización con una `PreferenciaNotificacion` que
-quiere ese tipo de aviso, una fila por canal externo encendido (correo,
-push). Filtrar por `organizacion_id` es la comprobación de pertenencia que
-pide MX-21. Una organización sin preferencias guardadas recibe la alerta en
-la aplicación (el generador usa las de omisión) pero no tiene a quién
-mandarle un correo: no hay ninguna persona con nombre. No es una omisión.
+A cada persona conocida de la organización que quiere ese tipo de aviso, una
+fila por canal externo encendido (correo, push). Conocida es tener fila de
+preferencias o dirección de correo; quien nunca guardó preferencias recibe
+con las de omisión, que son las que la pantalla le muestra como suyas
+(`PreferenciaNotificacion.de_la_organizacion`). Filtrar por
+`organizacion_id` es la comprobación de pertenencia que pide MX-21. Una
+organización sin ninguna persona conocida recibe la alerta en la aplicación
+pero no tiene a quién mandarle un correo.
 
 Cuando FE-24 emita `alerta.activada` y exista el consumidor de
 `notifications.entregas.v2`, ese consumidor llama a `planificar()` en vez del
@@ -102,6 +104,10 @@ DESCARTADA = Estado.DESCARTADA.value
 SIN_TOCAR = "sin_tocar"    # otro worker la tenía o ya no estaba
 TARDIA = "tardia"          # el reclamo venció antes de anotar el resultado
 
+#: Por qué se descarta una entrega de quien no tiene fila de preferencias:
+#: las de omisión no piden ese canal. No es lo mismo que haberlo apagado.
+MOTIVO_POR_OMISION = "preferencia_por_omision"
+
 
 def zona_de(_usuario_id) -> dt.tzinfo:
     """La zona horaria de la persona.
@@ -135,9 +141,7 @@ def planificar(alerta: Alerta, *, ahora: dt.datetime | None = None) -> int:
             canal=canal,
             proximo_intento_en=ahora,
         )
-        for preferencia in PreferenciaNotificacion.objects.filter(
-            organizacion_id=alerta.organizacion_id
-        ).order_by("usuario_id")
+        for preferencia in PreferenciaNotificacion.de_la_organizacion(alerta.organizacion_id)
         for canal in CANALES_EXTERNOS
         if preferencia.debe_avisar(alerta.tipo, canal)
     ]
@@ -256,9 +260,17 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
             return _cerrar(entrega, AGOTADA, ahora, error=ErrorDeEnvio(
                 "sin_resultado", "el último intento no informó resultado", permanente=False,
             ))
-        if preferencia is None or not preferencia.debe_avisar(entrega.alerta.tipo, entrega.canal):
+        motivo_descarte = "preferencia_apagada"
+        if preferencia is None:
+            # Nunca guardó preferencias: valen las de omisión, igual que al
+            # planificar. No hay fila que bloquear, y no hace falta: la cuota
+            # es del push, y `por_push` nace apagado, así que sin fila no
+            # sale ningún push que contar.
+            preferencia = PreferenciaNotificacion(**clave)
+            motivo_descarte = MOTIVO_POR_OMISION
+        if not preferencia.debe_avisar(entrega.alerta.tipo, entrega.canal):
             # Se mira de nuevo al mandar: pudo apagarlo después de planificar.
-            return _cerrar(entrega, DESCARTADA, ahora, motivo="preferencia_apagada")
+            return _cerrar(entrega, DESCARTADA, ahora, motivo=motivo_descarte)
         if not canales.disponible(entrega.canal):
             return _cerrar(entrega, FALLIDA, ahora, error=ErrorDeEnvio(
                 "canal_no_disponible",

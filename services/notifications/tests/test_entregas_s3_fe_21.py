@@ -170,6 +170,62 @@ class TestPlanificar:
         assert entrega.intentos == 0
 
 
+def sin_fila(usuario="42", *, org=ORG, correo="ana@ejemplo.cl"):
+    """Una persona conocida (tiene dirección) que nunca abrió Ajustes: no
+    tiene fila de preferencias. Es lo normal para quien no las cambió."""
+    return DireccionCorreo.objects.create(organizacion_id=org, usuario_id=usuario, email=correo)
+
+
+class TestPersonasSinFilaDePreferencias:
+    """La fila de preferencias nace con el primer GET de Ajustes. Quien no
+    abrió Ajustes tiene las de omisión (correo encendido): son las que la
+    pantalla le muestra como suyas, y RF-09 dice que el correo siempre está."""
+
+    def test_recibe_por_correo_con_las_de_omision(self):
+        sin_fila("42")
+        assert list(nueva_alerta().entregas.values_list("usuario_id", "canal")) == [("42", "email")]
+
+    def test_las_de_omision_no_piden_push(self):
+        sin_fila("42")
+        assert not nueva_alerta().entregas.filter(canal="push").exists()
+
+    def test_no_se_le_crea_fila_al_planificar(self):
+        """Las de omisión se usan sin guardarse: la fila sigue siendo de la
+        persona, que la crea cuando abre Ajustes."""
+        sin_fila("42")
+        nueva_alerta()
+        assert not PreferenciaNotificacion.objects.exists()
+
+    def test_la_fila_guardada_manda_sobre_la_omision(self):
+        persona("42", por_email=False)
+        assert not nueva_alerta().entregas.exists()
+
+    def test_no_mezcla_organizaciones(self):
+        sin_fila("42", org=OTRA)
+        assert not nueva_alerta(org=ORG).entregas.exists()
+
+    def test_desde_el_generador_tambien(self, mailoutbox):
+        """El escenario de la revisión: dirección conocida, sin fila, un cobro
+        en 2 días. Antes: 1 alerta y 0 entregas."""
+        sin_fila("42")
+        vigilada(cobro=HOY.date() + dt.timedelta(days=2))
+        assert len(generar(ahora=HOY).creadas) == 1
+        assert list(EntregaAlerta.objects.values_list("usuario_id", "canal")) == [("42", "email")]
+        assert entregas.despachar(ahora=HOY)[entregas.ACEPTADA] == 1
+        assert [correo.to for correo in mailoutbox] == [["ana@ejemplo.cl"]]
+
+    def test_su_ventana_por_omision_cuenta_para_el_generador(self):
+        """Otra persona pidió 7 días y esta no guardó nada (3 por omisión).
+        Con un cobro a 3 días hay que generar el aviso de 3: si el generador
+        solo mirara las filas guardadas, solo existiría la ventana de 7."""
+        persona("43", correo="beto@ejemplo.cl", dias_anticipacion=7)
+        sin_fila("42")
+        vigilada(cobro=HOY.date() + dt.timedelta(days=3))
+        generar(ahora=HOY - dt.timedelta(days=4))       # faltan 7: avisa la de 7
+        generar(ahora=HOY)                              # faltan 3: avisa la de 3
+        assert sorted(Alerta.objects.values_list("datos__anticipacion_dias", flat=True)) == [3, 7]
+
+
 class TestDesdeElGenerador:
     def test_la_alerta_nueva_trae_sus_entregas_y_no_manda_nada(self, mailoutbox):
         persona("42")
@@ -527,12 +583,30 @@ class TestPreferenciasAlMandar:
         assert la_entrega().estado == Estado.DESCARTADA
         assert mailoutbox == []
 
-    def test_sin_preferencias_ya_no_hay_a_quien(self, mailoutbox):
+    def test_sin_fila_al_mandar_valen_las_de_omision(self, mailoutbox):
+        """Mismo criterio que al planificar: sin fila no es "lo apagó"."""
         preferencia = persona("42")
         nueva_alerta()
         preferencia.delete()
+        assert entregas.despachar(ahora=a_las(10))[entregas.ACEPTADA] == 1
+        assert [correo.to for correo in mailoutbox] == [["ana@ejemplo.cl"]]
+
+    def test_sin_fila_el_push_se_descarta_por_la_omision_y_no_por_apagado(self, push):
+        preferencia = persona("42", por_push=True)
+        nueva_alerta()
+        preferencia.delete()
         entregas.despachar(ahora=a_las(10))
-        assert la_entrega().estado == Estado.DESCARTADA
+        entrega = la_entrega("push")
+        assert (entrega.estado, entrega.motivo) == (Estado.DESCARTADA, entregas.MOTIVO_POR_OMISION)
+        assert push.enviados == []
+
+    def test_sin_fila_ni_direccion_falla_explicita(self, mailoutbox):
+        preferencia = persona("42")
+        nueva_alerta()
+        preferencia.delete()
+        DireccionCorreo.objects.all().delete()
+        entregas.despachar(ahora=a_las(10))
+        assert (la_entrega().estado, la_entrega().codigo_error) == (Estado.FALLIDA, "sin_direccion")
         assert mailoutbox == []
 
     def test_lo_que_quiere_otra_persona_no_cambia_lo_suyo(self, mailoutbox):

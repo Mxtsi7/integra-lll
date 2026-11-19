@@ -120,7 +120,11 @@ def _anticipacion_por_omision() -> int:
 
 
 def _preferencias(organizacion_id) -> list[PreferenciaNotificacion]:
-    return list(PreferenciaNotificacion.objects.filter(organizacion_id=organizacion_id))
+    # Las mismas personas que ve la planificación de entregas (S3-FE-21),
+    # incluidas las que nunca guardaron preferencias: sin eso, su ventana
+    # por omisión no entraba en `anticipaciones_de_cobro` y nunca se les
+    # generaba el aviso que les correspondía.
+    return PreferenciaNotificacion.de_la_organizacion(organizacion_id)
 
 
 def anticipaciones_de_cobro(organizacion_id) -> set[int]:
