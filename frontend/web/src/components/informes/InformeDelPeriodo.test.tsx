@@ -92,6 +92,13 @@ describe('el informe según cómo vaya la carga (S3-CH-25)', () => {
     expect(screen.getByRole('button', { name: 'Descargar CSV' })).toBeInTheDocument();
   });
 
+  it('el gasto real dice que solo cuenta las suscripciones activas, y la descarga avisa que trae también las eliminadas', async () => {
+    await montar(conGastos());
+
+    expect(screen.getByText('Los cobros que ya se hicieron en el mes, de las suscripciones que siguen activas.')).toBeInTheDocument();
+    expect(screen.getByText(/Incluye también los de suscripciones que eliminaste/)).toBeInTheDocument();
+  });
+
   it('las cifras son las del mes elegido, el último, y coinciden con su fila de la tabla', async () => {
     await montar(conGastos());
 

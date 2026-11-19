@@ -14,7 +14,7 @@ interface Cifra {
  */
 export function ResumenDelPeriodo({ resumen }: { resumen: ResumenDelMes }) {
   const cifras: Cifra[] = [
-    { titulo: 'Gasto real', ayuda: 'Los cobros que ya se hicieron en el mes.', monto: resumen.gasto_real },
+    { titulo: 'Gasto real', ayuda: 'Los cobros que ya se hicieron en el mes, de las suscripciones que siguen activas.', monto: resumen.gasto_real },
     { titulo: 'Gasto proyectado', ayuda: 'Lo que falta por cobrar en el mes. Un mes que ya pasó no proyecta nada.', monto: resumen.gasto_proyectado },
     { titulo: 'Total estimado', ayuda: 'El gasto real más el proyectado.', monto: resumen.total_estimado },
   ];

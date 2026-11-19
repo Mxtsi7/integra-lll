@@ -21,7 +21,7 @@ export function DescargarCobros({ mes, moneda }: { mes: string; moneda: string }
   return (
     <Seccion
       titulo="Descargar cobros"
-      descripcion={`Un archivo CSV con todos los cobros de ${nombreDelMes(mes)} en ${moneda}, uno por fila.`}
+      descripcion={`Un archivo CSV con todos los cobros de ${nombreDelMes(mes)} en ${moneda}, uno por fila. Incluye también los de suscripciones que eliminaste, así que puede sumar más que el gasto real.`}
     >
       <div className={styles.descarga}>
         <Boton

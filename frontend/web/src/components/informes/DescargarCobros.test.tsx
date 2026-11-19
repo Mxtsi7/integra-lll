@@ -67,7 +67,11 @@ describe('descargar los cobros del mes (S3-CH-25)', () => {
     await montar('2026-10', 'USD');
 
     expect(screen.getByRole('heading', { name: 'Descargar cobros' })).toBeInTheDocument();
-    expect(screen.getByText('Un archivo CSV con todos los cobros de octubre de 2026 en USD, uno por fila.')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Un archivo CSV con todos los cobros de octubre de 2026 en USD, uno por fila. Incluye también los de suscripciones que eliminaste, así que puede sumar más que el gasto real.',
+      ),
+    ).toBeInTheDocument();
     expect(boton()).toHaveTextContent('Descargar CSV');
     expect(boton()).toBeEnabled();
   });
