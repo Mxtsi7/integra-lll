@@ -391,6 +391,39 @@ class TestLoInciertoNoSeInventa:
         }]
         assert importacion.filas_procesadas == 1
 
+    def test_omitidos_de_outlook_con_el_mismo_prefijo_son_distintos(self):
+        """Los `id` de Graph de un buzón comparten el buzón y la carpeta, más
+        de 64 caracteres. Antes el lector los recortaba a 64 y S3-FE-09 los
+        juntaba en uno; en la página siguiente ya no anotaba ninguno. Que el
+        lector entregue el `id` entero lo prueba `test_lector_outlook`; aquí,
+        que con el `id` entero cada omitido cuenta, también entre páginas."""
+        outlook = crear_cuenta(proveedor="outlook", correo="persona@empresa.cl")
+        de_outlook = crear_importacion(outlook)
+        prefijo = "AAMkADExNzI0ZmE5LTQ2NjctNGQ3Mi1hNjkzLWQ0ZTljZjE4NDMzOABGAAAAAADXtV2rRb4ZT5O8ZH8Qb7lkBwBdA5FtjN0QR4m0b0vd6Euz"
+
+        def omitido(fin):
+            return MensajeOmitido(f"{prefijo}AAAAAAEMAAB{fin}AAA=", "la fecha no es válida")
+
+        primera = guardar_pagina(de_outlook, pagina(omitidos=[omitido("lsA"), omitido("ltA"), omitido("luA")]))
+        segunda = guardar_pagina(de_outlook, pagina(omitidos=[omitido("lvA")]))
+
+        de_outlook.refresh_from_db()
+        assert (primera.errores_nuevos, segunda.errores_nuevos) == (3, 1)
+        assert de_outlook.errores_totales == 4
+        assert len({error["identificador_origen"] for error in de_outlook.errores}) == 4
+
+    def test_un_omitido_sin_identificador_se_anota_y_no_tumba_la_pagina(self, importacion, cuenta):
+        """Antes lanzaba `ValueError`: dentro de la lectura por cursor la
+        página se releía para siempre y el buzón quedaba detenido."""
+        sin_id = [MensajeOmitido("", "identificador no válido"), MensajeOmitido("", "identificador no válido")]
+        resultado = guardar_pagina(importacion, pagina(mensaje(cuenta), omitidos=sin_id))
+
+        assert el_unico_candidato().importe == Decimal("9990")
+        importacion.refresh_from_db()
+        assert [error["codigo"] for error in importacion.errores] == ["mensaje_omitido", "mensaje_omitido"]
+        assert all("identificador_origen" not in error for error in importacion.errores)
+        assert (resultado.errores_nuevos, importacion.filas_procesadas) == (2, 3)
+
     def test_una_pagina_mezclada_guarda_lo_bueno_y_anota_lo_malo(self, importacion, cuenta):
         bueno = mensaje(cuenta, id_mensaje="bueno")
         malo = mensaje(cuenta, id_mensaje="malo", asunto="Tu recibo", texto="Total: CLP 9.990\nFecha: 01/10/2026")

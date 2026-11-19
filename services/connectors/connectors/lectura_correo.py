@@ -199,13 +199,40 @@ class MensajeCorreo:
         return timezone.localdate(self.recibido_en)
 
 
+#: El `id` más largo que se acepta de un proveedor. Los de Graph rondan los
+#: 150 caracteres; 512 deja margen sin aceptar cualquier cosa.
+LARGO_MAXIMO_ID_MENSAJE = 512
+
+
+def es_id_de_mensaje(identificador) -> bool:
+    """¿Sirve como `id` de un mensaje? Texto imprimible, no vacío y de
+    `LARGO_MAXIMO_ID_MENSAJE` como mucho. Es la regla de Outlook; Gmail pide
+    además que vaya bien en una URL, porque con él pide el mensaje."""
+    return (
+        isinstance(identificador, str)
+        and 0 < len(identificador) <= LARGO_MAXIMO_ID_MENSAJE
+        and identificador.isprintable()
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class MensajeOmitido:
     """Un mensaje que la lista nombró pero no se pudo usar. Se informa en
     vez de callarlo: perderlo en silencio es perder un cobro."""
 
+    #: El `id` del proveedor ENTERO, o "" si la lista no trajo uno que sirva.
+    #: Es la identidad del omitido en S3-FE-09. Antes se recortaba a 64, y
+    #: los de Outlook comparten los primeros ~100 caracteres (el buzón y la
+    #: carpeta): tres omitidos distintos quedaban como uno. Lo encontró la
+    #: revisión de S3-FE-09.
     id_mensaje: str
     motivo: str
+
+    @classmethod
+    def desde_la_lista(cls, identificador, motivo: str) -> MensajeOmitido:
+        """El omitido de lo que trajo la lista, sea lo que sea: el `id`
+        entero si sirve (`es_id_de_mensaje`), si no ""."""
+        return cls(identificador if es_id_de_mensaje(identificador) else "", motivo)
 
 
 @dataclasses.dataclass(frozen=True)

@@ -167,7 +167,7 @@ def leer_mensajes(
         for referencia in referencias[:limite]:
             id_mensaje = referencia.get("id") if isinstance(referencia, dict) else None
             if not isinstance(id_mensaje, str) or not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", id_mensaje):
-                omitidos.append(MensajeOmitido(str(id_mensaje)[:64], "identificador no válido"))
+                omitidos.append(MensajeOmitido.desde_la_lista(id_mensaje, "identificador no válido"))
                 continue
             try:
                 crudo = _pedir(f"{URL_MENSAJES}/{id_mensaje}", token, {"format": "full", "fields": _CAMPOS_MENSAJE})

@@ -85,7 +85,7 @@ from django.utils import timezone
 from . import csv_candidatos
 from .candidatos import ORIGEN_CORREO, Candidato
 from .datos_del_cobro import AMBIGUO, AUSENTE, SUPUESTO, Campo, DatosDelCobro, datos_de
-from .lectura_correo import MensajeCorreo, PaginaDeMensajes
+from .lectura_correo import LARGO_MAXIMO_ID_MENSAJE, MensajeCorreo, PaginaDeMensajes
 from .models import CobroCandidato, CuentaConectada, Importacion
 from .origen_correo import OrigenDelMensaje, identificador_del_proveedor, origen_de
 from .tipo_de_aviso import AVISO_DE_COBRO, COBRO_REALIZADO, Clasificacion, clasificar
@@ -125,8 +125,8 @@ HOLGURA_FECHA_PASADA = timedelta(days=1)
 LARGO_TEXTO = 200
 #: Una dirección de correo no pasa de 254 (RFC 5321).
 LARGO_DIRECCION = 254
-#: El `id` de Outlook llega a 512 (ver `lector_outlook`).
-LARGO_ID_PROVEEDOR = 512
+#: El `id` más largo que aceptan los lectores (`lectura_correo`).
+LARGO_ID_PROVEEDOR = LARGO_MAXIMO_ID_MENSAJE
 #: RFC 5322: una línea no pasa de 998 caracteres.
 LARGO_MESSAGE_ID = 998
 #: Las explicaciones (regla del servicio, motivo, frases de S3-FE-08).
@@ -151,7 +151,9 @@ class ErrorDeMensaje:
     """Un mensaje que no da candidato, con su motivo. Es la `ErrorFila` del
     correo: en vez de número de fila lleva la identidad del mensaje."""
 
-    identificador_origen: str
+    #: `None` solo para un omitido que la lista nombró sin un `id` que sirva:
+    #: no hay con qué reconocerlo si la página se vuelve a leer.
+    identificador_origen: str | None
     codigo: str
     mensaje: str
 
@@ -373,10 +375,17 @@ def leer(pagina: PaginaDeMensajes, *, organizacion_id: str, cuenta_id, proveedor
             candidatos.append(candidato)
 
     for omitido in pagina.omitidos:
-        identificador = identificador_del_proveedor(proveedor_correo, cuenta_id, omitido.id_mensaje)
-        if identificador in vistos:
-            continue
-        vistos.add(identificador)
+        identificador = None
+        if omitido.id_mensaje:
+            # El `id` entero (`MensajeOmitido`): dos omitidos de Outlook
+            # comparten los primeros ~100 caracteres y no son el mismo.
+            identificador = identificador_del_proveedor(proveedor_correo, cuenta_id, omitido.id_mensaje)
+            if identificador in vistos:
+                continue
+            vistos.add(identificador)
+        # Sin `id` se anota igual, y si la página se relee se anota otra vez:
+        # repetirlo es mejor que perderlo, y lanzar dejaría el cursor
+        # releyendo esta página para siempre (revisión de S3-FE-09).
         errores.append(ErrorDeMensaje(
             identificador_origen=identificador,
             codigo=MENSAJE_OMITIDO,
@@ -482,12 +491,17 @@ def guardar_pagina(importacion: Importacion, pagina: PaginaDeMensajes, *, ahora=
         )
         guardados = CobroCandidato.objects.filter(importacion=tomada).count()
 
-        anotados = {error.get("identificador_origen") for error in tomada.errores if isinstance(error, dict)}
+        anotados = {
+            error["identificador_origen"]
+            for error in tomada.errores
+            if isinstance(error, dict) and error.get("identificador_origen")
+        }
         errores_antes = tomada.errores_totales
         for error in lectura.errores:
-            if error.identificador_origen in anotados:
-                continue
-            anotados.add(error.identificador_origen)
+            if error.identificador_origen is not None:
+                if error.identificador_origen in anotados:
+                    continue
+                anotados.add(error.identificador_origen)
             tomada.anotar_error(error.codigo, error.mensaje, identificador_origen=error.identificador_origen)
 
         Importacion.objects.filter(pk=tomada.pk).update(
