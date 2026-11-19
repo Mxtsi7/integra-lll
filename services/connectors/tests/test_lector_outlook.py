@@ -12,6 +12,8 @@ Estas pruebas usan el `lector_outlook` REAL y reemplazan solo `requests.get`.
 - La forma de la lista (`@odata.context`, `value`, `@odata.nextLink`) y de cada
   mensaje sigue la referencia publicada de "List messages" y del recurso
   `message`. Se contrasta con una cuenta de prueba real; ver el documento 24.
+- De la `@odata.nextLink` el lector solo usa que venga: la página siguiente
+  la arma él, por fecha (revisión de #189, ronda 3).
 
 Lo común con Gmail (qué cuenta se puede leer, el filtro, el HTML a texto) ya
 está probado en `test_lector_gmail.py` sobre el mismo `lectura_correo`. Aquí
@@ -19,6 +21,7 @@ se repite lo que tiene que valer **para Outlook en particular**: que pida la
 cuenta de Outlook y no otra.
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone as tz
 
@@ -34,8 +37,8 @@ from connectors.lector_outlook import (
     CursorRechazado,
     ErrorDelProveedor,
     ErrorTransitorio,
+    MAXIMO_VISTOS,
     FiltroCorreos,
-    es_pagina_de_graph,
     filtro_fechas_outlook,
     leer_mensajes,
 )
@@ -46,7 +49,18 @@ pytestmark = pytest.mark.django_db
 ORG_A = uuid.UUID("11111111-1111-1111-1111-111111111111")
 ORG_B = uuid.UUID("22222222-2222-2222-2222-222222222222")
 TOKEN = "EwB4A8l6BAAU-token-de-prueba-que-no-debe-salir"
+#: Lo que manda Graph cuando hay más. El lector solo mira que venga.
 SIGUIENTE = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24select=id&%24skip=25"
+#: Un cursor del lector: lo recibido antes del 1-10 a las 11:00:01, sin vistos.
+CURSOR = "antes-de=20261001T110001Z"
+
+
+def huella(id_mensaje):
+    return hashlib.sha256(id_mensaje.encode("utf-8")).hexdigest()[:16]
+
+
+def cursor(corte="20261001T110001Z", *vistos):
+    return f"antes-de={corte}" + (f"&vistos={','.join(sorted(huella(v) for v in vistos))}" if vistos else "")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -240,57 +254,152 @@ class TestLaCuentaCorrecta:
 
 
 class TestPaginas:
-    def test_devuelve_la_pagina_siguiente_de_graph(self, claves, graph):
-        cuenta = outlook()
-        graph.responde(lista(mensaje_graph("a1"), siguiente=SIGUIENTE))
-        assert leer(cuenta).siguiente_pagina == SIGUIENTE
+    """La página siguiente la arma el lector, por fecha: la `@odata.nextLink`
+    avanza con `$skip`, y un borrado a mitad de corrida hacía saltar un correo
+    (revisión de #189, ronda 3). De la `nextLink` solo importa que venga."""
 
-    def test_la_pagina_siguiente_se_pide_tal_cual(self, claves, graph):
-        """Microsoft pide usar la `@odata.nextLink` entera, sin sacarle el
-        `$skip` ni agregarle parámetros."""
+    def test_si_hay_mas_el_cursor_es_el_ultimo_segundo_y_los_de_ese_segundo(self, claves, graph):
         cuenta = outlook()
-        graph.responde(lista(mensaje_graph("b1")))
-        pagina = leer(cuenta, pagina=SIGUIENTE)
+        graph.responde(lista(mensaje_graph("a1", recibido="2026-10-01T12:00:00Z"),
+                             mensaje_graph("a2", recibido="2026-10-01T11:00:00.75Z"),
+                             mensaje_graph("a3", recibido="2026-10-01T11:00:00Z"), siguiente=SIGUIENTE))
+        # Graph muestra al segundo y el buzón guarda fracciones: el corte va
+        # un segundo después, para que vuelvan los de ese segundo.
+        assert leer(cuenta).siguiente_pagina == cursor("20261001T110001Z", "a2", "a3")
+
+    def test_la_pagina_siguiente_es_la_misma_consulta_con_el_corte(self, claves, graph):
+        cuenta = outlook()
+        filtro = FiltroCorreos(desde=datetime(2026, 9, 1, tzinfo=tz.utc), hasta=datetime(2026, 11, 1, tzinfo=tz.utc))
+        graph.responde(lista(mensaje_graph("b1", recibido="2026-10-01T10:00:00Z")))
+        leer(cuenta, filtro=filtro, pagina=cursor("20261001T110001Z", "a1"), limite=5)
         (peticion,) = graph.peticiones
-        assert peticion["url"] == SIGUIENTE
-        assert peticion["params"] is None
-        assert [m.id_mensaje for m in pagina.mensajes] == ["b1"]
-        assert pagina.siguiente_pagina is None
+        assert peticion["url"] == URL_MENSAJES
+        assert peticion["params"]["$filter"] == (
+            "receivedDateTime ge 2026-09-01T00:00:00Z and receivedDateTime lt 2026-10-01T11:00:01Z"
+        )
+        assert peticion["params"]["$orderby"] == "receivedDateTime desc"
+        # Los vistos vuelven a venir: se piden `limite` más ellos.
+        assert peticion["params"]["$top"] == 6
+        assert "$skip" not in peticion["params"]
 
-    def test_recorre_dos_paginas(self, claves, graph):
+    def test_recorre_dos_paginas_sin_repetir_el_del_borde(self, claves, graph):
         cuenta = outlook()
-        graph.responde(lista(mensaje_graph("a1"), siguiente=SIGUIENTE), lista(mensaje_graph("b1")))
+        graph.responde(lista(mensaje_graph("a1"), siguiente=SIGUIENTE),
+                       lista(mensaje_graph("a1"), mensaje_graph("b1", recibido="2026-10-01T10:00:00Z")))
         primera = leer(cuenta)
         segunda = leer(cuenta, pagina=primera.siguiente_pagina)
         assert [m.id_mensaje for m in primera.mensajes + segunda.mensajes] == ["a1", "b1"]
+        assert segunda.siguiente_pagina is None
+
+    def test_los_del_mismo_segundo_que_no_alcanzaron_se_entregan_en_la_siguiente(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("x"), mensaje_graph("y"), siguiente=SIGUIENTE),
+                       lista(mensaje_graph("x"), mensaje_graph("y"), mensaje_graph("z"),
+                             mensaje_graph("w", recibido="2026-10-01T10:59:59Z")))
+        primera = leer(cuenta, limite=2)
+        segunda = leer(cuenta, pagina=primera.siguiente_pagina, limite=2)
+        assert [m.id_mensaje for m in segunda.mensajes] == ["z", "w"]
+        assert graph.peticiones[1]["params"]["$top"] == 4
+
+    def test_una_pagina_entera_en_el_mismo_segundo_suma_sus_vistos_a_los_de_antes(self, claves, graph):
+        """En el mismo segundo el orden no está garantizado: si uno ya visto
+        no vuelve en la segunda página, sigue contado como visto y no se
+        entrega dos veces en la tercera."""
+        cuenta = outlook()
+        graph.responde(
+            lista(mensaje_graph("x"), mensaje_graph("y"), siguiente=SIGUIENTE),
+            lista(mensaje_graph("y"), mensaje_graph("z"), mensaje_graph("w"), mensaje_graph("u"), siguiente=SIGUIENTE),
+            lista(*(mensaje_graph(i) for i in "xyzwu"), mensaje_graph("q", recibido="2026-10-01T10:59:59Z")),
+        )
+        primera = leer(cuenta, limite=2)
+        segunda = leer(cuenta, pagina=primera.siguiente_pagina, limite=2)
+        assert segunda.siguiente_pagina == cursor("20261001T110001Z", *"xyzwu")
+        tercera = leer(cuenta, pagina=segunda.siguiente_pagina, limite=2)
+        assert [m.id_mensaje for m in primera.mensajes + segunda.mensajes + tercera.mensajes] == list("xyzwuq")
+
+    def test_un_cursor_que_no_avanza_es_un_error(self, claves, graph):
+        """Graph dice que hay más y solo entrega lo ya visto: seguir sería un
+        bucle, y terminar sería perder lo que falta."""
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("a1"), siguiente=SIGUIENTE))
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, pagina=cursor("20261001T110001Z", "a1"))
+        assert error.value.codigo == "pagina_sin_avance"
+
+    @pytest.mark.parametrize("respuesta", [
+        lista(siguiente=SIGUIENTE),
+        lista(mensaje_graph("sin-fecha", recibido=None), siguiente=SIGUIENTE),
+    ], ids=["vacia", "sin-fecha"])
+    def test_hay_mas_pero_nada_con_fecha_es_un_error(self, claves, graph, respuesta):
+        cuenta = outlook()
+        graph.responde(respuesta)
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta)
+        assert error.value.codigo == "pagina_sin_avance"
+
+    def test_en_un_mismo_segundo_caben_hasta_maximo_vistos(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(MAXIMO_VISTOS)), siguiente=SIGUIENTE))
+        assert leer(cuenta, limite=100).siguiente_pagina.count(",") == MAXIMO_VISTOS - 1
+
+        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(MAXIMO_VISTOS + 1)), siguiente=SIGUIENTE))
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, limite=100)
+        assert error.value.codigo == "demasiados_en_un_segundo"
+
+    def test_con_vistos_el_top_no_pasa_del_maximo(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista())
+        leer(cuenta, pagina=cursor("20261001T110001Z", "a", "b", "c"), limite=100)
+        assert graph.peticiones[0]["params"]["$top"] == 100
+
+    def test_una_next_link_ajena_nunca_se_pide(self, claves, graph):
+        """La `nextLink` no se sigue: el token va siempre a la lista."""
+        cuenta = outlook()
+        graph.responde(lista(mensaje_graph("a1"), siguiente="https://otro.sitio/v1.0/me/messages?$skip=1"), lista())
+        primera = leer(cuenta)
+        leer(cuenta, pagina=primera.siguiente_pagina)
+        assert [p["url"] for p in graph.peticiones] == [URL_MENSAJES, URL_MENSAJES]
+        assert all(p["allow_redirects"] is False for p in graph.peticiones)
 
     @pytest.mark.parametrize("pagina", [
+        # Las que Graph armaría, y las que llevarían el token a otro lado:
+        # ninguna se pide, porque ninguna es un cursor de este lector.
+        SIGUIENTE,
         "https://otro.sitio/v1.0/me/messages?$skip=10",
         "https://graph.microsoft.com.otro.sitio/v1.0/me/messages",
         "https://graph.microsoft.com@otro.sitio/v1.0/me/messages",
-        "https://usuario@graph.microsoft.com/v1.0/me/messages",
-        "https://graph.microsoft.com:8443/v1.0/me/messages",
-        "http://graph.microsoft.com/v1.0/me/messages",
-        "https://graph.microsoft.com/v1.0/users/otro/messages",
-        "https://graph.microsoft.com/v1.0/me/messages/../../users/otro/messages",
-        "https://graph.microsoft.com/beta/me/messages",
-        "https://graph.microsoft.com/v1.0/me/messages#x",
-        "https://graph.microsoft.com/v1.0/me/messages?$skip=1 x",
         "//graph.microsoft.com/v1.0/me/messages",
-        "https://graph.microsoft.com/v1.0/me/messages?" + "a" * 4100,
+        # Cursores mal formados.
+        "antes-de=2026-10-01T11:00:01Z",
+        "antes-de=20261399T110001Z",
+        "antes-de=20261001T110001Z&vistos=",
+        "antes-de=20261001T110001Z&vistos=ABCDEF0123456789",
+        "antes-de=20261001T110001Z&vistos=abc",
+        f"antes-de=20261001T110001Z&vistos={huella('a')},{huella('a')}",
+        "antes-de=20261001T110001Z&vistos=" + ",".join(huella(f"m{i}") for i in range(MAXIMO_VISTOS + 1)),
+        " antes-de=20261001T110001Z",
+        "antes-de=20261001T110001Z\n",
+        "antes-de=\u0662\u0660\u0662\u0666\u0661\u0660\u0660\u0661T110001Z",
         "", 123,
     ])
-    def test_una_pagina_ajena_no_recibe_el_token(self, claves, graph, pagina):
+    def test_una_pagina_que_no_armo_este_lector_no_recibe_el_token(self, claves, graph, pagina):
         cuenta = outlook()
         with pytest.raises(ValueError):
             leer(cuenta, pagina=pagina)
         assert graph.peticiones == []
 
-    def test_una_pagina_siguiente_ajena_de_graph_no_se_devuelve(self, claves, graph):
+    def test_un_cursor_de_otra_ventana_no_se_usa(self, claves, graph):
         cuenta = outlook()
-        graph.responde(lista(mensaje_graph("a1"), siguiente="https://otro.sitio/v1.0/me/messages?$skip=1"))
-        with pytest.raises(ErrorDelProveedor):
-            leer(cuenta)
+        with pytest.raises(ValueError, match="otra ventana"):
+            leer(cuenta, filtro=FiltroCorreos(desde=datetime(2026, 10, 1, 11, 0, 1, tzinfo=tz.utc)), pagina=CURSOR)
+        assert graph.peticiones == []
+
+    def test_un_cursor_mas_alla_del_hasta_no_amplia_la_ventana(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista())
+        leer(cuenta, filtro=FiltroCorreos(hasta=datetime(2026, 10, 1, tzinfo=tz.utc)), pagina=CURSOR)
+        assert graph.peticiones[0]["params"]["$filter"] == "receivedDateTime lt 2026-10-01T00:00:00Z"
 
     def test_si_graph_devuelve_mas_de_lo_pedido_no_se_recorta(self, claves, graph):
         """Recortar perdería los que sobran sin aviso: es un error explícito."""
@@ -299,37 +408,28 @@ class TestPaginas:
         with pytest.raises(ErrorDelProveedor, match="se pidieron 3"):
             leer(cuenta, limite=3)
 
+    def test_con_vistos_tampoco_se_recorta(self, claves, graph):
+        cuenta = outlook()
+        graph.responde(lista(*(mensaje_graph(f"m{i}", recibido="2026-10-01T10:00:00Z") for i in range(5))))
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 4"):
+            leer(cuenta, pagina=cursor("20261001T110001Z", "a1"), limite=3)
+
     # ── Revisión de #177: seguir una página con otro límite ───────────────
 
-    @pytest.mark.parametrize("siguiente", [None, SIGUIENTE + "&%24skip=50"])
-    def test_seguir_una_pagina_de_25_con_limite_5_no_pierde_ninguno(self, claves, graph, siguiente):
-        """El caso de Maxi, en página final y en página intermedia: el tamaño
-        lo fija el `$top` del cursor, y se procesa la página entera."""
+    def test_seguir_una_pagina_con_otro_limite_no_pierde_ninguno(self, claves, graph):
+        """El caso de Maxi: antes el tamaño de la página seguida lo fijaba su
+        `$top` y se recortaba a `limite`. Ahora el cursor no trae tamaño: se
+        piden `limite` más los vistos y se devuelve todo lo que llega."""
         cuenta = outlook()
-        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(25)), siguiente=siguiente))
-        pagina = leer(cuenta, pagina=SIGUIENTE, limite=5)
-        assert [m.id_mensaje for m in pagina.mensajes] == [f"m{i}" for i in range(25)]
-        assert pagina.omitidos == ()
-        assert pagina.siguiente_pagina == siguiente
-
-    def test_una_pagina_que_trae_mas_que_su_top_es_un_error(self, claves, graph):
-        cuenta = outlook()
-        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(26))))
-        with pytest.raises(ErrorDelProveedor, match="se pidieron 25"):
-            leer(cuenta, pagina=SIGUIENTE)
-
-    @pytest.mark.parametrize("top", ["0", "101", "abc", "-5", "25&%24top=50", ""])
-    def test_una_pagina_con_un_top_que_no_armo_este_lector(self, claves, graph, top):
-        cuenta = outlook()
-        with pytest.raises(ValueError):
-            leer(cuenta, pagina=f"{URL_MENSAJES}?%24top={top}&%24skip=25")
-        assert graph.peticiones == []
-
-    def test_sin_top_vale_el_tamano_por_omision_de_graph(self, claves, graph):
-        cuenta = outlook()
-        graph.responde(lista(*(mensaje_graph(f"m{i}") for i in range(11))))
-        with pytest.raises(ErrorDelProveedor, match="se pidieron 10"):
-            leer(cuenta, pagina=f"{URL_MENSAJES}?%24skiptoken=abc")
+        horas = [f"2026-10-01T{h:02}:30:00Z" for h in range(23, -1, -1)]
+        primera_tanda = [mensaje_graph(f"m{i}", recibido=horas[i]) for i in range(24)]
+        graph.responde(lista(*primera_tanda[:20], siguiente=SIGUIENTE),
+                       lista(primera_tanda[19], *primera_tanda[20:24], siguiente=SIGUIENTE))
+        primera = leer(cuenta, limite=20)
+        segunda = leer(cuenta, pagina=primera.siguiente_pagina, limite=5)
+        assert graph.peticiones[1]["params"]["$top"] == 6
+        assert [m.id_mensaje for m in primera.mensajes + segunda.mensajes] == [f"m{i}" for i in range(24)]
+        assert segunda.siguiente_pagina == cursor("20261001T003001Z", "m23")
 
     @pytest.mark.parametrize("limite", [0, 101, True, "5"])
     def test_limite_fuera_de_rango(self, claves, graph, limite):
@@ -350,12 +450,6 @@ class TestPaginas:
         graph.responde(_Respuesta(200, cuerpo))
         with pytest.raises(ErrorDelProveedor):
             leer(cuenta)
-
-
-class TestEsPaginaDeGraph:
-    def test_la_que_arma_graph(self):
-        assert es_pagina_de_graph(SIGUIENTE)
-        assert es_pagina_de_graph(URL_MENSAJES + "?%24skiptoken=abc")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -413,15 +507,17 @@ class TestRechazoYErrores:
         assert not isinstance(error, CursorRechazado)  # no se seguía ninguna página
 
     @pytest.mark.parametrize("estado, codigo_graph", [(400, "ErrorInvalidRequest"), (410, "SyncStateNotFound")])
-    def test_un_rechazo_de_la_pagina_siguiente_es_el_cursor_rechazado(self, claves, graph, estado, codigo_graph):
-        """Es lo único con que S3-FE-05 reinicia una corrida (revisión de
-        #189, P2): Graph armó esa página con una consulta que ya aceptó."""
+    def test_con_cursor_un_400_o_410_no_es_un_cursor_rechazado(self, claves, graph, estado, codigo_graph):
+        """El cursor lo arma este lector y Graph no lo conoce: no tiene cómo
+        vencer. Cuando la página siguiente era la `@odata.nextLink`, esto era
+        un `CursorRechazado` (revisión de #189, ronda 3)."""
         cuenta = outlook()
         graph.responde(_Respuesta(estado, error_graph(codigo_graph)))
-        with pytest.raises(CursorRechazado) as error:
-            leer(cuenta, pagina=SIGUIENTE)
-        assert error.value.codigo == "cursor_rechazado"
-        assert TOKEN not in str(error.value) and "skip" not in str(error.value)
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, pagina=CURSOR)
+        assert not isinstance(error.value, CursorRechazado)
+        assert error.value.codigo == "error_del_proveedor"
+        assert TOKEN not in str(error.value)
 
     @pytest.mark.parametrize("respuesta", [
         _Respuesta(200, ValueError("no es JSON")),
@@ -434,7 +530,7 @@ class TestRechazoYErrores:
         cuenta = outlook()
         graph.responde(respuesta)
         with pytest.raises(ErrorDelProveedor) as error:
-            leer(cuenta, pagina=SIGUIENTE)
+            leer(cuenta, pagina=CURSOR)
         assert not isinstance(error.value, CursorRechazado)
 
     def test_un_410_en_la_primera_pagina_no_es_un_cursor_rechazado(self, claves, graph):
@@ -461,7 +557,7 @@ class TestRechazoYErrores:
         cuenta = outlook()
         graph.responde(_Respuesta(401, ERROR_401))
         with pytest.raises(AutorizacionRechazada):
-            leer(cuenta, pagina=SIGUIENTE)
+            leer(cuenta, pagina=CURSOR)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -517,14 +613,17 @@ class TestFiltros:
         # Solo el cobro que no se pudo armar se informa; el que no era un
         # cobro no le importa a nadie.
         assert [o.id_mensaje for o in pagina.omitidos] == ["sin-fecha-y-es-cobro"]
-        assert pagina.siguiente_pagina == SIGUIENTE
+        # Los que no son cobros también cuentan para el cursor: ya se vieron.
+        assert pagina.siguiente_pagina == cursor(
+            "20261001T110001Z", "hola", "en-el-cuerpo", "acento-aparte", "en-el-nombre", "en-la-direccion",
+        )
 
     def test_una_pagina_sin_cobros_sigue_teniendo_pagina_siguiente(self, claves, graph):
         cuenta = outlook()
         graph.responde(lista(mensaje_graph("hola", asunto="Hola", texto="", remitente=("Ana", "a@b.cl")),
                              siguiente=SIGUIENTE))
         pagina = leer(cuenta)
-        assert (pagina.mensajes, pagina.siguiente_pagina) == ((), SIGUIENTE)
+        assert (pagina.mensajes, pagina.siguiente_pagina) == ((), cursor("20261001T110001Z", "hola"))
 
     def test_sin_solo_cobros_pasa_todo(self, claves, graph):
         cuenta = outlook()
@@ -636,7 +735,7 @@ class TestComando:
         graph.responde(lista(mensaje_graph("a1", texto="cuerpo-privado"), siguiente=SIGUIENTE))
         salida = StringIO()
         call_command("leer_outlook", "--organizacion", str(ORG_A), "--cuenta", str(cuenta.pk), stdout=salida)
-        assert "a1" in salida.getvalue() and SIGUIENTE in salida.getvalue()
+        assert "a1" in salida.getvalue() and cursor("20261001T110001Z", "a1") in salida.getvalue()
         assert "cuerpo-privado" not in salida.getvalue()
 
     def test_no_lee_una_cuenta_de_gmail(self, claves, graph):

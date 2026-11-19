@@ -1121,8 +1121,8 @@ class AvanceDeLectura(ModeloTenant):
         help_text="Vacío si no hay una corrida a medias.",
     )
 
-    # Un `pageToken` de Gmail o una `@odata.nextLink` de Graph. No es un
-    # secreto: no lleva el token de acceso.
+    # Un `pageToken` de Gmail o el cursor por fecha del lector de Outlook. No
+    # es un secreto: no lleva el token de acceso.
     pagina = models.TextField(
         blank=True,
         default="",

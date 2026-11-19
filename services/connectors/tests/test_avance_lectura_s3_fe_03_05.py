@@ -8,10 +8,11 @@ Criterios:
 
 La mayoría usa un lector de prueba que entrega páginas programadas: lo que se
 prueba aquí es el cursor, no el proveedor. Al final, los lectores REALES de
-Gmail y Outlook con `requests` reemplazado, para ver que el `pageToken` y la
-`@odata.nextLink` viajan bien, y las aceptaciones de la revisión de #189:
-Outlook con más de 1000 coincidencias (P1) y que solo un rechazo explícito
-del cursor reinicie (P2). Los dos workers con dos conexiones a PostgreSQL
+Gmail y Outlook con `requests` reemplazado, para ver que el `pageToken` y el
+cursor por fecha de Outlook viajan bien, y las aceptaciones de la revisión de
+#189: Outlook con más de 1000 coincidencias (P1), que solo un rechazo
+explícito del cursor reinicie (P2) y, en la ronda 3, un reinicio por corrida
+y un borrado a mitad de corrida en Outlook. Los dos workers con dos conexiones a PostgreSQL
 están en `test_carrera_avance_lectura_postgres.py`.
 """
 
@@ -485,27 +486,41 @@ class TestConLosLectoresReales:
         assert "pageToken" not in pedidos[0] and pedidos[1]["pageToken"] == "09876543210"
         assert pedidos[1]["q"].startswith(f"after:{int((LUNES - VENTANA_INICIAL).timestamp())} before:")
 
-    def test_outlook_guarda_la_next_link_y_se_recupera_si_vence(self, claves, monkeypatch):
+    def test_outlook_guarda_su_cursor_por_fecha_y_un_400_con_el_no_reinicia(self, claves, monkeypatch):
+        """El cursor de Outlook lo arma su lector (revisión de #189, ronda 3):
+        Graph no lo conoce y no tiene cómo vencer. Un 400 al seguirlo es un
+        error de la consulta: sale tal cual, con el cursor guardado."""
         c = cuenta(proveedor="outlook", correo="p@outlook.com")
-        siguiente = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24skiptoken=abc"
+        uno, dos = LUNES - timedelta(hours=1), LUNES - timedelta(hours=2)
         respuestas = [
-            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
-            # El skiptoken venció: Graph lo rechaza.
+            _Respuesta(200, {"value": [correo_graph("m1", recibido=uno)],
+                             "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?%24skip=1"}),
             _Respuesta(400, {"error": {"code": "ErrorInvalidRequest", "message": "..."}}),
-            _Respuesta(200, {"value": []}),
+            _Respuesta(200, {"value": [correo_graph("m1", recibido=uno), correo_graph("m2", recibido=dos)]}),
         ]
         pedidos = []
 
         def get(url, params=None, headers=None, timeout=None, allow_redirects=False):
-            pedidos.append(url)
+            pedidos.append((url, dict(params or {})))
             return respuestas.pop(0)
 
         monkeypatch.setattr(lector_outlook.requests, "get", get)
-        lote(lector_outlook, c, Procesado())
-        assert avance(c).pagina == siguiente
-        resultado = lote(lector_outlook, c, Procesado())
-        assert resultado.reiniciada and resultado.corrida_terminada
-        assert pedidos == [lector_outlook.URL_MENSAJES, siguiente, lector_outlook.URL_MENSAJES]
+        procesado = Procesado()
+        lote(lector_outlook, c, procesado)
+        guardado = avance(c).pagina
+        assert guardado.startswith("antes-de=20261116T110001Z&vistos=")
+
+        with pytest.raises(ErrorDelProveedor) as error:
+            lote(lector_outlook, c, procesado)
+        assert not isinstance(error.value, CursorRechazado)
+        assert (avance(c).pagina, avance(c).reinicios_por_pagina_invalida) == (guardado, 0)
+
+        assert lote(lector_outlook, c, procesado).corrida_terminada
+        assert procesado.ids == ["m1", "m2"]
+        # Nunca se pidió otra URL que la de la lista, y la página siguiente
+        # es la misma consulta con el corte.
+        assert {url for url, _ in pedidos} == {lector_outlook.URL_MENSAJES}
+        assert pedidos[2][1]["$filter"].endswith("receivedDateTime lt 2026-11-16T11:00:01Z")
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -525,10 +540,13 @@ class BuzonDeGraph:
 
     - `$filter` por `receivedDateTime` (`ge`/`lt`), `$orderby receivedDateTime
       desc`, `$top`, y la página siguiente con `$skip`, sin tope;
-    - `$search`: ordena por fecha de envío y entrega 1000 como mucho.
+    - `$search`: ordena por fecha de envío y entrega 1000 como mucho;
+    - la fecha se muestra al segundo, pero se filtra y se ordena con la que
+      guarda el buzón, que puede traer fracción (`_interno`, si la hay).
 
     Puede fallar una petición (un 503) para ver que un corte a mitad de
-    camino tampoco adelanta la marca.
+    camino tampoco adelanta la marca, y se puede borrar un correo a mitad de
+    camino (`borrar`).
     """
 
     TOPE_DE_SEARCH = 1000
@@ -537,6 +555,11 @@ class BuzonDeGraph:
         self.mensajes = mensajes
         self.consultas = []
         self.falla_en_la_peticion = falla_en_la_peticion
+
+    def borrar(self, *identificadores):
+        """Borrado definitivo (vaciar «Elementos eliminados»): el correo deja
+        de aparecer en cualquier consulta."""
+        self.mensajes = [m for m in self.mensajes if m["id"] not in identificadores]
 
     def get(self, url, params=None, headers=None, timeout=None, allow_redirects=False):
         if params is None:
@@ -553,8 +576,8 @@ class BuzonDeGraph:
                               key=lambda m: m["sentDateTime"], reverse=True)[:self.TOPE_DE_SEARCH]
         else:
             desde, hasta = _rango_del_filter(consulta.get("$filter", ""))
-            elegidos = sorted((m for m in self.mensajes if desde <= _instante(m["receivedDateTime"]) < hasta),
-                              key=lambda m: m["receivedDateTime"], reverse=True)
+            elegidos = sorted((m for m in self.mensajes if desde <= _guardada(m) < hasta),
+                              key=_guardada, reverse=True)
         top, salto = int(consulta.get("$top", 10)), int(consulta.get("$skip", 0))
         cuerpo = {"value": elegidos[salto:salto + top]}
         if salto + top < len(elegidos):
@@ -564,6 +587,11 @@ class BuzonDeGraph:
 
 def _instante(texto):
     return datetime.fromisoformat(texto)
+
+
+def _guardada(crudo):
+    """La fecha con que el buzón filtra y ordena; la que muestra va al segundo."""
+    return crudo.get("_interno") or _instante(crudo["receivedDateTime"])
 
 
 def _rango_del_filter(filtro):
@@ -582,13 +610,18 @@ def _fecha_graph(instante):
     return instante.astimezone(tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def correo_graph(id_mensaje, *, recibido, enviado, asunto="Tu recibo", texto="Cobro mensual: $8.990"):
-    return {
+def correo_graph(id_mensaje, *, recibido, enviado=None, asunto="Tu recibo", texto="Cobro mensual: $8.990"):
+    """`recibido` puede traer fracción de segundo: Graph la muestra al
+    segundo y el buzón la usa entera (`_interno`)."""
+    crudo = {
         "id": id_mensaje, "internetMessageId": f"<{id_mensaje}@ejemplo.com>", "conversationId": f"c-{id_mensaje}",
-        "receivedDateTime": _fecha_graph(recibido), "sentDateTime": _fecha_graph(enviado), "subject": asunto,
-        "from": {"emailAddress": {"name": "Ejemplo", "address": "avisos@ejemplo.com"}},
+        "receivedDateTime": _fecha_graph(recibido), "sentDateTime": _fecha_graph(enviado or recibido),
+        "subject": asunto, "from": {"emailAddress": {"name": "Ejemplo", "address": "avisos@ejemplo.com"}},
         "body": {"contentType": "text", "content": texto},
     }
+    if recibido.microsecond:
+        crudo["_interno"] = recibido
+    return crudo
 
 
 def buzon_con_mas_de_mil_cobros():
@@ -679,6 +712,85 @@ class TestOutlookConMasDeMilCoincidencias:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Revisión de #189, ronda 3 (P2) — un borrado a mitad de corrida
+# ══════════════════════════════════════════════════════════════════════
+#
+# La `@odata.nextLink` avanza con `$skip`, por posición. Si a mitad de una
+# corrida se borraba definitivamente un correo ya leído (Outlook.com vacía
+# solo «Elementos eliminados»; en Exchange Online lo hace la directiva de
+# retención), los que seguían se corrían un lugar y el del borde de la página
+# no se entregaba nunca, con la marca avanzando igual. Ahora Outlook arma su
+# página siguiente por fecha.
+
+
+class TestOutlookConBorradosAMitadDeCorrida:
+    def _cuenta(self, monkeypatch, mensajes):
+        c = cuenta(proveedor="outlook", correo="p@outlook.com")
+        buzon = BuzonDeGraph(mensajes)
+        monkeypatch.setattr(lector_outlook.requests, "get", buzon.get)
+        return c, buzon
+
+    def _leer_hasta_terminar(self, c, procesado, *, limite):
+        for _ in range(100):
+            if lote(lector_outlook, c, procesado, limite=limite).corrida_terminada:
+                return
+            assert avance(c).leido_hasta is None, "la marca avanzó a mitad de la corrida"
+        pytest.fail("la corrida no terminó en 100 páginas")
+
+    def test_un_correo_ya_leido_que_se_borra_no_hace_saltar_al_siguiente(self, claves, monkeypatch):
+        mensajes = [correo_graph(f"m{i}", recibido=LUNES - timedelta(hours=1 + i)) for i in range(30)]
+        c, buzon = self._cuenta(monkeypatch, mensajes)
+        procesado = Procesado()
+        lote(lector_outlook, c, procesado, limite=10)
+        assert procesado.ids == [f"m{i}" for i in range(10)]
+
+        buzon.borrar("m3")
+        self._leer_hasta_terminar(c, procesado, limite=10)
+
+        assert avance(c).leido_hasta == LUNES
+        assert sorted(procesado.ids) == sorted(f"m{i}" for i in range(30)), "faltan correos al avanzar la marca"
+        assert len(procesado.ids) == len(set(procesado.ids))
+        assert all("$skip" not in consulta for consulta in buzon.consultas)
+
+    def test_muchos_en_el_mismo_segundo_y_uno_borrado_entre_ellos(self, claves, monkeypatch):
+        """25 cobros en el mismo segundo, con fracciones distintas como las
+        guarda el buzón (Graph los muestra todos iguales), más 10 anteriores.
+        Las páginas de 10 cortan en medio de ese segundo, y a mitad de camino
+        se borra uno de ese segundo que ya se leyó."""
+        segundo = LUNES - timedelta(hours=2)
+        mensajes = [correo_graph(f"s{i:02}", recibido=segundo + timedelta(microseconds=999_000 - i * 1000))
+                    for i in range(25)]
+        mensajes += [correo_graph(f"v{i}", recibido=segundo - timedelta(seconds=1 + i)) for i in range(10)]
+        c, buzon = self._cuenta(monkeypatch, mensajes)
+        procesado = Procesado()
+        lote(lector_outlook, c, procesado, limite=10)
+
+        buzon.borrar("s04")
+        self._leer_hasta_terminar(c, procesado, limite=10)
+
+        esperados = {m["id"] for m in mensajes}
+        assert set(procesado.ids) == esperados, "faltan correos del mismo segundo"
+        assert len(procesado.ids) == len(set(procesado.ids)), "un correo se entregó dos veces"
+
+    def test_mas_de_los_que_caben_en_un_segundo_es_un_error_y_la_marca_no_avanza(self, claves, monkeypatch):
+        segundo = LUNES - timedelta(hours=2)
+        mensajes = [correo_graph(f"s{i:03}", recibido=segundo + timedelta(microseconds=i)) for i in range(150)]
+        c, _ = self._cuenta(monkeypatch, mensajes)
+        procesado = Procesado()
+        lote(lector_outlook, c, procesado, limite=50)
+        guardada = avance(c).pagina
+
+        for _ in range(2):
+            with pytest.raises(ErrorDelProveedor) as error:
+                lote(lector_outlook, c, procesado, limite=50)
+            assert error.value.codigo == "demasiados_en_un_segundo"
+
+        a = avance(c)
+        assert (a.pagina, a.leido_hasta) == (guardada, None)
+        assert len(procesado.ids) == 50
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Revisión de #189, P2 — solo un rechazo explícito del cursor reinicia
 # ══════════════════════════════════════════════════════════════════════
 #
@@ -759,39 +871,43 @@ class TestSoloUnRechazoDelCursorReinicia:
         respuestas = list(respuestas)
 
         def get(url, params=None, headers=None, timeout=None, allow_redirects=False):
-            pedidos.append(url)
+            pedidos.append(dict(params or {}))
             return respuestas.pop(0)
 
         monkeypatch.setattr(lector_outlook.requests, "get", get)
         return pedidos
 
-    def test_outlook_next_link_valida_con_json_ilegible_sale_el_error_y_se_conserva(self, claves, monkeypatch):
+    @staticmethod
+    def _primera_de_outlook():
+        """Una primera página A buena, con página siguiente."""
+        return _Respuesta(200, {"value": [correo_graph("m1", recibido=LUNES - timedelta(hours=1))],
+                                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?%24skip=1"})
+
+    def test_outlook_cursor_valido_con_json_ilegible_sale_el_error_y_se_conserva(self, claves, monkeypatch):
         c = cuenta(proveedor="outlook", correo="p@outlook.com")
-        siguiente = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24skip=25"
-        pedidos = self._outlook(
-            monkeypatch,
-            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
-            _Respuesta(200, NO_ES_JSON),
-            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
-        )
+        pedidos = self._outlook(monkeypatch, self._primera_de_outlook(), _Respuesta(200, NO_ES_JSON),
+                                self._primera_de_outlook())
         lote(lector_outlook, c, Procesado())
+        guardado = avance(c).pagina
 
         with pytest.raises(ErrorDelProveedor, match="no es JSON"):
             lote(lector_outlook, c, Procesado())
 
         a = avance(c)
-        assert (a.pagina, a.reinicios_por_pagina_invalida) == (siguiente, 0)
-        assert pedidos == [lector_outlook.URL_MENSAJES, siguiente]
+        assert (a.pagina, a.reinicios_por_pagina_invalida) == (guardado, 0)
+        assert len(pedidos) == 2, "se volvió a la primera página"
 
-    def test_outlook_410_en_la_next_link_si_reinicia(self, claves, monkeypatch):
+    @pytest.mark.parametrize("estado, codigo_graph", [(400, "ErrorInvalidRequest"), (410, "SyncStateNotFound")])
+    def test_outlook_un_400_o_410_con_el_cursor_ya_no_reinicia(self, claves, monkeypatch, estado, codigo_graph):
+        """Antes la página siguiente era una `@odata.nextLink` que podía
+        vencer; ahora el cursor es de este lado (ronda 3) y Graph no tiene
+        cómo rechazarlo."""
         c = cuenta(proveedor="outlook", correo="p@outlook.com")
-        siguiente = "https://graph.microsoft.com/v1.0/me/messages?%24top=25&%24skip=25"
-        self._outlook(
-            monkeypatch,
-            _Respuesta(200, {"value": [], "@odata.nextLink": siguiente}),
-            _Respuesta(410, {"error": {"code": "SyncStateNotFound", "message": "..."}}),
-            _Respuesta(200, {"value": []}),
-        )
+        pedidos = self._outlook(monkeypatch, self._primera_de_outlook(),
+                                _Respuesta(estado, {"error": {"code": codigo_graph, "message": "..."}}),
+                                self._primera_de_outlook())
         lote(lector_outlook, c, Procesado())
-        resultado = lote(lector_outlook, c, Procesado())
-        assert resultado.reiniciada and avance(c).reinicios_por_pagina_invalida == 1
+        with pytest.raises(ErrorDelProveedor) as error:
+            lote(lector_outlook, c, Procesado())
+        assert not isinstance(error.value, CursorRechazado)
+        assert avance(c).reinicios_por_pagina_invalida == 0 and len(pedidos) == 2

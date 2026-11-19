@@ -3,12 +3,12 @@
 **Qué hace.** Lee una cuenta de correo **una página a la vez**, le entrega
 cada página a quien la procesa y, solo si eso terminó bien, guarda hasta
 dónde llegó. Es lo mismo para Gmail (FE-03) y Outlook (FE-05): lo que cambia
-entre los dos (un `pageToken` o una `@odata.nextLink`) lo resuelve cada
-lector (documentos 23 y 24).
+entre los dos (el `pageToken` de Google o el cursor por fecha que arma el
+lector de Outlook) lo resuelve cada lector (documentos 23 y 24).
 
 | Criterio | Dónde se cumple |
 |---|---|
-| FE-03: reanudar no relee indefinidamente ni pierde mensajes tras un fallo | corridas con tope fijo, el cursor se mueve en la misma transacción que procesa, y la marca avanza solo con la ventana agotada (sin el tope de `$search`) |
+| FE-03: reanudar no relee indefinidamente ni pierde mensajes tras un fallo | corridas con tope fijo, el cursor se mueve en la misma transacción que procesa, la marca avanza solo con la ventana agotada (sin el tope de `$search`, y en Outlook por fecha y no por posición) y una corrida se reinicia una vez como mucho |
 | FE-03: cuentas distintas conservan cursores separados | un `AvanceDeLectura` por cuenta (uno a uno) |
 | FE-05: reiniciar retoma el avance correcto | se retoma desde la última página guardada |
 | FE-05: un cursor inválido no elimina evidencia ni provoca duplicados | si el proveedor lo rechaza explícitamente, la corrida vuelve a su primera página sin borrar nada y lo releído trae la misma identidad (Message-ID); cualquier otro error sale con el avance intacto |
@@ -68,14 +68,30 @@ correos fuera de la ventana y que no son cobros, contra un Graph falso que
 respeta el tope de `$search`. Todos los elegibles se entregan antes de que la
 marca avance, y ninguno dos veces. Con el lector anterior faltaban 192.
 
-**Lo que esto no cubre** (riesgo inferido de cómo pagina Graph, no
-reproducido): la `@odata.nextLink` de la lista de mensajes avanza con
-`$skip`. Si durante una corrida se borra **definitivamente** un correo de la
-ventana que ya se leyó (vaciar «Elementos eliminados»), los que siguen se
-corren un lugar y el del borde de la página puede quedar sin leer. Moverlo de
-carpeta no lo corre: la lista es de todo el buzón. Cerrarlo pide paginar por
-fecha en vez de por posición, o la consulta delta de Graph; queda anotado
-como pendiente.
+### Un correo borrado a mitad de corrida (ronda 3)
+
+En la ronda anterior quedó anotado como riesgo, y la revisión de #189 lo
+reprodujo: la `@odata.nextLink` de la lista de mensajes avanza con `$skip`.
+Con 30 cobros y páginas de 10, si después de la primera página se borraba
+**definitivamente** uno ya leído, la página siguiente empezaba un lugar más
+allá y el undécimo no se entregaba nunca. La corrida terminaba igual y la
+marca avanzaba. No hace falta que alguien vacíe la carpeta a mano:
+Outlook.com vacía solo «Elementos eliminados», y en Exchange Online lo hace
+la directiva de retención. La primera corrida cubre 90 días y dura muchas
+llamadas, así que la limpieza puede caer en medio.
+
+Ahora **Outlook pasa de una página a la siguiente por fecha**: cada página es
+la misma consulta con `receivedDateTime lt <corte>`, y el cursor guarda ese
+corte y una huella de los del último segundo que ya se vieron (detalle en el
+documento 24). Un borrado de cualquier lado no corre a nadie. Las pruebas son
+las de la revisión, con el Graph falso que imita el `$skip`: el borrado a
+mitad de corrida, y otra con 25 correos en el mismo segundo (con fracciones
+distintas, como los guarda el buzón) cortados entre páginas y uno de ellos
+borrado. Con el lector anterior faltaba uno en cada una. Si caen más de 99 en
+el mismo segundo, es un error y la marca no avanza.
+
+No se usó la consulta delta: en Graph es por carpeta, y habría que recorrer
+todas las del buzón y llevar un estado por cada una.
 
 ## Procesar y mover el cursor, juntos
 
@@ -85,7 +101,7 @@ lee la misma página. El cursor nunca queda por delante de lo procesado.
 
 ## Una página que el proveedor ya no acepta (FE-05)
 
-Un `pageToken` o una `@odata.nextLink` pueden vencer. Si el proveedor la
+Un `pageToken` de Gmail puede vencer. Si el proveedor lo
 **rechaza explícitamente**, el lector levanta `CursorRechazado` (código
 `cursor_rechazado`, en `lectura_correo.py`, hija de `ErrorDelProveedor`) y la
 corrida vuelve a su **primera página, con el mismo tope**:
@@ -103,7 +119,10 @@ y la primera página, que el proveedor sí aceptó, es el cursor.
 | Proveedor | Rechazo del cursor |
 |---|---|
 | Gmail | 400 a `messages.list` con `pageToken` |
-| Outlook | 400 o 410 al seguir una `@odata.nextLink` |
+| Outlook | no hay: el cursor lo arma el lector y Graph no lo conoce; un 400 o 410 con él es un error que sale tal cual |
+
+En la ronda 2, Outlook tomaba como rechazo del cursor un 400 o 410 al seguir
+una `@odata.nextLink`. Desde que pagina por fecha ya no sigue ninguna.
 
 **Todo lo demás sale tal cual, con el avance intacto y sin contar un
 reinicio**: un JSON ilegible, una lista mal formada, el detalle de un mensaje
@@ -121,7 +140,9 @@ guarda nada y sale `ErrorDelProveedor` con código `reinicio_sin_avance`.
 Esa guarda solo corta un ciclo de un paso, y por eso una corrida se reinicia
 **una vez como mucho**. La revisión de #189 (ronda 3) mostró que, con la
 tercera página rechazada siempre, la corrida volvía al inicio cada dos
-llamadas, para siempre, sin un error y sin que la marca avanzara. Ahora el
+llamadas, para siempre, sin un error y sin que la marca avanzara. Con la
+`@odata.nextLink` de Outlook pasaba de verdad: la URL con `$skip` es fija, y
+al reiniciar se volvía a generar la misma que Graph rechazaba. Ahora el
 avance anota `reiniciada_en_corrida` al reiniciar y la limpia cuando la
 corrida termina. Un segundo rechazo en la misma corrida sale como
 `ErrorDelProveedor` con código `cursor_rechazado_otra_vez`, sin procesar ni
@@ -211,15 +232,17 @@ eso hacían falta.
 | Sacar una cuenta detenida | `descartar_corrida` en `avance_lectura.py` |
 | Borrarlo con la organización | `eliminacion.py`, antes que la cuenta |
 | Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (29) y `test_carrera_avance_lectura_postgres.py` (2, con dos conexiones a PostgreSQL) |
-| El rechazo del cursor | `CursorRechazado` en `lectura_correo.py`; lo levantan `lector_gmail.py` y `lector_outlook.py` |
+| El rechazo del cursor | `CursorRechazado` en `lectura_correo.py`; lo levanta `lector_gmail.py` |
+| La página siguiente de Outlook, por fecha | `_Cursor` y `_cursor_siguiente` en `lector_outlook.py` |
 | El filtro de palabras de Outlook | `FiltroCorreos.coincide` en `lectura_correo.py` |
 
 ## Cómo se comprobaron las pruebas
 
 Las pruebas usan un lector de prueba con páginas programadas para el cursor,
 y los lectores **reales** de Gmail y Outlook (con `requests` reemplazado)
-para ver que el `pageToken` y la `@odata.nextLink` se guardan y se mandan, y
-que una `nextLink` vencida (400 de Graph) reinicia la corrida.
+para ver que el `pageToken` y el cursor por fecha de Outlook se guardan y se
+mandan, y que un `pageToken` rechazado (400 de Google) reinicia la corrida y
+un 400 de Graph no.
 
 En la primera ronda se rompió el código a propósito 15 veces y cada vez
 falló al menos una prueba:

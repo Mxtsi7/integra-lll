@@ -4,8 +4,8 @@
 
 Lee UNA página de la cuenta, se la entrega a `procesar` y, solo si `procesar`
 terminó bien, guarda hasta dónde se llegó. Lo mismo para Gmail (FE-03) y
-Outlook (FE-05): lo que cambia entre los dos (un `pageToken` o una
-`@odata.nextLink`) lo resuelve cada lector.
+Outlook (FE-05): lo que cambia entre los dos (el `pageToken` de Google o el
+cursor por fecha que arma el lector de Outlook) lo resuelve cada lector.
 
 ── Corridas y marca de agua ────────────────────────────────────────────────
 Los proveedores listan del más nuevo al más viejo. Si la marca avanzara con
@@ -29,7 +29,9 @@ Que no haya página siguiente tiene que querer decir que se agotó la ventana:
 es lo único que adelanta la marca. Por eso ningún lector puede terminar antes
 sin avisar. Outlook enumera la ventana por fecha en vez de buscar con
 `$search`, que Graph corta en 1000 resultados, y ninguno de los dos recorta
-una página (revisión de #189, P1).
+una página (revisión de #189, P1). Outlook, además, pasa de una página a la
+siguiente por fecha y no por posición: un correo que se borra a mitad de
+corrida no hace saltar a otro (ronda 3).
 
 ── Procesar y guardar, juntos ──────────────────────────────────────────────
 `procesar(pagina_de_mensajes)` corre dentro de la misma transacción que
@@ -38,12 +40,13 @@ y la próxima vez se lee la misma página. «Tras procesar de forma segura el
 lote» es eso: el cursor nunca queda por delante de lo procesado.
 
 ── Una página que el proveedor ya no acepta (FE-05) ────────────────────────
-Un `pageToken` o una `@odata.nextLink` pueden vencer. Si el proveedor la
-rechaza (`CursorRechazado`, y solo eso), la corrida vuelve a su **primera**
+Un `pageToken` de Gmail puede vencer. Si el proveedor lo rechaza
+(`CursorRechazado`, y solo eso), la corrida vuelve a su **primera**
 página con el mismo tope: se releen mensajes ya vistos, pero no se pierde
 ninguno, y no se borra nada. Que releer no duplique es de la llave única de
 candidatos (organización, origen, identificador), que en correo es el
 Message-ID (S3-FE-06). Se cuenta en `reinicios_por_pagina_invalida`.
+Outlook no lo levanta: su cursor lo arma el lector y Graph no lo conoce.
 
 Cualquier otro error con una página guardada —un JSON ilegible, una lista
 mal formada, el detalle de un mensaje que no se pudo leer, una página que el

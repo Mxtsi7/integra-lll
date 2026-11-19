@@ -130,8 +130,10 @@ class ErrorDelProveedor(ErrorDeLectura):
 
 class CursorRechazado(ErrorDelProveedor):
     """El proveedor rechazó la página siguiente que se le mandó (un
-    `pageToken` de Gmail, una `@odata.nextLink` de Graph): venció o ya no la
-    reconoce. Seguir con ella no sirve; empezar de nuevo la consulta, sí.
+    `pageToken` de Gmail): venció o ya no la reconoce. Seguir con ella no
+    sirve; empezar de nuevo la consulta, sí. Outlook no la levanta: su
+    página siguiente la arma `lector_outlook` por fecha, y Graph no tiene un
+    cursor suyo que rechazar (revisión de #189, ronda 3).
 
     Es lo único que reinicia una corrida de S3-FE-05. Cualquier otro
     `ErrorDelProveedor` —un JSON ilegible, una lista mal formada, el detalle
