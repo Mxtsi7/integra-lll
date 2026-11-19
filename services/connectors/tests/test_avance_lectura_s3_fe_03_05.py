@@ -24,7 +24,7 @@ import pytest
 from django.utils import timezone
 
 from connectors import lector_gmail, lector_outlook
-from connectors.avance_lectura import SOLAPE, VENTANA_INICIAL, leer_siguiente_lote
+from connectors.avance_lectura import SOLAPE, VENTANA_INICIAL, descartar_corrida, leer_siguiente_lote
 from connectors.lectura_correo import (
     CuentaNoDisponible,
     CursorRechazado,
@@ -328,6 +328,111 @@ class TestCursorInvalido:
         a = avance(c)
         assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta) == ("B", 0, None)
         assert procesado.ids == ["m1"]
+
+
+class TestUnReinicioPorCorrida:
+    """Revisión de #189, ronda 3 (P2): la guarda del mismo cursor solo cortaba
+    un ciclo de un paso. Si la página C (la tercera) se rechazaba siempre, la
+    corrida volvía al inicio cada dos llamadas, para siempre, respondiendo
+    éxito y sin que la marca avanzara. Ahora una corrida se reinicia una vez
+    como mucho: el segundo rechazo es un error."""
+
+    def test_un_rechazo_que_persiste_en_la_tercera_pagina_reinicia_una_vez_y_despues_es_un_error(self, claves):
+        c = cuenta()
+        lector = LectorFalso({None: pagina(c, 1, siguiente="B"), "B": pagina(c, 2, siguiente="C"),
+                              "C": CursorRechazado("Gmail rechazó la página siguiente (400).")})
+        procesado = Procesado()
+        lote(lector, c, procesado)
+        lote(lector, c, procesado)
+        assert lote(lector, c, procesado).reiniciada  # C rechazada: vuelve al inicio
+        assert avance(c).reiniciada_en_corrida
+        lote(lector, c, procesado)  # B otra vez, y guarda C
+
+        for _ in range(3):  # ni a la primera ni a la tercera: no hay bucle
+            with pytest.raises(ErrorDelProveedor) as error:
+                lote(lector, c, procesado)
+            assert error.value.codigo == "cursor_rechazado_otra_vez"
+            assert isinstance(error.value.__cause__, CursorRechazado)
+
+        a = avance(c)
+        assert (a.pagina, a.reinicios_por_pagina_invalida, a.leido_hasta, a.corrida_hasta) == ("C", 1, None, LUNES)
+        assert procesado.ids == ["m1", "m2", "m1", "m2"], "se procesó algo después del segundo rechazo"
+        # Tras el segundo rechazo no se vuelve a pedir la primera página.
+        assert [l["pagina"] for l in lector.llamadas][-3:] == ["C", "C", "C"]
+
+    def test_la_corrida_siguiente_puede_reiniciarse_otra_vez(self, claves):
+        """La marca de «ya se reinició» es de la corrida, no de la cuenta."""
+        c = cuenta()
+        lector = LectorFalso({
+            None: [pagina(c, 1, siguiente="vencido"), pagina(c, 1), pagina(c, 1, siguiente="vencido"), pagina(c, 1)],
+            "vencido": CursorRechazado("400"),
+        })
+        lote(lector, c, Procesado())
+        assert lote(lector, c, Procesado()).reiniciada
+        assert not avance(c).reiniciada_en_corrida, "la marca quedó puesta al terminar la corrida"
+
+        martes = LUNES + timedelta(days=1)
+        lote(lector, c, Procesado(), ahora=martes)
+        resultado = lote(lector, c, Procesado(), ahora=martes)
+
+        assert resultado.reiniciada and resultado.corrida_terminada
+        assert (avance(c).reinicios_por_pagina_invalida, avance(c).corridas_completadas) == (2, 2)
+
+
+class TestDescartarCorrida:
+    """Cómo se saca a mano una cuenta detenida (documento 29): se descarta la
+    corrida a medias y la siguiente empieza desde la marca, que no se movió."""
+
+    def test_una_cuenta_detenida_vuelve_a_leer_desde_la_marca(self, claves):
+        c = cuenta()
+        lector = LectorFalso({None: [pagina(c, 1), pagina(c, 2, siguiente="B"), pagina(c, 3)],
+                              "B": ValueError("`pagina` no es una página que este lector reconozca.")})
+        lote(lector, c, Procesado())  # la primera corrida termina: leído hasta el lunes
+        martes = LUNES + timedelta(days=1)
+        lote(lector, c, Procesado(), ahora=martes)
+        with pytest.raises(ValueError):
+            lote(lector, c, Procesado(), ahora=martes)  # detenida en B
+
+        assert descartar_corrida(organizacion_id=ORG, cuenta_id=c.pk)
+
+        a = avance(c)
+        assert (a.corrida_hasta, a.pagina, a.reiniciada_en_corrida) == (None, "", False)
+        # Lo que ya se sabía no se toca.
+        assert (a.leido_hasta, a.corridas_completadas) == (LUNES, 1)
+        miercoles = martes + timedelta(days=1)
+        assert lote(lector, c, Procesado(), ahora=miercoles).corrida_terminada
+        llamada = lector.llamadas[-1]
+        assert llamada["pagina"] is None
+        assert (llamada["filtro"].desde, llamada["filtro"].hasta) == (LUNES - SOLAPE, miercoles)
+
+    def test_despues_del_segundo_rechazo_tambien_se_puede_reiniciar(self, claves):
+        c = cuenta()
+        lector = LectorFalso({None: [pagina(c, 1, siguiente="X"), pagina(c, 1, siguiente="X"), pagina(c, 1)],
+                              "X": [pagina(c, 2, siguiente="Y"), pagina(c, 2, siguiente="Y")],
+                              "Y": CursorRechazado("400")})
+        for _ in range(4):
+            lote(lector, c, Procesado())
+        with pytest.raises(ErrorDelProveedor, match="otra"):
+            lote(lector, c, Procesado())
+        assert avance(c).reiniciada_en_corrida
+
+        descartar_corrida(organizacion_id=ORG, cuenta_id=c.pk)
+
+        assert not avance(c).reiniciada_en_corrida
+        assert lote(lector, c, Procesado(), ahora=LUNES + timedelta(hours=1)).corrida_terminada
+
+    def test_sin_corrida_a_medias_no_hay_nada_que_descartar(self, claves):
+        c = cuenta()
+        assert not descartar_corrida(organizacion_id=ORG, cuenta_id=c.pk)
+        lote(LectorFalso({None: pagina(c, 1)}), c, Procesado())
+        assert not descartar_corrida(organizacion_id=ORG, cuenta_id=c.pk)
+        assert avance(c).leido_hasta == LUNES
+
+    def test_la_de_otra_organizacion_no_se_toca(self, claves):
+        ajena = cuenta(org=OTRA)
+        lote(LectorFalso({None: pagina(ajena, 1, siguiente="B")}), ajena, Procesado())
+        assert not descartar_corrida(organizacion_id=ORG, cuenta_id=ajena.pk)
+        assert (avance(ajena).corrida_hasta, avance(ajena).pagina) == (LUNES, "B")
 
 
 class TestDosWorkers:

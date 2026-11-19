@@ -118,6 +118,55 @@ Y si al reiniciar el proveedor entrega como página siguiente **la misma que
 acaba de rechazar**, reiniciar no lleva a ninguna parte: no se procesa ni se
 guarda nada y sale `ErrorDelProveedor` con código `reinicio_sin_avance`.
 
+Esa guarda solo corta un ciclo de un paso, y por eso una corrida se reinicia
+**una vez como mucho**. La revisión de #189 (ronda 3) mostró que, con la
+tercera página rechazada siempre, la corrida volvía al inicio cada dos
+llamadas, para siempre, sin un error y sin que la marca avanzara. Ahora el
+avance anota `reiniciada_en_corrida` al reiniciar y la limpia cuando la
+corrida termina. Un segundo rechazo en la misma corrida sale como
+`ErrorDelProveedor` con código `cursor_rechazado_otra_vez`, sin procesar ni
+guardar nada. La corrida siguiente puede reiniciarse otra vez.
+
+## Una cuenta detenida
+
+Hay errores que se repiten en cada llamada hasta que alguien hace algo,
+porque vienen de la corrida guardada y no de una falla pasajera:
+
+| Error | Qué pasó |
+|---|---|
+| `cursor_rechazado_otra_vez` | el proveedor rechazó una página de una corrida que ya se había reiniciado una vez |
+| `reinicio_sin_avance` | al reiniciar, el proveedor entregó como siguiente la misma página que acababa de rechazar |
+| `ValueError` del lector | la página guardada no es una que el lector reconozca |
+| otro `ErrorDelProveedor` que vuelve igual | la página guardada falla siempre por otra cosa (por ejemplo, un JSON que nunca se puede leer) |
+
+En todos la cuenta queda **detenida**: la marca no avanza, no se procesa nada
+y cada llamada falla igual. Es lo que se busca: antes que un bucle que
+responde éxito, un error que se ve. Para sacarla:
+
+```
+python manage.py shell -c "from connectors.avance_lectura import descartar_corrida; print(descartar_corrida(organizacion_id='<uuid>', cuenta_id='<uuid>'))"
+```
+
+`descartar_corrida` toma la fila igual que un worker, limpia `corrida_hasta`,
+`pagina` y `reiniciada_en_corrida`, y deja `leido_hasta` y los contadores
+como estaban. Devuelve `True` si había una corrida que descartar. El efecto:
+
+- la llamada siguiente abre una corrida **nueva**, con tope en ese momento y
+  desde `leido_hasta` menos el solape (90 días si la cuenta nunca terminó
+  una);
+- se relee lo que la corrida descartada ya había procesado. Que no se
+  duplique es de la llave única de candidatos (S3-FE-09, que todavía no está
+  conectada a `procesar`);
+- **no se pierde nada**, porque la marca no se movió;
+- un worker que había leído el cursor antes descarta su página al ver que
+  cambió.
+
+Si el error vuelve en la corrida nueva, la culpa no es de la página
+guardada: hay que mirar el proveedor o el lector antes de descartar otra vez.
+Los errores de la cuenta (`CuentaNoDisponible`, `AutorizacionRechazada`) y
+los transitorios no detienen la corrida: los resuelven S3-FE-19 y S3-FE-18, y
+la lectura sigue desde la página guardada.
+
 ## Dos workers con la misma cuenta
 
 El cursor se lee al empezar y se vuelve a mirar, con la fila tomada, antes
@@ -158,7 +207,8 @@ eso hacían falta.
 | Pieza | Archivo |
 |---|---|
 | El avance | `services/connectors/connectors/avance_lectura.py` |
-| El modelo | `AvanceDeLectura` en `models.py`, migración `0010_avance_de_lectura` |
+| El modelo | `AvanceDeLectura` en `models.py`, migraciones `0010_avance_de_lectura` y `0011_avance_reiniciada_en_corrida` |
+| Sacar una cuenta detenida | `descartar_corrida` en `avance_lectura.py` |
 | Borrarlo con la organización | `eliminacion.py`, antes que la cuenta |
 | Las pruebas | `services/connectors/tests/test_avance_lectura_s3_fe_03_05.py` (29) y `test_carrera_avance_lectura_postgres.py` (2, con dos conexiones a PostgreSQL) |
 | El rechazo del cursor | `CursorRechazado` en `lectura_correo.py`; lo levantan `lector_gmail.py` y `lector_outlook.py` |

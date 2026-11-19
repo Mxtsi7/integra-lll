@@ -52,9 +52,23 @@ contar un reinicio. Antes se reiniciaba con cualquier `ErrorDelProveedor`, y
 una página buena que fallaba por otra cosa se cambiaba por la primera una y
 otra vez, respondiendo éxito (revisión de #189, P2).
 
+Una corrida se reinicia **una vez** como mucho (`reiniciada_en_corrida`). Si
+el proveedor vuelve a rechazar una página en la misma corrida, sale
+`cursor_rechazado_otra_vez` sin procesar ni guardar nada. Antes solo se
+cortaba el ciclo de un paso (abajo): con la tercera página rechazada siempre,
+la corrida volvía al inicio cada dos llamadas, para siempre, respondiendo
+éxito (revisión de #189, ronda 3). La marca se limpia al terminar la corrida.
+
 Si al reiniciar el proveedor entrega como página siguiente la misma que
 acaba de rechazar, reiniciar no lleva a ninguna parte: no se procesa ni se
-guarda nada y sale un error.
+guarda nada y sale `reinicio_sin_avance`.
+
+── Una cuenta detenida ─────────────────────────────────────────────────────
+Esos dos errores, y uno del lector con la página guardada, dejan la cuenta
+detenida: cada llamada vuelve a fallar igual y nada se mueve. Se saca con
+`descartar_corrida`, que olvida la corrida a medias y deja la marca donde
+estaba: la siguiente empieza desde `leido_hasta`, relee lo que la descartada
+ya había procesado (la llave única no lo duplica) y no pierde nada.
 
 ── Dos workers con la misma cuenta ─────────────────────────────────────────
 El cursor se lee al empezar y se vuelve a mirar, con la fila tomada, antes de
@@ -146,6 +160,13 @@ def leer_siguiente_lote(
         if not avance.pagina:
             # Sin página guardada no hay cursor que culpar: el error es otro.
             raise
+        if avance.reiniciada_en_corrida:
+            # Reiniciar otra vez llevaría de nuevo hasta una página que el
+            # proveedor rechaza: la corrida no terminaría nunca.
+            raise ErrorDelProveedor(
+                "El proveedor rechazó otra página de una corrida que ya se reinició una vez.",
+                codigo="cursor_rechazado_otra_vez",
+            ) from rechazo
         # El proveedor rechazó la página guardada. Se vuelve al inicio de la
         # MISMA corrida.
         lectura["pagina"] = None
@@ -164,9 +185,10 @@ def leer_siguiente_lote(
 
         procesar(pagina)
 
-        campos = ["pagina", "actualizado_en"]
+        campos = ["pagina", "reiniciada_en_corrida", "actualizado_en"]
         if reiniciada:
             actual.reinicios_por_pagina_invalida += 1
+            actual.reiniciada_en_corrida = True
             campos.append("reinicios_por_pagina_invalida")
         if pagina.siguiente_pagina:
             actual.pagina = pagina.siguiente_pagina
@@ -176,6 +198,31 @@ def leer_siguiente_lote(
         actual.leido_hasta = actual.corrida_hasta
         actual.corrida_hasta = None
         actual.pagina = ""
+        actual.reiniciada_en_corrida = False
         actual.corridas_completadas += 1
         actual.save(update_fields=[*campos, "leido_hasta", "corrida_hasta", "corridas_completadas"])
         return ResultadoDeLote(mensajes=len(pagina.mensajes), corrida_terminada=True, reiniciada=reiniciada)
+
+
+def descartar_corrida(*, organizacion_id, cuenta_id) -> bool:
+    """Olvida la corrida a medias de la cuenta, para sacarla de un error que
+    se repite (ver «Una cuenta detenida» en el módulo y el documento 29).
+
+    La marca `leido_hasta` y los contadores no se tocan: la próxima llamada
+    abre una corrida nueva desde la marca. Devuelve si había una corrida que
+    descartar. La fila se toma como en `leer_siguiente_lote`: un worker que
+    leyó el cursor antes de esto descarta su página al ver que cambió.
+    """
+    with transaction.atomic():
+        avance = (
+            AvanceDeLectura.objects.select_for_update()
+            .filter(cuenta_id=cuenta_id, organizacion_id=organizacion_id)
+            .first()
+        )
+        if avance is None or avance.corrida_hasta is None:
+            return False
+        avance.corrida_hasta = None
+        avance.pagina = ""
+        avance.reiniciada_en_corrida = False
+        avance.save(update_fields=["corrida_hasta", "pagina", "reiniciada_en_corrida", "actualizado_en"])
+        return True

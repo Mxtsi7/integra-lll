@@ -1139,6 +1139,14 @@ class AvanceDeLectura(ModeloTenant):
         ),
     )
 
+    reiniciada_en_corrida = models.BooleanField(
+        default=False,
+        help_text=(
+            "La corrida en curso ya volvió una vez a su primera página. Un "
+            "segundo rechazo en la misma corrida es un error, no otro reinicio."
+        ),
+    )
+
     class Meta(ModeloTenant.Meta):
         db_table = "avance_de_lectura"
         verbose_name = "Avance de lectura"
