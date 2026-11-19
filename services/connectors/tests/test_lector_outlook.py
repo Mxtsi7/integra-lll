@@ -27,6 +27,7 @@ import requests
 from django.utils import timezone
 
 from connectors import lector_outlook
+from connectors.candidatos_correo import guardar_pagina
 from connectors.lector_outlook import (
     URL_MENSAJES,
     AutorizacionRechazada,
@@ -39,7 +40,7 @@ from connectors.lector_outlook import (
     filtro_fechas_outlook,
     leer_mensajes,
 )
-from connectors.models import CuentaConectada
+from connectors.models import CuentaConectada, Importacion
 
 pytestmark = pytest.mark.django_db
 
@@ -535,7 +536,29 @@ class TestMensaje:
                              mensaje_graph("bueno")))
         pagina = leer(cuenta)
         assert [m.id_mensaje for m in pagina.mensajes] == ["bueno"]
-        assert len(pagina.omitidos) == 3
+        # Ninguno trae un `id` que sirva: quedan sin `id`, no como «None» ni
+        # como los primeros 64 caracteres de cualquier cosa.
+        assert [o.id_mensaje for o in pagina.omitidos] == ["", "", ""]
+
+    def test_un_omitido_conserva_el_id_entero(self, claves, graph):
+        """Los `id` de Graph de un buzón comparten el buzón y la carpeta: más
+        de 64 caracteres iguales. Recortados a 64, tres omitidos distintos
+        eran el mismo para S3-FE-09, que anotaba uno (revisión de S3-FE-09)."""
+        cuenta = outlook()
+        prefijo = "AAMkADExNzI0ZmE5LTQ2NjctNGQ3Mi1hNjkzLWQ0ZTljZjE4NDMzOABGAAAAAADXtV2rRb4ZT5O8ZH8Qb7lkBwBdA5FtjN0QR4m0b0vd6Euz"
+        ids = [f"{prefijo}AAAAAAEMAAB{fin}AAA=" for fin in ("lsA", "ltA", "luA")]
+        graph.responde(lista(*(mensaje_graph(id_mensaje, recibido="ayer") for id_mensaje in ids)))
+
+        pagina = leer(cuenta)
+        assert [o.id_mensaje for o in pagina.omitidos] == ids
+
+        importacion = Importacion.objects.create(
+            organizacion_id=ORG_A, usuario_id="42", origen=Importacion.Origen.CORREO, cuenta=cuenta,
+            estado=Importacion.Estado.PROCESANDO,
+        )
+        guardar_pagina(importacion, pagina)
+        importacion.refresh_from_db()
+        assert importacion.errores_totales == 3
 
     def test_texto_largo_se_corta(self, claves, graph):
         (mensaje,) = self._uno(graph, texto="x" * 25_000).mensajes

@@ -39,6 +39,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-06** El servicio y el identificador de origen de cada mensaje: Message-ID como identidad y el servicio sin asignarlo a la fuerza | Hecho, 39 pruebas | [26-origen-del-mensaje-s3-fe-06.md](26-origen-del-mensaje-s3-fe-06.md) |
 | **Sprint 3 · S3-FE-07** Importe, moneda y fecha de los correos: precisión exacta y lo ambiguo señalado para revisión | Hecho, 58 pruebas | [27-importe-moneda-y-fecha-s3-fe-07.md](27-importe-moneda-y-fecha-s3-fe-07.md) |
 | **Sprint 3 · S3-FE-08** Recibo pagado, aviso de cobro futuro o pago fallido: un aviso o un fallo nunca sale como cobro | Hecho, 32 pruebas | [28-tipo-de-aviso-s3-fe-08.md](28-tipo-de-aviso-s3-fe-08.md) |
+| **Sprint 3 · S3-FE-09** Candidatos de correo con la evidencia del mensaje: lo que no está confirmado queda como error, sin duplicar y sin confirmar nada | Hecho, 65 pruebas (2 con dos conexiones a PostgreSQL) y 36 más en S3-FE-07 y Outlook por la revisión; la lectura periódica que la llama va con S3-FE-18 y S3-FE-20 | [30-candidatos-de-correo-s3-fe-09.md](30-candidatos-de-correo-s3-fe-09.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su
