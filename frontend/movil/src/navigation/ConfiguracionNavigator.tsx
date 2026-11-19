@@ -9,6 +9,8 @@ import AlertasScreen from '../screens/configuracion/AlertasScreen';
 import AutorizacionCorreoScreen from '../screens/configuracion/AutorizacionCorreoScreen';
 import RestriccionesPremiumScreen from '../screens/configuracion/RestriccionesPremiumScreen';
 import EliminarCuentaScreen from '../screens/configuracion/EliminarCuentaScreen';
+import UsoRecolectoresScreen from '../screens/configuracion/UsoRecolectoresScreen';
+import AsociarPaqueteAndroidScreen from '../screens/configuracion/AsociarPaqueteAndroidScreen';
 
 const Stack = createNativeStackNavigator<ConfiguracionStackParamList>();
 
@@ -61,6 +63,16 @@ export function ConfiguracionNavigator() {
         name="EliminarCuenta"
         component={EliminarCuentaScreen}
         options={{ title: 'Eliminar Cuenta' }}
+      />
+      <Stack.Screen
+        name="UsoRecolectores"
+        component={UsoRecolectoresScreen}
+        options={{ title: 'Acceso de uso' }}
+      />
+      <Stack.Screen
+        name="AsociarPaqueteAndroid"
+        component={AsociarPaqueteAndroidScreen}
+        options={{ title: 'Paquetes asociados' }}
       />
     </Stack.Navigator>
   );

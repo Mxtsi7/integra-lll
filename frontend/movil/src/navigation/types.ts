@@ -50,6 +50,8 @@ export type ConfiguracionStackParamList = {
   AutorizacionCorreo: undefined;
   RestriccionesPremium: undefined;
   EliminarCuenta: undefined;
+  UsoRecolectores: undefined;
+  AsociarPaqueteAndroid: undefined;
 };
 
 // ── 3. Bottom Tabs (4 pestañas principales) ──────────────────────────

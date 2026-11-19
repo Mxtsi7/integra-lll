@@ -51,6 +51,14 @@ export const SECCIONES_CONFIGURACION: SeccionConfiguracion[] = [
     ],
   },
   {
+    id: 'uso',
+    titulo: 'Recolectores',
+    items: [
+      { testID: 'go-uso-recolectores', titulo: 'Acceso de uso', destino: 'UsoRecolectores' },
+      { testID: 'go-asociar-paquete-android', titulo: 'Asociar paquetes Android', destino: 'AsociarPaqueteAndroid' },
+    ],
+  },
+  {
     id: 'preferencias',
     titulo: 'Preferencias',
     items: [
