@@ -24,8 +24,9 @@ export const TONO_ESTADO: Record<EstadoImportacion, TonoInsignia> = {
 export function ImportacionPage() {
   const { id } = useParams<{ id: string }>();
   const { estado, reintentar } = useProgresoImportacion(id);
-  // Solo una importación de correo tiene cuenta. El id llega con la importación, así que hasta entonces es null.
-  const cuentaDeLaImportacion = estado.tipo === 'listo' ? (estado.importacion.cuenta ?? null) : null;
+  // Solo una importación de correo tiene cuenta, y solo se consulta cuando ya terminó: la lectura marca la cuenta
+  // justo cuando falla, así que lo que diga mientras sigue en curso puede cambiar antes del final.
+  const cuentaDeLaImportacion = estado.tipo === 'listo' && estado.importacion.terminada ? (estado.importacion.cuenta ?? null) : null;
   const estadoCuenta = useCuentaDeImportacion(cuentaDeLaImportacion);
 
   return (

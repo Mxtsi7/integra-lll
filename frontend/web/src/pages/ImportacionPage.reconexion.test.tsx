@@ -59,6 +59,14 @@ const GMAIL: CuentaConectada = {
   actualizado_en: "2026-11-18T10:00:00-03:00",
 };
 
+const GMAIL_SANA: CuentaConectada = {
+  ...GMAIL,
+  estado: "conectada",
+  estado_legible: "Conectada",
+  detalle_del_estado: "",
+  necesita_reautorizacion: false,
+};
+
 function montar(ruta = "/importaciones/imp-correo") {
   render(
     <MemoryRouter initialEntries={[ruta]}>
@@ -82,6 +90,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 describe("la cuenta que necesita volver a autorizarse (S3-CH-22)", () => {
@@ -98,7 +107,8 @@ describe("la cuenta que necesita volver a autorizarse (S3-CH-22)", () => {
 
   it("una cuenta que ya está sana no pide nada, aunque la importación tenga un error de autorización de antes", async () => {
     importacionMock.mockResolvedValue(CORREO_FALLIDA);
-    cuentasMock.mockResolvedValue([{ ...GMAIL, necesita_reautorizacion: false, estado: "conectada", estado_legible: "Conectada", detalle_del_estado: "" }]);
+    // La cuenta se volvió a autorizar DESPUÉS de que la importación falló.
+    cuentasMock.mockResolvedValue([{ ...GMAIL_SANA, actualizado_en: "2026-11-18T11:00:00-03:00" }]);
 
     montar();
 
@@ -180,5 +190,77 @@ describe("una lectura vacía y una fallida no se leen igual (S3-CH-22)", () => {
     expect(await screen.findByText("La importación no se pudo terminar. No se creó ni cambió ninguna suscripción.")).toBeInTheDocument();
     expect(screen.queryByText("No encontramos cobros que parezcan suscripciones.")).toBeNull();
     expect(screen.queryByText("El análisis terminó.")).toBeNull();
+  });
+});
+
+describe("el aviso sigue lo que le pasa a la cuenta mientras se lee (S3-CH-22)", () => {
+  it("una lectura que seguía en curso y después falla por autorización avisa, aunque al abrir la página la cuenta estuviera sana", async () => {
+    vi.useFakeTimers();
+    // El backend marca la cuenta en el mismo momento en que la lectura falla.
+    let laCuentaPideReconexion = false;
+    importacionMock
+      .mockResolvedValueOnce({
+        ...CORREO_FALLIDA,
+        estado: "procesando",
+        estado_legible: "Procesando",
+        terminada: false,
+        terminada_en: null,
+        progreso: 40,
+        errores: [],
+        errores_totales: 0,
+      })
+      .mockImplementation(async () => {
+        laCuentaPideReconexion = true;
+        return CORREO_FALLIDA;
+      });
+    cuentasMock.mockImplementation(async () => [laCuentaPideReconexion ? GMAIL : GMAIL_SANA]);
+
+    montar();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText("Leyendo tus correos…")).toBeInTheDocument();
+    expect(enlaceDeCuentas()).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+
+    expect(screen.getByText("La importación no se pudo terminar. No se creó ni cambió ninguna suscripción.")).toBeInTheDocument();
+    expect(screen.getByText(/Tu cuenta de Gmail necesita que la vuelvas a autorizar/)).toBeInTheDocument();
+    expect(enlaceDeCuentas()).toHaveAttribute("href", "/cuentas");
+  });
+
+  it("mientras la lectura sigue en curso no se consulta la cuenta: lo que diga puede cambiar antes de que termine", async () => {
+    importacionMock.mockResolvedValue({
+      ...CORREO_FALLIDA,
+      estado: "procesando",
+      estado_legible: "Procesando",
+      terminada: false,
+      terminada_en: null,
+      progreso: 40,
+      errores: [],
+      errores_totales: 0,
+    });
+    cuentasMock.mockResolvedValue([GMAIL_SANA]);
+
+    montar();
+
+    await screen.findByText("Leyendo tus correos…");
+    expect(cuentasMock).not.toHaveBeenCalled();
+  });
+
+  it("un error de autorización que la cuenta no refleja (sin credenciales guardadas) sigue pidiendo reconexión si la cuenta no cambió desde que terminó", async () => {
+    importacionMock.mockResolvedValue({
+      ...CORREO_FALLIDA,
+      errores: [{ codigo: "sin_credenciales", mensaje: "La cuenta no tiene credenciales guardadas.", fila: null }],
+    });
+    // Sana según el backend (el estado es «conectada»), pero sin tocar desde antes de la falla.
+    cuentasMock.mockResolvedValue([{ ...GMAIL_SANA, actualizado_en: "2026-11-18T09:00:00-03:00" }]);
+
+    montar();
+
+    expect(await screen.findByText(/Tu cuenta de Gmail necesita que la vuelvas a autorizar/)).toBeInTheDocument();
+    expect(enlaceDeCuentas()).toHaveAttribute("href", "/cuentas");
   });
 });

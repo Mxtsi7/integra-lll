@@ -17,6 +17,8 @@ const CUENTA_CON_AVISO: CuentaConectada = {
   actualizado_en: '2026-11-01T10:00:00-03:00',
 };
 const CUENTA_SANA: CuentaConectada = { ...CUENTA_CON_AVISO, estado: 'conectada', estado_legible: 'Conectada', detalle_del_estado: '', necesita_reautorizacion: false };
+// La importación de abajo termina el 18 de noviembre a las 10:00: esta cuenta se tocó después.
+const CUENTA_REAUTORIZADA_DESPUES: CuentaConectada = { ...CUENTA_SANA, actualizado_en: '2026-11-18T11:00:00-03:00' };
 
 const IMPORTACION_DE_CORREO: Importacion = {
   id: 'imp-correo',
@@ -40,6 +42,8 @@ const IMPORTACION_DE_CORREO: Importacion = {
 };
 const con = (parcial: Partial<Importacion>): Importacion => ({ ...IMPORTACION_DE_CORREO, ...parcial });
 const listo = (cuenta: CuentaConectada | null): EstadoCuentaDeImportacion => ({ tipo: 'listo', cuenta });
+const conErrorDe = (codigo: string): Importacion =>
+  con({ errores: [{ codigo, mensaje: 'Hay que autorizar.', fila: null }], errores_totales: 1 });
 
 describe('los códigos que piden reconectar (S3-CH-22)', () => {
   it('son los de autorización, y no los de una credencial que el backend renueva sola', () => {
@@ -53,10 +57,34 @@ describe('cuándo hay que pedir que se vuelva a autorizar la cuenta (S3-CH-22)',
     expect(hayQueReconectar(IMPORTACION_DE_CORREO, listo(CUENTA_CON_AVISO))).toBe(true);
   });
 
-  it('una cuenta sana no pide nada, aunque la importación tenga un error de autorización de antes', () => {
-    const conErrorViejo = con({ errores: [{ codigo: 'requiere_reautorizacion', mensaje: 'Hay que autorizar.', fila: null }], errores_totales: 1 });
+  it('una cuenta que se volvió a autorizar después de que terminó la importación no pide nada: el error es historia', () => {
+    expect(hayQueReconectar(conErrorDe('requiere_reautorizacion'), listo(CUENTA_REAUTORIZADA_DESPUES))).toBe(false);
+  });
 
-    expect(hayQueReconectar(conErrorViejo, listo(CUENTA_SANA))).toBe(false);
+  it('una cuenta sana que no cambió desde que terminó la importación sigue pidiendo reconexión si el error es de autorización, aunque la cuenta no lo refleje', () => {
+    // `sin_credenciales`: la cuenta figura conectada pero no tiene token guardado.
+    expect(hayQueReconectar(conErrorDe('sin_credenciales'), listo(CUENTA_SANA))).toBe(true);
+  });
+
+  it('una cuenta sana y una importación sin error de autorización no piden nada', () => {
+    expect(hayQueReconectar(IMPORTACION_DE_CORREO, listo(CUENTA_SANA))).toBe(false);
+    expect(hayQueReconectar(conErrorDe('monto_invalido'), listo(CUENTA_SANA))).toBe(false);
+  });
+
+  it('si no se sabe cuándo terminó la importación, el error de autorización sigue valiendo', () => {
+    const sinFechaDeTermino = { ...conErrorDe('sin_credenciales'), terminada_en: null };
+
+    expect(hayQueReconectar(sinFechaDeTermino, listo(CUENTA_REAUTORIZADA_DESPUES))).toBe(true);
+  });
+
+  it('si la fecha de la cuenta no se entiende, el error de autorización sigue valiendo', () => {
+    expect(hayQueReconectar(conErrorDe('sin_credenciales'), listo({ ...CUENTA_SANA, actualizado_en: 'ayer' }))).toBe(true);
+  });
+
+  it('una cuenta tocada en el mismo instante en que terminó la importación no cuenta como cambiada después', () => {
+    const delMismoInstante = { ...CUENTA_SANA, actualizado_en: '2026-11-18T10:00:00-03:00' };
+
+    expect(hayQueReconectar(conErrorDe('sin_credenciales'), listo(delMismoInstante))).toBe(true);
   });
 
   it('mientras la cuenta carga no se avisa todavía', () => {
