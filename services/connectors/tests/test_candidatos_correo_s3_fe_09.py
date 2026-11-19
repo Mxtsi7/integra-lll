@@ -178,6 +178,20 @@ class TestCandidatoTrazableYPendiente:
         assert candidato.evidencia["fecha_origen"] == "cobro_anunciado"
         assert candidato.evidencia["fecha_fragmento"] == "Te cobraremos USD 10.99 el 5 de noviembre de 2026."
 
+    def test_un_aviso_no_toma_otra_fecha_del_texto(self, importacion, cuenta):
+        """El correo de la revisión de S3-FE-09: antes salía un candidato con
+        la fecha del aviso (28 de octubre) marcada como `texto`, la misma
+        etiqueta que lleva un recibo con fecha cierta."""
+        aviso = mensaje(cuenta, asunto="Recordatorio de pago",
+                        texto="Fecha: 28 de octubre de 2026\nTe cobraremos CLP 9.990 pronto.")
+        guardar_pagina(importacion, pagina(aviso))
+
+        assert not CobroCandidato.objects.exists()
+        importacion.refresh_from_db()
+        (error,) = importacion.errores
+        assert error["codigo"] == "fecha_no_indicada"
+        assert error["mensaje"].endswith(": el aviso no dice cuándo se va a cobrar")
+
     def test_un_aviso_reconocido_por_otra_frase_de_s3_fe_08_tambien_lleva_su_fecha(self, importacion, cuenta):
         """El aviso usa solo la fecha anunciada: la frase con que S3-FE-08 lo
         reconoce tiene que marcarla en S3-FE-07."""
@@ -340,8 +354,9 @@ INCIERTOS = [
     pytest.param("Recordatorio de pago", "Te cobraremos CLP 9.990 pronto.", "fecha_no_indicada", id="aviso-sin-fecha"),
     pytest.param("Problema con tu pago", "No pudimos procesar tu pago de CLP 9.990.", "fecha_no_indicada",
                  id="fallo-sin-fecha"),
-    # La fecha del propio aviso no es la del cobro anunciado (revisión de S3-FE-09).
-    pytest.param("Recordatorio de pago", "Fecha: 28 de octubre de 2026\nTe cobraremos CLP 9.990 pronto.",
+    # La fecha del propio aviso, que es la del día en que llegó, no es la del
+    # cobro anunciado (revisión de S3-FE-09).
+    pytest.param("Recordatorio de pago", "Fecha: 2 de octubre de 2026\nTe cobraremos CLP 9.990 pronto.",
                  "fecha_no_indicada", id="aviso-con-la-fecha-del-aviso"),
     # Ni la del reintento ni una posterior a la llegada son la de lo que ya pasó.
     pytest.param("Problema con tu pago",
@@ -481,7 +496,8 @@ class TestNadaInnecesarioNiConfirmado:
         for privado in ("Juan Pérez", "terminada en 4242", "12.345.678-9", "Los Aromos"):
             assert privado not in guardado, privado
         for fragmento in (candidato.evidencia["importe_fragmento"], candidato.evidencia.get("fecha_fragmento", "")):
-            assert "4242" not in fragmento and "Juan" not in fragmento, fragmento
+            for marca in ("Juan", "Pérez", "4242", "RUT", "Aromos"):
+                assert marca not in fragmento, fragmento
 
     def test_la_evidencia_es_de_una_linea_y_acotada(self, importacion, cuenta):
         asunto = "Tu recibo\n\tde\x00 Netflix " + "x" * 5000

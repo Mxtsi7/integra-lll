@@ -352,6 +352,11 @@ class TestElFragmentoEsUnaVentana:
         assert d.importe.fragmento == "gracias por tu pago de CLP 9.990 del 1 de octubre de"
         assert d.fecha.fragmento == "por tu pago de CLP 9.990 del 1 de octubre de 2026 con la tarjeta"
 
+    def test_no_cruza_el_inciso_que_viene_despues_del_dato(self):
+        d = datos("Total: CLP 9.990, RUT 12.345.678-9; Fecha de cobro: 2026-10-01. Juan Pérez")
+        assert d.importe.fragmento == "Total: CLP 9.990"
+        assert d.fecha.fragmento == "Fecha de cobro: 2026-10-01"
+
     def test_el_dato_siempre_esta_aunque_venga_al_final_de_una_linea_larga(self):
         relleno = "Detalle de tu plan y de tus beneficios del mes. " * 10
         d = datos(relleno + "Total: CLP 9.990")
@@ -365,5 +370,5 @@ class TestElFragmentoEsUnaVentana:
         d = datos(("x" * 500) + " Total: CLP 9.990 " + ("y" * 500))
         assert d.importe.fragmento == "Total: CLP 9.990"
         d = datos(("palabra " * 60) + "CLP 9.990 " + ("otra " * 60))
-        assert "CLP 9.990" in d.importe.fragmento
-        assert len(d.importe.fragmento) <= 30 + len("CLP 9.990") + 20
+        # 30 antes y 20 después, sin el pedazo de palabra que quedó en el borde.
+        assert d.importe.fragmento == "palabra palabra palabra CLP 9.990 otra otra otra otra"
