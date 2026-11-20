@@ -7,6 +7,8 @@ import {
   getSuscripcionesPaginadas,
   getUsos,
   registrarUso,
+  ORDEN_PREDETERMINADO,
+  descomponerOrden,
   type OrdenSuscripciones,
 } from "./suscripciones";
 import { gastoProyectado } from "../calculos";
@@ -247,6 +249,26 @@ describe("getSuscripciones con filtros y orden (CH-11, CH-12)", () => {
 
     expect(error).toBeInstanceOf(RangeError);
     expect(fetchFalso).not.toHaveBeenCalled();
+  });
+
+  it("ORDEN_PREDETERMINADO y descomponerOrden estructuran el orden sin hardcoding", () => {
+    expect(ORDEN_PREDETERMINADO).toBe("fecha_proximo_cobro");
+    expect(descomponerOrden("fecha_proximo_cobro")).toEqual({
+      campo: "fecha_proximo_cobro",
+      direccion: "asc",
+    });
+    expect(descomponerOrden("-fecha_proximo_cobro")).toEqual({
+      campo: "fecha_proximo_cobro",
+      direccion: "desc",
+    });
+    expect(descomponerOrden("-monto")).toEqual({
+      campo: "monto",
+      direccion: "desc",
+    });
+    expect(descomponerOrden("nombre")).toEqual({
+      campo: "nombre",
+      direccion: "asc",
+    });
   });
 
   it("un valor no puede colar otro parámetro: se codifica", async () => {
