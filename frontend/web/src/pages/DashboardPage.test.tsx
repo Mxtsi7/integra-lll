@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { afterEach, expect, it, vi } from 'vitest';
-import { getCatalogosSuscripciones, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { getCatalogosSuscripciones, getComparacionDePresupuesto, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
 import { AuthProvider } from '../context/AuthContext';
 import { CatalogosProvider } from '../context/CatalogosContext';
 import { ToastProvider } from '../context/ToastContext';
@@ -13,11 +13,18 @@ import { TileCategorias } from '../components/Dashboard/TileCategorias';
 
 vi.mock('@ojoalgasto/shared', async (original) => ({
   ...await original<typeof import('@ojoalgasto/shared')>(),
-  getSuscripciones: vi.fn(), getCatalogosSuscripciones: vi.fn(),
+  getSuscripciones: vi.fn(), getCatalogosSuscripciones: vi.fn(), getComparacionDePresupuesto: vi.fn(),
 }));
 vi.mock('../utils/exportarCsv', () => ({ descargarSuscripcionesCsv: vi.fn() }));
 vi.mock('../hooks/useConteo', () => ({ useConteo: (n: number) => n }));
 afterEach(cleanup);
+// Sin esto el presupuesto del Panel pediría de verdad a la API, que en las pruebas no existe.
+beforeEach(() => {
+  vi.mocked(getComparacionDePresupuesto).mockReset().mockImplementation(async (mes, moneda) => ({
+    mes, moneda, presupuesto: null, gasto_real: '0.00', gasto_proyectado: '0.00', total_esperado: '0.00',
+    diferencia: null, porcentaje_consumido: 0, alerta_superado: false,
+  }));
+});
 
 it.each([
   ['EUR', 5.03, 'anual', 6, '2,52'],
@@ -124,4 +131,64 @@ it('filtra todas las cifras, categorías y CSV por la moneda elegida, incluso si
   expect(descargarSuscripcionesCsv).toHaveBeenCalledWith([euro], 'suscripciones-EUR.csv', undefined);
   fireEvent.change(selector, { target: { value: 'USD' } });
   expect(screen.getByRole('region', { name: 'Salud del gasto' })).toHaveTextContent('US$2,25');
+});
+
+function UbicacionActual() {
+  const ubicacion = useLocation();
+  return <p data-testid="ubicacion">{`${ubicacion.pathname}${ubicacion.search}`}</p>;
+}
+
+const suscripcionesEnDosMonedas: Suscripcion[] = [
+  { id: 'clp', nombre: 'Pesos', monto: 10000, moneda: 'CLP', frecuencia: 'mensual', fecha_proximo_cobro: '2026-11-10', categoria: 'otro', estado: 'activo' },
+  { id: 'eur', nombre: 'Euros', monto: 4.99, moneda: 'EUR', frecuencia: 'mensual', fecha_proximo_cobro: '2026-11-10', categoria: 'otro', estado: 'activo' },
+];
+
+function montarElPanel(url: string) {
+  vi.mocked(getSuscripciones).mockResolvedValue(suscripcionesEnDosMonedas);
+  vi.mocked(getCatalogosSuscripciones).mockRejectedValue(new Error('sin red'));
+  return render(<MemoryRouter initialEntries={[url]}><ToastProvider><AuthProvider><CatalogosProvider>
+    <DashboardPage />
+    <UbicacionActual />
+  </CatalogosProvider></AuthProvider></ToastProvider></MemoryRouter>);
+}
+
+it('el Panel trae la sección de presupuesto, y pide el presupuesto del mes de la URL en la moneda del Panel (S3-CH-27)', async () => {
+  montarElPanel('/dashboard?mes=2026-11');
+
+  const presupuesto = await screen.findByRole('region', { name: 'Presupuesto del mes' });
+  expect(await within(presupuesto).findByText('Aún no defines un presupuesto para noviembre de 2026 en CLP.')).toBeInTheDocument();
+  expect(getComparacionDePresupuesto).toHaveBeenCalledWith('2026-11', 'CLP');
+});
+
+it('la moneda del Panel queda en la URL, y el presupuesto la sigue sin mezclar monedas (S3-CH-27)', async () => {
+  montarElPanel('/dashboard?mes=2026-11');
+  const selector = await screen.findByRole('combobox', { name: 'Moneda del panel' });
+
+  fireEvent.change(selector, { target: { value: 'EUR' } });
+
+  const presupuesto = screen.getByRole('region', { name: 'Presupuesto del mes' });
+  expect(await within(presupuesto).findByText('Aún no defines un presupuesto para noviembre de 2026 en EUR.')).toBeInTheDocument();
+  expect(getComparacionDePresupuesto).toHaveBeenLastCalledWith('2026-11', 'EUR');
+  const parametros = new URLSearchParams(screen.getByTestId('ubicacion').textContent!.split('?')[1]);
+  expect(parametros.get('moneda')).toBe('EUR');
+  expect(parametros.get('mes')).toBe('2026-11');
+});
+
+it('al recargar con ?moneda= el Panel se queda en esa moneda, y el presupuesto también (S3-CH-27)', async () => {
+  montarElPanel('/dashboard?moneda=EUR&mes=2026-10');
+
+  const selector = await screen.findByRole('combobox', { name: 'Moneda del panel' });
+  expect(selector).toHaveValue('EUR');
+  const presupuesto = screen.getByRole('region', { name: 'Presupuesto del mes' });
+  expect(await within(presupuesto).findByText('Aún no defines un presupuesto para octubre de 2026 en EUR.')).toBeInTheDocument();
+  expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('4,99');
+});
+
+it('una moneda de la URL que el Panel no tiene se ignora: se usa la de siempre y no se pide el presupuesto en esa moneda (S3-CH-27)', async () => {
+  montarElPanel('/dashboard?moneda=XXX&mes=2026-11');
+
+  const selector = await screen.findByRole('combobox', { name: 'Moneda del panel' });
+  expect(selector).toHaveValue('CLP');
+  await screen.findByText('Aún no defines un presupuesto para noviembre de 2026 en CLP.');
+  expect(vi.mocked(getComparacionDePresupuesto).mock.calls.map(([, moneda]) => moneda)).not.toContain('XXX');
 });

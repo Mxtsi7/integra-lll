@@ -56,6 +56,10 @@
   animation-delay: 180ms;
 }
 
+.columnaIzquierda > :nth-child(4) {
+  animation-delay: 270ms;
+}
+
 .columnaDerecha > :first-child {
   animation-delay: 60ms;
 }
