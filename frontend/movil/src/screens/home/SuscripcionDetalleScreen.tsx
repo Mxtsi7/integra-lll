@@ -22,10 +22,14 @@ import { NavButton } from '../components/NavButton';
 import {
   ESTADOS_SUSCRIPCION,
   formatearTextoCobro,
+  obtenerInfoEstado,
   sufijoFrecuencia,
 } from '../components/TarjetaSuscripcion';
 import type { HomeScreenProps } from '../../navigation/types';
 import { styles } from './SuscripcionDetalleScreen.styles';
+
+/** Días de inactividad exigidos por el backend para el estado fantasma (SE-18). */
+export const DIAS_UMBRAL_FANTASMA = 45;
 
 export type EstadoDetalle =
   | { tipo: 'cargando' }
@@ -162,11 +166,7 @@ export function SuscripcionDetalleView({
   const { nombre, categoria, monto, moneda, frecuencia, estado: estadoSub, horas_uso_mes } =
     suscripcion;
 
-  const infoEstado = ESTADOS_SUSCRIPCION[estadoSub] ?? {
-    etiqueta: estadoSub,
-    fondo: '#334155',
-    texto: '#ffffff',
-  };
+  const infoEstado = obtenerInfoEstado(estadoSub);
 
   const montoMensual = equivalenteMensual(monto, frecuencia);
   const textoCobro = formatearTextoCobro(suscripcion);
@@ -227,7 +227,7 @@ export function SuscripcionDetalleView({
           <View style={styles.avisoFantasma} testID="aviso-fantasma">
             <Text style={styles.avisoFantasmaTitulo}>Suscripción sin uso prolongado</Text>
             <Text style={styles.avisoFantasmaTexto}>
-              Lleva más de 45 días sin uso registrado y sigue cobrando. Si no la vas a usar,
+              Lleva más de {DIAS_UMBRAL_FANTASMA} días sin uso registrado y sigue cobrando. Si no la vas a usar,
               retirarla te ahorra {formatearMonto(montoMensual, moneda)} al mes.
             </Text>
           </View>

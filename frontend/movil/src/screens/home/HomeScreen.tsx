@@ -6,6 +6,7 @@ import {
   gastosPorMoneda,
   getSuscripciones,
   getSuscripcionesPaginadas,
+  ORDEN_PREDETERMINADO,
   type ConsultaSuscripciones,
   type EstadoCarga,
   type Moneda,
@@ -38,6 +39,13 @@ export function deduplicarSuscripciones(
   const unicas = nuevas.filter((s) => !idsVistos.has(s.id));
   return [...acumuladas, ...unicas];
 }
+
+/** Configuración de rendimiento de FlatList sin números mágicos (SE-19). */
+export const FLATLIST_CONFIG_MOVIL = {
+  initialNumToRender: 10,
+  maxToRenderPerBatch: 10,
+  windowSize: 5,
+} as const;
 
 export interface HomeViewProps {
   estado: EstadoCarga<Suscripcion[]>;
@@ -244,9 +252,9 @@ export function HomeView({
                   refreshing={refreshing}
                   onRefresh={onRefresh}
                   contentContainerStyle={styles.listaContainer}
-                  initialNumToRender={10}
-                  maxToRenderPerBatch={10}
-                  windowSize={5}
+                  initialNumToRender={FLATLIST_CONFIG_MOVIL.initialNumToRender}
+                  maxToRenderPerBatch={FLATLIST_CONFIG_MOVIL.maxToRenderPerBatch}
+                  windowSize={FLATLIST_CONFIG_MOVIL.windowSize}
                   accessibilityRole="list"
                   ListFooterComponent={
                     hayMas ? (
@@ -309,7 +317,7 @@ export interface HomeScreenPropsContainer {
   orden?: OrdenSuscripciones;
 }
 
-export const ORDEN_PREDETERMINADO: OrdenSuscripciones = 'fecha_proximo_cobro';
+export { ORDEN_PREDETERMINADO };
 
 /**
  * Contenedor principal de HomeScreen.

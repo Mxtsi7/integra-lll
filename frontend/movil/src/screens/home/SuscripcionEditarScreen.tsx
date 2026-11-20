@@ -30,6 +30,8 @@ import type { HomeScreenProps } from '../../navigation/types';
 import { Loading } from '../../components/estados/Loading';
 import { NetworkError } from '../../components/estados/NetworkError';
 import { styles } from './SuscripcionNuevaScreen.styles';
+import { AvisoCambiosSinGuardarModal } from '../../components/AvisoCambiosSinGuardarModal';
+import { useAvisoCambiosSinGuardar } from '../../hooks/useAvisoCambiosSinGuardar';
 
 export interface EditarSuscripcionFormData {
   id: string;
@@ -111,18 +113,14 @@ export function calcularPatch(
   return patch;
 }
 
+/**
+ * Opciones iniciales vacías mientras carga el catálogo dinámico desde la API (GET /catalogos/suscripciones/).
+ * Las opciones válidas se obtienen dinámicamente del backend sin hardcoding.
+ */
 export const OPCIONES_POR_DEFECTO: OpcionesSuscripcion = {
-  monedas: ['CLP', 'USD', 'EUR'],
-  frecuencias: ['mensual', 'anual', 'semanal', 'trimestral', 'semestral'],
-  categorias: [
-    'streaming',
-    'musica',
-    'software',
-    'salud',
-    'educacion',
-    'servicios',
-    'otros',
-  ],
+  monedas: [],
+  frecuencias: [],
+  categorias: [],
 };
 
 const CAMPO_DESDE_API: Record<string, CampoSuscripcion> = {
@@ -234,35 +232,50 @@ export function EditarSuscripcionFormView({
   // Filtrar activas permitiendo conservar la opción actual si estuviese inactiva (suscripción legada)
   const monedasPermitidas = useMemo(() => {
     if (!catalogos) {
-      return (opcionesProp?.monedas ?? OPCIONES_POR_DEFECTO.monedas).map((codigo) => ({
-        codigo,
-        nombre: codigo,
-        activo: true,
-      }));
+      if (opcionesProp?.monedas) {
+        return opcionesProp.monedas.map((codigo) => ({
+          codigo,
+          nombre: codigo,
+          activo: true,
+        }));
+      }
+      return suscripcion.moneda
+        ? [{ codigo: suscripcion.moneda, nombre: suscripcion.moneda, activo: true }]
+        : [];
     }
     return monedas.filter((m) => m.activo || m.codigo === suscripcion.moneda);
   }, [catalogos, opcionesProp, suscripcion.moneda, monedas]);
 
   const categoriasPermitidas = useMemo(() => {
     if (!catalogos) {
-      return (opcionesProp?.categorias ?? OPCIONES_POR_DEFECTO.categorias).map((codigo) => ({
-        codigo,
-        nombre: codigo,
-        activo: true,
-      }));
+      if (opcionesProp?.categorias) {
+        return opcionesProp.categorias.map((codigo) => ({
+          codigo,
+          nombre: codigo,
+          activo: true,
+        }));
+      }
+      return suscripcion.categoria
+        ? [{ codigo: suscripcion.categoria, nombre: suscripcion.categoria, activo: true }]
+        : [];
     }
     return categorias.filter((c) => c.activo || c.codigo === suscripcion.categoria);
   }, [catalogos, opcionesProp, suscripcion.categoria, categorias]);
 
   const frecuenciasPermitidas = useMemo(() => {
     if (!catalogos) {
-      return (opcionesProp?.frecuencias ?? OPCIONES_POR_DEFECTO.frecuencias).map((codigo) => ({
-        codigo,
-        nombre: codigo,
-      }));
+      if (opcionesProp?.frecuencias) {
+        return opcionesProp.frecuencias.map((codigo) => ({
+          codigo,
+          nombre: codigo,
+        }));
+      }
+      return suscripcion.frecuencia
+        ? [{ codigo: suscripcion.frecuencia, nombre: suscripcion.frecuencia }]
+        : [];
     }
     return frecuencias;
-  }, [catalogos, opcionesProp, frecuencias]);
+  }, [catalogos, opcionesProp, frecuencias, suscripcion.frecuencia]);
 
   const opciones = useMemo(
     () => ({
@@ -834,17 +847,45 @@ export default function SuscripcionEditarScreen({
     };
   }, [catalogosProp, cargarCatalogos]);
 
-  const manejarCancelar = () => {
+  const [hayCambios, setHayCambios] = useState(false);
+
+  const manejarCambios = useCallback(
+    (dirty: boolean) => {
+      setHayCambios(dirty);
+      onCambiosSinGuardar?.(dirty);
+    },
+    [onCambiosSinGuardar],
+  );
+
+  const {
+    mostrandoAviso,
+    seguirEditando,
+    descartarCambios,
+    limpiarAvisoTrasGuardar,
+    intentarSalir,
+  } = useAvisoCambiosSinGuardar({
+    hayCambios,
+    navigation,
+  });
+
+  const manejarCancelar = useCallback(() => {
     if (onCancel) {
+      if (hayCambios) {
+        intentarSalir();
+        return;
+      }
       onCancel();
-    } else if (navigation?.goBack) {
-      navigation.goBack();
+      return;
     }
-  };
+    intentarSalir();
+  }, [onCancel, hayCambios, intentarSalir]);
 
   const handleSubmit = async (datos: EditarSuscripcionFormData): Promise<boolean> => {
     if (onSubmit) {
       const res = await onSubmit(datos);
+      if (res !== false) {
+        limpiarAvisoTrasGuardar();
+      }
       return res !== false;
     }
 
@@ -864,6 +905,7 @@ export default function SuscripcionEditarScreen({
     if (Object.keys(patch).length === 0) {
       guardandoRef.current = false;
       setIsSaving(false);
+      limpiarAvisoTrasGuardar();
       manejarCancelar();
       return true;
     }
@@ -871,6 +913,9 @@ export default function SuscripcionEditarScreen({
     try {
       const actualizada = await onActualizarSuscripcion(suscripcionActual.id, patch);
       onExito?.(actualizada);
+
+      // Quitar aviso tras guardar para permitir navegación sin interrupción (SE-31)
+      limpiarAvisoTrasGuardar();
 
       // Conciliar y volver al detalle existente con la suscripción confirmada (React Navigation 7 popTo)
       if (typeof (navigation as any)?.popTo === 'function') {
@@ -936,19 +981,26 @@ export default function SuscripcionEditarScreen({
   }
 
   return (
-    <EditarSuscripcionFormView
-      testID="screen-suscripcion-editar"
-      suscripcion={suscripcionActual}
-      catalogos={catalogosData}
-      cargandoCatalogos={cargandoCatalogos}
-      errorCatalogo={errorCatalogo}
-      onReintentarCatalogos={cargarCatalogos}
-      onSubmit={handleSubmit}
-      onCancel={manejarCancelar}
-      isSaving={isSaving}
-      errorGeneral={errorGeneral}
-      erroresCampos={erroresCampos}
-      onCambiosSinGuardar={onCambiosSinGuardar}
-    />
+    <>
+      <EditarSuscripcionFormView
+        testID="screen-suscripcion-editar"
+        suscripcion={suscripcionActual}
+        catalogos={catalogosData}
+        cargandoCatalogos={cargandoCatalogos}
+        errorCatalogo={errorCatalogo}
+        onReintentarCatalogos={cargarCatalogos}
+        onSubmit={handleSubmit}
+        onCancel={manejarCancelar}
+        isSaving={isSaving}
+        errorGeneral={errorGeneral}
+        erroresCampos={erroresCampos}
+        onCambiosSinGuardar={manejarCambios}
+      />
+      <AvisoCambiosSinGuardarModal
+        visible={mostrandoAviso}
+        onSeguirEditando={seguirEditando}
+        onDescartar={descartarCambios}
+      />
+    </>
   );
 }
