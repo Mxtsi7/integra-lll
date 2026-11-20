@@ -20,13 +20,14 @@
 
 2. **Criterio 2: Guardar, cancelar y descartar limpian el estado sucio correcto:**
    - **Cancelar / Salida con cambios pendientes:** Si hay campos modificados, la salida se intercepta (`e.preventDefault()`) y se despliega el modal accesible `AvisoCambiosSinGuardarModal`.
-   - **"Seguir editando":** Oculta el modal y mantiene intactos todos los datos ingresados por el usuario en el formulario.
-   - **"Descartar cambios":** Limpia el estado sucio, activa el bypass y completa la acción de navegación retenida (retroceso a la pantalla previa).
+   - **Coordinación nativa con `createNativeStackNavigator` (P1 SE-31):** En navegadores nativos (`@react-navigation/native-stack`), el hook registra la ruta en `PreventRemoveContext` (`useInsertionEffect` y `useEffect`), activando `preventNativeDismiss: true` en `react-native-screens`. Esto garantiza que los gestos de swipe nativos de iOS y los botones nativos del header no descarten la pantalla en la capa del sistema operativo antes de confirmar.
+   - **"Seguir editando":** Oculta el modal y mantiene intactos todos los datos ingresados por el usuario en el formulario, conservando `preventRemove: true`.
+   - **"Descartar cambios":** Limpia el estado sucio, desactiva `preventRemove` en `PreventRemoveContext`, activa el bypass y completa la acción de navegación retenida (retroceso a la pantalla previa).
    - **Restaurar al estado inicial:** Si el usuario borra los cambios manuales y devuelve el formulario al valor inicial, el estado sucio se desactiva reactivamente y se permite salir sin diálogo.
-   - **Guardar:** Tras guardar exitosamente (`handleSubmit`), se invoca `limpiarAvisoTrasGuardar()`, permitiendo que la navegación hacia `SuscripcionDetalle` proceda de forma fluida y sin bloqueos.
+   - **Guardar:** Tras guardar exitosamente (`handleSubmit`), se invoca `limpiarAvisoTrasGuardar()`, desactivando `preventRemove` y permitiendo que la navegación hacia `SuscripcionDetalle` proceda de forma fluida y sin bloqueos.
 
 3. **Criterio 3: Evidencia y pruebas automatizadas:**
-   - Suite dedicada en `AvisarCambiosSinGuardar.test.tsx` con 11 pruebas cubriendo ambos formularios y navegación nativa/React Navigation.
+   - Suite dedicada en `AvisarCambiosSinGuardar.test.tsx` con 13 pruebas cubriendo ambos formularios, Android BackHandler y la integración nativa con `PreventRemoveContext` en `createNativeStackNavigator`.
 
 ---
 
@@ -73,3 +74,6 @@ export interface UseAvisoCambiosSinGuardarResult {
 | `con cambios modificados intercepta salida en edición` | `SuscripcionEditarScreen` con monto cambiado | ✅ Aprobado |
 | `guardar exitosamente en edición actualiza y regresa sin avisos` | PATCH exitoso -> popTo detalle | ✅ Aprobado |
 | `BackHandler de Android intercepta y alterna el aviso` | Hardware Back press en Android | ✅ Aprobado |
+| `registra preventRemove en PreventRemoveContext al ensuciar` | `createNativeStackNavigator` + `SuscripcionNueva` | ✅ Aprobado |
+| `guardar exitosamente limpia preventRemove y desapila con popTo` | `createNativeStackNavigator` + `SuscripcionEditar` | ✅ Aprobado |
+

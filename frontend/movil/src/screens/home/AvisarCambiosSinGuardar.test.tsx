@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackHandler } from 'react-native';
 import SuscripcionNuevaScreen from './SuscripcionNuevaScreen';
 import SuscripcionEditarScreen from './SuscripcionEditarScreen';
+import { NavigationContainer, PreventRemoveContext } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { CatalogosSuscripciones, Suscripcion } from '@ojoalgasto/shared';
+
 
 const CATALOGO_MOCK: CatalogosSuscripciones = {
   monedas: [
@@ -423,4 +426,167 @@ describe('SE-31: Avisar cambios sin guardar en móvil', () => {
       expect(screen.getByTestId('input-nombre')).toHaveProperty('value', 'YouTube Premium');
     });
   });
+
+  describe('Coordinación con PreventRemoveContext en createNativeStackNavigator (P1 SE-31)', () => {
+    const Stack = createNativeStackNavigator();
+
+    it('registra preventRemove en PreventRemoveContext al ensuciar el formulario y lo desactiva al descartar', async () => {
+      let contextoPreventRemove: any = null;
+
+      function InspectorContexto() {
+        contextoPreventRemove = React.useContext<any>(PreventRemoveContext as any);
+        return null;
+      }
+
+      function TestApp() {
+        return (
+          <NavigationContainer>
+            <Stack.Navigator initialRouteName="SuscripcionNueva">
+              <Stack.Screen name="HomeScreen">
+                {() => (
+                  <>
+                    <InspectorContexto />
+                    <div data-testid="screen-home-dummy">Pantalla Home</div>
+                  </>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name="SuscripcionNueva">
+                {(props) => (
+                  <>
+                    <InspectorContexto />
+                    <SuscripcionNuevaScreen
+                      {...(props as any)}
+                      catalogos={CATALOGO_MOCK}
+                    />
+                  </>
+                )}
+              </Stack.Screen>
+            </Stack.Navigator>
+          </NavigationContainer>
+        );
+      }
+
+      render(<TestApp />);
+
+      expect(screen.getByTestId('screen-suscripcion-nueva')).toBeTruthy();
+      expect(contextoPreventRemove).toBeTruthy();
+
+      // Al inicio, limpio: no hay ninguna ruta con preventRemove activo
+      const rutasIniciales = Object.values(contextoPreventRemove.preventedRoutes || {}) as { preventRemove?: boolean }[];
+      const tieneBloqueoInicial = rutasIniciales.some((r) => r.preventRemove === true);
+      expect(tieneBloqueoInicial).toBe(false);
+
+      // Usuario ingresa datos en el formulario
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Paramount Plus' },
+      });
+
+      // El hook debe haber registrado preventRemove: true en PreventRemoveContext
+      const rutasConCambios = Object.values(contextoPreventRemove.preventedRoutes || {}) as { preventRemove?: boolean }[];
+      const tieneBloqueoActivo = rutasConCambios.some((r) => r.preventRemove === true);
+      expect(tieneBloqueoActivo).toBe(true);
+
+      // Cancelar y volver abre el diálogo de confirmación
+      fireEvent.click(screen.getByTestId('go-back'));
+      expect(screen.getByTestId('aviso-cambios-sin-guardar')).toBeTruthy();
+
+      // "Seguir editando" mantiene activo el bloqueo de salida nativa
+      fireEvent.click(screen.getByTestId('btn-seguir-editando'));
+      expect(screen.queryByTestId('aviso-cambios-sin-guardar')).toBeNull();
+      const rutasTrasSeguir = Object.values(contextoPreventRemove.preventedRoutes || {}) as { preventRemove?: boolean }[];
+      expect(rutasTrasSeguir.some((r) => r.preventRemove === true)).toBe(true);
+
+      // Volver a intentar salir y presionar "Descartar cambios"
+      fireEvent.click(screen.getByTestId('go-back'));
+      expect(screen.getByTestId('aviso-cambios-sin-guardar')).toBeTruthy();
+
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-descartar-cambios'));
+      });
+
+      // Se desactiva el bloqueo y se desmonta la advertencia
+      expect(screen.queryByTestId('aviso-cambios-sin-guardar')).toBeNull();
+    });
+
+    it('en edición, guardar exitosamente limpia preventRemove de PreventRemoveContext y desapila con popTo', async () => {
+      let contextoPreventRemove: any = null;
+
+      function InspectorContexto() {
+        contextoPreventRemove = React.useContext<any>(PreventRemoveContext as any);
+        return null;
+      }
+
+      const onActualizarMock = vi.fn().mockResolvedValue({
+        ...SUSCRIPCION_MOCK,
+        nombre: 'Spotify Plan Duo',
+      });
+
+      function TestAppEditar() {
+        return (
+          <NavigationContainer>
+            <Stack.Navigator initialRouteName="SuscripcionDetalle">
+              <Stack.Screen name="SuscripcionDetalle">
+                {({ navigation }: any) => (
+                  <div>
+                    <InspectorContexto />
+                    <div data-testid="screen-detalle-dummy">Detalle</div>
+                    <button
+                      data-testid="ir-a-editar"
+                      onClick={() =>
+                        navigation.navigate('SuscripcionEditar', { id: SUSCRIPCION_MOCK.id })
+                      }
+                    >
+                      Editar
+                    </button>
+                  </div>
+                )}
+              </Stack.Screen>
+              <Stack.Screen name="SuscripcionEditar">
+                {(props) => (
+                  <>
+                    <InspectorContexto />
+                    <SuscripcionEditarScreen
+                      {...(props as any)}
+                      suscripcion={SUSCRIPCION_MOCK}
+                      catalogos={CATALOGO_MOCK}
+                      onActualizarSuscripcion={onActualizarMock}
+                    />
+                  </>
+                )}
+              </Stack.Screen>
+            </Stack.Navigator>
+          </NavigationContainer>
+        );
+      }
+
+      render(<TestAppEditar />);
+
+      expect(screen.getByTestId('screen-detalle-dummy')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('ir-a-editar'));
+
+      expect(await screen.findByTestId('screen-suscripcion-editar')).toBeTruthy();
+
+      // Modificar un campo para poner el formulario sucio
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Spotify Plan Duo' },
+      });
+
+      // PreventRemoveContext debe reflejar preventRemove: true
+      const rutasSucias = Object.values(contextoPreventRemove?.preventedRoutes || {}) as { preventRemove?: boolean }[];
+      expect(rutasSucias.some((r) => r.preventRemove === true)).toBe(true);
+
+      // Guardar cambios
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+      });
+
+      expect(onActualizarMock).toHaveBeenCalledTimes(1);
+      // El modal no se muestra y popTo regresa a Detalle desapilando el editor
+      expect(screen.queryByTestId('aviso-cambios-sin-guardar')).toBeNull();
+      expect(await screen.findByTestId('screen-detalle-dummy')).toBeTruthy();
+      const rutasFinales = Object.values(contextoPreventRemove?.preventedRoutes || {}) as { preventRemove?: boolean }[];
+      expect(rutasFinales.some((r) => r.preventRemove === true)).toBe(false);
+    });
+  });
 });
+
