@@ -94,6 +94,13 @@
   font-weight: 600;
 }
 
+.confirmacion {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .resultados {
   display: grid;
   gap: 4px;
