@@ -39,6 +39,12 @@ export {
   type SuscripcionPayloadParcial,
   type UsoPayload,
 } from './api/suscripciones';
+export {
+  enviarUsoPendiente,
+  ErrorSincronizacionUso,
+  type GuardarUltimoEnvio,
+  type UltimoEnvioConfirmado,
+} from './api/usoRecolectores';
 export * from './api/usuarios';
 export * from './auth';
 export * from './api/catalogos';
@@ -48,6 +54,7 @@ export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/asistente';
+export * from './api/candidatos';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';

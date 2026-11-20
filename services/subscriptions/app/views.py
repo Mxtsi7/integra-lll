@@ -1052,6 +1052,72 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         except (TypeError, ValueError, AttributeError) as exc:
             raise ValidationError({"actor_id": "El identificador de usuario no es válido."}) from exc
 
+    @action(detail=True, methods=['post'], url_path='uso/recolector')
+    def recibir_uso_recolector(self, request, pk=None):
+        from app.uso_recolectores.recepcion import recibir
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        return recibir(request, suscripcion, usuario_id, self._correlation_id(request))
+
+    @action(detail=True, methods=['get'], url_path='uso/exacto')
+    def uso_exacto_recolector(self, request, pk=None):
+        """Unión diaria exacta propia, incluso cuando no completa un minuto."""
+        from app.models import ProyeccionUsoRecolector
+        from app.serializers import ProyeccionUsoRecolectorSerializer
+
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        proyecciones = ProyeccionUsoRecolector.objects.filter(
+            organizacion_id=suscripcion.organizacion_id,
+            usuario_id=usuario_id,
+            suscripcion=suscripcion,
+        ).order_by('-fecha_local', 'id')
+        pagina = self.paginate_queryset(proyecciones)
+        resultado = ProyeccionUsoRecolectorSerializer(
+            pagina if pagina is not None else proyecciones, many=True,
+        ).data
+        if pagina is not None:
+            return self.get_paginated_response(resultado)
+        return Response(resultado)
+
+    @action(detail=True, methods=['get'], url_path='uso/cobertura')
+    def cobertura_uso_recolector(self, request, pk=None):
+        from app.models import EventoUsoRecibido
+        from app.uso_recolectores.validacion import texto_utc
+
+        suscripcion = self.get_object()
+        usuario_id = self._actor_id(request, required=True)
+        fecha_texto = request.query_params.get('fecha')
+        try:
+            fecha = parse_date(fecha_texto) if fecha_texto else None
+        except ValueError as error:
+            raise ValidationError({'fecha': 'Se requiere una fecha válida con formato YYYY-MM-DD.'}) from error
+        if fecha is None:
+            raise ValidationError({'fecha': 'Se requiere una fecha válida con formato YYYY-MM-DD.'})
+        eventos = EventoUsoRecibido.objects.filter(
+            organizacion_id=suscripcion.organizacion_id,
+            usuario_id=usuario_id,
+            suscripcion=suscripcion,
+            fecha_local=fecha,
+        ).order_by('recolector_id', 'inicio', 'event_id')
+        pagina = self.paginate_queryset(eventos)
+        observaciones = pagina if pagina is not None else eventos
+        resultado = [{
+            'event_id': str(evento.event_id),
+            'recolector_id': str(evento.recolector_id),
+            'origen': evento.cuerpo['origen'],
+            'inicio': texto_utc(evento.inicio),
+            'fin': texto_utc(evento.fin),
+            'zona_horaria': evento.cuerpo['zona_horaria'],
+            'cobertura': evento.cuerpo['cobertura'],
+            'estado': evento.cuerpo['estado'],
+            'tramos_actividad': evento.cuerpo['tramos_actividad'],
+            'recibido_en': texto_utc(evento.recibido_en),
+        } for evento in observaciones]
+        if pagina is not None:
+            return self.get_paginated_response(resultado)
+        return Response(resultado)
+
     @staticmethod
     def _convertir_error_transicion(error: DjangoValidationError) -> ValidationError:
         detail = error.message_dict if hasattr(error, "message_dict") else error.messages

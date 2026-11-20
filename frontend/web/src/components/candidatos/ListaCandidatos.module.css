@@ -1,0 +1,140 @@
+.espera,
+.vacio {
+  margin: 0;
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+.lista {
+  display: grid;
+  gap: 12px;
+  border-radius: var(--radio-m);
+}
+
+/* El foco llega aquí al cambiar de página o reintentar: con teclado se ve dónde quedó. */
+.lista:focus {
+  outline: none;
+}
+
+.lista:focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 4px;
+}
+
+.items {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radio-m);
+}
+
+.contenido {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* S3-CH-07: la casilla y el hueco que deja un cobro ya resuelto miden lo mismo. */
+.casilla,
+.sinCasilla {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+}
+
+.casilla {
+  accent-color: var(--acento);
+  cursor: pointer;
+}
+
+.barraSeleccion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--tinta-2);
+}
+
+.etiquetaCasilla {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.conteo {
+  font-variant-numeric: tabular-nums;
+}
+
+/* S3-CH-08: el resultado de la última tanda de confirmaciones. */
+.resultado {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-m);
+  font-size: 13px;
+  color: var(--tinta);
+}
+
+.resumenResultado {
+  margin: 0;
+  font-weight: 600;
+}
+
+.resultados {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--tinta-2);
+}
+
+.cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nombre {
+  font-weight: 600;
+  color: var(--tinta);
+}
+
+.importe {
+  font-variant-numeric: tabular-nums;
+  color: var(--tinta);
+}
+
+.detalle,
+.estado {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.paginacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.textoPagina {
+  font-size: 13px;
+  color: var(--tinta-2);
+}
