@@ -6,7 +6,8 @@ import {
   textoDeRespaldo,
 } from './avisosDeRespaldo';
 
-// Los motivos que manda POST /api/asistente/ (services/analytics/analytics/politica_ia.py).
+// Los motivos que manda POST /api/asistente/: los de la IA (services/analytics/analytics/politica_ia.py)
+// y el de una consulta a Analytics que falló (services/analytics/analytics/views.py, S3-VI-21).
 const MOTIVOS_DEL_BACKEND = [
   'no_configurado',
   'timeout',
@@ -15,6 +16,7 @@ const MOTIVOS_DEL_BACKEND = [
   'cuota_no_disponible',
   'capacidad',
   'respuesta_invalida',
+  'consulta_analytics_no_disponible',
 ];
 
 describe('avisos de respaldo del asistente (S3-CH-17)', () => {
@@ -48,7 +50,7 @@ describe('avisos de respaldo del asistente (S3-CH-17)', () => {
     expect(textoDeRespaldo('cuota_agotada').recuperacion).toMatch(/Hasta el próximo mes/);
   });
 
-  it.each(['timeout', 'proveedor_no_disponible', 'cuota_no_disponible', 'capacidad', 'respuesta_invalida'])(
+  it.each(['timeout', 'proveedor_no_disponible', 'cuota_no_disponible', 'capacidad', 'respuesta_invalida', 'consulta_analytics_no_disponible'])(
     'con el motivo %s, que es pasajero, sí se invita a volver a preguntar',
     (motivo) => {
       expect(textoDeRespaldo(motivo).recuperacion).toMatch(/volver a preguntar|Vuelve a preguntar/);
