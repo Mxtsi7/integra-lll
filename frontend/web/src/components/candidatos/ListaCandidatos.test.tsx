@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatearFecha, TAMANO_PAGINA_CANDIDATOS, type CandidatoDetectado, type Paginado } from '@ojoalgasto/shared';
 import { useSeleccionCandidatos } from '../../hooks/useSeleccionCandidatos';
 import { candidatoDePrueba, paginaDeCandidatosDePrueba } from '../../test/candidatosDePrueba';
 import type { CargaCandidatos } from './cargaCandidatos';
 import { ListaCandidatos } from './ListaCandidatos';
+import { fraseDeLaFecha } from './presentacionDeCandidato';
 
 // S3-CH-04: el componente solo dibuja. Los datos son inventados y no hay ninguna llamada a un servicio.
 const listoCon = (datos: Paginado<CandidatoDetectado>): CargaCandidatos => ({ tipo: 'listo', datos });
@@ -69,8 +73,9 @@ describe('contenido de cada cobro (S3-CH-04)', () => {
     montar();
 
     const item = itemDe('Spotify');
-    expect(item).toHaveTextContent('$5.900');
-    expect(item).toHaveTextContent(`Archivo CSV o cartola · ${formatearFecha('2026-10-28')} · Cobro realizado`);
+    expect(item).toHaveTextContent('$5.900 CLP');
+    expect(item).toHaveTextContent('Archivo CSV o cartola · fila 3');
+    expect(item).toHaveTextContent(`Cobro realizado · el ${formatearFecha('2026-10-28')}`);
     expect(item).toHaveTextContent('Propuesto');
   });
 
@@ -266,8 +271,8 @@ describe('selección de cobros (S3-CH-07)', () => {
   it('cada cobro que espera decisión tiene su casilla, con un nombre que lo distingue de los demás', () => {
     render(<ListaConSeleccion carga={conLosCobros(SPOTIFY, NETFLIX)} />);
 
-    expect(screen.getByRole('checkbox', { name: `Seleccionar Spotify, $5.900, ${formatearFecha('2026-10-28')}` })).not.toBeChecked();
-    expect(screen.getByRole('checkbox', { name: `Seleccionar Netflix, $8.990, ${formatearFecha('2026-10-28')}` })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: `Seleccionar Spotify, $5.900 CLP, ${formatearFecha('2026-10-28')}` })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: `Seleccionar Netflix, $8.990 CLP, ${formatearFecha('2026-10-28')}` })).not.toBeChecked();
   });
 
   it('un cobro confirmado o rechazado no tiene casilla y sigue diciendo su estado', () => {
@@ -393,5 +398,148 @@ describe('selección al refrescar (S3-CH-07)', () => {
 
     rerender(<ListaConSeleccion carga={conLosCobros(SPOTIFY)} />);
     expect(casillaDe(SPOTIFY)).not.toBeChecked();
+  });
+});
+
+describe('importe, moneda, fecha y origen de cada cobro (S3-CH-05)', () => {
+  const montarCon = (...cobros: CandidatoDetectado[]) => montar({ carga: listoCon(paginaDeCandidatosDePrueba({ count: cobros.length, results: cobros })) });
+  const fechaDePrueba = formatearFecha('2026-10-28');
+
+  it('el importe lleva el código de su moneda al lado', () => {
+    montarCon(candidatoDePrueba({ id: 'c-1', servicio: 'Spotify' }), candidatoDePrueba({ id: 'c-2', servicio: 'Disney+', importe: '4.50', moneda: 'USD' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent('$5.900 CLP');
+    expect(itemDe('Disney+')).toHaveTextContent('US$4,50 USD');
+  });
+
+  it('un importe con decimales que la moneda no usa se muestra completo, sin redondearlo', () => {
+    montarCon(candidatoDePrueba({ importe: '5900.50' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent('$5.900,5 CLP');
+    expect(itemDe('Spotify').textContent).not.toContain('$5.901');
+  });
+
+  it('sin moneda dice que no se indicó, en vez de suponer pesos', () => {
+    montarCon(candidatoDePrueba({ moneda: '' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent('5900.00 (moneda sin indicar)');
+    expect(itemDe('Spotify').textContent).not.toContain('CLP');
+    expect(itemDe('Spotify').textContent).not.toContain('$');
+  });
+
+  it('un cobro realizado dice el día del cobro', () => {
+    montarCon(candidatoDePrueba({ tipo_mensaje: 'cobro_realizado', tipo_mensaje_legible: 'Cobro realizado' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent(`Cobro realizado · el ${fechaDePrueba}`);
+  });
+
+  it('un aviso de cobro dice que el cobro está previsto: no se presenta como un pago hecho', () => {
+    montarCon(candidatoDePrueba({ tipo_mensaje: 'aviso_de_cobro', tipo_mensaje_legible: 'Aviso de cobro' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent(`Aviso de cobro · previsto para el ${fechaDePrueba}`);
+    expect(itemDe('Spotify').textContent).not.toContain('Cobro realizado');
+  });
+
+  it('un pago fallido dice que fue un intento', () => {
+    montarCon(candidatoDePrueba({ tipo_mensaje: 'pago_fallido', tipo_mensaje_legible: 'Pago fallido' }));
+
+    expect(itemDe('Spotify')).toHaveTextContent(`Pago fallido · intento el ${fechaDePrueba}`);
+  });
+
+  it('si la API no manda la etiqueta del tipo, la línea empieza por la fecha, sin separadores sueltos', () => {
+    montarCon(candidatoDePrueba({ tipo_mensaje_legible: '' }));
+
+    const linea = within(itemDe('Spotify')).getByText(`el ${fechaDePrueba}`);
+    expect(linea.textContent).toBe(`el ${fechaDePrueba}`);
+  });
+
+  it('si el correo no traía la fecha del cobro y se usó la de recepción, lo dice', () => {
+    montarCon(candidatoDePrueba({ tipo_mensaje: 'aviso_de_cobro', tipo_mensaje_legible: 'Aviso de cobro', evidencia: { fecha_origen: 'recepcion' } }));
+
+    expect(itemDe('Spotify')).toHaveTextContent(`sin fecha de cobro: se usó la de recepción del correo (${fechaDePrueba})`);
+    expect(itemDe('Spotify').textContent).not.toContain('previsto para el');
+  });
+
+  it('una fecha que no es un día real no rompe la lista: dice que no se indicó y los demás cobros se ven', () => {
+    montarCon(candidatoDePrueba({ id: 'c-1', servicio: 'Spotify', fecha: '' }), candidatoDePrueba({ id: 'c-2', servicio: 'Netflix', fecha: '2026-02-30' }), candidatoDePrueba({ id: 'c-3', servicio: 'HBO Max' }));
+
+    expect(cantidadDeCobros()).toBe(3);
+    expect(itemDe('Spotify')).toHaveTextContent('Cobro realizado · fecha sin indicar');
+    expect(itemDe('Netflix')).toHaveTextContent('fecha sin indicar');
+    expect(itemDe('HBO Max')).toHaveTextContent(`el ${fechaDePrueba}`);
+  });
+
+  it('la casilla de un cobro sin fecha dice que no tiene fecha, y la de uno con fecha dice cuál', () => {
+    const sinFecha = candidatoDePrueba({ id: 'c-1', servicio: 'Spotify', fecha: '' });
+    render(<ListaConSeleccion carga={conLosCobros(sinFecha, NETFLIX)} />);
+
+    expect(screen.getByRole('checkbox', { name: 'Seleccionar Spotify, $5.900 CLP, fecha sin indicar' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: `Seleccionar Netflix, $8.990 CLP, ${fechaDePrueba}` })).toBeInTheDocument();
+  });
+
+  it('un cobro de un CSV dice su fila de la cartola, y uno de correo no dice fila', () => {
+    montarCon(
+      candidatoDePrueba({ id: 'c-1', servicio: 'Spotify', origen: 'csv', origen_legible: 'Archivo CSV o cartola', evidencia: { fila: '14' } }),
+      candidatoDePrueba({ id: 'c-2', servicio: 'Netflix', origen: 'correo', origen_legible: 'Correo', evidencia: { asunto: 'Tu próximo cobro' } }),
+    );
+
+    expect(itemDe('Spotify')).toHaveTextContent('Archivo CSV o cartola · fila 14');
+    expect(itemDe('Netflix')).toHaveTextContent('Correo');
+    expect(itemDe('Netflix').textContent).not.toContain('fila');
+  });
+});
+
+// El contrato común v1 (S3-MX-25) vive en docs/contratos, fuera de frontend. Si esa carpeta no está (un checkout
+// que solo trae frontend), estas pruebas se OMITEN y se ven como omitidas: no pasan en silencio.
+// (Sin `new URL('…', import.meta.url)`: Vite lo reescribe como una dirección web y deja de ser una ruta de disco.)
+const CARPETA_DE_CONTRATOS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../../docs/contratos');
+const hayContratoV1 =
+  existsSync(resolve(CARPETA_DE_CONTRATOS, 'candidatos-v1.schema.json')) && existsSync(resolve(CARPETA_DE_CONTRATOS, 'candidatos-v1.ejemplos.json'));
+
+function leerDelContrato<T>(nombre: string): T {
+  return JSON.parse(readFileSync(resolve(CARPETA_DE_CONTRATOS, nombre), 'utf-8')) as T;
+}
+
+interface EsquemaDeCandidatos {
+  required: string[];
+  properties: Record<string, { enum?: string[] }>;
+}
+type EjemploDelContrato = Partial<CandidatoDetectado> & { organizacion_id: string };
+
+describe.skipIf(!hayContratoV1)('el contrato común de candidatos v1 (S3-CH-05, S3-MX-25)', () => {
+  it('los campos que el contrato exige están en el candidato que recibe la lista, salvo organizacion_id, que la API no manda', () => {
+    const { required } = leerDelContrato<EsquemaDeCandidatos>('candidatos-v1.schema.json');
+    const camposDeLaLista = Object.keys(candidatoDePrueba());
+
+    expect(required.filter((campo) => campo !== 'organizacion_id' && !camposDeLaLista.includes(campo))).toEqual([]);
+    expect(camposDeLaLista).not.toContain('organizacion_id');
+  });
+
+  it('cada tipo de mensaje del contrato tiene su frase de fecha en la web: ninguno cae en el texto genérico', () => {
+    const tipos = leerDelContrato<EsquemaDeCandidatos>('candidatos-v1.schema.json').properties.tipo_mensaje.enum ?? [];
+
+    expect(tipos.length).toBeGreaterThan(0);
+    for (const tipo of tipos) {
+      expect(fraseDeLaFecha(candidatoDePrueba({ tipo_mensaje: tipo as CandidatoDetectado['tipo_mensaje'] }))).not.toMatch(/^fecha /);
+    }
+  });
+
+  it('la lista dibuja los ejemplos del contrato: el CSV con su fila y el aviso de correo con su fecha prevista', () => {
+    const ejemplos = leerDelContrato<EjemploDelContrato[]>('candidatos-v1.ejemplos.json');
+    const aCandidato = ({ organizacion_id: _organizacion, ...ejemplo }: EjemploDelContrato, posicion: number) =>
+      candidatoDePrueba({
+        ...ejemplo,
+        id: `ejemplo-${posicion}`,
+        origen_legible: ejemplo.origen === 'csv' ? 'Archivo CSV o cartola' : 'Correo',
+        tipo_mensaje_legible: ejemplo.tipo_mensaje === 'aviso_de_cobro' ? 'Aviso de cobro' : 'Cobro realizado',
+      });
+    const [csv, correo] = ejemplos.map(aCandidato);
+    montar({ carga: listoCon(paginaDeCandidatosDePrueba({ count: 2, results: [{ ...csv, servicio: 'Netflix (CSV)' }, { ...correo, servicio: 'Netflix (correo)' }] })) });
+
+    expect(itemDe('Netflix (CSV)')).toHaveTextContent('$5.990 CLP');
+    expect(itemDe('Netflix (CSV)')).toHaveTextContent('Archivo CSV o cartola · fila 2');
+    expect(itemDe('Netflix (CSV)')).toHaveTextContent(`Cobro realizado · el ${formatearFecha('2026-04-13')}`);
+    expect(itemDe('Netflix (correo)')).toHaveTextContent('$5.990 CLP');
+    expect(itemDe('Netflix (correo)')).toHaveTextContent(`Aviso de cobro · previsto para el ${formatearFecha('2026-04-13')}`);
   });
 });
