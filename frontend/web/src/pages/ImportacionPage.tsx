@@ -2,9 +2,11 @@ import { formatearFechaHora, type EstadoImportacion, type Importacion } from '@o
 import { ArrowLeft } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
-import { Boton } from '../components/ui/Boton';
+import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia, type TonoInsignia } from '../components/ui/Insignia';
+import { hayQueReconectar, type EstadoCuentaDeImportacion } from '../components/importacion/reconexion';
+import { useCuentaDeImportacion } from '../hooks/useCuentaDeImportacion';
 import { useProgresoImportacion } from '../hooks/useProgresoImportacion';
 import styles from './ImportacionesPage.module.css';
 
@@ -22,6 +24,10 @@ export const TONO_ESTADO: Record<EstadoImportacion, TonoInsignia> = {
 export function ImportacionPage() {
   const { id } = useParams<{ id: string }>();
   const { estado, reintentar } = useProgresoImportacion(id);
+  // Solo una importación de correo tiene cuenta, y solo se consulta cuando ya terminó: la lectura marca la cuenta
+  // justo cuando falla, así que lo que diga mientras sigue en curso puede cambiar antes del final.
+  const cuentaDeLaImportacion = estado.tipo === 'listo' && estado.importacion.terminada ? (estado.importacion.cuenta ?? null) : null;
+  const estadoCuenta = useCuentaDeImportacion(cuentaDeLaImportacion);
 
   return (
     <AppLayout headerTitulo="Importación" headerSubtitulo="Cómo va la lectura de tu archivo o tu correo." angosto>
@@ -36,7 +42,12 @@ export function ImportacionPage() {
       )}
       {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={reintentar} />}
       {estado.tipo === 'listo' && (
-        <DetalleImportacion importacion={estado.importacion} problema={estado.problema} onReintentar={reintentar} />
+        <DetalleImportacion
+          importacion={estado.importacion}
+          problema={estado.problema}
+          onReintentar={reintentar}
+          cuenta={estadoCuenta}
+        />
       )}
     </AppLayout>
   );
@@ -46,9 +57,10 @@ interface DetalleImportacionProps {
   importacion: Importacion;
   problema: null | 'reintentando' | 'detenido';
   onReintentar: () => void;
+  cuenta: EstadoCuentaDeImportacion;
 }
 
-function DetalleImportacion({ importacion: imp, problema, onReintentar }: DetalleImportacionProps) {
+function DetalleImportacion({ importacion: imp, problema, onReintentar, cuenta }: DetalleImportacionProps) {
   return (
     <section className={`tile ${styles.tarjeta}`} aria-labelledby="titulo-importacion">
       <div className={styles.encabezado}>
@@ -81,6 +93,7 @@ function DetalleImportacion({ importacion: imp, problema, onReintentar }: Detall
       )}
 
       {imp.estado === 'completada' && <Candidatos importacion={imp} />}
+      {hayQueReconectar(imp, cuenta) && <AvisoDeReconexion cuenta={cuenta} />}
       {imp.errores_totales > 0 && <ErroresPorFila importacion={imp} />}
     </section>
   );
@@ -150,6 +163,22 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
       <Boton variante="secundario" tamano="s" disabled title="Muy pronto">
         Revisar cobros encontrados
       </Boton>
+    </div>
+  );
+}
+
+/** S3-CH-22: la cuenta necesita que la vuelvan a autorizar. Eso se hace en Cuentas conectadas. */
+function AvisoDeReconexion({ cuenta }: { cuenta: EstadoCuentaDeImportacion }) {
+  const proveedor = cuenta.tipo === 'listo' && cuenta.cuenta !== null ? cuenta.cuenta.proveedor_legible : null;
+  return (
+    <div className={styles.reconexion}>
+      <p>
+        {proveedor ? `Tu cuenta de ${proveedor}` : 'Tu cuenta de correo'} necesita que la vuelvas a autorizar.
+        Mientras tanto no podemos leer tus correos.
+      </p>
+      <BotonEnlace to="/cuentas" variante="secundario" tamano="s">
+        Revisar cuentas conectadas
+      </BotonEnlace>
     </div>
   );
 }
