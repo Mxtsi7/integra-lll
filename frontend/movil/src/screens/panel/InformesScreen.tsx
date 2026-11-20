@@ -1,22 +1,27 @@
-import React from 'react';
-import { ScreenPlaceholder } from '../components/ScreenPlaceholder';
+import React, { useMemo } from 'react';
+import { ScrollView, StyleSheet, Text } from 'react-native';
+import { COLORES_RESUMEN as C } from '../components/resumen/estilos';
+import { ResumenPeriodoContenido } from '../components/resumen/ResumenPeriodoContenido';
 import { NavButton } from '../components/NavButton';
 import type { PanelScreenProps } from '../../navigation/types';
 
+/**
+ * AN-23. Usa el mismo contenido y la misma llamada que el Panel (AN-01), en su versión de informe.
+ * La acción de compartir (AN-26) se agrega con `renderAcciones`.
+ */
 export default function InformesScreen({ navigation }: PanelScreenProps<'Informes'>) {
+  const alVolverAPantalla = useMemo(() => (aviso: () => void) => navigation.addListener('focus', aviso), [navigation]);
+
   return (
-    <ScreenPlaceholder
-      testID="screen-informes"
-      titulo="Informes por Periodo"
-      tareaId="AN-23"
-      responsable="Andrea Travola"
-      descripcion="Gráficos y reportes de gasto histórico por mes, trimestre y año."
-    >
-      <NavButton
-        testID="go-back"
-        title="Volver al Panel"
-        onPress={() => navigation.goBack()}
-      />
-    </ScreenPlaceholder>
+    <ScrollView testID="screen-informes" contentContainerStyle={styles.contenedor}>
+      <Text style={styles.titulo}>Informes por Periodo</Text>
+      <ResumenPeriodoContenido variante="informe" alVolverAPantalla={alVolverAPantalla} />
+      <NavButton testID="go-back" title="Volver al Panel" variant="secondary" onPress={() => navigation.goBack()} />
+    </ScrollView>
   );
 }
+
+const styles = StyleSheet.create({
+  contenedor: { padding: 20, backgroundColor: C.fondo, gap: 16 },
+  titulo: { fontSize: 26, fontWeight: 'bold', color: C.tinta },
+});

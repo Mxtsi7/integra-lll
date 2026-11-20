@@ -1,0 +1,101 @@
+/* Informes por periodo (AN-22). */
+
+.navegacion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.periodo {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+  text-align: center;
+  color: var(--tinta);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.mensaje {
+  padding: 8px 0;
+  color: var(--tinta-2);
+  font-size: 14px;
+}
+
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tabla caption {
+  padding-bottom: 8px;
+  color: var(--tinta-2);
+  font-size: 13px;
+  text-align: left;
+}
+
+.tabla th,
+.tabla td {
+  padding: 10px 8px;
+  border-top: 1px solid var(--vidrio-borde);
+  text-align: right;
+}
+
+.tabla th:first-child,
+.tabla td:first-child {
+  text-align: left;
+}
+
+.tabla thead th {
+  border-top: none;
+  color: var(--tinta-2);
+  font-weight: 600;
+}
+
+.total {
+  color: var(--tinta);
+  font-weight: 700;
+}
+
+.conteo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.conteoItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio-s);
+}
+
+.conteoNumero {
+  color: var(--tinta);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.conteoNombre {
+  color: var(--tinta-2);
+  font-size: 13px;
+}
+
+.texto {
+  margin: 0;
+  color: var(--tinta-2);
+  font-size: 14px;
+  line-height: 1.5;
+}

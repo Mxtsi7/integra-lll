@@ -78,3 +78,4 @@ export type {
   UTCDateTime,
   UUID,
 } from './contracts/uso-recolectores.dto';
+export * from './api/resumenPanel';
