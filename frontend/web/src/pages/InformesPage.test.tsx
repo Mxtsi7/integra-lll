@@ -1,116 +1,18 @@
 // @vitest-environment jsdom
-import '@testing-library/jest-dom/vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { StrictMode } from 'react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ErrorDeApi, pedir } from '../../../shared/src/api/cliente';
-import { guardarTokens } from '../../../shared/src/auth';
-import { CatalogosLayout } from '../context/CatalogosContext';
-import { AuthProvider } from '../context/AuthContext';
-import { ToastProvider } from '../context/ToastContext';
-import { CATALOGOS_DE_PRUEBA, resumenDePrueba } from '../test/informesDePrueba';
-import { crearTokenDePrueba } from '../test/tokensDePrueba';
-import { guardarArchivo } from '../utils/descargas';
-import { MENSAJE_SIN_RED } from '../utils/mensajes';
-import { MENSAJE_ERROR_DESCARGA } from '../hooks/useDescargaDeCobros';
-import { MENSAJE_ERROR_INFORME } from '../hooks/useInformeMensual';
-import { InformesPage } from './InformesPage';
+import "@testing-library/jest-dom/vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResumenDelPeriodo } from "@ojoalgasto/shared";
+import { AuthProvider } from "../context/AuthContext";
+import { ToastProvider } from "../context/ToastContext";
+import { InformesPage } from "./InformesPage";
 
-// Solo se simula la red (pedir) y el guardado del archivo. La página, los hooks, el catálogo,
-// el cliente de shared y la sesión son los reales.
-vi.mock('../../../shared/src/api/cliente', async (importOriginal) => {
-  const real = await importOriginal<typeof import('../../../shared/src/api/cliente')>();
-  return { ...real, pedir: vi.fn() };
-});
-vi.mock('../utils/descargas', () => ({ guardarArchivo: vi.fn() }));
-
-const TOKEN = crearTokenDePrueba({ user_id: 7, organizacion_id: 'org-a', sid: 'sesion-a', jti: 'a-1' });
-const PERSONA_ACTUAL = { id: '7', nombre: 'Ana', correo: 'ana@ejemplo.com', rol: 'titular', organizacion_id: 'org-a', plan: 'premium' };
-const CSV = 'servicio,categoria,monto,moneda,fecha,origen,estado\r\nSpotify,musica,5900.00,CLP,2026-10-05,manual,activo\r\n';
-
-/** Gasto real y proyectado por mes y moneda. Lo que no está acá es cero. */
-const GASTOS: Record<string, Record<string, [string, string]>> = {
-  CLP: { '2026-05': ['1000.00', '0.00'], '2026-06': ['2000.00', '0.00'], '2026-07': ['3000.00', '0.00'], '2026-08': ['4000.00', '0.00'], '2026-09': ['5000.00', '0.00'], '2026-10': ['30000.00', '10000.00'], '2026-11': ['0.00', '9000.00'] },
-  USD: { '2026-09': ['2.00', '0.00'], '2026-10': ['4.50', '0.00'] },
-};
-
-interface Servidor {
-  catalogos: () => Promise<unknown>;
-  resumen: (mes: string, moneda: string) => Promise<unknown>;
-  exportacion: (ruta: string) => Promise<unknown>;
-}
-let servidor: Servidor;
-
-const resumenSegunDatos = (mes: string, moneda: string) => {
-  const [real, proyectado] = GASTOS[moneda]?.[mes] ?? ['0.00', '0.00'];
-  const total = (Number(real) + Number(proyectado)).toFixed(2);
-  return Promise.resolve(resumenDePrueba({ periodo: mes, moneda, gasto_real: real, gasto_proyectado: proyectado, total_estimado: total }));
-};
-
-function diferida<T>() {
-  let resolver!: (valor: T) => void;
-  let rechazar!: (error: unknown) => void;
-  const promesa = new Promise<T>((alResolver, alRechazar) => {
-    resolver = alResolver;
-    rechazar = alRechazar;
-  });
-  return { promesa, resolver, rechazar };
-}
-
-const pedidos = (prefijo: string) => vi.mocked(pedir).mock.calls.map(([ruta]) => String(ruta)).filter((ruta) => ruta.startsWith(prefijo));
-const resumenesPedidos = () => pedidos('/suscripciones/resumen/');
-const exportacionesPedidas = () => pedidos('/suscripciones/exportar-csv/');
-
-function Ubicacion() {
-  const { pathname, search } = useLocation();
-  return <div data-testid="ubicacion">{`${pathname}${search}`}</div>;
-}
-
-const montar = async (ruta = '/informes?mes=2026-10', estricto = false) => {
-  const arbol = (
-    <MemoryRouter initialEntries={[ruta]}>
-      <ToastProvider>
-        <AuthProvider>
-          <Routes>
-            <Route element={<CatalogosLayout />}>
-              <Route path="/informes" element={<InformesPage />} />
-            </Route>
-          </Routes>
-          <Ubicacion />
-        </AuthProvider>
-      </ToastProvider>
-    </MemoryRouter>
-  );
-  render(estricto ? <StrictMode>{arbol}</StrictMode> : arbol);
-  await act(async () => {});
-};
-
-const ubicacion = () => screen.getByTestId('ubicacion').textContent;
-const titulo = () => screen.getByRole('heading', { level: 2, name: /de 20\d\d$/ });
-const cifras = () => within(screen.getByRole('region', { name: 'Resumen del mes' }));
-const botonDescargar = () => screen.getByRole('button', { name: /^Descarg/ });
-
+// "Hoy" fijo: solo se falsea Date, para que los temporizadores sigan funcionando.
 beforeEach(() => {
-  localStorage.clear();
-  vi.mocked(pedir).mockReset();
-  vi.mocked(guardarArchivo).mockReset();
-  guardarTokens({ access_token: TOKEN, refresh_token: 'refresh-a' });
-  servidor = {
-    catalogos: () => Promise.resolve(CATALOGOS_DE_PRUEBA),
-    resumen: resumenSegunDatos,
-    exportacion: () => Promise.resolve(CSV),
-  };
-  vi.mocked(pedir).mockImplementation((ruta: string) => {
-    if (ruta.startsWith('/catalogos/suscripciones/')) return servidor.catalogos();
-    const resumen = /^\/suscripciones\/resumen\/\?mes=(\d{4}-\d{2})&moneda=([A-Za-z]+)$/.exec(ruta);
-    if (resumen !== null) return servidor.resumen(resumen[1], resumen[2]);
-    if (ruta.startsWith('/suscripciones/exportar-csv/')) return servidor.exportacion(ruta);
-    return Promise.resolve(PERSONA_ACTUAL);
-  });
-  // Solo la fecha: los temporizadores siguen siendo reales.
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(2026, 9, 24, 12));
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 9, 12, 0, 0));
 });
 
 afterEach(() => {
@@ -118,261 +20,173 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('las monedas del catálogo (S3-CH-25)', () => {
-  it('mientras cargan se dice, y todavía no se pide ningún gasto', async () => {
-    const catalogo = diferida<unknown>();
-    servidor.catalogos = () => catalogo.promesa;
+const CONTEO = { activo: 2, prueba: 0, por_confirmar: 1, cancelado: 1, fantasma: 0, total: 4 };
 
-    await montar();
+// Datos solo de prueba: la página nunca los inventa, los recibe de `cargarResumen`.
+function resumen(cambios: Partial<ResumenDelPeriodo> = {}): ResumenDelPeriodo {
+  return {
+    periodo: "2026-11",
+    conteo: CONTEO,
+    gastos: [
+      { moneda: "CLP", gastoReal: 25000, gastoProyectado: 12990, totalEstimado: 37990 },
+      { moneda: "USD", gastoReal: 10.5, gastoProyectado: 0, totalEstimado: 10.5 },
+    ],
+    ...cambios,
+  };
+}
 
-    expect(screen.getByRole('status', { name: 'Cargando las monedas' })).toBeInTheDocument();
-    expect(resumenesPedidos()).toHaveLength(0);
-    await act(async () => catalogo.resolver(CATALOGOS_DE_PRUEBA));
+async function montar(cargarResumen: (mes: string) => Promise<ResumenDelPeriodo>, direccion = "/informes") {
+  render(
+    <StrictMode>
+      <MemoryRouter initialEntries={[direccion]}>
+        <ToastProvider>
+          <AuthProvider>
+            <InformesPage cargarResumen={cargarResumen} />
+          </AuthProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </StrictMode>,
+  );
+  await act(async () => {});
+}
+
+const titulo = () => screen.getByRole("heading", { level: 2, name: /de 20\d\d$/ });
+
+describe("Informes web por periodo (AN-22)", () => {
+  it("muestra cada moneda en su fila, sin sumarlas, y la cantidad por estado", async () => {
+    await montar(vi.fn().mockResolvedValue(resumen()));
+
+    const tabla = screen.getByRole("table");
+    const filaClp = within(tabla).getByRole("row", { name: /CLP/ });
+    expect(filaClp).toHaveTextContent("$25.000");
+    expect(filaClp).toHaveTextContent("$12.990");
+    expect(filaClp).toHaveTextContent("$37.990");
+    const filaUsd = within(tabla).getByRole("row", { name: /USD/ });
+    expect(filaUsd).toHaveTextContent("10,50");
+    expect(filaClp).not.toHaveTextContent("10,50");
+
+    const conteo = screen.getByRole("list", { name: "Suscripciones por estado" });
+    expect(within(conteo).getByText("Activas").previousSibling).toHaveTextContent("2");
+    expect(screen.getByRole("heading", { name: "Suscripciones: 4" })).toBeInTheDocument();
   });
 
-  it('si no cargan, avisa con una alerta y Reintentar las vuelve a pedir', async () => {
-    servidor.catalogos = () => Promise.reject(new ErrorDeApi('Error interno.', 500));
-    await montar();
-
-    expect(screen.getByRole('alert')).toHaveTextContent('No pudimos cargar las opciones. Intenta de nuevo.');
-    expect(resumenesPedidos()).toHaveLength(0);
-
-    servidor.catalogos = () => Promise.resolve(CATALOGOS_DE_PRUEBA);
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })));
-
-    expect(screen.getByRole('combobox', { name: 'Moneda' })).toBeInTheDocument();
-    expect(resumenesPedidos()).toHaveLength(6);
+  it("incluye el resumen en texto con el periodo y la moneda de cada importe", async () => {
+    await montar(vi.fn().mockResolvedValue(resumen()));
+    expect(screen.getByText(/Resumen de Noviembre de 2026\. En CLP: gastado \$25\.000/)).toBeInTheDocument();
   });
 
-  it('sin ninguna moneda activa lo dice y no pide nada', async () => {
-    servidor.catalogos = () => Promise.resolve({ ...CATALOGOS_DE_PRUEBA, monedas: [{ codigo: 'EUR', nombre: 'Euro', activo: false, orden: 1 }] });
-
-    await montar();
-
-    expect(screen.getByText('No hay monedas disponibles para mostrar informes.')).toBeInTheDocument();
-    expect(resumenesPedidos()).toHaveLength(0);
+  it("sin mes en la dirección pide el mes de hoy", async () => {
+    const cargar = vi.fn().mockResolvedValue(resumen());
+    await montar(cargar);
+    expect(cargar).toHaveBeenCalledWith("2026-11");
+    expect(titulo()).toHaveTextContent("Noviembre de 2026");
   });
 
-  it('ofrece solo las activas, en el orden del catálogo', async () => {
-    await montar();
-
-    const opciones = Array.from(screen.getByRole('combobox', { name: 'Moneda' }).querySelectorAll('option')).map((opcion) => opcion.textContent);
-    expect(opciones).toEqual(['CLP · Peso chileno', 'USD · Dólar']);
+  it("el mes de la dirección (?mes=) es el que se pide", async () => {
+    const cargar = vi.fn().mockResolvedValue(resumen({ periodo: "2026-10" }));
+    await montar(cargar, "/informes?mes=2026-10");
+    expect(cargar).toHaveBeenCalledWith("2026-10");
+    expect(titulo()).toHaveTextContent("Octubre de 2026");
   });
 
-  it('sin moneda en la URL usa la predeterminada del catálogo', async () => {
-    await montar();
-
-    expect(screen.getByRole('combobox', { name: 'Moneda' })).toHaveValue('CLP');
-    expect(resumenesPedidos().every((ruta) => ruta.endsWith('&moneda=CLP'))).toBe(true);
+  it("un mes mal escrito en la dirección no se manda: se usa el de hoy", async () => {
+    const cargar = vi.fn().mockResolvedValue(resumen());
+    await montar(cargar, "/informes?mes=2026-13");
+    expect(cargar).toHaveBeenCalledTimes(2); // StrictMode monta dos veces
+    expect(cargar).not.toHaveBeenCalledWith("2026-13");
+    expect(cargar).toHaveBeenCalledWith("2026-11");
   });
 
-  it('usa la predeterminada del catálogo aunque no sea la primera de la lista', async () => {
-    servidor.catalogos = () =>
-      Promise.resolve({ ...CATALOGOS_DE_PRUEBA, predeterminados: { ...CATALOGOS_DE_PRUEBA.predeterminados, moneda: 'USD' } });
+  it("Mes anterior pide el mes anterior y no deja las cifras del mes viejo mientras carga", async () => {
+    let responderOctubre: (valor: ResumenDelPeriodo) => void = () => {};
+    const cargar = vi.fn().mockImplementation((mes: string) =>
+      mes === "2026-10" ? new Promise<ResumenDelPeriodo>((resolver) => (responderOctubre = resolver)) : Promise.resolve(resumen()),
+    );
+    await montar(cargar);
 
-    await montar();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Mes anterior" }));
+    });
 
-    expect(screen.getByRole('combobox', { name: 'Moneda' })).toHaveValue('USD');
-    expect(resumenesPedidos().every((ruta) => ruta.endsWith('&moneda=USD'))).toBe(true);
+    expect(titulo()).toHaveTextContent("Octubre de 2026");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Cargando el resumen del periodo" })).toBeInTheDocument();
+    await act(async () => responderOctubre(resumen({ periodo: "2026-10" })));
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 
-  it('una moneda de la URL que no existe no se pide: usa la predeterminada', async () => {
-    await montar('/informes?mes=2026-10&moneda=XXX');
+  it("una respuesta que llega tarde de un mes que ya se dejó no pisa al mes actual", async () => {
+    let responderNoviembre: (valor: ResumenDelPeriodo) => void = () => {};
+    const cargar = vi.fn().mockImplementation((mes: string) =>
+      mes === "2026-11"
+        ? new Promise<ResumenDelPeriodo>((resolver) => (responderNoviembre = resolver))
+        : Promise.resolve(
+            resumen({ periodo: mes, gastos: [{ moneda: "CLP", gastoReal: 111, gastoProyectado: 0, totalEstimado: 111 }] }),
+          ),
+    );
+    await montar(cargar);
 
-    expect(resumenesPedidos().every((ruta) => ruta.endsWith('&moneda=CLP'))).toBe(true);
-  });
-});
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Mes anterior" }));
+    });
+    await act(async () => responderNoviembre(resumen()));
 
-describe('el informe de un mes (S3-CH-25)', () => {
-  it('con el mes de la URL pide ese mes y los cinco anteriores, y lo muestra como título', async () => {
-    await montar('/informes?mes=2026-10');
-
-    expect(titulo()).toHaveTextContent('Octubre de 2026');
-    expect(resumenesPedidos()).toEqual([
-      '/suscripciones/resumen/?mes=2026-05&moneda=CLP',
-      '/suscripciones/resumen/?mes=2026-06&moneda=CLP',
-      '/suscripciones/resumen/?mes=2026-07&moneda=CLP',
-      '/suscripciones/resumen/?mes=2026-08&moneda=CLP',
-      '/suscripciones/resumen/?mes=2026-09&moneda=CLP',
-      '/suscripciones/resumen/?mes=2026-10&moneda=CLP',
-    ]);
-  });
-
-  it('sin mes en la URL usa el mes de hoy; con uno mal escrito, también: nunca se pide un mes inválido', async () => {
-    await montar('/informes');
-    expect(titulo()).toHaveTextContent('Octubre de 2026');
-    cleanup();
-    vi.mocked(pedir).mockClear();
-
-    await montar('/informes?mes=2026-13');
-
-    expect(titulo()).toHaveTextContent('Octubre de 2026');
-    expect(resumenesPedidos().some((ruta) => ruta.includes('2026-13'))).toBe(false);
+    expect(titulo()).toHaveTextContent("Octubre de 2026");
+    expect(screen.getByRole("table")).toHaveTextContent("$111");
+    expect(screen.getByRole("table")).not.toHaveTextContent("$25.000");
   });
 
-  it('muestra las cifras del mes elegido y la tabla con los seis, y las cifras coinciden con su fila', async () => {
-    await montar();
+  it("no se puede avanzar más allá del mes actual, pero sí volver a él con «Este mes»", async () => {
+    await montar(vi.fn().mockImplementation(async (mes: string) => resumen({ periodo: mes })), "/informes?mes=2026-09");
+    expect(screen.getByRole("button", { name: "Mes siguiente" })).toBeEnabled();
 
-    expect(cifras().getByText('$30.000')).toBeInTheDocument();
-    expect(cifras().getByText('$10.000')).toBeInTheDocument();
-    expect(cifras().getByText('$40.000')).toBeInTheDocument();
-    const filas = within(screen.getByRole('table', { name: 'Detalle por mes' })).getAllByRole('row').slice(1);
-    expect(filas).toHaveLength(6);
-    expect(filas[5]).toHaveAttribute('aria-current', 'true');
-    expect(filas[5]).toHaveTextContent('$30.000');
-    expect(filas[0]).toHaveTextContent('Mayo de 2026');
-    expect(filas[0]).toHaveTextContent('$1.000');
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Este mes" }));
+    });
+
+    expect(titulo()).toHaveTextContent("Noviembre de 2026");
+    expect(screen.getByRole("button", { name: "Mes siguiente" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Este mes" })).toBeDisabled();
   });
 
-  it('mientras carga lo dice y no muestra cifras', async () => {
-    const lento = diferida<unknown>();
-    servidor.resumen = () => lento.promesa;
-
-    await montar();
-
-    expect(screen.getByRole('status', { name: 'Cargando tus gastos' })).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Resumen del mes' })).not.toBeInTheDocument();
-    await act(async () => lento.resolver(resumenDePrueba()));
+  it("omite la moneda sin movimiento", async () => {
+    const solo = resumen({ gastos: [resumen().gastos[0], { moneda: "USD", gastoReal: 0, gastoProyectado: 0, totalEstimado: 0 }] });
+    await montar(vi.fn().mockResolvedValue(solo));
+    expect(within(screen.getByRole("table")).queryByRole("row", { name: /USD/ })).not.toBeInTheDocument();
   });
 
-  it('con error lo anuncia, y Reintentar vuelve a pedir y muestra el informe', async () => {
-    servidor.resumen = (mes) => (mes === '2026-07' ? Promise.reject(new ErrorDeApi('Error interno.', 500)) : resumenSegunDatos(mes, 'CLP'));
-    await montar();
+  it("un periodo sin gastos lo dice y no produce NaN", async () => {
+    const vacio = resumen({
+      conteo: { activo: 0, prueba: 0, por_confirmar: 0, cancelado: 0, fantasma: 0, total: 0 },
+      gastos: [{ moneda: "CLP", gastoReal: 0, gastoProyectado: 0, totalEstimado: 0 }],
+    });
+    await montar(vi.fn().mockResolvedValue(vacio));
 
-    expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_ERROR_INFORME);
-    expect(screen.queryByRole('region', { name: 'Resumen del mes' })).not.toBeInTheDocument();
-
-    servidor.resumen = resumenSegunDatos;
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Reintentar' })));
-
-    expect(cifras().getByText('$30.000')).toBeInTheDocument();
+    expect(screen.getAllByText(/Sin gastos registrados ni proyectados/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/NaN|undefined/);
   });
 
-  it('sin red dice que no hay conexión', async () => {
-    servidor.resumen = () => Promise.reject(new TypeError('Failed to fetch'));
+  it("si falla avisa y Reintentar vuelve a pedir", async () => {
+    let falla = true;
+    const cargar = vi.fn(async () => {
+      if (falla) throw new Error("500");
+      return resumen();
+    });
+    await montar(cargar);
 
-    await montar();
+    expect(screen.getByRole("alert")).toHaveTextContent("No pudimos cargar el resumen de este periodo.");
+    falla = false;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    });
 
-    expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_SIN_RED);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
   });
 
-  it('sin un solo cobro en esa moneda dice que no hay, sin cifras en cero ni descarga', async () => {
-    servidor.resumen = (mes, moneda) => Promise.resolve(resumenDePrueba({ periodo: mes, moneda, gasto_real: '0.00', gasto_proyectado: '0.00', total_estimado: '0.00' }));
-
-    await montar();
-
-    expect(screen.getByText(/No hay cobros en CLP en los últimos 6 meses/)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Resumen del mes' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Descarg/ })).not.toBeInTheDocument();
-  });
-
-  it('en modo estricto, que repite los efectos, termina mostrando el informe', async () => {
-    await montar('/informes?mes=2026-10', true);
-
-    expect(cifras().getByText('$30.000')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-  });
-});
-
-describe('cambiar de mes y de moneda (S3-CH-25)', () => {
-  it('la flecha siguiente pasa al mes siguiente: lo pone en la URL y pide los seis meses que terminan ahí', async () => {
-    await montar();
-    vi.mocked(pedir).mockClear();
-
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Mes siguiente: noviembre de 2026' })));
-
-    expect(titulo()).toHaveTextContent('Noviembre de 2026');
-    expect(ubicacion()).toContain('mes=2026-11');
-    expect(resumenesPedidos().at(0)).toBe('/suscripciones/resumen/?mes=2026-06&moneda=CLP');
-    expect(resumenesPedidos().at(-1)).toBe('/suscripciones/resumen/?mes=2026-11&moneda=CLP');
-    // Noviembre no tiene cobros hechos: lo proyectado y el total son los mismos $9.000.
-    expect(cifras().getAllByText('$9.000')).toHaveLength(2);
-    expect(cifras().getByText('$0')).toBeInTheDocument();
-  });
-
-  it('«Mes actual» vuelve al mes de hoy desde otro mes', async () => {
-    await montar('/informes?mes=2026-03');
-    expect(titulo()).toHaveTextContent('Marzo de 2026');
-
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Mes actual' })));
-
-    expect(titulo()).toHaveTextContent('Octubre de 2026');
-    expect(ubicacion()).toContain('mes=2026-10');
-  });
-
-  it('cambiar de moneda la pone en la URL, conserva el mes y pide todo de nuevo en esa moneda', async () => {
-    await montar('/informes?mes=2026-10');
-    vi.mocked(pedir).mockClear();
-
-    await act(async () => fireEvent.change(screen.getByRole('combobox', { name: 'Moneda' }), { target: { value: 'USD' } }));
-
-    expect(ubicacion()).toContain('moneda=USD');
-    expect(ubicacion()).toContain('mes=2026-10');
-    expect(resumenesPedidos()).toHaveLength(6);
-    expect(resumenesPedidos().every((ruta) => ruta.endsWith('&moneda=USD'))).toBe(true);
-    expect(cifras().getAllByText(/4,50/).length).toBeGreaterThan(0);
-  });
-
-  it('al cambiar de moneda no quedan a la vista las cifras de la anterior mientras carga la nueva', async () => {
-    await montar();
-    const lento = diferida<unknown>();
-    servidor.resumen = () => lento.promesa;
-
-    await act(async () => fireEvent.change(screen.getByRole('combobox', { name: 'Moneda' }), { target: { value: 'USD' } }));
-
-    expect(screen.getByRole('status', { name: 'Cargando tus gastos' })).toBeInTheDocument();
-    expect(screen.queryByText('$30.000')).not.toBeInTheDocument();
-    await act(async () => lento.resolver(resumenDePrueba({ moneda: 'USD' })));
-  });
-
-  it('una respuesta tardía de la moneda anterior no pisa la nueva', async () => {
-    const tardiaDeClp = diferida<unknown>();
-    servidor.resumen = (mes, moneda) => (moneda === 'CLP' ? tardiaDeClp.promesa : resumenSegunDatos(mes, moneda));
-    await montar();
-
-    await act(async () => fireEvent.change(screen.getByRole('combobox', { name: 'Moneda' }), { target: { value: 'USD' } }));
-    await act(async () => tardiaDeClp.resolver(resumenDePrueba({ moneda: 'CLP', gasto_real: '999999.00', total_estimado: '999999.00' })));
-
-    expect(screen.queryByText('$999.999')).not.toBeInTheDocument();
-    expect(cifras().getAllByText(/4,50/).length).toBeGreaterThan(0);
-  });
-});
-
-describe('descargar los cobros del informe (S3-CH-25)', () => {
-  it('descarga el mes y la moneda que se están viendo, con un nombre que lo dice', async () => {
-    await montar('/informes?mes=2026-10');
-
-    await act(async () => fireEvent.click(botonDescargar()));
-
-    expect(exportacionesPedidas()).toEqual(['/suscripciones/exportar-csv/?desde=2026-10-01&hasta=2026-10-31&moneda=CLP']);
-    expect(guardarArchivo).toHaveBeenCalledWith('cobros_2026-10-01_2026-10-31_CLP.csv', CSV, 'text/csv;charset=utf-8');
-    expect(screen.getByText('Descargamos cobros_2026-10-01_2026-10-31_CLP.csv.')).toBeInTheDocument();
-  });
-
-  it('al pasar a otro mes y otra moneda, la descarga es de lo nuevo y el aviso anterior se va', async () => {
-    await montar('/informes?mes=2026-10');
-    await act(async () => fireEvent.click(botonDescargar()));
-    expect(screen.getByText(/Descargamos cobros_2026-10-01_2026-10-31_CLP\.csv/)).toBeInTheDocument();
-
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Mes anterior: septiembre de 2026' })));
-    await act(async () => fireEvent.change(screen.getByRole('combobox', { name: 'Moneda' }), { target: { value: 'USD' } }));
-    expect(screen.queryByText(/Descargamos/)).not.toBeInTheDocument();
-
-    await act(async () => fireEvent.click(botonDescargar()));
-
-    expect(exportacionesPedidas().at(-1)).toBe('/suscripciones/exportar-csv/?desde=2026-09-01&hasta=2026-09-30&moneda=USD');
-    expect(guardarArchivo).toHaveBeenLastCalledWith('cobros_2026-09-01_2026-09-30_USD.csv', CSV, 'text/csv;charset=utf-8');
-  });
-
-  it('si la descarga falla, avisa y las cifras del informe siguen a la vista', async () => {
-    servidor.exportacion = () => Promise.reject(new ErrorDeApi('Error interno.', 500));
-    await montar();
-
-    await act(async () => fireEvent.click(botonDescargar()));
-
-    expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_ERROR_DESCARGA);
-    expect(guardarArchivo).not.toHaveBeenCalled();
-    expect(cifras().getByText('$30.000')).toBeInTheDocument();
+  it("sin conexión lo dice distinto de un error del servidor", async () => {
+    await montar(vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    expect(screen.getByRole("alert")).toHaveTextContent("No pudimos conectar con el servidor.");
   });
 });

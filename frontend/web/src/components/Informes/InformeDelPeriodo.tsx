@@ -5,7 +5,6 @@ import { DescargarCobros } from './DescargarCobros';
 import { GraficoDeGastos } from './GraficoDeGastos';
 import styles from './Informes.module.css';
 import { MESES_DEL_INFORME, sinGastos } from './periodosDeInforme';
-import { ResumenDelPeriodo } from './ResumenDelPeriodo';
 
 interface InformeDelPeriodoProps {
   carga: CargaInforme;
@@ -16,8 +15,9 @@ interface InformeDelPeriodoProps {
 }
 
 /**
- * S3-CH-25: lo que muestra Informes según cómo vaya la carga: cargando, error con reintento, vacío
- * o el informe. Solo dibuja lo que le llega; los datos los pide useInformeMensual.
+ * S3-CH-25: el histórico de una moneda según cómo vaya la carga: cargando, error con reintento, vacío
+ * o el gráfico con su tabla y la descarga de los cobros del mes elegido. Solo dibuja lo que le llega;
+ * los datos los pide useInformeMensual.
  */
 export function InformeDelPeriodo({ carga, mes, moneda, onReintentar }: InformeDelPeriodoProps) {
   if (carga.tipo === 'cargando') {
@@ -36,10 +36,8 @@ export function InformeDelPeriodo({ carga, mes, moneda, onReintentar }: InformeD
     );
   }
 
-  const delMes = carga.meses[carga.meses.length - 1];
   return (
     <>
-      <ResumenDelPeriodo resumen={delMes} />
       <GraficoDeGastos meses={carga.meses} mesElegido={mes} />
       <DescargarCobros mes={mes} moneda={moneda} />
     </>

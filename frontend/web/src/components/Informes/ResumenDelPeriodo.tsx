@@ -1,32 +1,67 @@
-import type { ResumenDelMes } from '@ojoalgasto/shared';
+import {
+  formatearMonto,
+  gastosConMovimiento,
+  NOMBRE_DE_ESTADO,
+  textoDelResumen,
+  type ResumenDelPeriodo as Resumen,
+} from '@ojoalgasto/shared';
+import { Seccion } from '../ui/Seccion';
 import styles from './Informes.module.css';
-import { montoLegible } from './periodosDeInforme';
-
-interface Cifra {
-  titulo: string;
-  ayuda: string;
-  monto: string;
-}
 
 /**
- * S3-CH-25: las tres cifras del mes elegido, tal cual las calcula el servidor (VI-06) para
- * toda la organización: ninguna se suma aquí sobre una página de datos.
+ * El resumen de un mes ya cargado (AN-22). Cada moneda va en su propia fila: los importes de monedas
+ * distintas nunca se suman. La tabla y el texto de abajo son la alternativa legible a cualquier gráfico.
  */
-export function ResumenDelPeriodo({ resumen }: { resumen: ResumenDelMes }) {
-  const cifras: Cifra[] = [
-    { titulo: 'Gasto real', ayuda: 'Los cobros que ya se hicieron en el mes, de las suscripciones que siguen activas.', monto: resumen.gasto_real },
-    { titulo: 'Gasto proyectado', ayuda: 'Lo que falta por cobrar en el mes. Un mes que ya pasó no proyecta nada.', monto: resumen.gasto_proyectado },
-    { titulo: 'Total estimado', ayuda: 'El gasto real más el proyectado.', monto: resumen.total_estimado },
-  ];
+export function ResumenDelPeriodo({ resumen }: { resumen: Resumen }) {
+  const gastos = gastosConMovimiento(resumen);
+
   return (
-    <section className={styles.resumen} aria-label="Resumen del mes">
-      {cifras.map((cifra) => (
-        <div key={cifra.titulo} className={`tile ${styles.cifra}`}>
-          <p className={styles.cifraTitulo}>{cifra.titulo}</p>
-          <p className={styles.cifraValor}>{montoLegible(cifra.monto, resumen.moneda)}</p>
-          <p className={styles.cifraAyuda}>{cifra.ayuda}</p>
-        </div>
-      ))}
-    </section>
+    <>
+      <Seccion titulo="Gasto del periodo" tinte="turquesa">
+        {gastos.length === 0 ? (
+          <p className={styles.mensaje}>Sin gastos registrados ni proyectados en este periodo.</p>
+        ) : (
+          <table className={styles.tabla}>
+            <caption>Gasto por moneda. Cada moneda se muestra por separado.</caption>
+            <thead>
+              <tr>
+                <th scope="col">Moneda</th>
+                <th scope="col">Gastado</th>
+                <th scope="col">Por cobrar</th>
+                <th scope="col">Total estimado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gastos.map((gasto) => (
+                <tr key={gasto.moneda}>
+                  <th scope="row">{gasto.moneda}</th>
+                  <td>{formatearMonto(gasto.gastoReal, gasto.moneda)}</td>
+                  <td>{formatearMonto(gasto.gastoProyectado, gasto.moneda)}</td>
+                  <td className={styles.total}>{formatearMonto(gasto.totalEstimado, gasto.moneda)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {gastos.length > 0 && (
+          <p className={styles.nota}>«Gastado» cuenta solo los cobros de suscripciones que siguen activas.</p>
+        )}
+      </Seccion>
+
+      <Seccion titulo={`Suscripciones: ${resumen.conteo.total}`} tinte="azul">
+        <ul className={styles.conteo} aria-label="Suscripciones por estado">
+          {(Object.keys(NOMBRE_DE_ESTADO) as (keyof typeof NOMBRE_DE_ESTADO)[]).map((estado) => (
+            <li key={estado} className={styles.conteoItem}>
+              <span className={styles.conteoNumero}>{resumen.conteo[estado]}</span>
+              <span className={styles.conteoNombre}>{NOMBRE_DE_ESTADO[estado]}</span>
+            </li>
+          ))}
+        </ul>
+      </Seccion>
+
+      <Seccion titulo="Resumen en texto">
+        <p className={styles.texto}>{textoDelResumen(resumen)}</p>
+      </Seccion>
+    </>
   );
 }

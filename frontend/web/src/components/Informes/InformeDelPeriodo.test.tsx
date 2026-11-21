@@ -45,6 +45,8 @@ const montar = async (carga: CargaInforme, onReintentar = vi.fn()) => {
   return { onReintentar };
 };
 
+const tablaDelHistorico = () => screen.getByRole('table', { name: 'Detalle por mes' });
+
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(pedir).mockReset().mockResolvedValue(PERSONA_ACTUAL);
@@ -56,57 +58,51 @@ afterEach(() => {
 });
 
 describe('el informe según cómo vaya la carga (S3-CH-25)', () => {
-  it('cargando: lo dice y no muestra cifras', async () => {
+  it('cargando: lo dice y no muestra la tabla ni la descarga', async () => {
     await montar({ tipo: 'cargando' });
 
     expect(screen.getByRole('status', { name: 'Cargando tus gastos' })).toBeInTheDocument();
-    expect(screen.queryByText('Gasto real')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Descargar/ })).not.toBeInTheDocument();
   });
 
-  it('con error: lo anuncia como alerta, ofrece Reintentar y no muestra cifras', async () => {
+  it('con error: lo anuncia como alerta, ofrece Reintentar y no muestra la tabla', async () => {
     const { onReintentar } = await montar({ tipo: 'error', mensaje: 'No pudimos cargar tus gastos. Intenta de nuevo.' });
 
     expect(screen.getByRole('alert')).toHaveTextContent('No pudimos cargar tus gastos. Intenta de nuevo.');
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
 
     expect(onReintentar).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('Gasto real')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
-  it('vacío: dice que no hay cobros en esa moneda, sin cifras en cero ni descarga', async () => {
+  it('vacío: dice que no hay cobros en esa moneda, sin tabla ni descarga', async () => {
     await montar(sinGastos());
 
     expect(screen.getByText(/No hay cobros en CLP en los últimos 6 meses/)).toBeInTheDocument();
-    expect(screen.queryByText('Gasto real')).not.toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Descargar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('con datos: muestra las cifras, el gráfico con su tabla y la descarga', async () => {
+  it('con datos: muestra el gráfico con su tabla y la descarga', async () => {
     await montar(conGastos());
 
-    expect(screen.getByRole('region', { name: 'Resumen del mes' })).toBeInTheDocument();
     expect(screen.getByRole('img')).toBeInTheDocument();
-    expect(screen.getByRole('table', { name: 'Detalle por mes' })).toBeInTheDocument();
+    expect(tablaDelHistorico()).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Descargar CSV' })).toBeInTheDocument();
   });
 
-  it('el gasto real dice que solo cuenta las suscripciones activas, y la descarga avisa que trae también las eliminadas', async () => {
+  it('la descarga avisa que trae también los cobros de suscripciones eliminadas', async () => {
     await montar(conGastos());
 
-    expect(screen.getByText('Los cobros que ya se hicieron en el mes, de las suscripciones que siguen activas.')).toBeInTheDocument();
     expect(screen.getByText(/Incluye también los de suscripciones que eliminaste/)).toBeInTheDocument();
   });
 
-  it('las cifras son las del mes elegido, el último, y coinciden con su fila de la tabla', async () => {
+  it('la última fila es el mes elegido, con sus cifras', async () => {
     await montar(conGastos());
 
-    const cifras = screen.getByRole('region', { name: 'Resumen del mes' });
-    expect(within(cifras).getByText('$30.000')).toBeInTheDocument(); // real
-    expect(within(cifras).getByText('$10.000')).toBeInTheDocument(); // proyectado
-    expect(within(cifras).getByText('$40.000')).toBeInTheDocument(); // total
-    const ultimaFila = within(screen.getByRole('table')).getAllByRole('row').at(-1) as HTMLElement;
+    const ultimaFila = within(tablaDelHistorico()).getAllByRole('row').at(-1) as HTMLElement;
     expect(ultimaFila).toHaveTextContent('Octubre de 2026');
     expect(ultimaFila).toHaveTextContent('$30.000');
     expect(ultimaFila).toHaveTextContent('$10.000');
@@ -116,8 +112,8 @@ describe('el informe según cómo vaya la carga (S3-CH-25)', () => {
   it('un mes elegido en cero con gastos en los anteriores sí muestra el informe, con sus ceros', async () => {
     await montar({ tipo: 'listo', meses: [mes('2026-09', '2000.00'), mes('2026-10', '0.00')] });
 
-    const cifras = screen.getByRole('region', { name: 'Resumen del mes' });
-    expect(within(cifras).getAllByText('$0')).toHaveLength(3);
+    const ultimaFila = within(tablaDelHistorico()).getAllByRole('row').at(-1) as HTMLElement;
+    expect(within(ultimaFila).getAllByText('$0')).toHaveLength(3);
     expect(screen.queryByText(/No hay cobros/)).not.toBeInTheDocument();
   });
 });

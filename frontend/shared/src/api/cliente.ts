@@ -87,6 +87,7 @@ export function configurarManejador401(fn: ManejadorNoAutorizado) {
 type Opciones = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  signal?: AbortSignal;
   /** Cómo leer una respuesta correcta: JSON (lo normal) o como texto, para un archivo CSV. */
   respuesta?: "json" | "texto";
 };
@@ -141,6 +142,7 @@ export async function pedir<T>(
       headers,
       body:
         opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+      signal: opciones.signal,
     });
   };
 

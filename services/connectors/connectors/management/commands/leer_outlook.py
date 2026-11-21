@@ -4,8 +4,8 @@
     python manage.py leer_outlook ... --pagina "<siguiente página de la corrida anterior>"
 
 Es `leer_gmail` con el lector de Outlook: mismos argumentos y misma salida, y
-tampoco imprime el texto de los mensajes. La página siguiente de Outlook es una
-URL completa: hay que pasarla entre comillas.
+tampoco imprime el texto de los mensajes. La página siguiente de Outlook lleva
+un `&`: hay que pasarla entre comillas, y con las mismas fechas de la primera.
 """
 
 from connectors import lector_outlook
