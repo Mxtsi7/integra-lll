@@ -56,7 +56,7 @@ export function GraficoDeGastos({ meses, mesElegido }: GraficoDeGastosProps) {
         </figcaption>
       </figure>
 
-      <table className={styles.tabla}>
+      <table className={styles.tablaHistorico}>
         <caption className={styles.tablaTitulo}>Detalle por mes</caption>
         <thead>
           <tr>

@@ -1,14 +1,5 @@
 import { pedir } from './cliente';
-
-/** Cuántas suscripciones hay en cada estado (ConteoEstadosSerializer). No depende del mes ni de la moneda. */
-export interface ConteoEstados {
-  activo: number;
-  prueba: number;
-  por_confirmar: number;
-  cancelado: number;
-  fantasma: number;
-  total: number;
-}
+import type { ConteoEstados } from './resumenPanel';
 
 /**
  * ResumenPanelSerializer (VI-06): el gasto de UN mes en UNA moneda. Los montos llegan
