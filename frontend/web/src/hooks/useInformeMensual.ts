@@ -1,6 +1,6 @@
 import { getResumenDelMes, type ResumenDelMes } from '@ojoalgasto/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { mesesDelInforme } from '../components/informes/periodosDeInforme';
+import { mesesDelInforme } from '../components/Informes/periodosDeInforme';
 import { useAuth } from '../context/AuthContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { InformeDelPeriodo } from '../components/informes/InformeDelPeriodo';
-import styles from '../components/informes/Informes.module.css';
-import { SelectorDePeriodo } from '../components/informes/SelectorDePeriodo';
+import { InformeDelPeriodo } from '../components/Informes/InformeDelPeriodo';
+import styles from '../components/Informes/Informes.module.css';
+import { SelectorDePeriodo } from '../components/Informes/SelectorDePeriodo';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Spinner } from '../components/Spinner';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
