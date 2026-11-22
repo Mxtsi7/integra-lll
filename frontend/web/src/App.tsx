@@ -152,6 +152,7 @@ export function App() {
               <Route path="/alertas" element={<AlertasPage />} />
               {/* S3-CH-14 y S3-CH-15: el chat con el asistente financiero (VI-22). */}
               <Route path="/asistente" element={<AsistentePage />} />
+              {/* S3-CH-25: el gasto por mes y la descarga de cobros (VI-06 y VI-25). */}
               <Route path="/informes" element={<InformesPage />} />
             </Route>
           </Route>

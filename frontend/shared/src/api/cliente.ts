@@ -88,6 +88,8 @@ type Opciones = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   signal?: AbortSignal;
+  /** Cómo leer una respuesta correcta: JSON (lo normal) o como texto, para un archivo CSV. */
+  respuesta?: "json" | "texto";
 };
 
 function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
@@ -233,5 +235,6 @@ export async function pedir<T>(
   }
 
   if (res.status === 204) return undefined as T;
+  if (opciones.respuesta === "texto") return (await res.text()) as T;
   return res.json() as Promise<T>;
 }

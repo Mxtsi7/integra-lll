@@ -1,14 +1,19 @@
 import { desplazarMes, etiquetaDelPeriodo, getResumenDelPeriodo, type ResumenDelPeriodo as Resumen } from '@ojoalgasto/shared';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { InformeDelPeriodo } from '../components/Informes/InformeDelPeriodo';
 import { ResumenDelPeriodo } from '../components/Informes/ResumenDelPeriodo';
 import styles from '../components/Informes/Informes.module.css';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Spinner } from '../components/Spinner';
 import { Boton } from '../components/ui/Boton';
+import { CampoSelect } from '../components/ui/Campo';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Seccion } from '../components/ui/Seccion';
+import { useCatalogos } from '../context/CatalogosContext';
+import { useInformeMensual } from '../hooks/useInformeMensual';
 import { useMesEnUrl } from '../hooks/useMesEnUrl';
+import { useMonedaEnUrl } from '../hooks/useMonedaEnUrl';
 import { useResumenPeriodo } from '../hooks/useResumenPeriodo';
 import { fechaATexto, mesDeFecha } from '../utils/calendario';
 
@@ -18,12 +23,13 @@ export interface InformesPageProps {
 }
 
 /**
- * Informes por periodo (AN-22): el gasto de un mes, lo que falta por cobrar y la cantidad de
- * suscripciones por estado, todo de GET /api/suscripciones/resumen/ (VI-06). Misma llamada y mismo
- * texto que el Informe móvil (AN-23), porque salen de `shared`.
+ * Informes por periodo, en una sola página:
+ * - Arriba, el gasto del mes en cada moneda, con la cantidad por estado y el texto del resumen (AN-22).
+ * - Abajo, una moneda a la vez: el histórico de seis meses y la descarga de los cobros del mes (S3-CH-25).
  *
- * El mes vive en la URL (?mes=YYYY-MM): Atrás/Adelante del navegador recorren los meses vistos y al
- * recargar se queda en el mismo. No se avanza más allá del mes actual.
+ * El mes vive en la URL (?mes=YYYY-MM) y la moneda también (?moneda=CLP). No se avanza más allá del mes
+ * actual. Todo sale de GET /api/suscripciones/resumen/ (VI-06) y GET /api/suscripciones/exportar-csv/ (VI-25);
+ * no hay datos en el código, y las monedas nunca se mezclan.
  */
 export function InformesPage({ cargarResumen = getResumenDelPeriodo }: InformesPageProps) {
   // "Hoy" se fija al abrir la página.
@@ -31,6 +37,12 @@ export function InformesPage({ cargarResumen = getResumenDelPeriodo }: InformesP
   const mesActual = mesDeFecha(hoy);
   const { mes, irAMes } = useMesEnUrl(hoy);
   const { estado, reintentar } = useResumenPeriodo(mes, cargarResumen);
+  const catalogos = useCatalogos();
+  const monedas = (catalogos.datos?.monedas ?? []).filter((opcion) => opcion.activo).sort((a, b) => a.orden - b.orden);
+  const { moneda, irAMoneda } = useMonedaEnUrl(
+    monedas.map((opcion) => opcion.codigo),
+    catalogos.datos?.predeterminados.moneda ?? null,
+  );
 
   return (
     <AppLayout headerTitulo="Informes" headerSubtitulo="Cuánto gastas y cuánto te falta por pagar, mes a mes.">
@@ -70,7 +82,44 @@ export function InformesPage({ cargarResumen = getResumenDelPeriodo }: InformesP
         )}
         {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={reintentar} />}
         {estado.tipo === 'listo' && <ResumenDelPeriodo resumen={estado.resumen} />}
+
+        <Seccion titulo="Histórico y descarga de cobros" tinte="azul">
+          {catalogos.datos === null && catalogos.cargando && (
+            <div className={styles.estadoCarga}>
+              <Spinner size={18} etiqueta="Cargando las monedas" />
+            </div>
+          )}
+          {catalogos.datos === null && catalogos.error !== null && (
+            <ErrorConReintento mensaje={catalogos.error} onReintentar={catalogos.recargar} />
+          )}
+          {catalogos.datos !== null && moneda === null && (
+            <p className={styles.vacio}>No hay monedas disponibles para mostrar informes.</p>
+          )}
+          {moneda !== null && (
+            <>
+              <CampoSelect
+                etiqueta="Moneda"
+                className={styles.moneda}
+                value={moneda}
+                onChange={(evento) => irAMoneda(evento.target.value)}
+              >
+                {monedas.map((opcion) => (
+                  <option key={opcion.codigo} value={opcion.codigo}>
+                    {opcion.codigo} · {opcion.nombre}
+                  </option>
+                ))}
+              </CampoSelect>
+              <InformeDeLaMoneda mes={mes} moneda={moneda} />
+            </>
+          )}
+        </Seccion>
       </div>
     </AppLayout>
   );
+}
+
+/** Pide el histórico de la moneda elegida. Es aparte para que el hook solo corra con una moneda. */
+function InformeDeLaMoneda({ mes, moneda }: { mes: string; moneda: string }) {
+  const { carga, reintentar } = useInformeMensual(mes, moneda);
+  return <InformeDelPeriodo carga={carga} mes={mes} moneda={moneda} onReintentar={reintentar} />;
 }

@@ -51,6 +51,7 @@ export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/asistente';
 export * from './api/candidatos';
+export * from './api/informes';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';
