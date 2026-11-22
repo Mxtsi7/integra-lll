@@ -1,0 +1,114 @@
+import { ErrorDeApi, pedir, type Paginado } from './cliente';
+
+/** De dónde salió el cobro: el CSV de una importación o un correo (S3-FE-14). */
+export type OrigenCandidato = 'csv' | 'correo';
+
+/** Qué dice el archivo o el correo sobre el cobro (CobroCandidato.TipoMensaje). */
+export type TipoMensajeCandidato = 'cobro_realizado' | 'aviso_de_cobro' | 'pago_fallido';
+
+/** Decisión de la persona. Nace `propuesto`. */
+export type EstadoCandidato = 'propuesto' | 'confirmado' | 'rechazado';
+
+/**
+ * Si el proveedor se reconoció. `servicio` es null cuando no es `reconocido`:
+ * no se inventa un nombre.
+ */
+export type ServicioResultado = 'reconocido' | 'ambiguo' | 'desconocido';
+
+/**
+ * Qué pasó con la orden de un candidato confirmado (S3-FE-15). `null` mientras
+ * no esté confirmado. `pendiente` quiere decir que la orden quedó en cola y que
+ * todavía no hay suscripción ni cobro creados.
+ */
+export type AplicacionCandidato = 'pendiente' | null;
+
+/**
+ * CobroCandidatoSerializer: un cobro detectado en un archivo o un correo.
+ * Todo de solo lectura. `importe` llega como texto para no perder exactitud.
+ */
+export interface CandidatoDetectado {
+  id: string;
+  importacion: string;
+  origen: OrigenCandidato;
+  origen_legible: string;
+  /** Igual para el mismo hecho leído dos veces: por eso recargar no duplica. */
+  identificador_origen: string;
+  servicio: string | null;
+  servicio_texto: string;
+  servicio_resultado: ServicioResultado;
+  importe: string;
+  moneda: string;
+  fecha: string;
+  tipo_mensaje: TipoMensajeCandidato;
+  tipo_mensaje_legible: string;
+  estado: EstadoCandidato;
+  estado_legible: string;
+  decidido_en: string | null;
+  decidido_por: string;
+  aplicacion: AplicacionCandidato;
+  /** Fila del CSV y texto original, cuando los hay. */
+  evidencia: Record<string, unknown>;
+  creado_en: string;
+}
+
+/** Cuántos pide cada página: se manda siempre, igual que en alertas. */
+export const TAMANO_PAGINA_CANDIDATOS = 10;
+
+export interface ConsultaCandidatos {
+  /** Sin valor, los dos orígenes. */
+  origen?: OrigenCandidato;
+  /** Sin valor, todos los estados. */
+  estado?: EstadoCandidato;
+  /** Solo las filas de una lectura. Un UUID; el servidor lo valida. */
+  importacion?: string;
+  /** Empieza en 1. */
+  pagina?: number;
+}
+
+/**
+ * GET /api/candidatos/ (S3-FE-14), los de la organización. Una página que no
+ * existe responde 404, como cualquier paginador de DRF.
+ */
+export async function getCandidatos({
+  origen,
+  estado,
+  importacion,
+  pagina = 1,
+}: ConsultaCandidatos = {}): Promise<Paginado<CandidatoDetectado>> {
+  const consulta = new URLSearchParams({ page: String(pagina), page_size: String(TAMANO_PAGINA_CANDIDATOS) });
+  if (origen) consulta.set('origen', origen);
+  if (estado) consulta.set('estado', estado);
+  if (importacion) consulta.set('importacion', importacion);
+  return await pedir(`/candidatos/?${consulta.toString()}`);
+}
+
+/**
+ * Por qué el servidor no confirma un cobro (409). Los códigos son estables
+ * (S3-FE-15):
+ * - `candidato_rechazado`: ya se descartó; para confirmarlo hay que volver a importar el archivo.
+ * - `servicio_sin_resolver`: no se reconoció el proveedor.
+ * - `tipo_sin_regla`: no hay regla para el tipo de mensaje.
+ */
+const CODIGOS_DE_CONFIRMACION_RECHAZADA = ['candidato_rechazado', 'servicio_sin_resolver', 'tipo_sin_regla'] as const;
+export type CodigoConfirmacionRechazada = (typeof CODIGOS_DE_CONFIRMACION_RECHAZADA)[number];
+
+/**
+ * POST /api/candidatos/<id>/confirmar/ (S3-FE-15). Responde 200 con el candidato
+ * `confirmado`. Es idempotente: repetirlo devuelve el mismo candidato y no
+ * agrega otra orden. Confirmar NO crea todavía la suscripción ni el cobro: deja
+ * la orden en cola, y el candidato lo dice con `aplicacion: 'pendiente'`.
+ */
+export async function confirmarCandidato(id: string): Promise<CandidatoDetectado> {
+  return await pedir(`/candidatos/${encodeURIComponent(id)}/confirmar/`, { method: 'POST' });
+}
+
+/**
+ * El código de un 409 de confirmar, o null si el error no es uno de ellos. El
+ * servidor manda `{ codigo, detail }`; `pedir` deja el `detail` como mensaje y
+ * el `codigo` entre los campos.
+ */
+export function codigoDeConfirmacionRechazada(error: unknown): CodigoConfirmacionRechazada | null {
+  if (!(error instanceof ErrorDeApi) || error.status !== 409) return null;
+  const codigo = error.campos?.codigo?.[0];
+  return CODIGOS_DE_CONFIRMACION_RECHAZADA.find((conocido) => conocido === codigo) ?? null;
+}

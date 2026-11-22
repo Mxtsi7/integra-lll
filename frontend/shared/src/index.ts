@@ -13,6 +13,8 @@ export {
 } from './api/cliente';
 export {
   getSuscripciones,
+  getSuscripcionesPaginadas,
+  type SuscripcionesPaginadas,
   esOrdenSuscripciones,
   ORDENES_SUSCRIPCIONES,
   type ConsultaSuscripciones,
@@ -27,11 +29,18 @@ export {
   reactivarSuscripcion,
   registrarUso,
   getUsos,
+  getHistorialUso,
   type RegistroUso,
   type SuscripcionPayload,
   type SuscripcionPayloadParcial,
   type UsoPayload,
 } from './api/suscripciones';
+export {
+  enviarUsoPendiente,
+  ErrorSincronizacionUso,
+  type GuardarUltimoEnvio,
+  type UltimoEnvioConfirmado,
+} from './api/usoRecolectores';
 export * from './api/usuarios';
 export * from './auth';
 export * from './api/catalogos';
@@ -40,6 +49,9 @@ export * from './api/conectores';
 export * from './api/importaciones';
 export * from './validaciones';
 export * from './api/recomendaciones';
+export * from './api/asistente';
+export * from './api/candidatos';
+export * from './api/informes';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';
@@ -49,3 +61,18 @@ export * from './api/verificacionCorreo';
 export * from './estadoCarga';
 export * from './api/calendario';
 export type { AuthSchemas } from './contratos/auth.generated';
+export type {
+  AcuseUso,
+  CodigoErrorUso,
+  CoverageIntervalPayload,
+  ErrorUso,
+  EstadoCobertura,
+  EstadoRecolector,
+  OrigenRecolector,
+  PendienteUso,
+  TramoActividad,
+  UsageEventPayload,
+  UTCDateTime,
+  UUID,
+} from './contracts/uso-recolectores.dto';
+export * from './api/resumenPanel';

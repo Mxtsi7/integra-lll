@@ -2,32 +2,23 @@ import {
   formatearFechaHora,
   type CuentaConectada,
   type EstadoCuentaConectada,
+  type ProveedorCorreo,
   type ProveedorCuenta,
 } from '@ojoalgasto/shared';
 import { FileSpreadsheet, Mail, TriangleAlert } from 'lucide-react';
 import EmptyState from '../subscriptions/EmptyState';
 import { Spinner } from '../Spinner';
+import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
 import { Insignia, type TonoInsignia } from '../ui/Insignia';
 import styles from './Cuentas.module.css';
 
-/**
- * Lo que puede mostrar el listado de Cuentas conectadas (CH-23). Es el
- * contrato con AN-17: la página pasa de "cargando" a "listo" o "error" con
- * lo que devuelva el GET del servicio connectors.
- *
- * "no_disponible" es mientras ese GET no exista: se dice tal cual, en vez
- * de mostrar "no tienes cuentas" (que sería falso) o cuentas inventadas.
- */
 export type EstadoListaCuentas =
   | { tipo: 'no_disponible' }
   | { tipo: 'cargando' }
   | { tipo: 'error'; mensaje: string }
   | { tipo: 'listo'; cuentas: CuentaConectada[] };
 
-// El texto del estado lo manda el backend (estado_legible); acá solo se
-// decide el color. Es un Record completo: si connectors agrega un estado,
-// TypeScript obliga a darle uno.
 const TONO_POR_ESTADO: Record<EstadoCuentaConectada, TonoInsignia> = {
   conectada: 'verde',
   requiere_reautorizacion: 'acento',
@@ -44,10 +35,18 @@ const ICONO_POR_PROVEEDOR: Record<ProveedorCuenta, typeof Mail> = {
 interface ListaCuentasProps {
   estado: EstadoListaCuentas;
   onReintentar: () => void;
+  onPedirDesconexion?: (cuenta: CuentaConectada) => void;
+  onReautorizar?: (proveedor: ProveedorCorreo) => void;
+  reautorizandoId?: string | null;
 }
 
-/** Listado de cuentas con sus estados: conectada, pendiente de reautorizar, con error, sin cuentas. */
-export function ListaCuentas({ estado, onReintentar }: ListaCuentasProps) {
+export function ListaCuentas({
+  estado,
+  onReintentar,
+  onPedirDesconexion,
+  onReautorizar,
+  reautorizandoId = null,
+}: ListaCuentasProps) {
   if (estado.tipo === 'no_disponible') {
     return (
       <p className={styles.mensaje}>
@@ -79,14 +78,34 @@ export function ListaCuentas({ estado, onReintentar }: ListaCuentasProps) {
   return (
     <ul className={styles.lista} aria-label="Tus cuentas conectadas">
       {estado.cuentas.map((cuenta) => (
-        <TarjetaCuenta key={cuenta.id} cuenta={cuenta} />
+        <TarjetaCuenta
+          key={cuenta.id}
+          cuenta={cuenta}
+          onPedirDesconexion={onPedirDesconexion}
+          onReautorizar={onReautorizar}
+          reautorizando={reautorizandoId === cuenta.id}
+        />
       ))}
     </ul>
   );
 }
 
-function TarjetaCuenta({ cuenta }: { cuenta: CuentaConectada }) {
+function TarjetaCuenta({
+  cuenta,
+  onPedirDesconexion,
+  onReautorizar,
+  reautorizando,
+}: {
+  cuenta: CuentaConectada;
+  onPedirDesconexion?: (cuenta: CuentaConectada) => void;
+  onReautorizar?: (proveedor: ProveedorCorreo) => void;
+  reautorizando: boolean;
+}) {
   const Icono = ICONO_POR_PROVEEDOR[cuenta.proveedor];
+  const esProveedorCorreo = cuenta.proveedor === 'gmail' || cuenta.proveedor === 'outlook';
+  const puedeDesconectar = Boolean(onPedirDesconexion) && cuenta.estado !== 'desconectada';
+  const puedeReautorizar = Boolean(onReautorizar) && cuenta.necesita_reautorizacion && esProveedorCorreo;
+
   return (
     <li className={styles.cuenta}>
       <span className={styles.cuentaIcono}>
@@ -108,7 +127,34 @@ function TarjetaCuenta({ cuenta }: { cuenta: CuentaConectada }) {
           </p>
         )}
       </div>
-      <Insignia tono={TONO_POR_ESTADO[cuenta.estado]}>{cuenta.estado_legible}</Insignia>
+
+      <div className={styles.cuentaDerecha}>
+        <Insignia tono={TONO_POR_ESTADO[cuenta.estado]}>{cuenta.estado_legible}</Insignia>
+        {(puedeReautorizar || puedeDesconectar) && (
+          <div className={styles.cuentaAcciones}>
+            {puedeReautorizar && (
+              <Boton
+                variante="secundario"
+                tamano="s"
+                cargando={reautorizando}
+                disabled={reautorizando}
+                onClick={() => onReautorizar!(cuenta.proveedor as ProveedorCorreo)}
+              >
+                Volver a autorizar
+              </Boton>
+            )}
+            {puedeDesconectar && (
+              <Boton
+                variante="sutil"
+                tamano="s"
+                onClick={() => onPedirDesconexion!(cuenta)}
+              >
+                Desconectar
+              </Boton>
+            )}
+          </div>
+        )}
+      </div>
     </li>
   );
 }

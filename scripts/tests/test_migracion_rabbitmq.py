@@ -26,6 +26,7 @@ class Cluster:
         self.suspendido = False
         self.cerrado = False
         self.aplicado = False
+        self.validado = False
 
     def __call__(self, *args):
         self.acciones.append(args)
@@ -70,8 +71,16 @@ class Cluster:
             n = self.mensajes if args[args.index("-p") + 1] == "otro" else 0
             return json.dumps([{"name": "fallidos", "messages": n,
                 "auto_delete": False, "exclusive": False, "state": "running"}])
+        if args[0] == "apply" and "--dry-run=server" in args:
+            # La validacion previa no guarda nada, y tiene que ocurrir con el
+            # broker INTACTO: si llegara despues de suspender, un manifiesto
+            # rechazado volveria a dejarlo cerrado.
+            assert not self.suspendido and not self.cerrado
+            self.validado = True
+            return ""
         if args[0] == "apply":
             assert self.suspendido and self.cerrado
+            assert self.validado, "se aplico un manifiesto que el servidor no valido"
             self.aplicado = True
         return ""
 
@@ -105,7 +114,7 @@ def test_actualizacion_incierta_no_reabre_pod_que_puede_ser_eliminado(guard, fal
     cluster = Cluster()
 
     def ejecutar(*args):
-        if args[0] == fallo:
+        if args[0] == fallo and "--dry-run=server" not in args:
             # El servidor aceptó la actualización pero no conocemos el resultado.
             cluster.aplicado = True
             raise RuntimeError("respuesta perdida o rollout sin verificar")
@@ -208,6 +217,8 @@ def test_guard_preserva_mensaje_confirmado_con_rabbitmq_real(guard):
                 capture_output=True, text=True, check=True, timeout=60,
             )
             return resultado.stdout
+        if args[0] == "apply" and "--dry-run=server" in args:
+            return ""
         if args[0] == "apply":
             cluster.aplicado = True
             return ""
@@ -272,3 +283,57 @@ def test_listado_de_conexiones_ilegible_no_autoriza_reemplazo(guard):
                          intentos=1, pausa=0)
     assert not cluster.aplicado
     assert not cluster.suspendido
+
+
+# ── La validacion previa al punto sin retorno (despliegue del 09-11) ────────
+# El texto del rechazo es el que devolvio el servidor de verdad, copiado de
+#     kubectl apply --dry-run=server -f k8s/02-redis-rabbitmq.yaml
+# contra el cluster del ramo. No es una suposicion de como falla.
+RECHAZO_DEL_SERVIDOR = (
+    'The PersistentVolumeClaim "rabbitmq-data" is invalid: spec: Forbidden: '
+    "spec is immutable after creation except resources.requests and "
+    "volumeAttributesClassName for bound claims"
+)
+
+
+def _servidor_que_rechaza(cluster):
+    def ejecutar(*args):
+        if args[0] == "apply":
+            # Rechaza igual el ensayo que el de verdad: es el mismo manifiesto.
+            cluster.acciones.append(args)
+            raise RuntimeError(RECHAZO_DEL_SERVIDOR)
+        return cluster(*args)
+    return ejecutar
+
+
+def test_manifiesto_que_el_servidor_rechaza_aborta_con_el_broker_intacto(guard):
+    """La regresion del 09-11: el servidor rechazaba el manifiesto entero y el
+    guion lo supo recien DESPUES de suspender los listeners. Como un `apply`
+    fallido es una actualizacion incierta, no los reanudo, y el broker quedo
+    22 horas vivo pero cerrado. Un rechazo que se puede conocer de antemano
+    tiene que abortar antes de tocar nada."""
+    cluster = Cluster()
+    with pytest.raises(RuntimeError, match="spec is immutable"):
+        guard.actualizar(_servidor_que_rechaza(cluster), intentos=1, pausa=0)
+    assert not cluster.aplicado
+    assert not cluster.suspendido
+    # No basta con que termine reanudado: no se tuvo que haber suspendido
+    # nunca, ni cerrado una sola conexion.
+    assert not any("suspend_listeners" in a for a in cluster.acciones)
+    assert not any("close_connection" in a for a in cluster.acciones)
+    assert not cluster.cerrado
+
+
+def test_la_validacion_ocurre_una_vez_y_antes_de_drenar(guard):
+    """El orden importa mas que la presencia: una validacion colocada despues
+    del drenaje haria esperar hasta dos minutos antes de avisar, y una
+    colocada despues de suspender no serviria de nada."""
+    cluster = Cluster()
+    guard.actualizar(cluster, intentos=1, pausa=0)
+    primeras = [a[0] if a[0] != "exec" else a[a.index("rabbitmqctl") + 2] for a in cluster.acciones]
+    ensayos = [i for i, a in enumerate(cluster.acciones) if a[0] == "apply" and "--dry-run=server" in a]
+    assert len(ensayos) == 1
+    assert ensayos[0] < primeras.index("list_vhosts")
+    assert ensayos[0] < primeras.index("suspend_listeners")
+    reales = [i for i, a in enumerate(cluster.acciones) if a[0] == "apply" and "--dry-run=server" not in a]
+    assert len(reales) == 1 and reales[0] > primeras.index("suspend_listeners")

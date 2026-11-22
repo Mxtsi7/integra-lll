@@ -98,6 +98,11 @@ RUTAS = {
     "/api/conectores/": "connectors",
     # FE-08: progreso de las importaciones (lo consulta CH-27).
     "/api/importaciones/": "connectors",
+    # S3-FE-14: los cobros candidatos que la vista previa lista antes de que
+    # alguien confirme. Ruta propia y no bajo "/api/importaciones/" porque los
+    # de correo no vienen de una importación de archivo: S3-CH-04 lista los
+    # dos orígenes juntos.
+    "/api/candidatos/": "connectors",
     "/api/recomendaciones/": "analytics",
     # FE-28 y FE-29: uso por periodo y puntaje de bajo uso. No va bajo
     # "/api/usos/" (que es de subscriptions) porque son cosas distintas:

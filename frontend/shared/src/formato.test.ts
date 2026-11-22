@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { formatearAhorro, formatearFechaHora, formatearFechaLarga, formatearMesAnio, formatearMonto, formatearTotales, nombresDiasSemana } from './formato';
+import { formatearAhorro, formatearDuracionMinutos, formatearFechaHora, formatearFechaLarga, formatearMesAnio, formatearMonto, formatearTotales, nombresDiasSemana } from './formato';
 
 it('identifica cada divisa y conserva sus decimales de presentación', () => {
   expect(formatearTotales([{ moneda: 'CLP', total: 10000 }, { moneda: 'EUR', total: 4.99 }]))
@@ -82,3 +82,25 @@ describe('formatearAhorro (CH-22)', () => {
     expect(formatearAhorro(ahorro, moneda)).toBeNull();
   });
 });
+
+describe('formatearDuracionMinutos (SE-30)', () => {
+  it('formatea duraciones menores a 60 minutos con "min"', () => {
+    expect(formatearDuracionMinutos(0)).toBe('0 min');
+    expect(formatearDuracionMinutos(15)).toBe('15 min');
+    expect(formatearDuracionMinutos(45)).toBe('45 min');
+    expect(formatearDuracionMinutos(59)).toBe('59 min');
+  });
+
+  it('formatea horas exactas con "h"', () => {
+    expect(formatearDuracionMinutos(60)).toBe('1 h');
+    expect(formatearDuracionMinutos(120)).toBe('2 h');
+    expect(formatearDuracionMinutos(180)).toBe('3 h');
+  });
+
+  it('formatea combinaciones de horas y minutos con "h ... min"', () => {
+    expect(formatearDuracionMinutos(65)).toBe('1 h 5 min');
+    expect(formatearDuracionMinutos(90)).toBe('1 h 30 min');
+    expect(formatearDuracionMinutos(150)).toBe('2 h 30 min');
+  });
+});
+

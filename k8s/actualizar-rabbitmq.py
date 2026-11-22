@@ -54,6 +54,24 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
         raise RuntimeError("RabbitMQ no está listo para verificar el drenaje")
     nombre, uid = pod["metadata"]["name"], pod["metadata"]["uid"]
 
+    # ── Validar el manifiesto ANTES de tocar el broker ──────────────────────
+    # Mas abajo hay un punto sin retorno: una vez suspendidos los listeners,
+    # si el `apply` falla este guion NO los reanuda, porque no puede saber si
+    # el servidor alcanzo a aceptar el reemplazo. Esa prudencia es correcta
+    # para una respuesta perdida, pero el 09-11 la pago un error que se podia
+    # conocer de antemano: el servidor rechazaba el manifiesto entero
+    #
+    #     The PersistentVolumeClaim "rabbitmq-data" is invalid: spec:
+    #     Forbidden: spec is immutable after creation ...
+    #
+    # y el broker quedo 22 horas vivo pero sin aceptar conexiones.
+    #
+    # `--dry-run=server` hace pasar el manifiesto por la misma validacion y
+    # los mismos permisos que el `apply` de verdad, sin guardar nada. Si el
+    # servidor lo rechaza, se aborta aca: con el broker intacto y los
+    # consumidores conectados.
+    ejecutar("apply", "--dry-run=server", "-f", str(MANIFIESTO))
+
     def ctl(*args):
         return ejecutar("exec", nombre, "-c", "rabbitmq", "--", "rabbitmqctl", "--quiet", *args)
 
@@ -148,7 +166,13 @@ def actualizar(ejecutar=kubectl, intentos=60, pausa=2):
                 ctl("resume_listeners")
             else:
                 print(f"ATENCIÓN: {nombre} permanece suspendido: actualización incierta. "
-                      "Verificar/cancelar el reemplazo pendiente antes de reanudar listeners.", file=sys.stderr)
+                      "Verificar/cancelar el reemplazo pendiente antes de reanudar listeners.\n"
+                      "  El broker NO acepta conexiones hasta reanudarlo a mano. Comprobar primero:\n"
+                      "    kubectl rollout status deployment/rabbitmq   (debe estar completo)\n"
+                      "    kubectl get pods -l app=rabbitmq             (un solo pod, sin Terminating)\n"
+                      "  y solo entonces:\n"
+                      f"    kubectl exec {nombre} -c rabbitmq -- rabbitmqctl resume_listeners",
+                      file=sys.stderr)
 
 
 def interrumpir(signum, frame):

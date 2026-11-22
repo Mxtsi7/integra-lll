@@ -76,9 +76,29 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: rabbitmq-data
-  labels: { app.kubernetes.io/part-of: ojoalgasto }
+  labels:
+    app.kubernetes.io/part-of: ojoalgasto
+    # La puso la administracion del cluster al recrear el volumen. Esta en la
+    # ultima configuracion aplicada del PVC vivo: si no se declara aca,
+    # `kubectl apply` la BORRA. No es nuestra, asi que se conserva.
+    rke2-edu.censei.cl/recovery-incident: "2026-10-16"
 spec:
   accessModes: ["ReadWriteOnce"]
+  # ── La clase va DECLARADA, no por omision ────────────────────────────────
+  # El PVC vivo lo creo a mano la administracion del cluster con
+  # `storageClassName: cinder-ceph`, y asi quedo en su ultima configuracion
+  # aplicada. Sin esta linea, `kubectl apply` calcula que hay que QUITAR la
+  # clase, y el spec de un PVC enlazado es inmutable:
+  #
+  #     The PersistentVolumeClaim "rabbitmq-data" is invalid: spec: Forbidden:
+  #     spec is immutable after creation ...
+  #     - "StorageClassName": "cinder-ceph",
+  #     + "StorageClassName": null,
+  #
+  # Aborto el despliegue del 09-11 DESPUES de suspender los listeners, y el
+  # broker quedo 22 horas sin aceptar conexiones. `cinder-ceph` es la unica
+  # clase del cluster del ramo; en otro cluster hay que cambiarla aca.
+  storageClassName: cinder-ceph
   resources: { requests: { storage: 1Gi } }
 ---
 apiVersion: apps/v1

@@ -65,8 +65,42 @@ beforeEach(() => {
 
   vi.stubGlobal(
     'fetch',
-    vi.fn().mockImplementation(async (url: string) => {
+    vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('/catalogos/suscripciones/')) {
+        return new Response(
+          JSON.stringify({
+            monedas: [{ codigo: 'CLP', nombre: 'Peso Chileno', activo: true, orden: 1 }],
+            categorias: [{ codigo: 'streaming', nombre: 'Streaming', activo: true, orden: 1 }],
+            frecuencias: [{ codigo: 'mensual', nombre: 'Mensual' }],
+            predeterminados: { moneda: 'CLP', categoria: 'streaming', frecuencia: 'mensual' },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
       if (typeof url === 'string' && url.includes('/suscripciones/')) {
+        if (init?.method === 'DELETE') {
+          return new Response(null, { status: 204 });
+        }
+        const idMatch = url.match(/\/suscripciones\/([^/?]+)\/?(\?.*)?$/);
+        if (idMatch && idMatch[1] && idMatch[1] !== '') {
+          const item =
+            MOCK_SUSCRIPCIONES_API.results.find((s) => s.id === idMatch[1]) ??
+            MOCK_SUSCRIPCIONES_API.results[0];
+          if (init?.method === 'PATCH' && typeof init.body === 'string') {
+            const cambios = JSON.parse(init.body);
+            return new Response(JSON.stringify({ ...item, ...cambios }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          return new Response(JSON.stringify(item), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         return new Response(JSON.stringify(MOCK_SUSCRIPCIONES_API), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -339,6 +373,68 @@ describe('Navegación Móvil (SE-06)', () => {
 
       fireEvent.click(screen.getByTestId('go-back'));
       expect(await screen.findByTestId('screen-home')).toBeTruthy();
+    });
+
+    it('flujo guardar edición (SE-25): popTo desapila el editor hacia Detalle y Volver regresa a Home sin pantallas zombie', async () => {
+      render(<App initialEstado="autenticado" initialUsuario={USUARIO} />);
+
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+      // Navegar a Detalle
+      fireEvent.click(await screen.findByTestId('go-detalle'));
+      expect(await screen.findByTestId('screen-suscripcion-detalle')).toBeTruthy();
+
+      // Navegar a Editar Suscripción
+      fireEvent.click(await screen.findByTestId('btn-editar-suscripcion'));
+      expect(await screen.findByTestId('screen-suscripcion-editar')).toBeTruthy();
+
+      // Modificar nombre y guardar
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Netflix Premium 4K' },
+      });
+      fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+      // Regresa a Detalle con popTo (el formulario de edición se desapila)
+      expect(await screen.findByTestId('screen-suscripcion-detalle')).toBeTruthy();
+      expect(screen.queryByTestId('screen-suscripcion-editar')).toBeNull();
+
+      // Desde Detalle, presionar Volver debe regresar directo a Home sin toparse con el editor
+      fireEvent.click(screen.getByTestId('go-back'));
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+      expect(screen.queryByTestId('screen-suscripcion-editar')).toBeNull();
+      expect(screen.queryByTestId('screen-suscripcion-detalle')).toBeNull();
+    });
+
+    it('flujo retiro desde Detalle (SE-26): popTo regresa a Home y ni Detalle ni Editor quedan accesibles', async () => {
+      render(<App initialEstado="autenticado" initialUsuario={USUARIO} />);
+
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+
+      // Home -> Detalle -> Editar -> Guardar -> Detalle
+      fireEvent.click(await screen.findByTestId('go-detalle'));
+      expect(await screen.findByTestId('screen-suscripcion-detalle')).toBeTruthy();
+
+      fireEvent.click(await screen.findByTestId('btn-editar-suscripcion'));
+      expect(await screen.findByTestId('screen-suscripcion-editar')).toBeTruthy();
+
+      fireEvent.change(screen.getByTestId('input-nombre'), {
+        target: { value: 'Netflix Modificado' },
+      });
+      fireEvent.click(screen.getByTestId('btn-guardar-edicion'));
+
+      expect(await screen.findByTestId('screen-suscripcion-detalle')).toBeTruthy();
+
+      // Iniciar y confirmar retiro
+      fireEvent.click(screen.getByTestId('btn-eliminar-suscripcion'));
+      expect(await screen.findByTestId('modal-confirmar-retiro')).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId('btn-confirmar-retiro'));
+
+      // popTo('HomeScreen') regresa directamente a Home
+      expect(await screen.findByTestId('screen-home')).toBeTruthy();
+      expect(screen.queryByTestId('modal-confirmar-retiro')).toBeNull();
+      expect(screen.queryByTestId('screen-suscripcion-detalle')).toBeNull();
+      expect(screen.queryByTestId('screen-suscripcion-editar')).toBeNull();
     });
 
     it('logout desde Home conmuta de inmediato a Login sin retorno a rutas privadas', async () => {

@@ -1,5 +1,13 @@
 # Tandas de D-03 con cuota fija
 
+> **Desde el 11-11-2026 `notifications` ya no necesita tanda.** Corre de forma
+> permanente en el namespace de otro integrante, con su propia cuota: ver
+> «Reparto entre namespaces» en [`k8s/README.md`](../README.md) y
+> `k8s/desplegar-satelite.sh`, que reutiliza los manifiestos de esta carpeta.
+> Lo que sigue describe cómo meterlo en el namespace del núcleo cuando no hay
+> otro disponible; la verificación de alertas de la sección 3 vale igual, con
+> `-n <namespace del satélite>` en las órdenes que tocan `notifications`.
+
 Se demuestra un servicio completo por tanda. No se pide capacidad ni nuevos
 permisos; `auth-eliminaciones` permanece activo. Autoescalado y comparación de
 cola se miden aparte, con Beat activo.
