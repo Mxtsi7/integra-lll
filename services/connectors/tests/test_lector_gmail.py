@@ -31,6 +31,7 @@ from connectors.lector_gmail import (
     URL_MENSAJES,
     AutorizacionRechazada,
     CuentaNoDisponible,
+    CursorRechazado,
     ErrorDelProveedor,
     ErrorTransitorio,
     FiltroCorreos,
@@ -338,12 +339,20 @@ class TestPaginacionYLimites:
         assert google.peticiones[0]["params"]["maxResults"] == 10
         assert pagina.siguiente_pagina is None  # Gmail no mandó otra: era la última
 
-    def test_no_trae_mas_mensajes_que_el_limite(self, claves, google):
+    def test_si_gmail_devuelve_mas_de_lo_pedido_no_se_recorta(self, claves, google):
+        """Antes se quedaba con 3 y el `nextPageToken` ya apuntaba después de
+        los 5: los otros 2 se perdían sin aviso y S3-FE-03 avanzaba la marca
+        igual (revisión de #189). Es un error explícito, como en Outlook."""
         cuenta = gmail()
         google.con_mensajes(*(mensaje_gmail(f"m{i}") for i in range(5)))
-        pagina = leer(cuenta, limite=3)
-        assert len(pagina.mensajes) == 3
-        assert len(google.peticiones) == 1 + 3
+        with pytest.raises(ErrorDelProveedor, match="se pidieron 3"):
+            leer(cuenta, limite=3)
+        assert len(google.peticiones) == 1  # ni un mensaje pedido
+
+    def test_con_lo_pedido_justo_no_hay_error(self, claves, google):
+        cuenta = gmail()
+        google.con_mensajes(*(mensaje_gmail(f"m{i}") for i in range(3)))
+        assert len(leer(cuenta, limite=3).mensajes) == 3
 
     @pytest.mark.parametrize("limite", [0, -1, LIMITE_MAXIMO + 1, True, "5", 2.5])
     def test_limite_fuera_de_rango_no_llega_a_google(self, claves, google, limite):
@@ -468,9 +477,43 @@ class TestErroresDeGoogle:
         assert TOKEN not in str(error.value)
         assert error.value.__cause__ is None and error.value.__suppress_context__
 
-    def test_pagina_invalida_es_permanente(self, claves, google):
-        self._falla(google, _Respuesta(400, error_google(400, "invalidArgument", "INVALID_ARGUMENT", "Invalid pageToken")),
-                    ErrorDelProveedor)
+    def test_un_400_sin_page_token_es_permanente_y_no_es_del_cursor(self, claves, google):
+        cuenta = gmail()
+        google.lista = _Respuesta(400, error_google(400, "invalidArgument", "INVALID_ARGUMENT", "Invalid pageToken"))
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta)
+        assert not isinstance(error.value, CursorRechazado)
+
+    def test_un_400_con_page_token_es_el_cursor_rechazado(self, claves, google):
+        """Es lo único con que S3-FE-05 reinicia una corrida (revisión de
+        #189, P2): la misma consulta sin el token ya se aceptó."""
+        cuenta = gmail()
+        google.lista = _Respuesta(400, error_google(400, "invalid", "INVALID_ARGUMENT", "Invalid pageToken"))
+        with pytest.raises(CursorRechazado) as error:
+            leer(cuenta, pagina="09876543210")
+        assert error.value.codigo == "cursor_rechazado"
+        assert TOKEN not in str(error.value) and "09876543210" not in str(error.value)
+
+    @pytest.mark.parametrize("respuesta", [
+        _Respuesta(200, ValueError("no es JSON")),
+        _Respuesta(200, ["una", "lista"]),
+        _Respuesta(404, error_google(404, "notFound", "NOT_FOUND")),
+        _Respuesta(403, error_google(403, "accessNotConfigured", "PERMISSION_DENIED")),
+    ], ids=["no-es-json", "no-es-objeto", "404", "api-deshabilitada"])
+    def test_con_page_token_otro_error_no_es_un_cursor_rechazado(self, claves, google, respuesta):
+        cuenta = gmail()
+        google.lista = respuesta
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, pagina="09876543210")
+        assert not isinstance(error.value, CursorRechazado)
+
+    def test_un_400_al_pedir_un_mensaje_no_es_un_cursor_rechazado(self, claves, google):
+        cuenta = gmail()
+        google.con_mensajes(mensaje_gmail("a1"))
+        google.mensajes["a1"] = _Respuesta(400, error_google(400, "invalidArgument", "INVALID_ARGUMENT"))
+        with pytest.raises(ErrorDelProveedor) as error:
+            leer(cuenta, pagina="09876543210")
+        assert not isinstance(error.value, CursorRechazado)
 
     def test_404_en_la_lista_no_se_confunde_con_un_mensaje_borrado(self, claves, google):
         self._falla(google, _Respuesta(404, error_google(404, "notFound", "NOT_FOUND")), ErrorDelProveedor)

@@ -65,6 +65,11 @@ const TEXTO_DE_RESPALDO_POR_MOTIVO = new Map<string, TextoDeRespaldo>([
     'respuesta_invalida',
     { causa: 'El asistente con IA devolvió una respuesta que no se pudo usar.', recuperacion: PUEDE_VOLVER_A_PREGUNTAR },
   ],
+  [
+    // Analytics no respondió al leer el uso de las suscripciones (analytics/views.py): el resumen sale sin esos datos.
+    'consulta_analytics_no_disponible',
+    { causa: 'No pudimos consultar el uso de tus suscripciones.', recuperacion: VOLVER_A_PREGUNTAR_EN_UNOS_MINUTOS },
+  ],
 ]);
 
 /** Los motivos con texto propio. Las pruebas comprueban que cubren los que manda el backend. */

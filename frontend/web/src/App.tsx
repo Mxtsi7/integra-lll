@@ -1,17 +1,30 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { restablecerContrasena, solicitarRecuperacion, RECOMENDACIONES_DISPONIBLES } from '@ojoalgasto/shared';
+import {
+  restablecerContrasena,
+  solicitarRecuperacion,
+  RECOMENDACIONES_DISPONIBLES,
+  confirmarCorreo,
+  reenviarVerificacion,
+  haySesionParaReenvio,
+  getCuentasConectadas,
+  iniciarAutorizacionCorreo,
+  desconectarCuenta,
+  type ProveedorCorreo,
+} from '@ojoalgasto/shared';
 import { DashboardPage } from './pages/DashboardPage';
 import { PerfilPage } from './pages/PerfilPage';
 import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { CuentasConectadasPage } from './pages/CuentasConectadasPage';
+import { RetornoOAuthPage } from './pages/RetornoOAuthPage';
 import { ImportacionPage } from './pages/ImportacionPage';
 import { ImportacionesPage } from './pages/ImportacionesPage';
 import { CalendarioPage } from './pages/CalendarioPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { AlertasPage } from './pages/AlertasPage';
 import { AsistentePage } from './pages/AsistentePage';
+import { ConectarCorreo } from './components/Cuentas/ConectarCorreo';
 import { RUTA_AGENDA, RUTA_CALENDARIO } from './components/calendario/rutas';
 import { ToastProvider } from './context/ToastContext';
 import { CatalogosLayout } from './context/CatalogosContext';
@@ -21,11 +34,12 @@ import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import { RecomendacionesPage } from './pages/RecomendacionesPage';
+import { InformesPage } from './pages/InformesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
 import VerificarCorreoPage from './pages/VerificarCorreoPage';
-import { confirmarCorreo, reenviarVerificacion, haySesionParaReenvio } from '@ojoalgasto/shared';
+
 // CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
 // La respuesta del backend es neutra (no dice si el correo existe), así que
 // la pantalla no la necesita: solo importa si la solicitud falló.
@@ -37,6 +51,13 @@ async function pedirEnlaceRecuperacion(email: string): Promise<void> {
 // La pantalla entrega (password, token); la API recibe (token, password).
 function cambiarContrasena(password: string, token: string): Promise<void> {
   return restablecerContrasena(token, password);
+}
+
+// AN-15 / AN-17: inicia la autorización OAuth indicando la ruta de retorno web (AN-16).
+async function iniciarFlujoCorreo(proveedor: ProveedorCorreo): Promise<string> {
+  const retorno = `${window.location.origin}/oauth/retorno`;
+  const autorizacion = await iniciarAutorizacionCorreo(proveedor, retorno);
+  return autorizacion.url_autorizacion;
 }
 
 export function App() {
@@ -68,7 +89,13 @@ export function App() {
           />
           <Route
             path="/verificar-correo"
-            element={<VerificarCorreoPage onConfirmar={confirmarCorreo}  onReenviar={reenviarVerificacion} haySesion={haySesionParaReenvio}/>}
+            element={
+              <VerificarCorreoPage
+                onConfirmar={confirmarCorreo}
+                onReenviar={reenviarVerificacion}
+                haySesion={haySesionParaReenvio}
+              />
+            }
           />
 
           {/* Sin sesión válida, todo esto redirige a /login. */}
@@ -82,7 +109,7 @@ export function App() {
               <Route path="/home" element={<Homepage />} />
               <Route path="/perfil" element={<PerfilPage />} />
               <Route path="/configuracion" element={<ConfiguracionPage />} />
-                            <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
+              <Route path="/suscripciones/:id" element={<SuscripcionDetallePage />} />
 
               {/* Secciones del menú. Las que todavía no tienen backend muestran
                   ProximamentePage; antes caían al comodín y devolvían al Panel
@@ -102,10 +129,20 @@ export function App() {
                   )
                 }
               />
-              {/* CH-23: AN-17 le pasa cargarCuentas (listado real) y AN-15
-                  accionConectar (ConectarCorreo). Sin ellas, la página dice
-                  que todavía no está disponible. */}
-              <Route path="/cuentas" element={<CuentasConectadasPage />} />
+              {/* CH-23 / AN-17: listado real, desconexión y reautorización de cuentas. */}
+              <Route
+                path="/cuentas"
+                element={
+                  <CuentasConectadasPage
+                    cargarCuentas={getCuentasConectadas}
+                    accionConectar={<ConectarCorreo onIniciar={iniciarFlujoCorreo} />}
+                    onDesconectar={desconectarCuenta}
+                    onReautorizar={iniciarFlujoCorreo}
+                  />
+                }
+              />
+              {/* AN-16: retorno del proveedor OAuth (Gmail / Outlook) con sesión activa. */}
+              <Route path="/oauth/retorno" element={<RetornoOAuthPage />} />
               {/* CH-27: el progreso de una importación (FE-08). FE-07 lleva
                   acá después de subir un archivo. */}
               <Route path="/importaciones" element={<ImportacionesPage />} />
@@ -115,9 +152,9 @@ export function App() {
               <Route path="/alertas" element={<AlertasPage />} />
               {/* S3-CH-14 y S3-CH-15: el chat con el asistente financiero (VI-22). */}
               <Route path="/asistente" element={<AsistentePage />} />
-              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* S3-CH-25: el gasto por mes y la descarga de cobros (VI-06 y VI-25). */}
+              <Route path="/informes" element={<InformesPage />} />
             </Route>
-
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
