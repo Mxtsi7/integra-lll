@@ -76,13 +76,20 @@ describe('el informe según cómo vaya la carga (S3-CH-25)', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 
-  it('vacío: dice que no hay cobros en esa moneda, sin tabla ni descarga', async () => {
+  it('vacío: dice que no hay cobros de suscripciones activas, sin tabla, y la descarga sigue disponible', async () => {
     await montar(sinGastos());
 
-    expect(screen.getByText(/No hay cobros en CLP en los últimos 6 meses/)).toBeInTheDocument();
+    expect(screen.getByText(/No hay cobros de suscripciones activas en CLP en los últimos 6 meses/)).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Descargar/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Descargar CSV' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('vacío: avisa que los cobros de suscripciones eliminadas pueden estar en la descarga de abajo', async () => {
+    await montar(sinGastos());
+
+    expect(screen.getByText(/Si eliminaste alguna, sus cobros pueden estar en la descarga de abajo/)).toBeInTheDocument();
+    expect(screen.getByText(/Incluye también los de suscripciones que eliminaste/)).toBeInTheDocument();
   });
 
   it('con datos: muestra el gráfico con su tabla y la descarga', async () => {

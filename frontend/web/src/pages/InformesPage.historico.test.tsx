@@ -30,7 +30,8 @@ vi.mock('../utils/descargas', () => ({ guardarArchivo: vi.fn() }));
 
 const TOKEN = crearTokenDePrueba({ user_id: 7, organizacion_id: 'org-a', sid: 'sesion-a', jti: 'a-1' });
 const PERSONA_ACTUAL = { id: '7', nombre: 'Ana', correo: 'ana@ejemplo.com', rol: 'titular', organizacion_id: 'org-a', plan: 'premium' };
-const CSV = 'servicio,categoria,monto,moneda,fecha,origen,estado\r\nSpotify,musica,5900.00,CLP,2026-10-05,manual,activo\r\n';
+const CABECERA = 'servicio,categoria,monto,moneda,fecha,origen,estado\r\n';
+const CSV = `${CABECERA}Spotify,musica,5900.00,CLP,2026-10-05,manual,activo\r\n`;
 
 /** Gasto real y proyectado por mes y moneda. Lo que no está acá es cero. */
 const GASTOS: Record<string, Record<string, [string, string]>> = {
@@ -50,6 +51,10 @@ const resumenSegunDatos = (mes: string, moneda: string) => {
   const total = (Number(real) + Number(proyectado)).toFixed(2);
   return Promise.resolve(resumenDePrueba({ periodo: mes, moneda, gasto_real: real, gasto_proyectado: proyectado, total_estimado: total }));
 };
+
+/** Todos los meses en cero: lo que se ve cuando las suscripciones activas no tienen cobros. */
+const SIN_COBROS = (mes: string, moneda: string) =>
+  Promise.resolve(resumenDePrueba({ periodo: mes, moneda, gasto_real: '0.00', gasto_proyectado: '0.00', total_estimado: '0.00' }));
 
 /** La parte de arriba de la página no recibe datos en estas pruebas. Función estable, como pide la página. */
 const SIN_RESUMEN_DEL_PERIODO = (mes: string) =>
@@ -268,14 +273,14 @@ describe('el histórico de una moneda (S3-CH-25)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_SIN_RED);
   });
 
-  it('sin un solo cobro en esa moneda dice que no hay, sin tabla ni descarga', async () => {
-    servidor.resumen = (mes, moneda) => Promise.resolve(resumenDePrueba({ periodo: mes, moneda, gasto_real: '0.00', gasto_proyectado: '0.00', total_estimado: '0.00' }));
+  it('sin un solo cobro de suscripciones activas dice que no hay, sin tabla, y la descarga sigue a la vista', async () => {
+    servidor.resumen = SIN_COBROS;
 
     await montar();
 
-    expect(screen.getByText(/No hay cobros en CLP en los últimos 6 meses/)).toBeInTheDocument();
+    expect(screen.getByText(/No hay cobros de suscripciones activas en CLP en los últimos 6 meses/)).toBeInTheDocument();
     expect(screen.queryByRole('table', { name: 'Detalle por mes' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Descarg/ })).not.toBeInTheDocument();
+    expect(botonDescargar()).toBeInTheDocument();
   });
 
   it('en modo estricto, que repite los efectos, termina mostrando el histórico', async () => {
@@ -395,5 +400,41 @@ describe('descargar los cobros del informe (S3-CH-25)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_ERROR_DESCARGA);
     expect(guardarArchivo).not.toHaveBeenCalled();
     expect(tablaDelHistorico()).toHaveTextContent('$30.000');
+  });
+
+  it('con el resumen de activas en cero, la descarga del mes igual va y trae los cobros de suscripciones eliminadas', async () => {
+    const eliminada = `${CABECERA}Gimnasio,salud,9990.00,CLP,2026-10-05,manual,cancelado\r\n`;
+    servidor.resumen = SIN_COBROS;
+    servidor.exportacion = () => Promise.resolve(eliminada);
+    await montar();
+
+    await act(async () => fireEvent.click(botonDescargar()));
+
+    expect(exportacionesPedidas()).toEqual(['/suscripciones/exportar-csv/?desde=2026-10-01&hasta=2026-10-31&moneda=CLP']);
+    expect(guardarArchivo).toHaveBeenCalledWith('cobros_2026-10-01_2026-10-31_CLP.csv', eliminada, 'text/csv;charset=utf-8');
+    expect(screen.getByText('Descargamos cobros_2026-10-01_2026-10-31_CLP.csv.')).toBeInTheDocument();
+  });
+
+  it('un mes sin cobros, con solo los encabezados del CSV, se descarga sin aviso de error', async () => {
+    servidor.resumen = SIN_COBROS;
+    servidor.exportacion = () => Promise.resolve(CABECERA);
+    await montar();
+
+    await act(async () => fireEvent.click(botonDescargar()));
+
+    expect(guardarArchivo).toHaveBeenCalledWith('cobros_2026-10-01_2026-10-31_CLP.csv', CABECERA, 'text/csv;charset=utf-8');
+    expect(screen.getByText('Descargamos cobros_2026-10-01_2026-10-31_CLP.csv.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('con seis meses en cero, elegir otro mes y descargar pide ese mes', async () => {
+    servidor.resumen = SIN_COBROS;
+    await montar('/informes?mes=2026-08');
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Mes anterior' })));
+    await act(async () => fireEvent.click(botonDescargar()));
+
+    expect(exportacionesPedidas().at(-1)).toBe('/suscripciones/exportar-csv/?desde=2026-07-01&hasta=2026-07-31&moneda=CLP');
+    expect(guardarArchivo).toHaveBeenLastCalledWith('cobros_2026-07-01_2026-07-31_CLP.csv', CSV, 'text/csv;charset=utf-8');
   });
 });
