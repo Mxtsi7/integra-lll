@@ -35,7 +35,7 @@ from events.uso import (
 
 RAIZ = Path(__file__).resolve().parents[3]
 ESQUEMA = json.loads(
-    (RAIZ / "docs" / "contratos" / "uso-recolectores-v1.schema.json").read_text(
+    (RAIZ / "shared" / "contratos" / "uso-recolectores-v1.schema.json").read_text(
         encoding="utf-8"
     )
 )

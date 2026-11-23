@@ -11,7 +11,7 @@ porque lo consumen las mismas tarjetas:
   con un `codigo` estable para S3-FE-18 (reintentos) y S3-FE-19 (renovar o
   pedir reconexión);
 - **qué se filtra** (`FiltroCorreos`), validado antes de que cada lector lo
-  traduzca a la sintaxis de su proveedor;
+  traduzca a la sintaxis de su proveedor o lo aplique de este lado;
 - y **cómo se pasa un HTML a texto**.
 
 Ningún lector guarda nada ni cambia la cuenta.
@@ -22,10 +22,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
+from typing import Iterable
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
@@ -126,6 +128,28 @@ class ErrorDelProveedor(ErrorDeLectura):
     codigo = "error_del_proveedor"
 
 
+class CursorRechazado(ErrorDelProveedor):
+    """El proveedor rechazó la página siguiente que se le mandó (un
+    `pageToken` de Gmail): venció o ya no la reconoce. Seguir con ella no
+    sirve; empezar de nuevo la consulta, sí. Outlook no la levanta: su
+    página siguiente la arma `lector_outlook` por fecha, y Graph no tiene un
+    cursor suyo que rechazar (revisión de #189, ronda 3).
+
+    Es lo único que reinicia una corrida de S3-FE-05. Cualquier otro
+    `ErrorDelProveedor` —un JSON ilegible, una lista mal formada, el detalle
+    de un mensaje que no se pudo leer— no dice nada del cursor y sale tal
+    cual, con el avance intacto. Antes se reiniciaba con cualquiera, y una
+    página válida que fallaba por otra cosa se reemplazaba una y otra vez por
+    la primera sin avisar (revisión de #189, P2).
+
+    Lo levanta el lector solo cuando la petición llevaba un cursor y el
+    proveedor la rechazó como petición mal hecha: lo único que cambia entre
+    esa petición y la primera página, que el proveedor sí aceptó, es el
+    cursor."""
+
+    codigo = "cursor_rechazado"
+
+
 # ── lo que se pide y lo que se devuelve ─────────────────────────────────────
 
 
@@ -134,8 +158,9 @@ class FiltroCorreos:
     """Qué correos interesan. Todo opcional; por omisión, los que parecen
     cobros, de cualquier fecha y remitente. `hasta` es exclusivo.
 
-    Cada lector lo traduce a la búsqueda de su proveedor, después de
-    `validar()`.
+    Cada lector lo usa después de `validar()`: Gmail lo traduce entero a su
+    búsqueda; Outlook le pide a Graph solo las fechas y aplica las palabras y
+    los remitentes con `coincide`.
     """
 
     desde: datetime | None = None
@@ -163,6 +188,54 @@ class FiltroCorreos:
         if self.hasta and recibido_en >= self.hasta:
             return False
         return True
+
+    def coincide(self, *, direccion: str, textos: Iterable[str]) -> bool:
+        """¿Un mensaje de `direccion` (la del remitente) con estos `textos`
+        (asunto, cuerpo, quien lo envía) pasa las palabras de cobro y los
+        remitentes del filtro?
+
+        Es para el proveedor que no puede filtrarlos de su lado sin truncar:
+        la búsqueda por palabras de Graph (`$search`) entrega 1000 resultados
+        como mucho, así que Outlook enumera la ventana por fecha y filtra aquí
+        (revisión de #189).
+
+        Sobre lo que recibe es más permisiva que la búsqueda de un proveedor,
+        a propósito: la palabra vale como fragmento, sin distinguir mayúsculas,
+        y un acento compuesto vale lo mismo que uno escrito aparte (NFKC). Un
+        correo que sobra lo descarta S3-FE-08; uno que falta no se ve nunca.
+
+        Lo que NO hace es decidir qué textos mirar: solo ve los que le pasan.
+        Un acento escrito como entidad HTML (`&oacute;`) no lo reconoce; quien
+        tenga HTML tiene que pasar también el texto. Y si no le pasan los
+        destinatarios o los adjuntos, no los mira: ahí es más estrecha que una
+        búsqueda que sí los mire (ver `lector_outlook._coincide`).
+        """
+        if self.remitentes and not any(_es_de(direccion, remitente) for remitente in self.remitentes):
+            return False
+        if not self.solo_cobros:
+            return True
+        contenido = " ".join(_comparable(texto) for texto in textos if isinstance(texto, str))
+        return any(palabra in contenido for palabra in _PALABRAS_COMPARABLES)
+
+
+def _comparable(texto: str) -> str:
+    """Minúsculas y acentos compuestos de una sola forma (NFKC), para que
+    `SUSCRIPCIÓN` escrita con el acento aparte siga siendo `suscripción`."""
+    return unicodedata.normalize("NFKC", texto).casefold()
+
+
+_PALABRAS_COMPARABLES = tuple(_comparable(palabra) for palabra in PALABRAS_DE_COBRO)
+
+
+def _es_de(direccion, remitente: str) -> bool:
+    """¿`direccion` es `remitente` (una dirección) o es de ese dominio o de
+    uno suyo (`info@account.netflix.com` es de `netflix.com`)?"""
+    if not isinstance(direccion, str):
+        return False
+    direccion, remitente = direccion.strip().casefold(), remitente.casefold()
+    if "@" in remitente:
+        return direccion == remitente
+    return direccion.endswith("@" + remitente) or direccion.endswith("." + remitente)
 
 
 @dataclasses.dataclass(frozen=True)

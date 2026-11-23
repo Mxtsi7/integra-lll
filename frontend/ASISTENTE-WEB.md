@@ -6,7 +6,7 @@
 |---|---|---|
 | S3-CH-14 | Construir la interfaz web del chat de IA | Hecha; en `main` (PR #154) |
 | S3-CH-15 | Enviar preguntas y mostrar respuestas del asistente existente | Hecha; en `main` (PR #154) |
-| S3-CH-17 | Mostrar errores y respuestas de respaldo del asistente | Hecha en su rama con el contrato que hoy está en `main`. Falta la revisión de otra persona y S3-VI-21 (Victor), que no está entregada |
+| S3-CH-17 | Mostrar errores y respuestas de respaldo del asistente | Hecha, con el motivo de S3-VI-21 en `Christopher/chat_respaldo_analytics`. Falta la revisión de otra persona y que Victor valide el texto del motivo nuevo |
 
 **Dependencias, ya en `main`:**
 - VI-22 (Victor): `POST /api/asistente/` en Analytics (`services/analytics/analytics/views.py`, función `asistente`),
@@ -17,15 +17,15 @@
 - MX-24 (Maximiliano) y VI-22/VI-24 (Victor, PR #132): la respuesta `estado: "degradado"` con su `motivo`
   (`services/analytics/analytics/politica_ia.py` y `asistente.py`). Los motivos que manda `POST /api/asistente/` son
   `no_configurado`, `timeout`, `proveedor_no_disponible`, `cuota_agotada`, `cuota_no_disponible`, `capacidad` y
-  `respuesta_invalida`. La cuota es por persona y por mes calendario.
+  `respuesta_invalida`. La cuota es por persona y por mes calendario. S3-VI-21 (#190, en `main`) agrega
+  `consulta_analytics_no_disponible`: Analytics no respondió al leer el uso de las suscripciones.
 - Gateway (`gateway/app/proxy.py`): responde 403 sin Premium, 502 si Analytics no está disponible, 504 si no
   respondió a tiempo y 503 si no pudo comprobar la sesión o los permisos.
 
-**Dependencia que falta:** S3-VI-21 (Victor), «Resolver consultas de IA cuando faltan datos o falla el proveedor».
-No tiene PR ni commits en `main` (revisado el 13 de noviembre de 2026, `main` en `2b2676f`). Su criterio «error, cuota y
-ausencia de datos tienen resultado explícito» puede sumar un motivo o un estado para la falta de datos. S3-CH-17 se
-hizo con lo que ya existe; cuando llegue S3-VI-21 hay que agregar su texto en `avisosDeRespaldo.ts` y validar el
-contrato con Victor. Mientras tanto, un motivo nuevo muestra el aviso general.
+**S3-VI-21 (Victor), «Resolver consultas de IA cuando faltan datos o falla el proveedor»:** entró en `main` con la #190
+(merge `3d677eb`, 17 de noviembre). Trae el motivo `consulta_analytics_no_disponible`, cuyo texto está en
+`avisosDeRespaldo.ts`. Falta que Victor valide ese texto y el contrato. La falta de datos no tiene motivo propio: un
+motivo que la web no conozca sigue mostrando el aviso general.
 
 ## Dónde está
 
@@ -88,6 +88,7 @@ Rutas relativas a `frontend/`.
   | `respuesta_invalida` | El asistente con IA devolvió una respuesta que no se pudo usar. | Puedes volver a preguntar. |
   | `proveedor_no_disponible` | El asistente con IA no está disponible ahora. | Vuelve a preguntar en unos minutos. |
   | `capacidad` | El asistente con IA está atendiendo muchas consultas. | Vuelve a preguntar en unos minutos. |
+  | `consulta_analytics_no_disponible` | No pudimos consultar el uso de tus suscripciones. | Vuelve a preguntar en unos minutos. |
   | `cuota_no_disponible` | No pudimos comprobar tu cuota de consultas con IA. | Vuelve a preguntar en unos minutos. |
   | `cuota_agotada` | Ya usaste tus consultas con IA de este mes. | Hasta el próximo mes recibirás este resumen automático. |
   | `no_configurado` | El asistente con IA no está activado en este momento. | Por ahora recibirás este resumen automático. |
@@ -154,8 +155,8 @@ Rutas relativas a `frontend/`.
 
 - **S3-CH-16** (restricción Premium y límite de consultas): el menú muestra «Asistente» a todas las cuentas y un 403
   se dice con un mensaje general. No hay bloqueo previo para el plan gratuito ni contador de consultas.
-- **La falta de datos como estado propio:** espera a S3-VI-21. Hoy solo se ve en el texto del resumen de respaldo;
-  cuando el asistente con IA sí contesta, la web no sabe si había datos.
+- **La falta de datos como estado propio:** S3-VI-21 no la agregó: solo sumó el motivo de Analytics. Hoy se ve en el
+  texto del resumen de respaldo; cuando el asistente con IA sí contesta, la web no sabe si había datos.
 - **Reintentar una respuesta de respaldo:** el aviso dice cuándo conviene volver a preguntar, pero no hay un botón
   para repetir la pregunta; solo los errores lo tienen.
 - **El 403 con «Reintentar»:** sin Premium, reintentar no sirve. Quitar el botón y explicar el plan es de S3-CH-16.
