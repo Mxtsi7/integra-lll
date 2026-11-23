@@ -66,6 +66,24 @@ export const ORDENES_SUSCRIPCIONES = [
 
 export type OrdenSuscripciones = (typeof ORDENES_SUSCRIPCIONES)[number];
 
+/** Orden por defecto del listado según el backend DRF y criterios CH-12 / SE-29. */
+export const ORDEN_PREDETERMINADO: OrdenSuscripciones = 'fecha_proximo_cobro';
+
+export type CampoOrdenSuscripciones = 'fecha_proximo_cobro' | 'nombre' | 'monto';
+export type DireccionOrden = 'asc' | 'desc';
+
+/**
+ * Descompone un valor de OrdenSuscripciones en su campo y dirección (asc/desc).
+ */
+export function descomponerOrden(orden: OrdenSuscripciones): {
+  campo: CampoOrdenSuscripciones;
+  direccion: DireccionOrden;
+} {
+  const direccion: DireccionOrden = orden.startsWith('-') ? 'desc' : 'asc';
+  const campo = (direccion === 'desc' ? orden.slice(1) : orden) as CampoOrdenSuscripciones;
+  return { campo, direccion };
+}
+
 /** true si `valor` está en la lista de órdenes permitidos. */
 export function esOrdenSuscripciones(valor: string): valor is OrdenSuscripciones {
   return (ORDENES_SUSCRIPCIONES as readonly string[]).includes(valor);

@@ -264,9 +264,37 @@ export const Animated = {
   sequence: () => ({ start: (cb?: any) => cb && cb({ finished: true }) }),
 };
 
+const backPressListeners = new Set<() => boolean | null | undefined>();
+
 export const BackHandler = {
-  addEventListener: () => ({ remove: () => {} }),
-  removeEventListener: () => {},
+  addEventListener: (eventName: string, handler: () => boolean | null | undefined) => {
+    if (eventName === 'hardwareBackPress') {
+      backPressListeners.add(handler);
+    }
+    return {
+      remove: () => {
+        backPressListeners.delete(handler);
+      },
+    };
+  },
+  removeEventListener: (eventName: string, handler: () => boolean | null | undefined) => {
+    if (eventName === 'hardwareBackPress') {
+      backPressListeners.delete(handler);
+    }
+  },
+  exitApp: () => {},
+  _triggerBackPress: () => {
+    const listeners = Array.from(backPressListeners);
+    for (let i = listeners.length - 1; i >= 0; i--) {
+      const handled = listeners[i]();
+      if (handled) return true;
+    }
+    return false;
+  },
+};
+
+export const Alert = {
+  alert: (..._args: any[]) => {},
 };
 
 export const I18nManager = {
@@ -427,4 +455,5 @@ export default {
   Switch,
   FlatList,
   Modal,
+  Alert,
 };

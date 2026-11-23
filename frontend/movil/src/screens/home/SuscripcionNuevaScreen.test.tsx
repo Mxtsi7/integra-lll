@@ -11,7 +11,6 @@ import {
 } from '@ojoalgasto/shared';
 import SuscripcionNuevaScreen, {
   NuevaSuscripcionFormView,
-  OPCIONES_POR_DEFECTO,
 } from './SuscripcionNuevaScreen';
 
 describe('Pantalla Móvil Nueva Suscripción (SE-22)', () => {
