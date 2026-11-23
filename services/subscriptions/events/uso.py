@@ -51,6 +51,10 @@ CAMPOS_RESERVADOS = frozenset({"organizacion_id", "suscripcion_id", "usuario_id"
 def _uuid(valor: Any, campo: str) -> uuid.UUID:
     if isinstance(valor, uuid.UUID):
         return valor
+    if isinstance(valor, int) and not isinstance(valor, bool):
+        if valor <= 0:
+            raise ValueError(f"`{campo}` debe ser un entero positivo: {valor!r}")
+        return uuid.UUID(int=valor)
     try:
         return uuid.UUID(str(valor))
     except (TypeError, ValueError, AttributeError) as exc:
