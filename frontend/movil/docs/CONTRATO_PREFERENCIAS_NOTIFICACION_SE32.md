@@ -26,14 +26,17 @@
 
 2. **Manejo de permisos del dispositivo separado de la preferencia persistida:**
    - **Preferencia persistida (Backend):** Booleano `por_push` que viaja en el PATCH y persiste a nivel de cuenta.
-   - **Permiso del dispositivo (Nativo/SO):** `EstadoPermisoDispositivo = 'concedido' | 'denegado' | 'no_determinado' | 'no_disponible'`.
-   - **Regla crítica de negocio:** Si el permiso del dispositivo está `denegado`, el canal push **NUNCA** se presenta como canal habilitado en el dispositivo:
+   - **Permiso del dispositivo (Nativo/SO - Expo 57):** `EstadoPermisoDispositivo = 'concedido' | 'denegado' | 'no_determinado' | 'no_disponible'`.
+   - **Adaptador Nativo (`AdaptadorNativoExpo`):** Consulta verazmente el sistema operativo mediante `getPermissionsAsync` / `requestPermissionsAsync` de Expo Notifications, y mediante `PermissionsAndroid` (`POST_NOTIFICATIONS`) para Android nativo (Android 13+ / API 33+ y versiones previas). Si ninguna API nativa está disponible, devuelve `'no_disponible'` de forma veraz, sin dobles en memoria ni concesiones automáticas ficticias.
+   - **Regla crítica de negocio:** Si el permiso del dispositivo está `denegado` o `no_disponible`, el canal push **NUNCA** se presenta como canal habilitado en el dispositivo:
      - `canalPushHabilitadoEnDispositivo(preferenciaPersistida, estadoPermiso)` devuelve `false`.
      - La interfaz muestra explícitamente:
-       `Estado push en este dispositivo: Inhabilitado (permiso denegado en dispositivo)`
-     - Muestra un badge destacado: `Canal no habilitado en dispositivo`.
-     - Muestra una alerta: *"Permiso denegado en este dispositivo. Las notificaciones push están bloqueadas en los ajustes del sistema."*
-     - Si el permiso está en estado `no_determinado`, al encender el toggle se solicita el permiso al sistema operativo. Si el usuario lo deniega, el canal queda inmediatamente inhabilitado en el dispositivo.
+       `Estado push en este dispositivo: Inhabilitado (permiso denegado en dispositivo)` (o `No disponible en este dispositivo`).
+     - Muestra un badge destacado: `Canal no habilitado en dispositivo` o `No disponible en este dispositivo`.
+     - Si está denegado, ofrece un botón para **Abrir ajustes del dispositivo** (`Linking.openSettings()`).
+     - Si está indeterminado (`no_determinado`), ofrece el botón **Permitir notificaciones en este dispositivo** (`btn-solicitar-permiso`) además de solicitarlo al encender el toggle.
+     - Al volver de ajustes del sistema operativo (evento `AppState` `'active'`), el estado del permiso se reevalúa en caliente de forma veraz.
+     - Si el usuario lo deniega, el canal queda inmediatamente inhabilitado en el dispositivo.
 
 3. **Edición, Borrador y Guardado Selectivo (PATCH):**
    - La edición de toggles modifica un estado de borrador local (`editadas`).
@@ -117,5 +120,7 @@ export function MiPantallaNotificaciones() {
 ## 4. Criterios de Aceptación Verificados
 
 - [x] **Valores coinciden con backend y web:** Consumo de `GET` y `PATCH /api/preferencias-alertas/` usando `@ojoalgasto/shared`, mismos canales, mismos tipos de alertas y `dias_anticipacion` dinámico.
-- [x] **Denegar permiso push no se presenta como canal habilitado en dispositivo:** Si el permiso del SO es `denegado`, el canal push se presenta explícitamente como inhabilitado con alerta y badge, impidiendo falsos positivos.
-- [x] **Evidencia y pruebas automatizadas:** Suite completa de 16 pruebas unitarias y de integración en `src/screens/components/notificaciones/notificaciones.test.tsx`, prueba de navegación en `PreferenciasNotificacionScreen.test.tsx` y validación de secciones en `secciones.test.ts`.
+- [x] **Adaptador veraz y permisos de SO (Expo 57):** Implementado `AdaptadorNativoExpo` conectando `getPermissionsAsync` y `requestPermissionsAsync` reales. Si el módulo no está disponible o el permiso está denegado, nunca concede automáticamente ni presenta el canal como habilitado.
+- [x] **Denegar permiso push no se presenta como canal habilitado en dispositivo:** Si el permiso del SO es `denegado` o `no_disponible`, el canal push se presenta explícitamente como inhabilitado con alerta y badge, impidiendo falsos positivos, y ofrece botón para abrir ajustes del sistema (`Linking.openSettings()`).
+- [x] **Reevaluación en caliente al volver de Ajustes:** Manejo reactivo de `AppState` `'active'` para refrescar el permiso inmediatamente al regresar de los ajustes del sistema.
+- [x] **Evidencia y pruebas automatizadas:** Suite completa de 25 pruebas unitarias y de integración en `src/screens/components/notificaciones/notificaciones.test.tsx`, prueba de navegación en `PreferenciasNotificacionScreen.test.tsx` y validación de secciones en `secciones.test.ts`.

@@ -119,6 +119,12 @@ export const styles = StyleSheet.create({
     color: '#f87171',
     fontWeight: '700',
   },
+  ajustesContenedor: {
+    marginTop: 8,
+  },
+  botonAjustes: {
+    marginTop: 4,
+  },
   alertaContenedor: {
     backgroundColor: '#451a03',
     padding: 14,

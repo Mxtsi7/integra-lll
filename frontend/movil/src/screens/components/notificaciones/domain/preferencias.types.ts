@@ -38,4 +38,5 @@ export interface IPreferenciasRepository {
 export interface IPermisosDispositivoGateway {
   obtenerEstado(): Promise<EstadoPermisoDispositivo>;
   solicitarPermiso(): Promise<EstadoPermisoDispositivo>;
+  abrirAjustes?(): Promise<boolean>;
 }

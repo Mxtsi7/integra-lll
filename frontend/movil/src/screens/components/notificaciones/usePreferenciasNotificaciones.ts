@@ -135,7 +135,11 @@ export function usePreferenciasNotificaciones({
 
     if (clave === 'por_push') {
       if (valor === true) {
-        if (permisoDispositivo === 'denegado') {
+        if (permisoDispositivo === 'no_disponible') {
+          setAlertaPushDispositivo(
+            'Las notificaciones push no están disponibles en este dispositivo o compilación.'
+          );
+        } else if (permisoDispositivo === 'denegado') {
           setAlertaPushDispositivo(
             'Permiso denegado en el dispositivo. No se pueden recibir notificaciones push aquí hasta activarlas en Ajustes.'
           );
@@ -145,6 +149,10 @@ export function usePreferenciasNotificaciones({
           if (resultado === 'denegado') {
             setAlertaPushDispositivo(
               'Permiso denegado en el dispositivo. Las notificaciones push quedan inhabilitadas en este teléfono.'
+            );
+          } else if (resultado === 'no_disponible') {
+            setAlertaPushDispositivo(
+              'Las notificaciones push no están disponibles en este dispositivo o compilación.'
             );
           }
         }
@@ -191,6 +199,32 @@ export function usePreferenciasNotificaciones({
     ? canalPushHabilitadoEnDispositivo(editadas.por_push, permisoDispositivo)
     : false;
 
+  const abrirAjustes = useCallback(async () => {
+    if (permisosGateway.abrirAjustes) {
+      return await permisosGateway.abrirAjustes();
+    }
+    return false;
+  }, [permisosGateway]);
+
+  const pedirPermiso = useCallback(async () => {
+    const resultado = await permisosGateway.solicitarPermiso();
+    if (montado.current) {
+      setPermisoDispositivo(resultado);
+      if (resultado === 'denegado') {
+        setAlertaPushDispositivo(
+          'Permiso denegado en el dispositivo. Las notificaciones push quedan inhabilitadas en este teléfono.'
+        );
+      } else if (resultado === 'concedido') {
+        setAlertaPushDispositivo(null);
+      } else if (resultado === 'no_disponible') {
+        setAlertaPushDispositivo(
+          'Las notificaciones push no están disponibles en este dispositivo o compilación.'
+        );
+      }
+    }
+    return resultado;
+  }, [permisosGateway]);
+
   return {
     estadoCarga,
     errorCargaMensaje,
@@ -206,5 +240,8 @@ export function usePreferenciasNotificaciones({
     descartar,
     guardar,
     reintentar: cargar,
+    abrirAjustes,
+    solicitarPermiso: pedirPermiso,
+    actualizarPermisoDispositivo,
   };
 }

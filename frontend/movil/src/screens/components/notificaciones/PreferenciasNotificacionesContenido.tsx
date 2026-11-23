@@ -81,6 +81,8 @@ export function PreferenciasNotificacionesContenido({
     descartar,
     guardar,
     reintentar,
+    abrirAjustes,
+    solicitarPermiso,
   } = usePreferenciasNotificaciones({
     repository,
     permisosGateway: permisosGateway ?? controlPermisos,
@@ -134,6 +136,13 @@ export function PreferenciasNotificacionesContenido({
                 alerta =
                   alertaPushDispositivo ??
                   'Permiso denegado en este dispositivo. No recibirás push aquí hasta activarlo en los ajustes del sistema.';
+              } else if (permisoDispositivo === 'no_disponible') {
+                badgeDispositivo = 'No disponible en este dispositivo';
+                if (editadas.por_push) {
+                  alerta =
+                    alertaPushDispositivo ??
+                    'Las notificaciones push no están disponibles en este dispositivo o compilación.';
+                }
               } else if (editadas.por_push && !pushHabilitadoEnDispositivo) {
                 badgeDispositivo = 'Inactivo en dispositivo';
               }
@@ -175,9 +184,35 @@ export function PreferenciasNotificacionesContenido({
                 ? 'Habilitado'
                 : permisoDispositivo === 'denegado'
                 ? 'Inhabilitado (permiso denegado en dispositivo)'
+                : permisoDispositivo === 'no_disponible'
+                ? 'No disponible en este dispositivo'
                 : 'No habilitado'}
             </Text>
           </Text>
+
+          {permisoDispositivo === 'denegado' && (
+            <View style={styles.ajustesContenedor}>
+              <NavButton
+                testID="btn-abrir-ajustes"
+                title="Abrir ajustes del dispositivo"
+                variant="secondary"
+                onPress={() => void abrirAjustes()}
+                style={styles.botonAjustes}
+              />
+            </View>
+          )}
+
+          {permisoDispositivo === 'no_determinado' && (
+            <View style={styles.ajustesContenedor}>
+              <NavButton
+                testID="btn-solicitar-permiso"
+                title="Permitir notificaciones en este dispositivo"
+                variant="secondary"
+                onPress={() => void solicitarPermiso()}
+                style={styles.botonAjustes}
+              />
+            </View>
+          )}
         </View>
 
         {!canalesActivos && (

@@ -9,8 +9,11 @@ import {
   type PreferenciasAlertas,
 } from '@ojoalgasto/shared';
 import { PreferenciasNotificacionesContenido } from './PreferenciasNotificacionesContenido';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import {
+  AdaptadorNativoExpo,
   canalPushHabilitadoEnDispositivo,
+  mapearEstadoPermisoExpo,
   type ControlPermisosNotificaciones,
   type EstadoPermisoDispositivo,
 } from '../../../services/permisosNotificaciones';
@@ -54,6 +57,7 @@ function crearControlPermisosMock(
       estado = respuestaSolicitud;
       return respuestaSolicitud;
     }),
+    abrirAjustes: vi.fn(async () => true),
   };
 }
 
@@ -229,6 +233,127 @@ describe('Preferencias de Notificación Móvil (SE-32)', () => {
       const estadoDispositivo = screen.getByTestId('estado-push-dispositivo');
       expect(estadoDispositivo.textContent).toBe('Habilitado');
     });
+
+    it('pantalla productiva con adaptador por defecto sin módulo nativo informa no_disponible y NO presenta push como habilitado', async () => {
+      getMock.mockResolvedValueOnce({
+        ...PREFERENCIAS_BASE,
+        por_push: false,
+      });
+
+      // No inyectamos controlPermisos; usa el crearControlPermisosNotificaciones() predeterminado
+      render(<PreferenciasNotificacionesContenido />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('preferencias-notificaciones-contenido')).toBeDefined();
+      });
+
+      // Activar el switch de push
+      await act(async () => {
+        fireEvent.click(screen.getByTestId('switch-por_push'));
+      });
+
+      // El estado debe reflejar verazmente que no está disponible, jamás "Habilitado"
+      const estadoDispositivo = screen.getByTestId('estado-push-dispositivo');
+      expect(estadoDispositivo.textContent).toBe('No disponible en este dispositivo');
+      expect(estadoDispositivo.textContent).not.toBe('Habilitado');
+
+      // Se muestra la alerta correspondiente y el badge
+      expect(screen.getByTestId('alerta-push-dispositivo').textContent).toContain(
+        'Las notificaciones push no están disponibles'
+      );
+      expect(screen.getByTestId('badge-push-dispositivo').textContent).toBe(
+        'No disponible en este dispositivo'
+      );
+    });
+
+    it('cuando el permiso está denegado muestra botón para abrir ajustes del dispositivo y permite pulsarlo', async () => {
+      getMock.mockResolvedValueOnce({
+        ...PREFERENCIAS_BASE,
+        por_push: true,
+      });
+
+      const control = crearControlPermisosMock('denegado');
+      render(<PreferenciasNotificacionesContenido controlPermisos={control} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('preferencias-notificaciones-contenido')).toBeDefined();
+      });
+
+      const btnAjustes = screen.getByTestId('btn-abrir-ajustes');
+      expect(btnAjustes).toBeDefined();
+      expect(btnAjustes.textContent).toBe('Abrir ajustes del dispositivo');
+
+      await act(async () => {
+        fireEvent.click(btnAjustes);
+      });
+
+      expect(control.abrirAjustes).toHaveBeenCalledTimes(1);
+    });
+
+    it('reevalúa el permiso verazmente al regresar de ajustes del sistema (evento AppState active)', async () => {
+      getMock.mockResolvedValueOnce({
+        ...PREFERENCIAS_BASE,
+        por_push: true,
+      });
+
+      let estadoActual: EstadoPermisoDispositivo = 'denegado';
+      const control: ControlPermisosNotificaciones = {
+        obtenerEstado: vi.fn(async () => estadoActual),
+        solicitarPermiso: vi.fn(async () => estadoActual),
+        abrirAjustes: vi.fn(async () => true),
+      };
+
+      render(<PreferenciasNotificacionesContenido controlPermisos={control} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('preferencias-notificaciones-contenido')).toBeDefined();
+      });
+
+      expect(screen.getByTestId('estado-push-dispositivo').textContent).toBe(
+        'Inhabilitado (permiso denegado en dispositivo)'
+      );
+      expect(screen.getByTestId('btn-abrir-ajustes')).toBeDefined();
+
+      // El usuario va a ajustes del sistema y concede el permiso
+      estadoActual = 'concedido';
+
+      // La app vuelve al primer plano
+      await act(async () => {
+        (AppState as any)._simulateStateChange('active');
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('estado-push-dispositivo').textContent).toBe('Habilitado');
+      });
+      expect(screen.queryByTestId('btn-abrir-ajustes')).toBeNull();
+    });
+
+    it('cuando el permiso es no_determinado muestra botón para solicitar permiso al sistema y permite pulsarlo', async () => {
+      getMock.mockResolvedValueOnce({
+        ...PREFERENCIAS_BASE,
+        por_push: false,
+      });
+
+      const control = crearControlPermisosMock('no_determinado', 'concedido');
+      render(<PreferenciasNotificacionesContenido controlPermisos={control} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('preferencias-notificaciones-contenido')).toBeDefined();
+      });
+
+      const btnSolicitar = screen.getByTestId('btn-solicitar-permiso');
+      expect(btnSolicitar).toBeDefined();
+      expect(btnSolicitar.textContent).toBe('Permitir notificaciones en este dispositivo');
+
+      await act(async () => {
+        fireEvent.click(btnSolicitar);
+      });
+
+      expect(control.solicitarPermiso).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.queryByTestId('btn-solicitar-permiso')).toBeNull();
+      });
+    });
   });
 
   describe('Edición, borrador, descarte y guardado selectivo (PATCH)', () => {
@@ -376,6 +501,110 @@ describe('Preferencias de Notificación Móvil (SE-32)', () => {
       await waitFor(() => {
         expect(getMock).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  describe('AdaptadorNativoExpo y mapeo Expo 57', () => {
+    it('mapea respuestas de Expo 57 al dominio correctamente', () => {
+      expect(mapearEstadoPermisoExpo({ status: 'granted', granted: true })).toBe('concedido');
+      expect(
+        mapearEstadoPermisoExpo({ status: 'denied', granted: false, canAskAgain: false })
+      ).toBe('denegado');
+      expect(
+        mapearEstadoPermisoExpo({ status: 'undetermined', granted: false, canAskAgain: true })
+      ).toBe('no_determinado');
+      expect(mapearEstadoPermisoExpo(null)).toBe('no_disponible');
+      expect(mapearEstadoPermisoExpo(undefined)).toBe('no_disponible');
+    });
+
+    it('AdaptadorNativoExpo consulta getPermissionsAsync y requestPermissionsAsync del módulo si existe', async () => {
+      const moduloMock = {
+        getPermissionsAsync: vi.fn(async () => ({
+          status: 'granted' as const,
+          granted: true,
+        })),
+        requestPermissionsAsync: vi.fn(async () => ({
+          status: 'granted' as const,
+          granted: true,
+        })),
+      };
+      const adaptador = new AdaptadorNativoExpo(moduloMock);
+
+      const estado = await adaptador.obtenerPermiso();
+      expect(estado).toBe('concedido');
+      expect(moduloMock.getPermissionsAsync).toHaveBeenCalledTimes(1);
+
+      const solicitud = await adaptador.solicitarPermiso();
+      expect(solicitud).toBe('concedido');
+      expect(moduloMock.requestPermissionsAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it('AdaptadorNativoExpo devuelve no_disponible si el módulo es nulo o lanza error', async () => {
+      const adaptadorSinModulo = new AdaptadorNativoExpo(null);
+      expect(await adaptadorSinModulo.obtenerPermiso()).toBe('no_disponible');
+      expect(await adaptadorSinModulo.solicitarPermiso()).toBe('no_disponible');
+
+      const moduloQueFalla = {
+        getPermissionsAsync: vi.fn(async () => {
+          throw new Error('Native crash');
+        }),
+        requestPermissionsAsync: vi.fn(async () => {
+          throw new Error('Native crash');
+        }),
+      };
+      const adaptadorFalla = new AdaptadorNativoExpo(moduloQueFalla);
+      expect(await adaptadorFalla.obtenerPermiso()).toBe('no_disponible');
+      expect(await adaptadorFalla.solicitarPermiso()).toBe('no_disponible');
+    });
+
+    it('AdaptadorNativoExpo en Android 13+ (API >= 33) usa PermissionsAndroid para verificar y solicitar', async () => {
+      const origOS = Platform.OS;
+      const origVersion = Platform.Version;
+      (Platform as any).OS = 'android';
+      (Platform as any).Version = 34;
+
+      try {
+        const adaptador = new AdaptadorNativoExpo(null);
+
+        // 1. check() devuelve false -> no_determinado
+        (PermissionsAndroid as any)._setPermisoParaPruebas(false);
+        expect(await adaptador.obtenerPermiso()).toBe('no_determinado');
+
+        // 2. check() devuelve true -> concedido
+        (PermissionsAndroid as any)._setPermisoParaPruebas(true);
+        expect(await adaptador.obtenerPermiso()).toBe('concedido');
+
+        // 3. solicitarPermiso con resultado GRANTED -> concedido
+        (PermissionsAndroid as any)._setPermisoParaPruebas(false, 'granted');
+        expect(await adaptador.solicitarPermiso()).toBe('concedido');
+
+        // 4. solicitarPermiso con resultado DENIED -> denegado
+        (PermissionsAndroid as any)._setPermisoParaPruebas(false, 'denied');
+        expect(await adaptador.solicitarPermiso()).toBe('denegado');
+
+        // 5. solicitarPermiso con resultado NEVER_ASK_AGAIN -> denegado
+        (PermissionsAndroid as any)._setPermisoParaPruebas(false, 'never_ask_again');
+        expect(await adaptador.solicitarPermiso()).toBe('denegado');
+      } finally {
+        (Platform as any).OS = origOS;
+        (Platform as any).Version = origVersion;
+      }
+    });
+
+    it('AdaptadorNativoExpo en Android < 33 concede permisos automáticamente por diseño del SO', async () => {
+      const origOS = Platform.OS;
+      const origVersion = Platform.Version;
+      (Platform as any).OS = 'android';
+      (Platform as any).Version = 30;
+
+      try {
+        const adaptador = new AdaptadorNativoExpo(null);
+        expect(await adaptador.obtenerPermiso()).toBe('concedido');
+        expect(await adaptador.solicitarPermiso()).toBe('concedido');
+      } finally {
+        (Platform as any).OS = origOS;
+        (Platform as any).Version = origVersion;
+      }
     });
   });
 });
