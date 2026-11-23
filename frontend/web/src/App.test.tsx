@@ -5,16 +5,19 @@ import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-d
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getAlertas,
+  getCatalogosSuscripciones,
   getCobrosDelMes,
   getContadorAlertas,
   getPreferenciasAlertas,
   getRecomendaciones,
+  getResumenDelMes,
   getSuscripciones,
   getUsuarioActual,
   guardarTokens,
   type Usuario,
 } from "@ojoalgasto/shared";
 import { App } from "./App";
+import { CATALOGOS_DE_PRUEBA, resumenDePrueba } from "./test/informesDePrueba";
 
 // Prueba el árbol de rutas REAL de App.tsx (RutaPrivada.test.tsx usa una
 // copia liviana). Solo se simula la red.
@@ -29,6 +32,8 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     getPreferenciasAlertas: vi.fn(),
     getAlertas: vi.fn(),
     getContadorAlertas: vi.fn(),
+    getCatalogosSuscripciones: vi.fn(),
+    getResumenDelMes: vi.fn(),
   };
 });
 
@@ -60,6 +65,8 @@ beforeEach(() => {
   vi.mocked(getUsuarioActual).mockReset();
   vi.mocked(getUsuarioActual).mockResolvedValue(USUARIO);
   vi.mocked(getSuscripciones).mockReset().mockResolvedValue([]);
+  vi.mocked(getCatalogosSuscripciones).mockReset().mockResolvedValue(CATALOGOS_DE_PRUEBA);
+  vi.mocked(getResumenDelMes).mockReset().mockImplementation(async (mes, moneda) => resumenDePrueba({ periodo: mes, moneda }));
   vi.mocked(getContadorAlertas).mockReset().mockResolvedValue({ pendientes: 2, total: 3 });
   vi.mocked(getAlertas).mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
   vi.mocked(getPreferenciasAlertas).mockReset().mockResolvedValue({
@@ -140,6 +147,15 @@ describe("App: secciones del menú que ya existen", () => {
     montar("/calendario/agenda?mes=2026-10");
     expect(await screen.findByText("No hay cobros en octubre de 2026.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Agenda" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("con sesión, /informes abre Informes con el gasto del mes y no el 'En construcción' (S3-CH-25)", async () => {
+    guardarTokens({ access_token: jwtVigente(), refresh_token: "refresh" });
+    montar("/informes?mes=2026-10");
+    expect(await screen.findByRole("heading", { name: "Gasto por mes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Octubre de 2026" })).toBeInTheDocument();
+    expect(screen.queryByText("En construcción")).not.toBeInTheDocument();
+    expect(getResumenDelMes).toHaveBeenCalledTimes(6);
   });
 });
 

@@ -3,9 +3,6 @@ import {
   restablecerContrasena,
   solicitarRecuperacion,
   RECOMENDACIONES_DISPONIBLES,
-  confirmarCorreo,
-  reenviarVerificacion,
-  haySesionParaReenvio,
   getCuentasConectadas,
   iniciarAutorizacionCorreo,
   desconectarCuenta,
@@ -34,10 +31,11 @@ import { RutaPrivada, SoloInvitados } from './components/RutaPrivada';
 import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import { RecomendacionesPage } from './pages/RecomendacionesPage';
+import { InformesPage } from './pages/InformesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
-import VerificarCorreoPage from './pages/VerificarCorreoPage';
+import { VerificarCorreoConectado } from './components/VerificarCorreoConectado';
 
 // CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
 // La respuesta del backend es neutra (no dice si el correo existe), así que
@@ -89,11 +87,7 @@ export function App() {
           <Route
             path="/verificar-correo"
             element={
-              <VerificarCorreoPage
-                onConfirmar={confirmarCorreo}
-                onReenviar={reenviarVerificacion}
-                haySesion={haySesionParaReenvio}
-              />
+              <VerificarCorreoConectado />
             }
           />
 
@@ -151,7 +145,8 @@ export function App() {
               <Route path="/alertas" element={<AlertasPage />} />
               {/* S3-CH-14 y S3-CH-15: el chat con el asistente financiero (VI-22). */}
               <Route path="/asistente" element={<AsistentePage />} />
-              <Route path="/informes" element={<ProximamentePage seccion="informes" />} />
+              {/* S3-CH-25: el gasto por mes y la descarga de cobros (VI-06 y VI-25). */}
+              <Route path="/informes" element={<InformesPage />} />
             </Route>
           </Route>
 
