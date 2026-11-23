@@ -98,7 +98,7 @@ export PATH="$HOME/.nvm/versions/node/v22.23.3/bin:$PATH" && npm test --workspac
 # 5. Suite completa móvil (26 archivos, 484/484 pruebas aprobadas)
 export PATH="$HOME/.nvm/versions/node/v22.23.3/bin:$PATH" && npm test --workspace=movil
 
-# 6. Suite completa shared (19 archivos, 281/281 pruebas aprobadas)
+# 6. Suite completa shared (19 archivos, 282/282 pruebas aprobadas)
 export PATH="$HOME/.nvm/versions/node/v22.23.3/bin:$PATH" && npm test --workspace=@ojoalgasto/shared
 
 # 7. Typecheck estricto en todos los workspaces (0 errores)
