@@ -352,6 +352,38 @@ class PreferenciaNotificacion(ModeloTenant):
             return False
         return self.quiere(tipo) and getattr(self, campo)
 
+    @classmethod
+    def de_la_organizacion(cls, organizacion_id) -> list["PreferenciaNotificacion"]:
+        """Las preferencias de cada persona conocida de la organización.
+
+        La fila nace con el primer GET de `/preferencias-alertas/`, o sea,
+        cuando alguien abre Ajustes. Quien nunca lo hizo no tiene fila, pero sí
+        tiene preferencias: las de omisión, que son las que la pantalla le
+        muestra como suyas. Por eso a esa persona se le devuelve una instancia
+        SIN GUARDAR con los valores por omisión, en vez de dejarla fuera.
+
+        "Conocida" es tener fila de preferencias o dirección de correo
+        (`DireccionCorreo`). Si la fuente de direcciones cambia (ver su
+        docstring), este es el único lugar que hay que tocar. La limpieza de
+        la persona borra las dos cosas, así que una persona eliminada no
+        vuelve a aparecer acá.
+
+        Lo usan el generador (qué ventanas de aviso hay) y la planificación
+        de entregas (a quién se le manda): los dos tienen que ver a las
+        mismas personas con las mismas preferencias.
+        """
+        guardadas = list(cls.objects.filter(organizacion_id=organizacion_id).order_by("usuario_id"))
+        con_fila = {preferencia.usuario_id for preferencia in guardadas}
+        sin_fila = (
+            DireccionCorreo.objects.filter(organizacion_id=organizacion_id)
+            .exclude(usuario_id__in=con_fila)
+            .order_by("usuario_id")
+            .values_list("usuario_id", flat=True)
+        )
+        return guardadas + [
+            cls(organizacion_id=organizacion_id, usuario_id=usuario_id) for usuario_id in sin_fila
+        ]
+
     class Meta(ModeloTenant.Meta):
         db_table = "preferencia_notificacion"
         constraints = [
@@ -463,3 +495,190 @@ class EventoRecibido(ModeloTenant):
         constraints = [models.UniqueConstraint(
             fields=['consumidor', 'organizacion_id', 'evento_id'], name='notifications_evento_unico',
         )]
+
+
+class DireccionCorreo(ModeloTenant):
+    """A qué dirección escribirle a cada persona (S3-FE-21).
+
+    ── De dónde sale: NO HAY CONTRATO ACORDADO ──────────────────────────────
+    El correo de una persona vive en el esquema de `auth` y ningún servicio
+    consulta el de otro (ADR-002). Las dos fuentes posibles están abiertas:
+
+    · `usuario.creado`. El catálogo (`shared/events/catalogo.md`, «Publica
+      auth») lo describe con `usuario_id`, `email` y `rol`, escuchado por
+      notifications, y esta tabla es la forma de lo que guardaría ese
+      consumidor. Pero MX-21 (`docs/arquitectura/MX-21-contratos-rabbitmq.md`,
+      «Transporte y tratamiento de fallos») dice «No transportar tokens,
+      contraseñas, correos ni cuerpos de mensajes». Las dos reglas no pueden
+      valer a la vez: es un conflicto, no un acuerdo.
+    · Una consulta interna firmada a auth al momento de reclamar, como la de
+      la limpieza (MX-07). No guarda correos acá ni choca con MX-21, pero
+      auth no la expone.
+
+    Lo deciden Maxi y quien lleve auth. Si gana la consulta, cambian
+    `CanalCorreo.destino` y `PreferenciaNotificacion.de_la_organizacion`, y
+    esta tabla se retira.
+
+    HOY NADIE LA LLENA, fuera de las pruebas. Mientras tanto, una entrega por
+    correo sin fila acá termina en `fallida` con `sin_direccion`: un error
+    explícito, no un envío inventado ni una entrega dada por hecha. Por lo
+    mismo, `despachar_alertas` no debe programarse antes de resolver esto:
+    cada correo que tome quedaría fallido para siempre.
+
+    Es dato personal: se borra con la persona (limpieza de usuario) y con la
+    organización, igual que las preferencias.
+    """
+
+    usuario_id = models.CharField(
+        max_length=64,
+        verbose_name="Usuario",
+        help_text="El mismo valor crudo que `PreferenciaNotificacion.usuario_id`.",
+    )
+    email = models.EmailField(verbose_name="Correo")
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "direccion_correo"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "usuario_id"],
+                name="direccion_correo_unica_por_usuario",
+            ),
+        ]
+        verbose_name = "Dirección de correo"
+        verbose_name_plural = "Direcciones de correo"
+
+
+class EntregaAlerta(ModeloTenant):
+    """Una alerta, una persona, un canal externo: qué pasó al mandarla (S3-FE-21).
+
+    ── Qué cuenta como entregada ────────────────────────────────────────────
+    Solo `aceptada`, y solo cuando el proveedor la aceptó: el servidor SMTP
+    respondió 250 al mensaje. Crear la fila no es entregar ni encolar es
+    entregar. `evidencia` guarda lo que respalda la aceptación y
+    `codigo_error`/`detalle_error` el último fallo, con su código.
+
+    ── Una fila por (alerta, persona, canal) ────────────────────────────────
+    La restricción única es la idempotencia de la planificación: el mismo
+    aviso no se planifica dos veces para la misma persona por el mismo canal.
+    La de la ejecución la da el reclamo (`reclamo_id` + `reclamada_hasta`):
+    dos workers no pueden tener la misma fila en `enviando` a la vez.
+
+    `in_app` no tiene fila: la alerta misma es esa entrega (FE-19).
+    """
+
+    class Canal(models.TextChoices):
+        EMAIL = "email", "Correo"
+        PUSH = "push", "Push"
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        # Un worker la tomó y está hablando con el proveedor. Nadie más la
+        # toma hasta `reclamada_hasta`; si el worker muere, vence y otro la
+        # retoma (puede salir dos veces: ver `entregas.py`).
+        ENVIANDO = "enviando", "Enviando"
+        ACEPTADA = "aceptada", "Aceptada por el proveedor"
+        # Horario de descanso o cuota diaria: no se pierde, sale en
+        # `proximo_intento_en`. No gasta un intento: no se habló con nadie.
+        DIFERIDA = "diferida", "Diferida"
+        # Error transitorio: espera progresiva hasta `proximo_intento_en`.
+        REINTENTO = "reintento", "En reintento"
+        # Error permanente: repetirla da lo mismo.
+        FALLIDA = "fallida", "Fallida"
+        AGOTADA = "agotada", "Reintentos agotados"
+        # Ya no corresponde mandarla: la persona apagó el aviso o el canal.
+        DESCARTADA = "descartada", "Descartada"
+
+    #: Las que esperan su `proximo_intento_en` para intentarse. Es el filtro
+    #: de `entregas.elegibles()`, junto con las `enviando` de reclamo vencido.
+    EN_ESPERA = (Estado.PENDIENTE, Estado.DIFERIDA, Estado.REINTENTO)
+    #: Los estados de los que ya no se sale. Con `EN_ESPERA` y `ENVIANDO`
+    #: cubren todos los estados sin repetir ninguno, y ninguno es elegible:
+    #: lo exigen las pruebas, para que un estado nuevo no quede fuera de los
+    #: dos grupos sin que nadie lo note.
+    TERMINALES = (Estado.ACEPTADA, Estado.FALLIDA, Estado.AGOTADA, Estado.DESCARTADA)
+
+    alerta = models.ForeignKey(
+        Alerta,
+        on_delete=models.CASCADE,
+        related_name="entregas",
+        verbose_name="Alerta",
+    )
+    usuario_id = models.CharField(
+        max_length=64,
+        verbose_name="Usuario",
+        help_text="El mismo valor crudo que `PreferenciaNotificacion.usuario_id`.",
+    )
+    canal = models.CharField(max_length=8, choices=Canal.choices)
+    estado = models.CharField(
+        max_length=12,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+    )
+    motivo = models.CharField(
+        max_length=24,
+        blank=True,
+        default="",
+        help_text=(
+            "Por qué quedó diferida o descartada: descanso, cuota_diaria, "
+            "preferencia_apagada, preferencia_por_omision, fuera_de_anticipacion."
+        ),
+    )
+
+    # ── intentos ─────────────────────────────────────────────────────
+    intentos = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Veces que se reclamó para mandarla al proveedor. Diferirla o descartar un mensaje inválido no cuenta.",
+    )
+    proximo_intento_en = models.DateTimeField(
+        help_text="Desde cuándo puede intentarse (pendiente, diferida o en reintento).",
+    )
+    ultimo_intento_en = models.DateTimeField(null=True, blank=True)
+    reclamo_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Identifica el reclamo vigente. El resultado de un envío solo se "
+            "anota si el reclamo sigue siendo el mismo: un worker cuyo reclamo "
+            "venció no pisa lo que anotó el que lo retomó."
+        ),
+    )
+    reclamada_hasta = models.DateTimeField(null=True, blank=True)
+
+    # ── resultado ────────────────────────────────────────────────────
+    destino = models.CharField(
+        max_length=254,
+        blank=True,
+        default="",
+        help_text="A dónde se mandó en el último intento. Dato personal: se borra con la persona.",
+    )
+    message_id = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        help_text=(
+            "El Message-ID del correo. Se fija en el primer intento y se "
+            "repite en los siguientes: es la clave de idempotencia del canal."
+        ),
+    )
+    aceptada_en = models.DateTimeField(null=True, blank=True)
+    evidencia = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Lo que respalda la aceptación: Message-ID y backend que la aceptó.",
+    )
+    codigo_error = models.CharField(max_length=40, blank=True, default="")
+    detalle_error = models.CharField(max_length=300, blank=True, default="")
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "entrega_alerta"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["alerta", "usuario_id", "canal"],
+                name="entrega_unica_por_alerta_usuario_y_canal",
+            ),
+        ]
+        verbose_name = "Entrega de alerta"
+        verbose_name_plural = "Entregas de alertas"
+
+    def __str__(self) -> str:
+        return f"{self.alerta_id} → {self.usuario_id} por {self.canal} ({self.estado})"
