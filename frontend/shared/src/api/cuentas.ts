@@ -54,3 +54,67 @@ export async function iniciarAutorizacionCorreo(
 export async function desconectarCuenta(id: string): Promise<CuentaConectada> {
   return await pedir(`/conectores/${encodeURIComponent(id)}/`, { method: 'DELETE' });
 }
+// Añadir al final de frontend/shared/src/api/cuentas.ts
+
+export interface EntradaCallbackOAuth {
+  estado_oauth: string;
+  codigo?: string;
+  error?: string;
+}
+
+export type ResultadoCallbackOAuth =
+  | { tipo: 'conectada'; cuenta: CuentaConectada }
+  | { tipo: 'cancelada'; proveedor: ProveedorCorreo; detalle: string };
+
+const PATRON_ESTADO_OAUTH = /^[A-Za-z0-9_-]{8,64}$/;
+const PATRON_ERROR_OAUTH = /^[A-Za-z0-9_.-]{1,120}$/;
+
+/** Valida localmente los parámetros del retorno antes de llamar al backend. */
+export function esEntradaCallbackValida(entrada: EntradaCallbackOAuth): boolean {
+  if (!PATRON_ESTADO_OAUTH.test(entrada.estado_oauth)) return false;
+
+  const tieneCodigo = typeof entrada.codigo === 'string' && entrada.codigo.trim().length > 0;
+  const tieneError = typeof entrada.error === 'string' && entrada.error.trim().length > 0;
+
+  if (tieneCodigo === tieneError) return false;
+  if (tieneCodigo && /\s/.test(entrada.codigo!)) return false;
+  if (tieneError && !PATRON_ERROR_OAUTH.test(entrada.error!)) return false;
+
+  return true;
+}
+
+/**
+ * POST /api/conectores/autorizaciones/callback/ (FE-04 / AN-16).
+ * Reenvía el `state` y el `code` (o `error` si canceló) usando la sesión activa.
+ */
+export async function procesarCallbackOAuth(
+  entrada: EntradaCallbackOAuth,
+): Promise<ResultadoCallbackOAuth> {
+  if (!esEntradaCallbackValida(entrada)) {
+    throw new Error('Los parámetros de autorización no son válidos.');
+  }
+
+  const cuerpo: Record<string, string> = { estado_oauth: entrada.estado_oauth };
+  if (entrada.codigo) cuerpo.codigo = entrada.codigo;
+  if (entrada.error) cuerpo.error = entrada.error;
+
+  const respuesta = await pedir<
+    CuentaConectada | { resultado: 'cancelada'; proveedor: ProveedorCorreo; detalle?: string }
+  >('/conectores/autorizaciones/callback/', {
+    method: 'POST',
+    body: cuerpo,
+  });
+
+  if ('resultado' in respuesta && respuesta.resultado === 'cancelada') {
+    return {
+      tipo: 'cancelada',
+      proveedor: respuesta.proveedor,
+      detalle: respuesta.detalle ?? 'Autorización cancelada.',
+    };
+  }
+
+  return {
+    tipo: 'conectada',
+    cuenta: respuesta as CuentaConectada,
+  };
+}
