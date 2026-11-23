@@ -136,6 +136,7 @@ export const ScrollView = React.forwardRef<HTMLDivElement, any>(
     contentContainerStyle,
     keyboardShouldPersistTaps,
     keyboardDismissMode,
+    showsVerticalScrollIndicator,
     ...props
   }, ref) => (
     <div
@@ -325,6 +326,12 @@ export const Keyboard = {
   dismiss: () => {},
 };
 
+export const AppState = {
+  currentState: 'active',
+  addEventListener: (_type: string, _listener: any) => ({ remove: () => {} }),
+  removeEventListener: () => {},
+};
+
 export const TextInput = React.forwardRef<HTMLInputElement, any>(
   ({
     testID,
@@ -375,6 +382,29 @@ export const TextInput = React.forwardRef<HTMLInputElement, any>(
 );
 TextInput.displayName = 'TextInput';
 
+export const Switch = React.forwardRef<HTMLInputElement, any>(
+  ({ testID, value, onValueChange, disabled, accessibilityLabel, style, trackColor, thumbColor, ...props }, ref) => (
+    <input
+      data-testid={testID}
+      type="checkbox"
+      role="switch"
+      checked={Boolean(value)}
+      disabled={disabled}
+      aria-label={accessibilityLabel}
+      aria-checked={Boolean(value)}
+      onChange={(e) => {
+        if (onValueChange) {
+          onValueChange(e.target.checked);
+        }
+      }}
+      style={typeof style === 'object' ? style : undefined}
+      ref={ref}
+      {...props}
+    />
+  )
+);
+Switch.displayName = 'Switch';
+
 export default {
   View,
   KeyboardAvoidingView,
@@ -392,7 +422,9 @@ export default {
   Easing,
   Image,
   Keyboard,
+  AppState,
   TextInput,
+  Switch,
   FlatList,
   Modal,
 };
