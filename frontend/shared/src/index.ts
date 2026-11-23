@@ -76,3 +76,4 @@ export type {
   UUID,
 } from './contracts/uso-recolectores.dto';
 export * from './api/resumenPanel';
+export * from './api/cambioCorreo';

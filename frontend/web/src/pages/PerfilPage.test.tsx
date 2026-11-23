@@ -11,6 +11,7 @@ import {
   getUsuarioActual,
   guardarTokens,
   hayTokenGuardado,
+  solicitarCambioCorreo,
   MENSAJE_POLITICA_PASSWORD,
   obtenerAccessToken,
   revocarSesion,
@@ -31,12 +32,14 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     actualizarNombre: vi.fn(),
     cambiarContrasena: vi.fn(),
     revocarSesion: vi.fn(),
+    solicitarCambioCorreo: vi.fn(),
   };
 });
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const actualizarNombreMock = vi.mocked(actualizarNombre);
 const cambiarContrasenaMock = vi.mocked(cambiarContrasena);
 const revocarSesionMock = vi.mocked(revocarSesion);
+const solicitarCambioCorreoMock = vi.mocked(solicitarCambioCorreo);
 
 const USUARIO: Usuario = {
   id: "7",
@@ -139,6 +142,7 @@ beforeEach(() => {
   getUsuarioActualMock.mockReset().mockResolvedValue(USUARIO);
   actualizarNombreMock.mockReset();
   cambiarContrasenaMock.mockReset();
+  solicitarCambioCorreoMock.mockReset();
 });
 
 afterEach(() => {
@@ -512,5 +516,43 @@ describe("Respuestas que llegan después de cambiar de sesión", () => {
     expect(usuarioEnSesion()).toBe("8");
     expect(obtenerAccessToken()).toBe(tokenB);
     expect(screen.queryByText("Cambiaste tu contraseña. Inicia sesión con la nueva.")).not.toBeInTheDocument();
+  });
+});
+
+describe("Cambiar correo desde Perfil (S3-AN-02)", () => {
+  const abrirFormulario = () => fireEvent.click(screen.getByRole("button", { name: "Cambiar correo electrónico" }));
+
+  it("pedir el cambio no cambia el correo que se muestra: sigue el actual hasta confirmar", async () => {
+    solicitarCambioCorreoMock.mockResolvedValue(undefined);
+    await montar();
+    expect(screen.getAllByText("ana@ejemplo.com").length).toBeGreaterThan(0);
+    const lecturasAlAbrir = getUsuarioActualMock.mock.calls.length;
+
+    abrirFormulario();
+    fireEvent.change(screen.getByLabelText("Correo nuevo"), { target: { value: "nuevo@ejemplo.com" } });
+    fireEvent.change(screen.getByLabelText("Contraseña actual"), { target: { value: "Clave123" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar enlace" }));
+    });
+
+    expect(solicitarCambioCorreoMock).toHaveBeenCalledWith({ correo: "nuevo@ejemplo.com", password: "Clave123" });
+    expect(screen.getByRole("status")).toHaveTextContent("Te enviamos un enlace a nuevo@ejemplo.com");
+    // El correo de la tarjeta de Perfil sigue siendo el de siempre, y no se volvió a pedir el usuario.
+    expect(screen.getAllByText("ana@ejemplo.com").length).toBeGreaterThan(0);
+    expect(getUsuarioActualMock.mock.calls.length).toBe(lecturasAlAbrir);
+  });
+
+  it("si el backend rechaza el cambio no queda ningún aviso de envío", async () => {
+    solicitarCambioCorreoMock.mockRejectedValue(new ErrorDeApi("x", 400));
+    await montar();
+    abrirFormulario();
+    fireEvent.change(screen.getByLabelText("Correo nuevo"), { target: { value: "nuevo@ejemplo.com" } });
+    fireEvent.change(screen.getByLabelText("Contraseña actual"), { target: { value: "Clave123" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Enviar enlace" }));
+    });
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/Te enviamos un enlace/)).not.toBeInTheDocument();
   });
 });
