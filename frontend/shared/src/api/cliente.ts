@@ -57,16 +57,20 @@ export class ErrorDeApi extends Error {
   campos?: Record<string, string[]>;
   /** Contexto de sesión cuando el error es un 401. */
   sesion?: ContextoSesionError;
+  /** `code` del cuerpo, si el backend lo manda (p. ej. "correo_no_disponible"). */
+  codigo?: string;
   constructor(
     message: string,
     status: number,
     campos?: Record<string, string[]>,
     sesion?: ContextoSesionError,
+    codigo?: string,
   ) {
     super(message);
     this.status = status;
     this.campos = campos;
     this.sesion = sesion;
+    this.codigo = codigo;
   }
 }
 
@@ -219,10 +223,12 @@ export async function pedir<T>(
   if (!res.ok) {
     let message = "Ocurrió un error inesperado";
     let campos: Record<string, string[]> | undefined;
+    let codigo: string | undefined;
     try {
       const data = (await res.json()) as Record<string, unknown>;
       message = mensajeDesdeCuerpo(data);
       campos = camposDesdeCuerpo(data);
+      if (typeof data.code === "string") codigo = data.code;
     } catch {
       // el cuerpo no era JSON
     }
@@ -231,6 +237,7 @@ export async function pedir<T>(
       res.status,
       campos,
       motivoSesion ? { motivo: motivoSesion, tokenUsado } : undefined,
+      codigo,
     );
   }
 
