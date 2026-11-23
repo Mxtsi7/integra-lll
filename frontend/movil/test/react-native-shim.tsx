@@ -504,9 +504,6 @@ export default {
   Switch,
   FlatList,
   Modal,
-<<<<<<< Updated upstream
   Alert,
-=======
   PermissionsAndroid,
->>>>>>> Stashed changes
 };
