@@ -32,6 +32,8 @@ import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import { RecomendacionesPage } from './pages/RecomendacionesPage';
 import { InformesPage } from './pages/InformesPage';
+import { TerminosPage } from './pages/TerminosPage';
+import { HistorialAccesosPage } from './pages/HistorialAccesosPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
@@ -66,6 +68,9 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+          {/* S3-AN-08: pública; el registro la enlaza antes de que exista la cuenta. */}
+          <Route path="/terminos" element={<TerminosPage />} />
 
           {/* Con sesión activa, /login y /registro mandan al panel. */}
           <Route element={<SoloInvitados />}>
@@ -147,6 +152,8 @@ export function App() {
               <Route path="/asistente" element={<AsistentePage />} />
               {/* S3-CH-25: el gasto por mes y la descarga de cobros (VI-06 y VI-25). */}
               <Route path="/informes" element={<InformesPage />} />
+              {/* S3-AN-06: sin endpoint todavía; sin cargarAccesos la página lo dice. */}
+              <Route path="/configuracion/historial-accesos" element={<HistorialAccesosPage />} />
             </Route>
           </Route>
 
