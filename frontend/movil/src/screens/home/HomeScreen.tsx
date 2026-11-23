@@ -109,93 +109,62 @@ export function HomeView({
     Boolean(onCambiarEstado) &&
     (tieneSuscripciones || hayFiltrosActivos || estado.tipo === 'cargando');
 
+  const encabezadoComun = (
+    <>
+      <View style={styles.header}>
+        <Text style={styles.titulo} accessibilityRole="header">
+          Home de Suscripciones
+        </Text>
+        <Text style={styles.usuarioTexto}>
+          Usuario: {usuario?.nombre ?? 'Cargando...'}
+        </Text>
+      </View>
+
+      <View style={styles.accionesBarra}>
+        <NavButton
+          testID="go-nueva-suscripcion"
+          title="Crear Nueva Suscripción"
+          variant="secondary"
+          onPress={onNuevaSuscripcion}
+          style={styles.botonAccion}
+        />
+        {onLogout ? (
+          <NavButton
+            testID="logout"
+            title="Cerrar Sesión"
+            variant="danger"
+            onPress={onLogout}
+            style={styles.botonAccion}
+          />
+        ) : null}
+      </View>
+
+      {mostrarFiltros && onCambiarEstado ? (
+        <FiltrosSuscripcionesMovil
+          filtroEstado={filtroEstado}
+          filtroFecha={filtroFecha}
+          orden={orden}
+          onCambiarEstado={onCambiarEstado}
+          onCambiarFecha={onCambiarFecha ?? (() => {})}
+          onCambiarOrden={onCambiarOrden}
+          onLimpiarFiltros={onLimpiarFiltros ?? (() => {})}
+          hayFiltrosActivos={hayFiltrosActivos}
+          totalResultados={
+            estado.tipo === 'listo'
+              ? (totalGeneral ?? estado.datos.length)
+              : undefined
+          }
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <View style={styles.safeArea} testID="screen-home">
       <View style={styles.contenedor}>
-        <View style={styles.header}>
-          <Text style={styles.titulo} accessibilityRole="header">
-            Home de Suscripciones
-          </Text>
-          <Text style={styles.usuarioTexto}>
-            Usuario: {usuario?.nombre ?? 'Cargando...'}
-          </Text>
-        </View>
-
-        <View style={styles.accionesBarra}>
-          <NavButton
-            testID="go-nueva-suscripcion"
-            title="Crear Nueva Suscripción"
-            variant="secondary"
-            onPress={onNuevaSuscripcion}
-            style={styles.botonAccion}
-          />
-          {onLogout ? (
-            <NavButton
-              testID="logout"
-              title="Cerrar Sesión"
-              variant="danger"
-              onPress={onLogout}
-              style={styles.botonAccion}
-            />
-          ) : null}
-        </View>
-
-        {mostrarFiltros && onCambiarEstado ? (
-          <FiltrosSuscripcionesMovil
-            filtroEstado={filtroEstado}
-            filtroFecha={filtroFecha}
-            orden={orden}
-            onCambiarEstado={onCambiarEstado}
-            onCambiarFecha={onCambiarFecha ?? (() => {})}
-            onCambiarOrden={onCambiarOrden}
-            onLimpiarFiltros={onLimpiarFiltros ?? (() => {})}
-            hayFiltrosActivos={hayFiltrosActivos}
-            totalResultados={
-              estado.tipo === 'listo'
-                ? (totalGeneral ?? estado.datos.length)
-                : undefined
-            }
-          />
-        ) : null}
-
-        <ContenidoConEstado<Suscripcion[]>
-          estado={estado}
-          onReintentar={onReintentar}
-          esVacio={(datos) => datos.length === 0}
-          vacio={
-            hayFiltrosActivos
-              ? {
-                  titulo: 'Ninguna suscripción coincide',
-                  descripcion:
-                    describirCriterioActivo(
-                      filtroEstado,
-                      filtroFecha,
-                      orden !== ORDEN_PREDETERMINADO ? orden : undefined
-                    ) ||
-                    'No se encontraron suscripciones con los filtros aplicados.',
-                  accion: {
-                    etiqueta: 'Limpiar filtros',
-                    onPress: onLimpiarFiltros ?? onNuevaSuscripcion,
-                    variante: 'primario',
-                    testID: 'btn-limpiar-filtros-vacio',
-                  },
-                  testID: 'empty-state-filtros',
-                }
-              : {
-                  titulo: 'Todavía no registras suscripciones',
-                  descripcion:
-                    'Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar.',
-                  accion: {
-                    etiqueta: 'Agregar suscripción',
-                    onPress: onNuevaSuscripcion,
-                    variante: 'primario',
-                    testID: 'btn-crear-primera-suscripcion',
-                  },
-                  testID: 'empty-state-home',
-                }
-          }
-        >
-          {(suscripciones) => {
+        {estado.tipo === 'listo' && estado.datos.length > 0 ? (
+          (() => {
+            const suscripciones = estado.datos;
             const esParcial =
               !resumenGlobal &&
               Boolean(
@@ -215,81 +184,127 @@ export function HomeView({
               : `${totalGeneral !== undefined ? totalGeneral : suscripciones.length} ${(totalGeneral !== undefined ? totalGeneral : suscripciones.length) === 1 ? 'suscripción activa' : 'suscripciones en total'}`;
 
             return (
-              <>
-                <View
-                  style={styles.resumenCaja}
-                  testID="resumen-gastos"
-                  accessibilityRole="summary"
-                  accessibilityLabel={
-                    esParcial
-                      ? `Subtotal mensual proyectado (parcial): ${totalTexto}, correspondiente a ${suscripciones.length} de ${totalGeneral} suscripciones`
-                      : `Gasto mensual proyectado: ${totalTexto}`
-                  }
-                >
-                  <Text
-                    style={esParcial ? styles.resumenEtiquetaParcial : styles.resumenEtiqueta}
-                    testID="resumen-etiqueta"
-                  >
-                    {etiquetaResumen}
-                  </Text>
-                  <Text style={styles.resumenTotal} testID="resumen-total">{totalTexto}</Text>
-                  <Text style={styles.resumenSubtitulo} testID="resumen-subtitulo">
-                    {subtituloResumen}
-                  </Text>
-                </View>
-
-                <FlatList
-                  testID="lista-suscripciones"
-                  data={suscripciones}
-                  keyExtractor={(item) => item.id}
-                  renderItem={({ item, index }) => (
-                    <TarjetaSuscripcionMovil
-                      suscripcion={item}
-                      testID={index === 0 ? 'go-detalle' : undefined}
-                      onPress={onSuscripcionPress}
-                    />
-                  )}
-                  refreshing={refreshing}
-                  onRefresh={onRefresh}
-                  contentContainerStyle={styles.listaContainer}
-                  initialNumToRender={FLATLIST_CONFIG_MOVIL.initialNumToRender}
-                  maxToRenderPerBatch={FLATLIST_CONFIG_MOVIL.maxToRenderPerBatch}
-                  windowSize={FLATLIST_CONFIG_MOVIL.windowSize}
-                  accessibilityRole="list"
-                  ListFooterComponent={
-                    hayMas ? (
-                      <View style={styles.footerPaginacion}>
-                        <Pressable
-                          testID="btn-cargar-mas"
-                          accessibilityRole="button"
-                          accessibilityLabel="Cargar más suscripciones"
-                          disabled={cargandoMas}
-                          accessibilityState={{ disabled: cargandoMas }}
-                          style={styles.botonCargarMas}
-                          onPress={onCargarMas}
-                        >
-                          <Text style={styles.textoCargarMas}>
-                            {cargandoMas ? 'Cargando más...' : 'Cargar más'}
+              <FlatList
+                testID="lista-suscripciones"
+                data={suscripciones}
+                keyExtractor={(item) => item.id}
+                renderItem={({ item, index }) => (
+                  <TarjetaSuscripcionMovil
+                    suscripcion={item}
+                    testID={index === 0 ? 'go-detalle' : undefined}
+                    onPress={onSuscripcionPress}
+                  />
+                )}
+                ListHeaderComponent={
+                  <>
+                    {encabezadoComun}
+                    <View
+                      style={styles.resumenCaja}
+                      testID="resumen-gastos"
+                      accessibilityRole="summary"
+                      accessibilityLabel={
+                        esParcial
+                          ? `Subtotal mensual proyectado (parcial): ${totalTexto}, correspondiente a ${suscripciones.length} de ${totalGeneral} suscripciones`
+                          : `Gasto mensual proyectado: ${totalTexto}`
+                      }
+                    >
+                      <Text
+                        style={esParcial ? styles.resumenEtiquetaParcial : styles.resumenEtiqueta}
+                        testID="resumen-etiqueta"
+                      >
+                        {etiquetaResumen}
+                      </Text>
+                      <Text style={styles.resumenTotal} testID="resumen-total">{totalTexto}</Text>
+                      <Text style={styles.resumenSubtitulo} testID="resumen-subtitulo">
+                        {subtituloResumen}
+                      </Text>
+                    </View>
+                  </>
+                }
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                style={styles.lista}
+                contentContainerStyle={styles.listaContainer}
+                initialNumToRender={FLATLIST_CONFIG_MOVIL.initialNumToRender}
+                maxToRenderPerBatch={FLATLIST_CONFIG_MOVIL.maxToRenderPerBatch}
+                windowSize={FLATLIST_CONFIG_MOVIL.windowSize}
+                accessibilityRole="list"
+                ListFooterComponent={
+                  hayMas ? (
+                    <View style={styles.footerPaginacion}>
+                      <Pressable
+                        testID="btn-cargar-mas"
+                        accessibilityRole="button"
+                        accessibilityLabel="Cargar más suscripciones"
+                        disabled={cargandoMas}
+                        accessibilityState={{ disabled: cargandoMas }}
+                        style={styles.botonCargarMas}
+                        onPress={onCargarMas}
+                      >
+                        <Text style={styles.textoCargarMas}>
+                          {cargandoMas ? 'Cargando más...' : 'Cargar más'}
+                        </Text>
+                      </Pressable>
+                      {totalGeneral !== undefined ? (
+                        <View style={styles.contadorPaginacion}>
+                          <Text
+                            style={styles.contadorTexto}
+                            testID="contador-paginacion"
+                          >
+                            Mostrando {suscripciones.length} de {totalGeneral}
                           </Text>
-                        </Pressable>
-                        {totalGeneral !== undefined ? (
-                          <View style={styles.contadorPaginacion}>
-                            <Text
-                              style={styles.contadorTexto}
-                              testID="contador-paginacion"
-                            >
-                              Mostrando {suscripciones.length} de {totalGeneral}
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
-                    ) : null
-                  }
-                />
-              </>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null
+                }
+              />
             );
-          }}
-        </ContenidoConEstado>
+          })()
+        ) : (
+          <>
+            {encabezadoComun}
+            <ContenidoConEstado<Suscripcion[]>
+              estado={estado}
+              onReintentar={onReintentar}
+              esVacio={(datos) => datos.length === 0}
+              vacio={
+                hayFiltrosActivos
+                  ? {
+                      titulo: 'Ninguna suscripción coincide',
+                      descripcion:
+                        describirCriterioActivo(
+                          filtroEstado,
+                          filtroFecha,
+                          orden !== ORDEN_PREDETERMINADO ? orden : undefined
+                        ) ||
+                        'No se encontraron suscripciones con los filtros aplicados.',
+                      accion: {
+                        etiqueta: 'Limpiar filtros',
+                        onPress: onLimpiarFiltros ?? onNuevaSuscripcion,
+                        variante: 'primario',
+                        testID: 'btn-limpiar-filtros-vacio',
+                      },
+                      testID: 'empty-state-filtros',
+                    }
+                  : {
+                      titulo: 'Todavía no registras suscripciones',
+                      descripcion:
+                        'Agrega la primera y empieza a ver cuánto gastas al mes, qué cobros vienen y cuáles pagas sin usar.',
+                      accion: {
+                        etiqueta: 'Agregar suscripción',
+                        onPress: onNuevaSuscripcion,
+                        variante: 'primario',
+                        testID: 'btn-crear-primera-suscripcion',
+                      },
+                      testID: 'empty-state-home',
+                    }
+              }
+            >
+              {() => null}
+            </ContenidoConEstado>
+          </>
+        )}
       </View>
     </View>
   );
