@@ -3,9 +3,6 @@ import {
   restablecerContrasena,
   solicitarRecuperacion,
   RECOMENDACIONES_DISPONIBLES,
-  confirmarCorreo,
-  reenviarVerificacion,
-  haySesionParaReenvio,
   getCuentasConectadas,
   iniciarAutorizacionCorreo,
   desconectarCuenta,
@@ -38,7 +35,7 @@ import { InformesPage } from './pages/InformesPage';
 import Login from './pages/Login';
 import Register from './pages/register';
 import Homepage from './pages/Homepage';
-import VerificarCorreoPage from './pages/VerificarCorreoPage';
+import { VerificarCorreoConectado } from './components/VerificarCorreoConectado';
 
 // CH-06: conecta la pantalla de AN-14 con POST /api/auth/password-reset/.
 // La respuesta del backend es neutra (no dice si el correo existe), así que
@@ -90,11 +87,7 @@ export function App() {
           <Route
             path="/verificar-correo"
             element={
-              <VerificarCorreoPage
-                onConfirmar={confirmarCorreo}
-                onReenviar={reenviarVerificacion}
-                haySesion={haySesionParaReenvio}
-              />
+              <VerificarCorreoConectado />
             }
           />
 

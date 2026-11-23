@@ -16,6 +16,11 @@ export interface VerificarCorreoProps {
   onReenviar?: () => Promise<void>;
   /** ¿Hay sesión en este navegador? Decide entre "Reenviar enlace" e "Iniciar sesión". */
   haySesion?: () => boolean;
+  /**
+   * Se llama una vez, cuando el backend confirmó el correo. App.tsx lo usa para releer el usuario
+   * de la sesión abierta y que Perfil y la barra superior muestren el correo nuevo (S3-AN-02).
+   */
+  onVerificado?: () => void;
 }
 
 type Estado = 'verificando' | 'verificado' | 'vencido' | 'usado' | 'invalido' | 'no_disponible' | 'error';
@@ -110,6 +115,7 @@ export const VerificarCorreoPage: React.FC<VerificarCorreoProps> = ({
   onConfirmar,
   onReenviar,
   haySesion = () => false,
+  onVerificado,
 }) => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
@@ -128,6 +134,7 @@ export const VerificarCorreoPage: React.FC<VerificarCorreoProps> = ({
       await onConfirmar(token);
       // Solo aquí, tras la respuesta correcta de la API, el correo se muestra como verificado.
       setEstado('verificado');
+      onVerificado?.();
     } catch (err: unknown) {
       if (err instanceof AuthError && err.codigo && err.codigo in ESTADO_POR_CODIGO) {
         setEstado(ESTADO_POR_CODIGO[err.codigo]);
@@ -142,7 +149,7 @@ export const VerificarCorreoPage: React.FC<VerificarCorreoProps> = ({
         setEstado('error');
       }
     }
-  }, [onConfirmar, token]);
+  }, [onConfirmar, onVerificado, token]);
 
   useEffect(() => {
     if (!token || tokenEnviado.current === token) return;

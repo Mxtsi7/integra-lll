@@ -68,3 +68,66 @@ describe('rechazos del puente durante la lectura', () => {
       .toEqual({ estado: 'sesion_cambiada' });
   });
 });
+
+describe('lectura de tramos Android con alcance de consentimiento', () => {
+  const autorizado = { paquete: 'com.ejemplo.app', inicioMs: 2000, finMs: 3000 };
+
+  function entornoTramos() {
+    let alcance = { id: 'aceptacion-1', desdeMs: 2000, paquetes: [autorizado.paquete] };
+    let consentimiento = true;
+    const nativo = {
+      tienePermiso: vi.fn(async () => true),
+      abrirAjustes: vi.fn(async () => {}),
+      leerEstadisticas: vi.fn(async () => []),
+      leerTramos: vi.fn(async () => [
+        autorizado,
+        { ...autorizado, paquete: 'com.ejemplo.otra' },
+        { ...autorizado, inicioMs: 1999 },
+        { ...autorizado, finMs: 4001 },
+      ]),
+    };
+    return {
+      control: crearControlUsoAndroid(nativo, () => 'sesion', () => consentimiento, () => alcance),
+      nativo,
+      retirar: () => { consentimiento = false; },
+      cambiarAlcance: () => { alcance = { ...alcance, id: 'aceptacion-2' }; },
+    };
+  }
+
+  it('consulta solo desde la aceptación y excluye paquetes y tramos fuera del alcance', async () => {
+    const { control, nativo } = entornoTramos();
+    await expect(control.leerTramos(1000, 4000)).resolves.toEqual({
+      estado: 'disponible', tramos: [autorizado],
+    });
+    expect(nativo.leerTramos).toHaveBeenCalledTimes(1);
+    expect(nativo.leerTramos).toHaveBeenCalledWith(2000, 4000, ['com.ejemplo.app'], true);
+    expect(nativo.leerEstadisticas).not.toHaveBeenCalled();
+  });
+
+  it('no lee tramos sin consentimiento ni con el permiso denegado', async () => {
+    const sinConsentimiento = entornoTramos();
+    sinConsentimiento.retirar();
+    await expect(sinConsentimiento.control.leerTramos(1000, 4000)).resolves.toEqual({ estado: 'sin_consentimiento' });
+    expect(sinConsentimiento.nativo.leerTramos).not.toHaveBeenCalled();
+
+    const sinPermiso = entornoTramos();
+    sinPermiso.nativo.tienePermiso.mockResolvedValue(false);
+    await expect(sinPermiso.control.leerTramos(1000, 4000)).resolves.toEqual({ estado: 'sin_permiso' });
+    expect(sinPermiso.nativo.leerTramos).not.toHaveBeenCalled();
+  });
+
+  it('descarta la lectura si cambia la aceptación mientras responde el puente', async () => {
+    const { control, nativo, cambiarAlcance } = entornoTramos();
+    nativo.leerTramos.mockImplementationOnce(async () => {
+      cambiarAlcance();
+      return [autorizado];
+    });
+    await expect(control.leerTramos(1000, 4000)).resolves.toEqual({ estado: 'sin_consentimiento' });
+  });
+
+  it('rechaza ventanas mayores a un día antes de tocar Android', async () => {
+    const { control, nativo } = entornoTramos();
+    await expect(control.leerTramos(0, 86_400_001)).rejects.toThrow(RangeError);
+    expect(nativo.leerTramos).not.toHaveBeenCalled();
+  });
+});
