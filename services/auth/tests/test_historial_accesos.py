@@ -6,7 +6,7 @@ from drf_spectacular.generators import SchemaGenerator
 from rest_framework.test import APIClient
 
 from app.models import Organizacion, Sesion, User
-from test_contratos_openapi import validar
+from .test_contratos_openapi import validar
 
 
 RUTA = "/api/usuarios/me/historial-accesos/"
