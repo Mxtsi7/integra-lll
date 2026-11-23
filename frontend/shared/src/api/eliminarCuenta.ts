@@ -3,10 +3,15 @@ import { ErrorDeApi, pedir } from './cliente';
 
 
 /**
- * MX-07 (DELETE /usuarios/me/) aún no está integrado en main (PR #72 en draft, espera FE-05).
- * Mientras sea false, la web muestra "Eliminar" deshabilitado. Al integrarse el backend: true.
+ * Bandera compartida (web Perfil + Ajustes y móvil AN-19): habilita "Eliminar cuenta".
+ *
+ * Es true porque MX-07 ya está en main (DELETE /usuarios/me/, limpieza duradera por el
+ * worker `auth-eliminaciones` y endpoints internos en suscripciones, conectores, analítica
+ * y notificaciones). Requiere que el despliegue tenga ELIMINACION_INTERNA_SECRET y
+ * ELIMINACION_DESTINOS; si falta, el backend responde 503 `eliminacion_no_configurada` y la
+ * cuenta sigue activa (el diálogo lo dice). Para apagarlo en una emergencia: false.
  */
-export const ELIMINAR_CUENTA_DISPONIBLE = false;
+export const ELIMINAR_CUENTA_DISPONIBLE = true;
 
 /** Cuerpo de DELETE /usuarios/me/ (MX-07). */
 export interface DatosEliminacion {
