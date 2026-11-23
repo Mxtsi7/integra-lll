@@ -10,6 +10,7 @@ from . import proveedores
 from .models import (
     ArchivoImportacion,
     AutorizacionPendiente,
+    AvanceDeLectura,
     CuentaConectada,
     Importacion,
     OutboxEvento,
@@ -61,6 +62,8 @@ class LimpiezaConnectorsView(LimpiezaOrganizacionView):
         AutorizacionPendiente,
         ArchivoImportacion,
         Importacion,
+        # S3-FE-03/05: va antes que su cuenta, explícito como los demás.
+        AvanceDeLectura,
         CuentaConectada,
     )
 
