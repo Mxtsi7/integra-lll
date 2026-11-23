@@ -171,6 +171,7 @@ describe("Mensajes y estados (S3-CH-14)", () => {
       ["cuota_agotada", "Ya usaste tus consultas con IA de este mes. Hasta el próximo mes recibirás este resumen automático."],
       ["capacidad", "El asistente con IA está atendiendo muchas consultas. Vuelve a preguntar en unos minutos."],
       ["no_configurado", "El asistente con IA no está activado en este momento. Por ahora recibirás este resumen automático."],
+      ["consulta_analytics_no_disponible", "No pudimos consultar el uso de tus suscripciones. Vuelve a preguntar en unos minutos."],
     ])("con el motivo %s", (motivo, textoEsperado) => {
       montar({ mensajes: [respuestaDeRespaldo(motivo)] });
 
