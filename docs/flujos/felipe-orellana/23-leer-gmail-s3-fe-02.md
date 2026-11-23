@@ -101,6 +101,10 @@ Lo encontró la revisión de #172.
   cae, sin saber hasta dónde llegó. Recorrer y recordar es S3-FE-03.
 - Un `pagina` vacío o de más de 512 caracteres no viene de Gmail y no se
   reenvía.
+- Si Gmail devuelve **más** mensajes de los pedidos, es un error explícito
+  (`ErrorDelProveedor`): antes se recortaba a `limite`, y el `nextPageToken`
+  ya apuntaba después de los que sobraban, así que se perdían sin aviso.
+  Lo encontró la revisión de #189; Outlook ya lo hacía así desde #177.
 - Cada petición lleva el mismo tiempo límite que el OAuth (10 s).
 - Un correo con miles de partes MIME no se recorre entero (tope de 100).
 
@@ -154,7 +158,7 @@ texto no, porque esta salida termina en una PR o en una captura.
 | El lector, lo propio de Google | `services/connectors/connectors/lector_gmail.py` |
 | Lo común con Outlook: la cuenta, los errores, el filtro, el HTML | `services/connectors/connectors/lectura_correo.py` |
 | El comando | `services/connectors/connectors/management/commands/leer_gmail.py` |
-| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (88) |
+| Las pruebas | `services/connectors/tests/test_lector_gmail.py` (95) |
 
 ## Cómo se comprobaron las pruebas
 
