@@ -1,10 +1,12 @@
 # S3-MX-05 · Lectura local de tramos de Android
 
-Disponible como operación del control móvil. Para habilitarla desde una pantalla,
-el anfitrión debe suministrar una sesión activa y consentimiento explícito vigente.
-El alcance incluye un identificador distinto por aceptación o edición, el instante
-desde el que se permite medir y la lista de paquetes elegidos. La ausencia de
-alcance bloquea la lectura.
+Desde **Configuración → Acceso de uso**, la persona concede el permiso Android,
+escribe el identificador del paquete y pulsa **Acepto autorizar la consulta local**.
+La pantalla informa qué datos lee y conserva el alcance solo en memoria. Registra
+la sesión, un identificador por aceptación y el instante desde el que permite
+medir. **Consultar intervalos** ejecuta la lectura bajo demanda y muestra cuántos
+tramos completos encontró. Retirar la autorización o salir de la pantalla borra
+el alcance. Una nueva aceptación empieza en un instante nuevo.
 
 1. `crearControlUsoAndroid(...).leerTramos(inicioMs, finMs)` valida una ventana
    pasada de hasta 24 horas. Ajusta su inicio a la aceptación y comprueba sesión,
@@ -21,16 +23,20 @@ alcance bloquea la lectura.
    Una lista vacía no prueba cero observado ni cobertura completa. Los tramos
    que atraviesan el inicio o final sin ambos eventos observados quedan fuera.
 
-La lectura es local y bajo demanda. Esta PR prepara el lector con su control de
-acceso, sin activar la captura desde Perfil ni crear almacenamiento o envío.
+La autorización vive únicamente en esta pantalla. Los tramos se usan para mostrar
+el resultado de la consulta y quedan fuera del almacenamiento y del envío. La
+política de conservación y purga para historial persistente sigue pendiente de
+MX-02. El [contrato v1](../../contratos/uso-recolectores-v1.md) de MX-01/VI-01
+rige una futura integración con el receptor.
 
 ## Verificación
 
 Desde `frontend/`, ejecutar
-`npm test --workspace movil -- src/services/usoAndroid.test.ts`.
+`npm test --workspace movil -- src/services/usoAndroid.test.ts src/screens/configuracion/UsoRecolectoresScreen.test.tsx`.
 El doble del módulo verifica el alcance, el inicio de la aceptación, límites y
-cambios de autorización. Para probar Android, compilar la build de desarrollo,
-conectar un anfitrión de prueba con el flujo de consentimiento aprobado y
-alternar entre una app autorizada y una excluida. Comprobar los instantes de ambos
+cambios de autorización. La prueba de pantalla comprueba la aceptación, la
+consulta manual y el descarte de una respuesta tardía tras retirar. Para validar
+Android, instalar la build de desarrollo, autorizar un paquete en la pantalla,
+alternar entre esa app y una excluida, volver y consultar los intervalos. Comprobar los instantes de ambos
 eventos, luego repetir con acceso denegado, revocado y una actividad abierta
 fuera de la ventana. Registrar versión Android, commit, tiempos y resultado.
