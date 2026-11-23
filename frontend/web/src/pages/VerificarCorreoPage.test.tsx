@@ -96,4 +96,17 @@ describe('VerificarCorreoPage', () => {
     expect(await screen.findByText('Esta función todavía no está disponible.')).toBeTruthy();
     expect(screen.queryByText('Correo verificado')).toBeNull();
   });
+
+  it('avisa una sola vez que el correo quedó verificado (S3-AN-02), y no cuando el enlace falla', async () => {
+    const onVerificado = vi.fn();
+    renderizar({ onConfirmar: vi.fn().mockResolvedValue(undefined), onVerificado }, '/verificar-correo?token=abc', true);
+    await screen.findByText('Correo verificado');
+    expect(onVerificado).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const noDebeAvisar = vi.fn();
+    renderizar({ onConfirmar: vi.fn().mockRejectedValue(errorCodigo('token_expirado')), onVerificado: noDebeAvisar });
+    await screen.findByText('Enlace vencido');
+    expect(noDebeAvisar).not.toHaveBeenCalled();
+  });
 });
