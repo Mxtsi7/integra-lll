@@ -14,6 +14,7 @@ import { ContenidoConEstado } from '../../../components/estados';
 import { NavButton } from '../NavButton';
 import { isoDeFecha, mesDeFecha } from '../calendario/fechas';
 import { COLORES_RESUMEN as C } from './estilos';
+import { GraficoGastos } from './GraficoGastos';
 import { useResumenPeriodo, type ApiResumen } from './useResumenPeriodo';
 
 export interface ResumenPeriodoContenidoProps {
@@ -123,6 +124,8 @@ function Gastos({ gastos, informe }: { gastos: GastoPorMoneda[]; informe: boolea
       {gastos.map((gasto) => (
         <View key={gasto.moneda} testID={`gasto-${gasto.moneda}`} style={styles.tarjeta}>
           <Text style={styles.subtitulo}>Gasto en {gasto.moneda}</Text>
+          {/* El gráfico usa las mismas cifras que las filas de abajo (reglasGrafico.ts). */}
+          <GraficoGastos gasto={gasto} />
           <Fila etiqueta="Gastado" valor={formatearMonto(gasto.gastoReal, gasto.moneda)} />
           <Fila etiqueta="Por cobrar" valor={formatearMonto(gasto.gastoProyectado, gasto.moneda)} />
           {informe ? <Fila etiqueta="Total estimado" valor={formatearMonto(gasto.totalEstimado, gasto.moneda)} fuerte /> : null}

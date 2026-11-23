@@ -75,10 +75,22 @@ export function obtenerAuthApiUrl(): string {
 }
 
 async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  return enviarJSON<T>(path, { method: "POST", body });
+}
+
+/**
+ * Petición pública al servicio de auth. `credentials: "include"` solo lo usa
+ * el inicio con Google (S3-AN-07): el nonce viaja con una cookie del navegador.
+ */
+async function enviarJSON<T>(
+  path: string,
+  opciones: { method: "GET" | "POST"; body?: unknown; credentials?: RequestCredentials },
+): Promise<T> {
   const res = await fetch(`${urlApi()}${path}`, {
-    method: "POST",
+    method: opciones.method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+    credentials: opciones.credentials,
   });
 
   if (!res.ok) {
@@ -617,4 +629,51 @@ export async function restablecerContrasena(token: string, password: string): Pr
    */
 export async function confirmarCorreo(token: string): Promise<void> {
   await postJSON<{ detail: string }>(endpoints.emailVerificationConfirm, { token });
+}
+
+
+// ── S3-AN-07 · Inicio de sesión con Google (MX-11) ──────────────────────────
+// Es solo identidad: no autoriza leer Gmail. El backend valida el ID token y
+// el nonce, y emite la sesión propia de la app (los mismos tokens del login).
+
+/** Respuesta de GET /auth/google/nonce/. */
+export type NonceGoogle = { nonce: string; client_id: string; vence_en_segundos: number };
+
+/**
+ * `code` que manda el backend en el inicio con Google:
+ * - 503 google_no_configurado | google_no_disponible
+ * - 400 google_cancelado · 401 google_invalido (nonce vencido o ya usado)
+ * - 401 vincular_google: la cuenta existe y pide su contraseña para vincularla
+ * - 409 completar_registro: no hay cuenta con ese correo
+ */
+export type CodigoErrorGoogle =
+  | "google_no_configurado"
+  | "google_no_disponible"
+  | "google_cancelado"
+  | "google_invalido"
+  | "vincular_google"
+  | "completar_registro";
+
+/**
+ * GET /auth/google/nonce/. Pide un nonce de un solo uso (5 minutos) y el
+ * navegador guarda una cookie que lo liga a este navegador; por eso va con
+ * credentials: "include". Un nonce nuevo por cada intento.
+ */
+export function pedirNonceGoogle(): Promise<NonceGoogle> {
+  return enviarJSON<NonceGoogle>("/auth/google/nonce/", { method: "GET", credentials: "include" });
+}
+
+/**
+ * POST /auth/google/. Cambia el ID token de Google (con su nonce) por la
+ * sesión de la app. `password` solo se manda al vincular por primera vez una
+ * cuenta que ya existía con correo y contraseña. Errores: AuthError con `codigo`.
+ */
+export function loginConGoogle(datos: {
+  idToken: string;
+  nonce: string;
+  password?: string;
+}): Promise<AuthResponse> {
+  const body: Record<string, string> = { id_token: datos.idToken, nonce: datos.nonce };
+  if (datos.password) body.password = datos.password;
+  return enviarJSON<AuthResponse>("/auth/google/", { method: "POST", body, credentials: "include" });
 }
