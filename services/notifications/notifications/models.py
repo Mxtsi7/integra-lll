@@ -108,6 +108,24 @@ class Alerta(ModeloTenant):
         verbose_name="Revisada en",
     )
 
+    # ── S3-FE-22: un aviso que ya no corresponde ─────────────────────
+    # Un próximo cobro o un fin de prueba se calculan con la suscripción de
+    # ESE momento. Si después cambia la fecha o la suscripción se cancela, el
+    # aviso viejo queda obsoleto: no se muestra en la campana ni sale por
+    # correo. No se borra, para que se vea qué pasó.
+    invalidada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Obsoleta desde",
+    )
+    motivo_invalidacion = models.CharField(
+        max_length=24,
+        blank=True,
+        default="",
+        verbose_name="Por qué quedó obsoleta",
+        help_text="cobro_cambiado, prueba_cambiada, no_vigente o prueba_terminada.",
+    )
+
     # ── comportamiento ───────────────────────────────────────────────
 
     @property

@@ -216,4 +216,12 @@ def aplicar(sobre: dict) -> bool:
                 "evento %s de %s ignorado: la proyección ya tiene uno de %s o más nuevo",
                 nombre, suscripcion_id, ocurrido_en.isoformat(),
             )
-        return bool(cambiadas)
+            return False
+        # S3-FE-22: con la suscripción ya actualizada, los avisos que dejaron
+        # de corresponder se invalidan en esta misma transacción. Solo si el
+        # evento cambió algo: uno viejo o repetido no invalida ni reactiva.
+        from .invalidacion import revisar
+
+        fila.refresh_from_db()
+        revisar(fila)
+        return True
