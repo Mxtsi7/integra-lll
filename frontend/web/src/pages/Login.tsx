@@ -8,6 +8,7 @@ import { destinoTrasLogin } from "../components/RutaPrivada";
 import { PantallaAcceso } from "../components/layout/PantallaAcceso";
 import { CampoContrasena, CampoTexto } from "../components/ui/Campo";
 import { Boton } from "../components/ui/Boton";
+import { InicioConGoogle } from "../components/Acceso/InicioConGoogle";
 import styles from "./Acceso.module.css";
 
 export default function Login() {
@@ -92,6 +93,14 @@ export default function Login() {
           {loading ? "Ingresando…" : "Iniciar sesión"}
         </Boton>
       </form>
+
+      {/* S3-AN-07: acceso con Google (solo identidad, no lee Gmail). */}
+      <InicioConGoogle
+        alIniciarSesion={(tokens) => {
+          iniciarSesion(tokens);
+          navigate(destinoTrasLogin(location), { replace: true });
+        }}
+      />
     </PantallaAcceso>
   );
 }
