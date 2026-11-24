@@ -27,6 +27,8 @@ import {
 } from '@ojoalgasto/shared';
 import type { HomeScreenProps } from '../../navigation/types';
 import { styles } from './SuscripcionNuevaScreen.styles';
+import { AvisoCambiosSinGuardarModal } from '../../components/AvisoCambiosSinGuardarModal';
+import { useAvisoCambiosSinGuardar } from '../../hooks/useAvisoCambiosSinGuardar';
 
 export interface NuevaSuscripcionFormData {
   nombre: string;
@@ -39,18 +41,14 @@ export interface NuevaSuscripcionFormData {
   finPrueba: string;
 }
 
+/**
+ * Opciones iniciales vacías mientras carga el catálogo dinámico desde la API (GET /catalogos/suscripciones/).
+ * Las opciones reales se obtienen siempre del catálogo del backend sin listas hardcodeadas.
+ */
 export const OPCIONES_POR_DEFECTO: OpcionesSuscripcion = {
-  monedas: ['CLP', 'USD', 'EUR'],
-  frecuencias: ['mensual', 'anual', 'semanal', 'trimestral', 'semestral'],
-  categorias: [
-    'streaming',
-    'musica',
-    'software',
-    'salud',
-    'educacion',
-    'servicios',
-    'otros',
-  ],
+  monedas: [],
+  frecuencias: [],
+  categorias: [],
 };
 
 const EMPTY_FORM = (): NuevaSuscripcionFormData => ({
@@ -754,6 +752,27 @@ export default function SuscripcionNuevaScreen({
   const [erroresCampos, setErroresCampos] = useState<Record<string, string[]> | null>(null);
   const guardandoRef = useRef(false);
 
+  const [hayCambios, setHayCambios] = useState(false);
+
+  const manejarCambios = useCallback(
+    (dirty: boolean) => {
+      setHayCambios(dirty);
+      onCambiosSinGuardar?.(dirty);
+    },
+    [onCambiosSinGuardar],
+  );
+
+  const {
+    mostrandoAviso,
+    seguirEditando,
+    descartarCambios,
+    limpiarAvisoTrasGuardar,
+    intentarSalir,
+  } = useAvisoCambiosSinGuardar({
+    hayCambios,
+    navigation,
+  });
+
   const handleSubmit = async (datos: SuscripcionPayload): Promise<boolean> => {
     // Bloqueo de doble envío concurrente (antirrebote sincrónico y reactivo)
     if (guardandoRef.current || isSaving) {
@@ -767,6 +786,9 @@ export default function SuscripcionNuevaScreen({
     try {
       const creada = await onCrearSuscripcion(datos);
       onExito?.(creada);
+
+      // Quitar aviso tras guardar para permitir navegación sin interrupción (SE-31)
+      limpiarAvisoTrasGuardar();
 
       // Navegar al resultado (detalle de la nueva suscripción)
       if (navigation?.replace) {
@@ -796,22 +818,25 @@ export default function SuscripcionNuevaScreen({
   };
 
   return (
-    <NuevaSuscripcionFormView
-      testID="screen-suscripcion-nueva"
-      catalogos={catalogosData}
-      cargandoCatalogos={cargandoCatalogos}
-      errorCatalogo={errorCatalogo}
-      onReintentarCatalogos={cargarCatalogos}
-      onSubmit={handleSubmit}
-      onCancel={() => {
-        if (navigation?.goBack) {
-          navigation.goBack();
-        }
-      }}
-      isSaving={isSaving}
-      errorGeneral={errorGeneral}
-      erroresCampos={erroresCampos}
-      onCambiosSinGuardar={onCambiosSinGuardar}
-    />
+    <>
+      <NuevaSuscripcionFormView
+        testID="screen-suscripcion-nueva"
+        catalogos={catalogosData}
+        cargandoCatalogos={cargandoCatalogos}
+        errorCatalogo={errorCatalogo}
+        onReintentarCatalogos={cargarCatalogos}
+        onSubmit={handleSubmit}
+        onCancel={intentarSalir}
+        isSaving={isSaving}
+        errorGeneral={errorGeneral}
+        erroresCampos={erroresCampos}
+        onCambiosSinGuardar={manejarCambios}
+      />
+      <AvisoCambiosSinGuardarModal
+        visible={mostrandoAviso}
+        onSeguirEditando={seguirEditando}
+        onDescartar={descartarCambios}
+      />
+    </>
   );
 }

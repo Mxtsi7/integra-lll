@@ -296,7 +296,7 @@ function DetalleDeSesion({ sesion }: { sesion: MarcaSesion }) {
             />
 
             <h3 className={styles.subtitulo}>Historial</h3>
-            <HistorialUso estado={historial} onReintentar={recargarHistorial} />
+            <HistorialUso key={id} estado={historial} onReintentar={recargarHistorial} />
           </section>
 
           {confirmandoCancelacion && (
