@@ -26,9 +26,9 @@ describe('Configuración móvil (AN-04): secciones', () => {
     );
   });
 
-  it('lo que no tiene integración queda sin destino y se muestra deshabilitado', () => {
+  it('preferencias de notificación móvil (SE-32) queda integrado con su destino', () => {
     const notificaciones = items.find((i) => i.testID === 'pref-notificaciones');
     expect(notificaciones).toBeDefined();
-    expect(notificaciones?.destino).toBeUndefined();
+    expect(notificaciones?.destino).toBe('PreferenciasNotificacion');
   });
 });
