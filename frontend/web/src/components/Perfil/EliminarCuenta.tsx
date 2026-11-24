@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import {
   AuthError,
-  ELIMINAR_CUENTA_DISPONIBLE,
+  ELIMINAR_CUENTA_WEB_DISPONIBLE,
   eliminarCuenta,
   type DatosEliminacion,
   type ResultadoEliminacion,
@@ -39,7 +39,7 @@ export interface EliminarCuentaProps {
 export function EliminarCuenta({
   className = '',
   onEliminar = eliminarCuenta,
-  disponible = ELIMINAR_CUENTA_DISPONIBLE,
+  disponible = ELIMINAR_CUENTA_WEB_DISPONIBLE,
 }: EliminarCuentaProps) {
   const navigate = useNavigate();
   const toast = useToast();

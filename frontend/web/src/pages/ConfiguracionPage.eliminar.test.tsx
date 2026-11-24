@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ELIMINAR_CUENTA_DISPONIBLE } from "@ojoalgasto/shared";
+import { ELIMINAR_CUENTA_DISPONIBLE, ELIMINAR_CUENTA_WEB_DISPONIBLE } from "@ojoalgasto/shared";
 import { ConfiguracionPage } from "./ConfiguracionPage";
 
 // S3-AN-03: Eliminar cuenta está habilitado también en Ajustes. Se simulan el layout y los
@@ -23,8 +23,9 @@ afterEach(() => {
 });
 
 describe("Eliminar cuenta en Ajustes (S3-AN-03)", () => {
-  it("la bandera compartida está habilitada", () => {
-    expect(ELIMINAR_CUENTA_DISPONIBLE).toBe(true);
+  it("la bandera web está habilitada y la de móvil sigue apagada (AN-19 sin protección de sesión)", () => {
+    expect(ELIMINAR_CUENTA_WEB_DISPONIBLE).toBe(true);
+    expect(ELIMINAR_CUENTA_DISPONIBLE).toBe(false);
   });
 
   it("el botón está activo y abre el diálogo con contraseña y confirmación explícita", () => {

@@ -3,15 +3,21 @@ import { ErrorDeApi, pedir } from './cliente';
 
 
 /**
- * Bandera compartida (web Perfil + Ajustes y móvil AN-19): habilita "Eliminar cuenta".
- *
- * Es true porque MX-07 ya está en main (DELETE /usuarios/me/, limpieza duradera por el
- * worker `auth-eliminaciones` y endpoints internos en suscripciones, conectores, analítica
- * y notificaciones). Requiere que el despliegue tenga ELIMINACION_INTERNA_SECRET y
- * ELIMINACION_DESTINOS; si falta, el backend responde 503 `eliminacion_no_configurada` y la
- * cuenta sigue activa (el diálogo lo dice). Para apagarlo en una emergencia: false.
+ * Habilita "Eliminar cuenta" en la WEB (Perfil y Ajustes, S3-AN-03). Es true porque MX-07 ya
+ * está en main (DELETE /usuarios/me/, limpieza duradera por el worker `auth-eliminaciones` y
+ * endpoints internos en suscripciones, conectores, analítica y notificaciones). Requiere
+ * ELIMINACION_INTERNA_SECRET y ELIMINACION_DESTINOS en el despliegue; si faltan, el backend
+ * responde 503 y la cuenta sigue activa. Para apagarlo en una emergencia: false.
  */
-export const ELIMINAR_CUENTA_DISPONIBLE = true;
+export const ELIMINAR_CUENTA_WEB_DISPONIBLE = true;
+
+/**
+ * Habilita la pantalla de Eliminar cuenta en MÓVIL (AN-19). Sigue en false a propósito: su
+ * pantalla llama cerrarSesion() al terminar sin comprobar que la sesión (ni la pantalla)
+ * sigan siendo las que pidieron el borrado, y una respuesta tardía podría cerrar la sesión de
+ * otra cuenta que entró después. Se enciende cuando AN-19 tenga esa protección.
+ */
+export const ELIMINAR_CUENTA_DISPONIBLE = false;
 
 /** Cuerpo de DELETE /usuarios/me/ (MX-07). */
 export interface DatosEliminacion {

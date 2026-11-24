@@ -1,7 +1,7 @@
 # Eliminar cuenta en web
 
 ## Qué cambió
-- `ELIMINAR_CUENTA_DISPONIBLE` pasa a `true` (`shared/src/api/eliminarCuenta.ts`). Es una bandera **compartida**: habilita el botón en Perfil y Ajustes (web) y la pantalla AN-19 en móvil.
+- Nueva bandera `ELIMINAR_CUENTA_WEB_DISPONIBLE = true` (`shared/src/api/eliminarCuenta.ts`): habilita el botón en Perfil y Ajustes (web). `ELIMINAR_CUENTA_DISPONIBLE` (móvil AN-19) **sigue en `false`**: esa pantalla cierra sesión al terminar sin comprobar que la sesión ni la pantalla sigan siendo las mismas, y una respuesta tardía podría cerrar la sesión de otra cuenta. Se enciende cuando AN-19 tenga esa protección (pendiente).
 - `EliminarCuenta.tsx` anota la sesión (`capturarSesion()`) antes de pedir el borrado. Si cuando llega la respuesta ya hay otra sesión (otra cuenta entró o se cerró), **no** cierra sesión, no avisa y no redirige; tampoco muestra errores de la sesión anterior.
 
 ## Cómo funciona el diálogo
@@ -21,7 +21,7 @@
 ## Pendiente / límites
 - **No se probó de punta a punta** (cuenta real + worker + 4 servicios). Antes de usarlo en un entorno real, quien despliegue debe confirmar que `.env` tiene `ELIMINACION_INTERNA_SECRET` y `ELIMINACION_DESTINOS` y que el worker corre. Si falta configuración el backend responde 503 y la cuenta sigue activa.
 - Outlook: se destruyen las credenciales guardadas, pero Microsoft no revoca el acceso solo (el diálogo ya lo explica).
-- Para apagar la función rápido: `ELIMINAR_CUENTA_DISPONIBLE = false`.
+- Para apagar la función web rápido: `ELIMINAR_CUENTA_WEB_DISPONIBLE = false`.
 
 ## Pruebas
 - `EliminarCuenta.test.tsx`: 409 (primer envío sin confirmación de organización), doble clic, respuesta y error tardíos de otra sesión, además de 204/202/403/503/red.
