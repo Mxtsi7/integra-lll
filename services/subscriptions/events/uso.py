@@ -47,14 +47,40 @@ MAX_REINTENTOS = 5
 #: Campos que el cuerpo canónico prohíbe y que solo la recepción puede añadir.
 CAMPOS_RESERVADOS = frozenset({"organizacion_id", "suscripcion_id", "usuario_id"})
 
+# Namespace fijo para representar IDs enteros de Auth como UUID RFC 4122 en
+# eventos de uso. Es determinista: el mismo usuario_id entero siempre produce
+# el mismo UUID, y el valor es aceptado por validadores UUID RFC (Zod/PG).
+# No cambiar: rompería la identidad histórica y la deduplicación cross-service.
+NAMESPACE_USUARIO_AUTH = uuid.uuid5(
+    uuid.NAMESPACE_URL, "urn:integra-lll:auth:usuario-id"
+)
+
+
+def uuid_usuario_auth(valor: Any) -> uuid.UUID:
+    """Convierte un ID entero de Auth a UUID RFC 4122 determinista.
+
+    Auth expone `usuario_id` como entero positivo. El contrato interno de
+    `uso.registrado` y el consumidor Analytics-uso esperan un UUID RFC 4122,
+    por lo que no se puede usar `uuid.UUID(int=valor)` (genera un UUID con
+    versión/variante no RFC). La representación canónica es UUIDv5 dentro de
+    `NAMESPACE_USUARIO_AUTH`.
+    """
+    if isinstance(valor, bool) or not isinstance(valor, int):
+        raise ValueError(
+            f"`usuario_id` debe ser un entero positivo de Auth: {valor!r}"
+        )
+    if valor <= 0:
+        raise ValueError(f"`usuario_id` debe ser un entero positivo: {valor!r}")
+    return uuid.uuid5(NAMESPACE_USUARIO_AUTH, str(valor))
+
 
 def _uuid(valor: Any, campo: str) -> uuid.UUID:
     if isinstance(valor, uuid.UUID):
         return valor
     if isinstance(valor, int) and not isinstance(valor, bool):
-        if valor <= 0:
-            raise ValueError(f"`{campo}` debe ser un entero positivo: {valor!r}")
-        return uuid.UUID(int=valor)
+        if campo == "usuario_id":
+            return uuid_usuario_auth(valor)
+        raise ValueError(f"`{campo}` no es un UUID: {valor!r}")
     try:
         return uuid.UUID(str(valor))
     except (TypeError, ValueError, AttributeError) as exc:
