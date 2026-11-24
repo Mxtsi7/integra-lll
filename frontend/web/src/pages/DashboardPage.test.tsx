@@ -205,6 +205,61 @@ it('una moneda de la URL que el Panel no tiene se ignora: se usa la de siempre y
   expect(vi.mocked(getComparacionDePresupuesto).mock.calls.map(([, moneda]) => moneda)).not.toContain('XXX');
 });
 
+describe('los estados del Panel: carga, error y sin datos (S3-CH-13)', () => {
+  it('mientras carga lo dice, y no muestra una cifra ni un cero', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(() => new Promise(() => {}));
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    expect(await screen.findByRole('status', { name: 'Cargando el gasto del mes' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Resumen del mes' })).not.toHaveTextContent('al mes');
+  });
+
+  it('si el servicio falla dice que no se pudo cargar, y Reintentar vuelve a pedir el mismo mes y moneda sin perder los filtros', async () => {
+    let falla = true;
+    vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) => {
+      if (falla) throw new Error('caída');
+      return resumenDePrueba({ periodo: mes, moneda, gasto_real: '1000.00', gasto_proyectado: '250.00', total_estimado: '1250.00' });
+    });
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    const resumen = await screen.findByRole('region', { name: 'Resumen del mes' });
+    expect(await within(resumen).findByText('No pudimos cargar tus gastos. Intenta de nuevo.')).toBeInTheDocument();
+    expect(resumen).not.toHaveTextContent('al mes');
+
+    falla = false;
+    fireEvent.click(within(resumen).getByRole('button', { name: 'Reintentar' }));
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$1.250al mes'));
+    expect(getResumenDelMes).toHaveBeenLastCalledWith('2026-09', 'CLP');
+    const parametros = new URLSearchParams(screen.getByTestId('ubicacion').textContent!.split('?')[1]);
+    expect(parametros.get('mes')).toBe('2026-09');
+    expect(parametros.get('moneda')).toBe('CLP');
+  });
+
+  it('sin cobros en los seis meses no muestra cifra ni cero: dice que no hay cobros de suscripciones activas', async () => {
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    const resumen = await screen.findByRole('region', { name: 'Resumen del mes' });
+    expect(await within(resumen).findByText('No hay cobros de suscripciones activas en CLP en los últimos 6 meses.')).toBeInTheDocument();
+    expect(within(resumen).queryByText(/Ya cobrado/)).not.toBeInTheDocument();
+    expect(resumen).not.toHaveTextContent('al mes');
+  });
+
+  it('un mes sin cobros con cobros en los anteriores muestra $0 y lo dice: es un cero confirmado', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) => {
+      const real = mes === '2026-09' ? '0.00' : '1000.00';
+      return resumenDePrueba({ periodo: mes, moneda, gasto_real: real, gasto_proyectado: '0.00', total_estimado: real });
+    });
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$0al mes'));
+    expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('Sin cobros este mes');
+  });
+});
+
 describe('los gráficos del Panel salen de los mismos meses que la cifra (S3-CH-12)', () => {
   it('el gráfico tiene los seis meses hasta el de la URL, y el mes elegido coincide con la cifra del Panel', async () => {
     vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) =>
@@ -231,8 +286,8 @@ describe('los gráficos del Panel salen de los mismos meses que la cifra (S3-CH-
   it('sin cobros en los seis meses no se dibuja gráfico con ceros', async () => {
     montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
 
-    // Llegó la respuesta (cero) y el gráfico no aparece: no hay serie que mostrar.
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$0al mes'));
+    // Llegó la respuesta (sin cobros) y el gráfico no aparece: no hay serie que mostrar.
+    expect(await within(await screen.findByRole('region', { name: 'Resumen del mes' })).findByText(/No hay cobros de suscripciones activas/)).toBeInTheDocument();
     expect(screen.queryByRole('table', { name: 'Detalle por mes' })).not.toBeInTheDocument();
   });
 });

@@ -7,7 +7,8 @@ import { TileCategorias } from '../components/Dashboard/TileCategorias';
 import { TileHub } from '../components/Dashboard/TileHub';
 import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
 import { TileProximo } from '../components/Dashboard/TileProximo';
-import { gastoDelMesDe, TileResumen } from '../components/Dashboard/TileResumen';
+import { TileResumen } from '../components/Dashboard/TileResumen';
+import { estadoDelMesDesde } from '../components/Dashboard/estadoDelMes';
 import { TileSalud } from '../components/Dashboard/TileSalud';
 import { GraficoDeGastos } from '../components/Informes/GraficoDeGastos';
 import { sinGastos } from '../components/Informes/periodosDeInforme';
@@ -68,9 +69,8 @@ export function DashboardPage() {
   const delPanel = todas.filter((s) => s.moneda === moneda);
   // El mes lo elige el presupuesto del Panel (?mes=): las cifras y el presupuesto miran el mismo mes.
   const { mes } = useMesEnUrl(fechaATexto(new Date()));
-  const { carga: informe } = useInformeMensual(mes, moneda);
-  // El último mes del informe es el elegido. Mientras no llega, no hay cifra que mostrar.
-  const gastoDelMes = informe.tipo === 'listo' ? gastoDelMesDe(informe.meses[informe.meses.length - 1]) : null;
+  const { carga: informe, reintentar: reintentarInforme } = useInformeMensual(mes, moneda);
+  const estadoDelMes = estadoDelMesDesde(informe, reintentarInforme);
 
   return (
     <AppLayout
@@ -93,7 +93,7 @@ export function DashboardPage() {
         </div>
         <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
-            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} gastoDelMes={gastoDelMes} />
+            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} estado={estadoDelMes} />
             {/* Los mismos meses que la cifra del mes: salen de la misma respuesta (S3-CH-12). */}
             {informe.tipo === 'listo' && !sinGastos(informe.meses) && (
               <GraficoDeGastos meses={informe.meses} mesElegido={mes} />
