@@ -3,6 +3,7 @@ import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from 'react-n
 import { obtenerAccessToken, sesionDelToken } from '@ojoalgasto/shared';
 import { validarPaqueteAndroid } from '../../services/asociacionPaquetes';
 import { NavButton } from '../components/NavButton';
+import { calcularMinutosUsoAndroid } from '../../services/minutosUsoAndroid';
 import { usoAndroidNativo } from '../../services/usoAndroidNativo';
 import { crearControlPermisoUsoAndroid, crearControlUsoAndroid, type AlcanceUsoAndroid, type EstadoPermisoUsoAndroid } from '../../services/usoAndroid';
 
@@ -106,11 +107,20 @@ export default function UsoRecolectoresScreen() {
         setEstadoPermiso('requerido');
         return;
       }
-      setResultado(lectura.estado !== 'disponible'
-        ? 'No se pudo realizar la consulta.'
-        : lectura.tramos.length
-          ? `Intervalos encontrados: ${lectura.tramos.length}.`
-          : 'No se encontraron intervalos completos en la consulta.');
+      if (lectura.estado !== 'disponible') {
+        setResultado('No se pudo realizar la consulta.');
+        return;
+      }
+      if (!lectura.tramos.length) {
+        setResultado('No se encontraron intervalos completos en la consulta.');
+        return;
+      }
+      const zonaHoraria = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const resumen = calcularMinutosUsoAndroid(lectura.tramos, zonaHoraria);
+      const duraciones = resumen.map(({ fechaLocal, minutos }) =>
+        `${fechaLocal}: ${minutos.toLocaleString('es-CL', { maximumSignificantDigits: 4 })} min`,
+      );
+      setResultado([`Intervalos encontrados: ${lectura.tramos.length}.`, ...duraciones].join('\n'));
     } catch {
       if (consentimiento.current === aceptacion && alcanceVigente()) {
         setResultado('No se pudo realizar la consulta.');
@@ -136,7 +146,7 @@ export default function UsoRecolectoresScreen() {
       </Text>
       <Text style={styles.texto}>
         Puedes autorizar una consulta local del paquete que elijas. Se leen los inicios y fines
-        de uso desde tu aceptación. La consulta no se envía al servidor ni se guarda como
+        de uso desde tu aceptación y se muestran los minutos por día en la zona del dispositivo. La consulta no se envía al servidor ni se guarda como
         historial. Puedes retirar la autorización aquí o salir de esta pantalla.
       </Text>
       <NavButton

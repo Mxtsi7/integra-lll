@@ -108,14 +108,23 @@ class Pais(OpcionCatalogo):
 
 
 class Sesion(models.Model):
+    class Metodo(models.TextChoices):
+        LOCAL = "local", "Contraseña"
+        GOOGLE = "google", "Google"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="sesiones")
     refresh_jti = models.CharField(max_length=64)
     vence_en = models.DateTimeField()
     revocada = models.BooleanField(default=False)
+    iniciada_en = models.DateTimeField(null=True, blank=True)
+    metodo = models.CharField(max_length=6, choices=Metodo.choices, default=Metodo.LOCAL)
 
     class Meta:
         db_table = "sesion"
+        indexes = [
+            models.Index(fields=["usuario", "-iniciada_en", "-id"], name="sesion_historial_usuario_idx"),
+        ]
 
 
 class Plan(models.Model):
