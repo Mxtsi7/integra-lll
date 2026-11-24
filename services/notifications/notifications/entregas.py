@@ -333,6 +333,10 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
         if entrega is None:
             return SIN_TOCAR
 
+        if entrega.alerta.invalidada_en is not None:
+            # S3-FE-22: el aviso quedó obsoleto (cambió la fecha o se canceló
+            # la suscripción) después de planificarlo. No sale.
+            return _cerrar(entrega, DESCARTADA, ahora, motivo="alerta_obsoleta")
         if entrega.estado == Estado.ENVIANDO and entrega.intentos >= MAX_INTENTOS:
             # El último intento no informó resultado (el worker murió).
             return _cerrar(entrega, AGOTADA, ahora, error=ErrorDeEnvio(
