@@ -136,6 +136,7 @@ export const ScrollView = React.forwardRef<HTMLDivElement, any>(
     contentContainerStyle,
     keyboardShouldPersistTaps,
     keyboardDismissMode,
+    showsVerticalScrollIndicator,
     ...props
   }, ref) => (
     <div
@@ -232,8 +233,29 @@ export const StyleSheet = {
   flatten: (style: any) => style,
 };
 
+let _permisoAndroidConcedido = false;
+let _resultadoSolicitudAndroid: 'granted' | 'denied' | 'never_ask_again' = 'granted';
+
+export const PermissionsAndroid = {
+  PERMISSIONS: {
+    POST_NOTIFICATIONS: 'android.permission.POST_NOTIFICATIONS',
+  },
+  RESULTS: {
+    GRANTED: 'granted',
+    DENIED: 'denied',
+    NEVER_ASK_AGAIN: 'never_ask_again',
+  },
+  check: async (_permission: string) => _permisoAndroidConcedido,
+  request: async (_permission: string) => _resultadoSolicitudAndroid,
+  _setPermisoParaPruebas: (concedido: boolean, resultado?: 'granted' | 'denied' | 'never_ask_again') => {
+    _permisoAndroidConcedido = concedido;
+    if (resultado) _resultadoSolicitudAndroid = resultado;
+  },
+};
+
 export const Platform = {
   OS: 'ios',
+  Version: 34,
   select: (obj: any) => obj.ios ?? obj.default,
 };
 
@@ -263,9 +285,37 @@ export const Animated = {
   sequence: () => ({ start: (cb?: any) => cb && cb({ finished: true }) }),
 };
 
+const backPressListeners = new Set<() => boolean | null | undefined>();
+
 export const BackHandler = {
-  addEventListener: () => ({ remove: () => {} }),
-  removeEventListener: () => {},
+  addEventListener: (eventName: string, handler: () => boolean | null | undefined) => {
+    if (eventName === 'hardwareBackPress') {
+      backPressListeners.add(handler);
+    }
+    return {
+      remove: () => {
+        backPressListeners.delete(handler);
+      },
+    };
+  },
+  removeEventListener: (eventName: string, handler: () => boolean | null | undefined) => {
+    if (eventName === 'hardwareBackPress') {
+      backPressListeners.delete(handler);
+    }
+  },
+  exitApp: () => {},
+  _triggerBackPress: () => {
+    const listeners = Array.from(backPressListeners);
+    for (let i = listeners.length - 1; i >= 0; i--) {
+      const handled = listeners[i]();
+      if (handled) return true;
+    }
+    return false;
+  },
+};
+
+export const Alert = {
+  alert: (..._args: any[]) => {},
 };
 
 export const I18nManager = {
@@ -325,6 +375,39 @@ export const Keyboard = {
   dismiss: () => {},
 };
 
+const appStateListeners = new Set<(state: string) => void>();
+
+export const AppState = {
+  currentState: 'active',
+  addEventListener: (type: string, listener: (state: string) => void) => {
+    if (type === 'change') {
+      appStateListeners.add(listener);
+    }
+    return {
+      remove: () => {
+        appStateListeners.delete(listener);
+      },
+    };
+  },
+  removeEventListener: (type: string, listener: (state: string) => void) => {
+    if (type === 'change') {
+      appStateListeners.delete(listener);
+    }
+  },
+  _simulateStateChange: (newState: string) => {
+    AppState.currentState = newState;
+    appStateListeners.forEach((fn) => fn(newState));
+  },
+};
+
+export const Linking = {
+  openURL: async (_url: string) => true,
+  canOpenURL: async (_url: string) => true,
+  openSettings: async () => {},
+  getInitialURL: async () => null,
+  addEventListener: () => ({ remove: () => {} }),
+};
+
 export const TextInput = React.forwardRef<HTMLInputElement, any>(
   ({
     testID,
@@ -375,6 +458,31 @@ export const TextInput = React.forwardRef<HTMLInputElement, any>(
 );
 TextInput.displayName = 'TextInput';
 
+export const Switch = React.forwardRef<HTMLInputElement, any>(
+  ({ testID, value, onValueChange, disabled, accessibilityLabel, style, trackColor, thumbColor, ...props }, ref) => (
+    <input
+      data-testid={testID}
+      type="checkbox"
+      role="switch"
+      checked={Boolean(value)}
+      disabled={disabled}
+      aria-label={accessibilityLabel}
+      aria-checked={Boolean(value)}
+      onChange={(e) => {
+        if (onValueChange) {
+          onValueChange(e.target.checked);
+        }
+      }}
+      style={typeof style === 'object' ? style : undefined}
+      ref={ref}
+      {...props}
+    />
+  )
+);
+Switch.displayName = 'Switch';
+
+export const NativeModules: Record<string, any> = {};
+
 export default {
   View,
   KeyboardAvoidingView,
@@ -392,7 +500,13 @@ export default {
   Easing,
   Image,
   Keyboard,
+  AppState,
+  Linking,
   TextInput,
+  Switch,
   FlatList,
   Modal,
+  Alert,
+  PermissionsAndroid,
+  NativeModules,
 };

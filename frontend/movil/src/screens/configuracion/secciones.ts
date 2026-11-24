@@ -63,8 +63,8 @@ export const SECCIONES_CONFIGURACION: SeccionConfiguracion[] = [
     titulo: 'Preferencias',
     items: [
       { testID: 'go-alertas', titulo: 'Centro de Alertas', destino: 'Alertas' },
-      // SE-32 (Sebastián): al integrarlo, agregar aquí su `destino`.
-      { testID: 'pref-notificaciones', titulo: 'Preferencias de notificación' },
+      // SE-32 (Sebastián): integrado con su destino hacia PreferenciasNotificacion.
+      { testID: 'pref-notificaciones', titulo: 'Preferencias de notificación', destino: 'PreferenciasNotificacion' },
     ],
   },
 ];

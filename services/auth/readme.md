@@ -17,7 +17,29 @@ gateway valida en cada petición (ADR-004).
 | `POST` | `/api/auth/password-reset/confirm/` | Sí | contraseña actualizada (`200`) / validación o enlace inválido (`400`) / enlace vencido o usado (`410`) / sesiones no disponibles (`503`) |
 | `GET` | `/api/usuarios/<id>/` | No, exige `Authorization: Bearer` | usuario, sin password (`200`) / `404` |
 
-`/api/auth/` es pública (`RUTAS_PUBLICAS` en el gateway); `/api/usuarios/` no.
+El Gateway identifica las rutas públicas con coincidencias exactas en `RUTAS_PUBLICAS`.
+
+### Historial de accesos (S3-AN-06)
+
+`GET /api/usuarios/me/historial-accesos/?limit=20&offset=0` requiere
+`Authorization: Bearer` y devuelve los inicios exitosos de la cuenta autenticada,
+del más reciente al más antiguo. `limit` admite de 1 a 100 y su valor
+predeterminado es 20. Para pedir la siguiente página se envía `siguiente_offset`
+como `offset`, con el mismo límite.
+
+```json
+{
+  "resultados": [{"iniciada_en": "2026-11-23T18:00:00Z", "metodo": "google"}],
+  "siguiente_offset": null
+}
+```
+
+`metodo` es `local` (contraseña) o `google`. Una lista vacía se devuelve con
+`200` y `siguiente_offset: null`. Renovar el token no agrega una entrada.
+Cerrar sesión conserva su entrada mientras exista la fila de sesión. El
+comando `limpiar_sesiones` elimina esas filas tras su vencimiento según su
+retención configurada (7 días por defecto). Las sesiones creadas antes de la
+migración carecen de fecha de inicio y no aparecen en el historial.
 
 ### Login — ejemplo
 
