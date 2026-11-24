@@ -11,12 +11,11 @@ Es idempotente: correrlo varias veces el mismo día no duplica nada (ver
 controlable que usan las pruebas.
 """
 
-import datetime as dt
-
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from notifications.generador import generar
+from notifications.reloj import instante_de_opcion
 
 
 class Command(BaseCommand):
@@ -30,15 +29,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opciones):
-        ahora = timezone.now()
-        if opciones["ahora"]:
-            try:
-                ahora = dt.datetime.fromisoformat(opciones["ahora"])
-            except ValueError as exc:
-                raise CommandError(f"--ahora no es un instante ISO: {exc}") from exc
-            if ahora.tzinfo is None:
-                ahora = timezone.make_aware(ahora, timezone.get_current_timezone())
-
+        ahora = instante_de_opcion(opciones["ahora"])
         resultado = generar(ahora=ahora)
         # Las omitidas se informan solo cuando hay: es el caso raro (una
         # organización eliminada mientras corría la generación), y callarlo

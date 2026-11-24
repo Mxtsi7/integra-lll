@@ -32,10 +32,10 @@ Se implementa el historial móvil de uso por fecha en la pantalla de detalle de 
   - Respuestas tardías de suscripciones anteriores se descartan ante cambio de ruta.
   - Aislamiento total de errores y registros entre suscripciones.
 - [x] **Evidencia enlazada y pruebas automatizadas:**
-  - 9 pruebas unitarias y de integración dedicadas en `HistorialUso.test.tsx`.
+  - 10 pruebas unitarias y de integración dedicadas en `HistorialUso.test.tsx`.
   - 27 pruebas de `SuscripcionDetalleScreen.test.tsx` aprobadas.
-  - 281 pruebas en `@ojoalgasto/shared` aprobadas.
-  - 480 pruebas en 26 archivos del workspace móvil aprobadas al 100%.
+  - 282 pruebas en `@ojoalgasto/shared` aprobadas.
+  - 484 pruebas en 26 archivos del workspace móvil aprobadas al 100%.
   - `npm run typecheck` completado con 0 errores.
 
 ---
@@ -78,11 +78,11 @@ Test Files  1 passed (1)
 
 $ npm test --workspace=@ojoalgasto/shared
  Test Files  19 passed (19)
-      Tests  281 passed (281)
+      Tests  282 passed (282)
 
 $ npm test --workspace=movil
  Test Files  26 passed (26)
-      Tests  480 passed (480)
+      Tests  484 passed (484)
 
 $ npm run typecheck
  > typecheck (0 errores)
