@@ -19,7 +19,7 @@ from shared.sesiones import registrar_credenciales, sesion_activa
 from .models import Sesion, User
 
 
-def emitir_tokens(usuario, *, sesion=None, version=None, proveedor="local"):
+def emitir_tokens(usuario, *, sesion=None, version=None, proveedor=Sesion.Metodo.LOCAL):
     refresh = RefreshToken.for_user(usuario)
     refresh["session_version"] = version or registrar_credenciales(usuario)
     refresh["organizacion_id"] = str(usuario.organizacion_id) if usuario.organizacion_id else None
@@ -29,6 +29,8 @@ def emitir_tokens(usuario, *, sesion=None, version=None, proveedor="local"):
         sesion = Sesion.objects.create(
             usuario=usuario, refresh_jti=refresh["jti"],
             vence_en=datetime.fromtimestamp(refresh["exp"], tz=tz.utc),
+            iniciada_en=timezone.now(),
+            metodo=proveedor,
         )
     else:
         # La rotación no prolonga indefinidamente la sesión inicial.

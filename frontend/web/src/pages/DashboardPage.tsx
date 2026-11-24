@@ -1,6 +1,8 @@
 import { getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
+import { SeccionPresupuesto } from '../components/presupuesto/SeccionPresupuesto';
 import { TileCategorias } from '../components/Dashboard/TileCategorias';
 import { TileHub } from '../components/Dashboard/TileHub';
 import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
@@ -21,7 +23,15 @@ export function DashboardPage() {
   const { datos: catalogos } = useCatalogos();
   const { usuario } = useAuth();
   const [estado, setEstado] = useState<EstadoCarga>({ tipo: 'cargando' });
-  const [monedaElegida, setMonedaElegida] = useState('');
+  // La moneda vive en la URL (?moneda=), como el mes del presupuesto (?mes=): al recargar se queda en la misma.
+  const [parametros, setParametros] = useSearchParams();
+  const monedaElegida = parametros.get('moneda') ?? '';
+  const elegirMoneda = (codigo: string) =>
+    setParametros((actuales) => {
+      const siguientes = new URLSearchParams(actuales);
+      siguientes.set('moneda', codigo);
+      return siguientes;
+    });
 
   useEffect(() => {
     let cancelado = false;
@@ -64,7 +74,7 @@ export function DashboardPage() {
         <div className={styles.moneda}>
           <label htmlFor="moneda-panel">Moneda del panel</label>
           <select id="moneda-panel" value={moneda} disabled={monedas.length === 0}
-            onChange={(e) => setMonedaElegida(e.target.value)}>
+            onChange={(e) => elegirMoneda(e.target.value)}>
             {(monedas.length ? monedas : [moneda]).map((codigo) => (
               <option key={codigo} value={codigo}>{codigo} — {catalogos?.monedas.find((m) => m.codigo === codigo)?.nombre ?? codigo}</option>
             ))}
@@ -74,6 +84,7 @@ export function DashboardPage() {
         <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
             <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} />
+            <SeccionPresupuesto moneda={moneda} />
             <TileSalud suscripciones={delPanel} moneda={moneda} />
             <TileProximo suscripciones={delPanel} />
           </div>

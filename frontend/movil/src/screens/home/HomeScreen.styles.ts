@@ -65,6 +65,9 @@ export const styles = StyleSheet.create({
   botonAccion: {
     flex: 1,
   },
+  lista: {
+    flex: 1,
+  },
   listaContainer: {
     paddingBottom: 24,
   },
