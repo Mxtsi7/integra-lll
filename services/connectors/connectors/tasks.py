@@ -273,24 +273,13 @@ def procesar_importacion(importacion_id: str) -> dict:
         # contradice. Ahí no hay filas que rescatar.
         return _terminar_mal(importacion, exc.codigo, exc.mensaje)
 
-    # ── En el orden de la llave, no en el del archivo ──────────────────────
-    # Dos cartolas que se traslapan comparten cobros, y pueden traerlos en
-    # orden contrario. Si cada worker insertara en el orden de su archivo, uno
-    # tomaría X y esperaría Y mientras el otro tomó Y y espera X: PostgreSQL
-    # mata a uno y esa importación entera se revierte. Insertando todos en el
-    # MISMO orden —el de la llave única— el que llega segundo espera al
-    # primero y ya no hay ciclo. Dentro de una importación la organización y
-    # el origen son los mismos, así que ordenar por el identificador es
-    # ordenar por la llave completa. La ocurrencia ya se asignó al leer, en
-    # el orden del archivo, y ordenar después no la cambia. Lo encontró la
-    # revisión de #171.
-    filas = sorted(
-        (
-            CobroCandidato.desde_candidato(candidato, importacion=importacion)
-            for candidato in resultado.candidatos
-        ),
-        key=lambda fila: fila.identificador_origen,
-    )
+    # El orden de inserción lo fija `CobroCandidato.guardar_sin_duplicar` (el
+    # de la llave única, revisión de #171). La ocurrencia ya se asignó al
+    # leer, en el orden del archivo, y ordenar después no la cambia.
+    filas = [
+        CobroCandidato.desde_candidato(candidato, importacion=importacion)
+        for candidato in resultado.candidatos
+    ]
 
     # Los errores se arman en memoria con `anotar_error`, que es quien sabe
     # cuántos se guardan (`MAXIMO_ERRORES`) y cuántos se cuentan.
@@ -330,14 +319,14 @@ def procesar_importacion(importacion_id: str) -> dict:
             candidatos_detectados=len(filas),
         )
         if cerrada:
-            # `ignore_conflicts`: la unicidad de (organización, origen,
-            # identificador) es lo que hace idempotente a esta tarea. Un
-            # reintento choca con sus propias filas y no las duplica.
-            CobroCandidato.objects.bulk_create(filas, ignore_conflicts=True)
-            # Y se cuenta de verdad: `bulk_create` con `ignore_conflicts` no
-            # dice cuántas insertó, y en un reintento las de la corrida
-            # anterior ya estaban. Lo que la persona tiene que ver es cuántos
-            # candidatos EXISTEN, no cuántos se intentaron.
+            # La unicidad de (organización, origen, identificador) es lo que
+            # hace idempotente a esta tarea: un reintento choca con sus
+            # propias filas y no las duplica.
+            CobroCandidato.guardar_sin_duplicar(filas)
+            # Y se cuenta de verdad: insertar sin duplicar no dice cuántas
+            # insertó, y en un reintento las de la corrida anterior ya
+            # estaban. Lo que la persona tiene que ver es cuántos candidatos
+            # EXISTEN, no cuántos se intentaron.
             guardados = CobroCandidato.objects.filter(importacion=importacion).count()
             if guardados != len(filas):
                 Importacion.objects.filter(pk=importacion.pk).update(
