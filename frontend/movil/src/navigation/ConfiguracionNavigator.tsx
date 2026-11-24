@@ -11,6 +11,7 @@ import RestriccionesPremiumScreen from '../screens/configuracion/RestriccionesPr
 import EliminarCuentaScreen from '../screens/configuracion/EliminarCuentaScreen';
 import UsoRecolectoresScreen from '../screens/configuracion/UsoRecolectoresScreen';
 import AsociarPaqueteAndroidScreen from '../screens/configuracion/AsociarPaqueteAndroidScreen';
+import PreferenciasNotificacionScreen from '../screens/configuracion/PreferenciasNotificacionScreen';
 
 const Stack = createNativeStackNavigator<ConfiguracionStackParamList>();
 
@@ -73,6 +74,11 @@ export function ConfiguracionNavigator() {
         name="AsociarPaqueteAndroid"
         component={AsociarPaqueteAndroidScreen}
         options={{ title: 'Paquetes asociados' }}
+      />
+      <Stack.Screen
+        name="PreferenciasNotificacion"
+        component={PreferenciasNotificacionScreen}
+        options={{ title: 'Preferencias de notificación' }}
       />
     </Stack.Navigator>
   );
