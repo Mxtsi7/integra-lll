@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import {
   AuthError,
-  ELIMINAR_CUENTA_DISPONIBLE,
+  ELIMINAR_CUENTA_WEB_DISPONIBLE,
   eliminarCuenta,
   type DatosEliminacion,
   type ResultadoEliminacion,
@@ -27,7 +27,7 @@ export interface EliminarCuentaProps {
   className?: string;
   /** Por defecto eliminarCuenta() de shared → DELETE /api/usuarios/me/ (MX-07). Se inyecta en las pruebas. */
   onEliminar?: (datos: DatosEliminacion) => Promise<ResultadoEliminacion>;
-  /** false mientras MX-07 no esté integrado: el botón queda deshabilitado. Se inyecta en las pruebas. */
+  /** false deja el botón deshabilitado (apagado de emergencia). Se inyecta en las pruebas. */
   disponible?: boolean;
 }
 
@@ -39,11 +39,11 @@ export interface EliminarCuentaProps {
 export function EliminarCuenta({
   className = '',
   onEliminar = eliminarCuenta,
-  disponible = ELIMINAR_CUENTA_DISPONIBLE,
+  disponible = ELIMINAR_CUENTA_WEB_DISPONIBLE,
 }: EliminarCuentaProps) {
   const navigate = useNavigate();
   const toast = useToast();
-  const { cerrarSesionLocal } = useAuth();
+  const { cerrarSesionLocal, capturarSesion } = useAuth();
 
   const [abierto, setAbierto] = useState(false);
   const [password, setPassword] = useState('');
@@ -78,6 +78,9 @@ export function EliminarCuenta({
     setEnviando(true);
     setErrorPassword(null);
     setErrorGeneral(null);
+    // La sesión que pidió el borrado: si mientras esperábamos cerró sesión o entró otra
+    // cuenta, la respuesta ya no es de la sesión actual y no debe tocarla.
+    const sesion = capturarSesion();
     try {
       const datos: DatosEliminacion = {
         password,
@@ -85,11 +88,15 @@ export function EliminarCuenta({
         ...(requiereOrg ? { confirmacion_organizacion: PALABRA } : {}),
       };
       const resultado = await onEliminar(datos);
-      // El backend ya revocó las sesiones: se borra la local sin volver a llamarlo.
-      cerrarSesionLocal();
+      // El backend ya revocó las sesiones de la cuenta borrada. Si la sesión de hoy es otra
+      // (otra cuenta entró mientras esperábamos), cerrarSesionLocal(sesion) no hace nada y
+      // no mostramos aviso ni redirigimos: no es la sesión de esta respuesta.
+      if (!cerrarSesionLocal(sesion)) return;
       toast.exito(resultado.estado === 'pendiente' ? MENSAJE_PENDIENTE : MENSAJE_ELIMINADA);
       navigate('/login', { replace: true });
     } catch (err: unknown) {
+      // Un error de una sesión anterior no se muestra en la pantalla de la actual.
+      if (sesion !== capturarSesion()) return;
       // Ningún error cierra la sesión ni da la cuenta por eliminada.
       if (err instanceof AuthError && err.status === 409) {
         setRequiereOrg(true);
