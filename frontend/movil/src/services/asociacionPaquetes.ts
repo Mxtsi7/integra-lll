@@ -16,7 +16,7 @@ interface DependenciasAsociacion {
 
 const PATRON_PAQUETE_ANDROID = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$/;
 
-function validarPaqueteAndroid(paquete: string): string {
+export function validarPaqueteAndroid(paquete: string): string {
   const paqueteNormalizado = paquete.trim();
   if (paqueteNormalizado.length > 255 || !PATRON_PAQUETE_ANDROID.test(paqueteNormalizado)) {
     throw new RangeError('Escribe un nombre de paquete Android válido, por ejemplo com.ejemplo.app.');
