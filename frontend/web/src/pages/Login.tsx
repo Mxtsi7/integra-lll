@@ -8,13 +8,14 @@ import { destinoTrasLogin } from "../components/RutaPrivada";
 import { PantallaAcceso } from "../components/layout/PantallaAcceso";
 import { CampoContrasena, CampoTexto } from "../components/ui/Campo";
 import { Boton } from "../components/ui/Boton";
+import { InicioConGoogle } from "../components/Acceso/InicioConGoogle";
 import styles from "./Acceso.module.css";
 
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
-  const { iniciarSesion } = useAuth();
+  const { iniciarSesion, capturarSesion } = useAuth();
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,14 +25,21 @@ export default function Login() {
   async function handleSubmit(evento: FormEvent) {
     evento.preventDefault();
     setLoading(true);
+    // Hay dos formas de entrar (contraseña y Google). Si mientras esta esperaba
+    // ya entró una sesión por otro lado, su respuesta no se aplica: no pisa a
+    // la que ya está (revisión de #212).
+    const sesion = capturarSesion();
     try {
       const { access_token, refresh_token } = await login({ correo, password });
+      if (sesion !== capturarSesion()) return;
       // Pasa por el AuthContext para que la app sepa al instante que hay
       // sesión (si no, <RutaPrivada> seguiría viendo "anonimo").
       iniciarSesion({ access_token, refresh_token });
       // Vuelve a la página privada que se quiso abrir sin sesión, o al panel.
       navigate(destinoTrasLogin(location), { replace: true });
     } catch (err) {
+      // Un fallo de un intento que ya no vale no se avisa: la sesión ya está abierta.
+      if (sesion !== capturarSesion()) return;
       if (err instanceof AuthError && err.status === 401) {
         toast.error("Usuario o contraseña inválidos");
       } else if (err instanceof AuthError) {
@@ -92,6 +100,14 @@ export default function Login() {
           {loading ? "Ingresando…" : "Iniciar sesión"}
         </Boton>
       </form>
+
+      {/* S3-AN-07: acceso con Google (solo identidad, no lee Gmail). */}
+      <InicioConGoogle
+        alIniciarSesion={(tokens) => {
+          iniciarSesion(tokens);
+          navigate(destinoTrasLogin(location), { replace: true });
+        }}
+      />
     </PantallaAcceso>
   );
 }

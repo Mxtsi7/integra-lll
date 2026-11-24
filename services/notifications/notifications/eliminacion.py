@@ -7,6 +7,8 @@ from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView, validar_solicitud_eliminacion
 from .models import (
     Alerta,
+    DireccionCorreo,
+    EntregaAlerta,
     EventoRecibido,
     PreferenciaNotificacion,
     SuscripcionVigilada,
@@ -19,11 +21,19 @@ class LimpiezaNotificationsView(LimpiezaOrganizacionView):
     # TODOS los modelos de tenant del servicio, incluida la proyección de
     # FE-17/18: `SuscripcionVigilada` guarda nombre del servicio, monto y
     # fecha de cobro, así que dejarla fuera era conservar datos personales
-    # después de confirmar el borrado. Los cuatro son `ModeloTenant` con UUID
-    # suelto y sin FK entre ellos, así que el orden hijo/padre no aplica acá;
-    # `test_eliminacion_proyeccion` exige que la lista cubra los cuatro para
-    # que el próximo modelo no se olvide igual.
-    modelos = (Alerta, PreferenciaNotificacion, SuscripcionVigilada, UsuarioEliminado, EventoRecibido)
+    # después de confirmar el borrado. `test_eliminacion_proyeccion` exige
+    # que la lista cubra todos para que el próximo modelo no se olvide igual.
+    #
+    # El orden importa desde S3-FE-21:
+    # · `EntregaAlerta` antes que `Alerta`, su padre por FK;
+    # · `PreferenciaNotificacion` antes que `EntregaAlerta`, porque el
+    #   despachador bloquea en ese orden (preferencia, después entrega). Con
+    #   el orden contrario, una limpieza y un reclamo de la misma persona
+    #   podían esperarse el uno al otro.
+    modelos = (
+        PreferenciaNotificacion, EntregaAlerta, DireccionCorreo, Alerta,
+        SuscripcionVigilada, UsuarioEliminado, EventoRecibido,
+    )
 
 
 class LimpiezaUsuarioNotificationsView(APIView):
@@ -43,7 +53,11 @@ class LimpiezaUsuarioNotificationsView(APIView):
             UsuarioEliminado.objects.get_or_create(
                 organizacion_id=organizacion_id, usuario_id=str(usuario_id),
             )
-            PreferenciaNotificacion.objects.filter(
-                organizacion_id=organizacion_id, usuario_id=str(usuario_id),
-            ).delete()
+            # Mismo orden que el despachador: preferencias y después entregas.
+            # Las entregas guardan la dirección usada (`destino`), y
+            # `DireccionCorreo` es el correo mismo: datos de la persona.
+            de_la_persona = dict(organizacion_id=organizacion_id, usuario_id=str(usuario_id))
+            PreferenciaNotificacion.objects.filter(**de_la_persona).delete()
+            EntregaAlerta.objects.filter(**de_la_persona).delete()
+            DireccionCorreo.objects.filter(**de_la_persona).delete()
         return Response(status=204)

@@ -17,6 +17,10 @@ export {
   type SuscripcionesPaginadas,
   esOrdenSuscripciones,
   ORDENES_SUSCRIPCIONES,
+  ORDEN_PREDETERMINADO,
+  descomponerOrden,
+  type CampoOrdenSuscripciones,
+  type DireccionOrden,
   type ConsultaSuscripciones,
   type OrdenSuscripciones,
   USAR_DATOS_DE_EJEMPLO,
@@ -76,3 +80,4 @@ export type {
   UUID,
 } from './contracts/uso-recolectores.dto';
 export * from './api/resumenPanel';
+export * from './api/cambioCorreo';
