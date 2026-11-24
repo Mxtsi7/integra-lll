@@ -205,4 +205,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "connectors.tasks.rescatar_importaciones_estancadas",
         "schedule": env.float("IMPORTACION_RESCATE_SEGUNDOS", default=300.0),
     },
+    # S3-FE-18/20: ver `connectors/lectura_programada.py`. Cada 15 minutos:
+    # una cuenta con mucho correo se lee en varias tareas, y cada una deja
+    # el cursor donde llegó.
+    "lectura-de-correo": {
+        "task": "connectors.tasks.programar_lecturas_de_correo",
+        "schedule": env.float("CONECTORES_LECTURA_CORREO_SEGUNDOS", default=900.0),
+    },
 }
