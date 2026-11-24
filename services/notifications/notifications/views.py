@@ -70,7 +70,10 @@ class AlertaViewSet(SoloLecturaTenantViewSet):
     genérico que dejaría inventar alertas.
     """
 
-    queryset = Alerta.objects.all()
+    # S3-FE-22: un aviso obsoleto no se muestra ni se cuenta. Va en el
+    # queryset base para que el listado, el detalle, el contador y "leer
+    # todas" digan lo mismo.
+    queryset = Alerta.objects.filter(invalidada_en__isnull=True)
     serializer_class = AlertaSerializer
     pagination_class = AlertaPagination
 
@@ -131,7 +134,7 @@ class AlertaViewSet(SoloLecturaTenantViewSet):
         organizacion = getattr(self.request, "organizacion_id", None)
         if not organizacion:
             raise PermissionDenied("Falta el contexto de organización")
-        return Alerta.objects.filter(organizacion_id=organizacion)
+        return Alerta.objects.filter(organizacion_id=organizacion, invalidada_en__isnull=True)
 
     @action(detail=False, methods=["get"], url_path="contador")
     def contador(self, request):

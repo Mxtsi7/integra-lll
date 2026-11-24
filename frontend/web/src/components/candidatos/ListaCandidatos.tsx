@@ -1,12 +1,13 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { formatearFecha, formatearMonto, TAMANO_PAGINA_CANDIDATOS, type CandidatoDetectado } from '@ojoalgasto/shared';
+import { TAMANO_PAGINA_CANDIDATOS, type CandidatoDetectado } from '@ojoalgasto/shared';
 import { Boton } from '../ui/Boton';
 import { ErrorConReintento } from '../ui/ErrorConReintento';
 import { Modal } from '../ui/Modal';
 import type { CargaCandidatos } from './cargaCandidatos';
 import type { AccionDeCandidato, DecisionesDeCandidatos, ResultadoDecisiones } from './decisionesCandidatos';
 import styles from './ListaCandidatos.module.css';
+import { fechaParaLeer, fraseDeLaFecha, importeDelCandidato, importeParaLeer, procedenciaLegible } from './presentacionDeCandidato';
 import { sePuedeDecidir, type SeleccionDeCandidatos } from './seleccionCandidatos';
 
 interface ListaCandidatosProps {
@@ -109,6 +110,7 @@ function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado
   const sinProveedor = candidato.servicio === null;
   const nombre = candidato.servicio ?? (candidato.servicio_texto || 'Cobro sin descripción');
   const pendienteDeAplicar = candidato.aplicacion === 'pendiente';
+  const importe = importeDelCandidato(candidato);
   return (
     <li className={styles.item}>
       {seleccion &&
@@ -118,7 +120,7 @@ function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado
             className={styles.casilla}
             checked={seleccion.seleccionados.has(candidato.id)}
             onChange={() => seleccion.alAlternar(candidato.id)}
-            aria-label={`Seleccionar ${nombre}, ${importeLegible(candidato)}, ${formatearFecha(candidato.fecha)}`}
+            aria-label={`Seleccionar ${nombre}, ${importeParaLeer(importe)}, ${fechaParaLeer(candidato.fecha)}`}
           />
         ) : (
           // Un cobro ya resuelto no tiene casilla; el hueco mantiene alineados a los demás.
@@ -127,15 +129,24 @@ function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado
       <div className={styles.contenido}>
         <div className={styles.cabecera}>
           <span className={styles.nombre}>{nombre}</span>
-          <span className={styles.importe}>{importeLegible(candidato)}</span>
+          <span className={styles.monto}>
+            <span className={styles.importe}>{importe.texto}</span>
+            {importe.moneda !== null && (
+              <>
+                {' '}
+                <span className={styles.moneda}>{importe.moneda}</span>
+              </>
+            )}
+          </span>
         </div>
         {sinProveedor && (
           <p className={styles.detalle}>
             {AVISO_DE_PROVEEDOR.get(candidato.servicio_resultado) ?? AVISO_DE_PROVEEDOR_GENERAL}
           </p>
         )}
+        <p className={styles.detalle}>{procedenciaLegible(candidato)}</p>
         <p className={styles.detalle}>
-          {candidato.origen_legible} · {formatearFecha(candidato.fecha)} · {candidato.tipo_mensaje_legible}
+          {[candidato.tipo_mensaje_legible, fraseDeLaFecha(candidato)].filter((parte) => parte !== '').join(' · ')}
         </p>
         <p className={styles.estado}>
           {candidato.estado_legible}
@@ -329,28 +340,6 @@ function textoDelConteo(cuantos: number, sinProveedor: number): string {
   if (sinProveedor === 0) return elegidos;
   const aviso = sinProveedor === 1 ? '1 no se puede confirmar' : `${sinProveedor} no se pueden confirmar`;
   return `${elegidos} · ${aviso}: proveedor sin reconocer`;
-}
-
-/** Más dígitos que estos no caben en un número sin perder precisión. */
-const MAXIMO_DIGITOS_EXACTOS = 15;
-
-/**
- * El importe como texto que llega de la API. Con un número y una moneda válidos
- * se da formato ("$5.900"); si no, se muestra tal cual. Un importe con más dígitos
- * que un número exacto se muestra también tal cual: formatearlo como número
- * inventaría los dígitos que se perdieron.
- */
-function importeLegible({ importe, moneda }: CandidatoDetectado): string {
-  const monto = Number(importe);
-  const crudo = `${importe} ${moneda}`.trim();
-  const digitos = importe.replace(/\D/g, '').length;
-  if (importe.trim() === '' || !Number.isFinite(monto) || digitos > MAXIMO_DIGITOS_EXACTOS) return crudo;
-  try {
-    return formatearMonto(monto, moneda);
-  } catch {
-    // Intl rechaza un código de moneda que no existe: en ese caso se muestra el dato crudo.
-    return crudo;
-  }
 }
 
 interface PaginacionCandidatosProps {
