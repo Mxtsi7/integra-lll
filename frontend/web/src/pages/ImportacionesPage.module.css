@@ -119,6 +119,13 @@
   margin: 0;
 }
 
+/* ---- Cobros encontrados de la importación (S3-CH-06) ---- */
+
+.cobros {
+  padding-top: 12px;
+  border-top: 1px solid var(--vidrio-borde);
+}
+
 /* ---- Errores por fila ---- */
 
 .reconexion {

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ErrorDeApi,
+  getCandidatos,
   getImportacion,
   getMisImportaciones,
   type Importacion,
@@ -12,16 +13,19 @@ import {
 } from "@ojoalgasto/shared";
 import { AuthProvider } from "../context/AuthContext";
 import { ToastProvider } from "../context/ToastContext";
+import { candidatoDePrueba, paginaDeCandidatosDePrueba } from "../test/candidatosDePrueba";
+import { MENSAJE_SIN_RED } from "../utils/mensajes";
 import { ImportacionPage } from "./ImportacionPage";
 import { ImportacionesPage } from "./ImportacionesPage";
 
 // Solo se simula la red; las páginas y el polling son reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getImportacion: vi.fn(), getMisImportaciones: vi.fn() };
+  return { ...real, getCandidatos: vi.fn(), getImportacion: vi.fn(), getMisImportaciones: vi.fn() };
 });
 const getMock = vi.mocked(getImportacion);
 const listarMock = vi.mocked(getMisImportaciones);
+const candidatosMock = vi.mocked(getCandidatos);
 
 const BASE: Importacion = {
   id: "imp-1",
@@ -75,6 +79,7 @@ beforeEach(() => {
   localStorage.clear();
   getMock.mockReset();
   listarMock.mockReset();
+  candidatosMock.mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
 });
 
 afterEach(() => {
@@ -138,7 +143,7 @@ describe("Progreso de una importación (CH-27)", () => {
     expect(screen.getByText(/Confirmaste estos cobros el/)).toBeInTheDocument();
     cleanup();
 
-    getMock.mockResolvedValueOnce({ ...COMPLETADA, candidatos_detectados: 0 });
+    getMock.mockResolvedValueOnce({ ...COMPLETADA, candidatos_detectados: 0, filas_totales: 0 });
     await montar();
     expect(screen.getByText("No encontramos cobros que parezcan suscripciones.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revisar cobros encontrados" })).not.toBeInTheDocument();
@@ -247,5 +252,166 @@ describe("Tus importaciones (CH-27)", () => {
     const enlaces = screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("/importaciones/"));
     expect(enlaces).toHaveLength(11);
     expect(screen.queryByRole("button", { name: "Ver más" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Cobros encontrados y problemas de un archivo (S3-CH-06)", () => {
+  const MIXTA: Importacion = {
+    ...COMPLETADA,
+    candidatos_detectados: 2,
+    errores: [
+      { codigo: "fecha_invalida", mensaje: "La fecha no tiene el formato AAAA-MM-DD.", fila: 3 },
+      { codigo: "monto_invalido", mensaje: "El monto no es un número.", fila: 8 },
+    ],
+    errores_totales: 2,
+  };
+  const SPOTIFY = candidatoDePrueba({ id: "c-1", servicio: "Spotify" });
+  const NETFLIX = candidatoDePrueba({ id: "c-2", servicio: "Netflix", importe: "8990.00" });
+  const conLosCobros = () =>
+    candidatosMock.mockResolvedValue(paginaDeCandidatosDePrueba({ count: 2, results: [SPOTIFY, NETFLIX] }));
+  const cobros = () => screen.getByRole("region", { name: "Cobros encontrados" });
+
+  /** La importación llega primero y los cobros después: son dos consultas. */
+  async function montarYEsperarLosCobros() {
+    await montar();
+    await act(async () => {});
+  }
+
+  it("un archivo mixto muestra los cobros y los problemas por separado, cada uno con lo suyo", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(within(cobros()).getByText("Spotify")).toBeInTheDocument();
+    expect(within(cobros()).getByText("Netflix")).toBeInTheDocument();
+    expect(within(cobros()).queryByText("Fila 3")).not.toBeInTheDocument();
+
+    const problemas = screen.getByRole("heading", { name: "2 problemas" }).parentElement as HTMLElement;
+    expect(within(problemas).getByText("Fila 3")).toBeInTheDocument();
+    expect(within(problemas).getByText("Fila 8")).toBeInTheDocument();
+    expect(within(problemas).queryByText("Spotify")).not.toBeInTheDocument();
+  });
+
+  it("los cobros van antes que los problemas y los dos se ven a la vez", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    const encabezadoDeCobros = screen.getByRole("heading", { name: "Cobros encontrados" });
+    const encabezadoDeProblemas = screen.getByRole("heading", { name: "2 problemas" });
+    expect(encabezadoDeCobros.compareDocumentPosition(encabezadoDeProblemas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("pide solo los cobros de esta importación", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(candidatosMock).toHaveBeenCalledTimes(1);
+    expect(candidatosMock).toHaveBeenCalledWith(expect.objectContaining({ importacion: "imp-1", pagina: 1 }));
+  });
+
+  it("pasar de página pide la siguiente de esta misma importación", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    candidatosMock.mockResolvedValue(paginaDeCandidatosDePrueba({ count: 12, next: "?page=2", results: [SPOTIFY] }));
+    await montarYEsperarLosCobros();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Siguiente/ })));
+
+    expect(candidatosMock).toHaveBeenLastCalledWith(expect.objectContaining({ importacion: "imp-1", pagina: 2 }));
+  });
+
+  it("si no se leyó ningún cobro no hay lista ni se pide, y los problemas se ven igual", async () => {
+    getMock.mockResolvedValue({ ...MIXTA, candidatos_detectados: 0 });
+    await montarYEsperarLosCobros();
+
+    expect(candidatosMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Cobros encontrados" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "2 problemas" })).toBeInTheDocument();
+  });
+
+  it("una reimportación de 10 filas con 2 cobros nuevos y sin errores dice que 8 filas ya estaban importadas", async () => {
+    getMock.mockResolvedValue({ ...COMPLETADA, filas_totales: 10, candidatos_detectados: 2, errores: [], errores_totales: 0 });
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText("8 filas ya estaban importadas de antes: no se repiten.")).toBeInTheDocument();
+  });
+
+  it("subir dos veces la misma cartola de 10 filas no dice «No encontramos cobros»: dice que las 10 ya estaban", async () => {
+    getMock.mockResolvedValue({ ...COMPLETADA, filas_totales: 10, candidatos_detectados: 0, errores: [], errores_totales: 0 });
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText("10 filas ya estaban importadas de antes: no se repiten.")).toBeInTheDocument();
+    expect(screen.queryByText(/No encontramos cobros/)).not.toBeInTheDocument();
+  });
+
+  it("mientras la importación sigue en curso no se piden los cobros", async () => {
+    getMock.mockResolvedValue({ ...BASE, candidatos_detectados: 3 });
+    await montarYEsperarLosCobros();
+
+    expect(candidatosMock).not.toHaveBeenCalled();
+  });
+
+  it("la lista es de solo lectura: sin casillas ni botones para confirmar o rechazar, y «Revisar cobros encontrados» sigue deshabilitado", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(Confirmar|Rechazar)/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar cobros encontrados" })).toBeDisabled();
+  });
+
+  it("de un archivo explica cómo corregir y volver a subir", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText(/Corrige estas filas en tu archivo y vuelve a subirlo/)).toBeInTheDocument();
+    expect(screen.getByText(/un cobro que ya se encontró no se duplica/)).toBeInTheDocument();
+  });
+
+  it("de un correo no hay nada que corregir ni volver a subir", async () => {
+    getMock.mockResolvedValue({ ...MIXTA, origen: "correo", origen_legible: "Lectura de correo", nombre_archivo: "", errores_totales: 40 });
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByRole("heading", { name: "40 problemas" })).toBeInTheDocument();
+    expect(screen.queryByText(/vuelve a subirlo/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Aquí solo ves las primeras filas/)).not.toBeInTheDocument();
+  });
+
+  it("cuando solo se guardan las primeras filas con problemas lo dice y explica cómo ver las que faltan", async () => {
+    getMock.mockResolvedValue({ ...MIXTA, errores_totales: 45 });
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.getByText("Y 43 más.")).toBeInTheDocument();
+    expect(screen.getByText(/Aquí solo ves las primeras filas con problemas/)).toBeInTheDocument();
+  });
+
+  it("si se ven todos los problemas no dice que falten", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    conLosCobros();
+    await montarYEsperarLosCobros();
+
+    expect(screen.queryByText(/Aquí solo ves las primeras filas/)).not.toBeInTheDocument();
+  });
+
+  it("si los cobros no cargan, los problemas se siguen viendo y se puede reintentar solo la lista", async () => {
+    getMock.mockResolvedValue(MIXTA);
+    candidatosMock
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(paginaDeCandidatosDePrueba({ count: 1, results: [SPOTIFY] }));
+    await montarYEsperarLosCobros();
+
+    expect(within(cobros()).getByRole("alert")).toHaveTextContent(MENSAJE_SIN_RED);
+    expect(screen.getByRole("heading", { name: "2 problemas" })).toBeInTheDocument();
+
+    await act(async () => fireEvent.click(within(cobros()).getByRole("button", { name: "Reintentar" })));
+
+    expect(within(cobros()).getByText("Spotify")).toBeInTheDocument();
+    expect(getMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -8,7 +8,12 @@ import {
   View,
 } from 'react-native';
 import {
+  descomponerOrden,
   esFechaReal,
+  ORDENES_SUSCRIPCIONES,
+  ORDEN_PREDETERMINADO,
+  type CampoOrdenSuscripciones,
+  type DireccionOrden,
   type EstadoSuscripcion,
   type OrdenSuscripciones,
 } from '@ojoalgasto/shared';
@@ -27,56 +32,49 @@ export const OPCIONES_FILTRO_ESTADO: { valor: FiltroEstado; etiqueta: string }[]
 
 export interface OpcionOrdenConfig {
   valor: OrdenSuscripciones;
-  campo: 'fecha_proximo_cobro' | 'nombre' | 'monto';
-  direccion: 'asc' | 'desc';
+  campo: CampoOrdenSuscripciones;
+  direccion: DireccionOrden;
   etiqueta: string;
   etiquetaCorta: string;
 }
 
-export const OPCIONES_ORDEN: OpcionOrdenConfig[] = [
-  {
-    valor: 'fecha_proximo_cobro',
-    campo: 'fecha_proximo_cobro',
-    direccion: 'asc',
+const DESCRIPCIONES_ORDEN: Record<
+  OrdenSuscripciones,
+  { etiqueta: string; etiquetaCorta: string }
+> = {
+  fecha_proximo_cobro: {
     etiqueta: 'Próximo cobro: más cercano primero',
     etiquetaCorta: 'Cobro ↑ (más cercano)',
   },
-  {
-    valor: '-fecha_proximo_cobro',
-    campo: 'fecha_proximo_cobro',
-    direccion: 'desc',
+  '-fecha_proximo_cobro': {
     etiqueta: 'Próximo cobro: más lejano primero',
     etiquetaCorta: 'Cobro ↓ (más lejano)',
   },
-  {
-    valor: 'nombre',
-    campo: 'nombre',
-    direccion: 'asc',
+  nombre: {
     etiqueta: 'Nombre: de la A a la Z',
     etiquetaCorta: 'Nombre (A-Z)',
   },
-  {
-    valor: '-nombre',
-    campo: 'nombre',
-    direccion: 'desc',
+  '-nombre': {
     etiqueta: 'Nombre: de la Z a la A',
     etiquetaCorta: 'Nombre (Z-A)',
   },
-  {
-    valor: 'monto',
-    campo: 'monto',
-    direccion: 'asc',
+  monto: {
     etiqueta: 'Monto: de menor a mayor',
     etiquetaCorta: 'Monto (menor a mayor)',
   },
-  {
-    valor: '-monto',
-    campo: 'monto',
-    direccion: 'desc',
+  '-monto': {
     etiqueta: 'Monto: de mayor a menor',
     etiquetaCorta: 'Monto (mayor a menor)',
   },
-];
+};
+
+export const OPCIONES_ORDEN: OpcionOrdenConfig[] = ORDENES_SUSCRIPCIONES.map(
+  (valor) => ({
+    valor,
+    ...descomponerOrden(valor),
+    ...DESCRIPCIONES_ORDEN[valor],
+  }),
+);
 
 export interface FiltrosSuscripcionesMovilProps {
   filtroEstado: FiltroEstado;
