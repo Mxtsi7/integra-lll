@@ -203,9 +203,7 @@ export default function Register() {
               aria-describedby={errores.aceptaDatos ? "acepta-datos-error" : undefined}
             />
             <span>
-              Acepto los <Link to="/terminos" target="_blank" rel="noopener noreferrer">
-                términos y condiciones
-              </Link> y el uso de mis datos
+              Acepto los <Link to="/terminos">términos y condiciones</Link> y el uso de mis datos
               para calcular mi gasto.
             </span>
           </label>

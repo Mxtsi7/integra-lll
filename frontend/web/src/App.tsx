@@ -32,7 +32,6 @@ import { RecuperarContrasenaPage } from './pages/RecuperarContrasenaPage';
 import { RestablecerContrasenaPage } from './pages/RestablecerContrasenaPage';
 import { RecomendacionesPage } from './pages/RecomendacionesPage';
 import { InformesPage } from './pages/InformesPage';
-import { TerminosPage } from './pages/TerminosPage';
 import { HistorialAccesosPage } from './pages/HistorialAccesosPage';
 import Login from './pages/Login';
 import Register from './pages/register';
@@ -69,8 +68,6 @@ export function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          {/* S3-AN-08: pública; el registro la enlaza antes de que exista la cuenta. */}
-          <Route path="/terminos" element={<TerminosPage />} />
 
           {/* Con sesión activa, /login y /registro mandan al panel. */}
           <Route element={<SoloInvitados />}>
