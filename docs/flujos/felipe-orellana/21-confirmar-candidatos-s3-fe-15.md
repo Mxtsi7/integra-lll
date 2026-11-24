@@ -163,8 +163,10 @@ suscripción llamada `PAYPAL *SPOTIFY` no es un dato: es basura con forma de
 dato, y una vez creada queda en el presupuesto de la persona. El 409 dice si
 fue `ambiguo` o `desconocido`, para que se pueda arreglar.
 
-Falta la tarjeta que permita asignar el proveedor a mano; hoy el camino es
-corregir el catálogo de FE-12 y volver a importar.
+Falta la tarjeta que permita asignar el proveedor a mano. Volver a importar
+no sirve: desde S3-FE-17 el identificador depende del cobro, así que la fila
+ya guardada se conserva tal cual (con `servicio` vacío) y no se vuelve a
+proponer, aunque el catálogo de FE-12 ya reconozca el proveedor.
 
 **Repetir la confirmación no deja dos órdenes.** Dos órdenes son dos cobros.
 La guarda va en el `WHERE`: dos peticiones simultáneas leen las dos
