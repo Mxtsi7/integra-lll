@@ -41,6 +41,7 @@ estado real contrastado con `main`.
 | **Sprint 3 · S3-FE-08** Recibo pagado, aviso de cobro futuro o pago fallido: un aviso o un fallo nunca sale como cobro | Hecho, 32 pruebas | [28-tipo-de-aviso-s3-fe-08.md](28-tipo-de-aviso-s3-fe-08.md) |
 | **Sprint 3 · S3-FE-03 y S3-FE-05** Guardar hasta dónde se leyó cada cuenta de Gmail y Outlook: corridas con tope, cursor junto con lo procesado, un solo reinicio por corrida y cómo sacar una cuenta detenida | Hecho, 39 pruebas más 2 con dos conexiones a PostgreSQL | [29-avance-de-lectura-s3-fe-03-05.md](29-avance-de-lectura-s3-fe-03-05.md) |
 | **Sprint 3 · S3-FE-21** Mandar las alertas por correo y anotar entrega o error: evidencia del proveedor, reintentos acotados, y descanso y cuota del push | Implementado, 126 pruebas (6 con dos conexiones a PostgreSQL). No se cierra: falta acordar de dónde sale la dirección de correo (el catálogo choca con MX-21), programar el despachador y una corrida con el Gmail real | [31-envio-de-alertas-s3-fe-21.md](31-envio-de-alertas-s3-fe-21.md) |
+| **Sprint 3 · S3-FE-09** Candidatos de correo con la evidencia del mensaje: lo que no está confirmado queda como error, sin duplicar y sin confirmar nada | Hecho, 65 pruebas (2 con dos conexiones a PostgreSQL) y 36 más en S3-FE-07 y Outlook por la revisión; la lectura periódica que la llama va con S3-FE-18 y S3-FE-20 | [30-candidatos-de-correo-s3-fe-09.md](30-candidatos-de-correo-s3-fe-09.md) |
 
 Fuera de la planilla, pero del mismo sprint y míos: el CI
 (`.github/workflows/ci.yml`), el despliegue en Kubernetes (`k8s/`, con su

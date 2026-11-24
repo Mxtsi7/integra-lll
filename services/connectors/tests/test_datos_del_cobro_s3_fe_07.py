@@ -17,10 +17,21 @@ from decimal import Decimal
 
 import pytest
 
+from connectors import tipo_de_aviso
 from connectors.datos_del_cobro import AMBIGUO, AUSENTE, CONFIRMADO, SUPUESTO, datos_de, leer_numero
 from connectors.lectura_correo import MensajeCorreo
 
 RECIBIDO = datetime(2026, 10, 3, 12, 0, tzinfo=tz.utc)
+
+#: Las frases con que S3-FE-08 reconoce un cobro anunciado. Fuera quedan los
+#: «recordatorio»: no dicen de qué es la fecha que traen, que puede ser la
+#: del propio aviso («Recordatorio de pago — 28 de octubre de 2026»).
+FRASES_QUE_ANUNCIAN_UN_COBRO = sorted(
+    frase
+    for tipo in (tipo_de_aviso.AVISO_DE_COBRO, tipo_de_aviso._PROXIMO_CICLO)
+    for frase in tipo_de_aviso.EVIDENCIA[tipo]
+    if "recordatorio" not in frase and "reminder" not in frase
+)
 
 
 def datos(texto, asunto=""):
@@ -269,6 +280,38 @@ class TestFechaDelProximoCiclo:
     def test_sin_fecha_del_proximo_cobro_queda_ausente(self):
         assert datos("Total: CLP 9.990").fecha_proximo_cobro.estado == AUSENTE
 
+    @pytest.mark.parametrize("frase", FRASES_QUE_ANUNCIAN_UN_COBRO)
+    def test_cada_frase_de_aviso_de_s3_fe_08_marca_su_fecha(self, frase):
+        """S3-FE-09 toma la fecha de un aviso SOLO de `fecha_proximo_cobro`:
+        si FE-08 reconoce el aviso por una frase que FE-07 no marca, el aviso
+        se queda sin fecha (revisión de S3-FE-09)."""
+        d = datos(f"{frase.capitalize()} el 2026-11-05")
+        assert (d.fecha_proximo_cobro.valor, d.fecha_proximo_cobro.estado) == (date(2026, 11, 5), CONFIRMADO)
+        assert d.fecha.estado == SUPUESTO
+
+    @pytest.mark.parametrize("texto", [
+        "Lo intentaremos de nuevo el 5 de noviembre de 2026.",
+        "Volveremos a intentar el cobro el 5 de noviembre de 2026.",
+        "Reintentaremos el pago el 5 de noviembre de 2026.",
+        "Próximo intento: 5 de noviembre de 2026",
+        "We'll retry your payment on November 5, 2026",
+    ])
+    def test_el_reintento_de_un_pago_fallido_no_es_la_fecha_del_intento(self, texto):
+        d = datos("No pudimos procesar tu pago de CLP 9.990.\n" + texto)
+        assert d.fecha.estado == SUPUESTO
+        assert d.fecha_proximo_cobro.valor == date(2026, 11, 5)
+
+
+class TestElDiaDeRecepcion:
+    def test_es_el_de_chile_y_no_el_de_utc(self, settings):
+        """02:30 UTC del 1 de noviembre son las 23:30 del 31 en Santiago."""
+        settings.TIME_ZONE = "America/Santiago"
+        d = datos_de(MensajeCorreo(
+            cuenta_id=uuid.uuid4(), id_mensaje="1", id_hilo="", remitente="x", asunto="", texto="Total: CLP 9.990",
+            recibido_en=datetime(2026, 11, 1, 2, 30, tzinfo=tz.utc),
+        ))
+        assert (d.fecha.valor, d.fecha.estado) == (date(2026, 10, 31), SUPUESTO)
+
 
 class TestSignoPesosJuntoAOtraMoneda:
     @pytest.mark.parametrize("texto", ["Total: USD 10\nTotal: $10", "Total: USD 10\nTotal: $12"])
@@ -290,3 +333,42 @@ class TestParentesisConCodigoDespues:
 
     def test_el_fragmento_es_el_de_la_linea(self):
         assert datos("Total: ($9.990 CLP)").importe.fragmento == "Total: ($9.990 CLP)"
+
+
+class TestElFragmentoEsUnaVentana:
+    """El fragmento es para la evidencia de S3-FE-09: el dato y un poco de lo
+    que lo rodea, nunca la línea. Un HTML de un párrafo es una sola línea, y
+    antes el fragmento eran sus primeros 200 caracteres (revisión de S3-FE-09)."""
+
+    PARRAFO = ("Hola Juan Pérez, gracias por tu pago de CLP 9.990 del 1 de octubre de 2026 "
+               "con la tarjeta terminada en 4242.")
+
+    def test_una_linea_corta_queda_entera(self):
+        d = datos("Fecha de cobro: 1 de octubre de 2026\nTotal: CLP 9.990")
+        assert (d.importe.fragmento, d.fecha.fragmento) == ("Total: CLP 9.990", "Fecha de cobro: 1 de octubre de 2026")
+
+    def test_en_un_parrafo_no_cruza_el_inciso_ni_corta_palabras(self):
+        d = datos(self.PARRAFO)
+        assert d.importe.fragmento == "gracias por tu pago de CLP 9.990 del 1 de octubre de"
+        assert d.fecha.fragmento == "por tu pago de CLP 9.990 del 1 de octubre de 2026 con la tarjeta"
+
+    def test_no_cruza_el_inciso_que_viene_despues_del_dato(self):
+        d = datos("Total: CLP 9.990, RUT 12.345.678-9; Fecha de cobro: 2026-10-01. Juan Pérez")
+        assert d.importe.fragmento == "Total: CLP 9.990"
+        assert d.fecha.fragmento == "Fecha de cobro: 2026-10-01"
+
+    def test_el_dato_siempre_esta_aunque_venga_al_final_de_una_linea_larga(self):
+        relleno = "Detalle de tu plan y de tus beneficios del mes. " * 10
+        d = datos(relleno + "Total: CLP 9.990")
+        assert d.importe.fragmento == "Total: CLP 9.990"
+
+    def test_el_punto_de_los_miles_no_corta(self):
+        d = datos("Te cobraremos USD 1.234,50 el 5 de noviembre de 2026.")
+        assert d.fecha_proximo_cobro.fragmento == "Te cobraremos USD 1.234,50 el 5 de noviembre de 2026."
+
+    def test_tiene_tope(self):
+        d = datos(("x" * 500) + " Total: CLP 9.990 " + ("y" * 500))
+        assert d.importe.fragmento == "Total: CLP 9.990"
+        d = datos(("palabra " * 60) + "CLP 9.990 " + ("otra " * 60))
+        # 30 antes y 20 después, sin el pedazo de palabra que quedó en el borde.
+        assert d.importe.fragmento == "palabra palabra palabra CLP 9.990 otra otra otra otra"
