@@ -109,21 +109,65 @@ export async function abrirAjustesDispositivo(): Promise<boolean> {
 }
 
 /**
- * Adaptador nativo real para Expo 57 y Android nativo (PermissionsAndroid).
+ * Puente nativo para consultar el estado efectivo de notificaciones en Android,
+ * equivalente a NotificationManagerCompat.areNotificationsEnabled().
+ *
+ * Referencia oficial Android:
+ * https://developer.android.com/reference/androidx/core/app/NotificationManagerCompat#areNotificationsEnabled()
+ */
+export interface PuenteNotificacionesAndroid {
+  areNotificationsEnabled(): Promise<boolean> | boolean;
+}
+
+export function resolverPuenteNotificacionesAndroid(): PuenteNotificacionesAndroid | null {
+  try {
+    const nativo =
+      requireOptionalNativeModule<PuenteNotificacionesAndroid>('NotificationManagerCompat');
+    if (nativo && typeof nativo.areNotificationsEnabled === 'function') {
+      return nativo;
+    }
+  } catch {
+    // No disponible
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { NativeModules } = require('react-native');
+    const mod =
+      NativeModules?.NotificationManagerCompat || NativeModules?.NotificationManager;
+    if (mod && typeof mod.areNotificationsEnabled === 'function') {
+      return mod as PuenteNotificacionesAndroid;
+    }
+  } catch {
+    // No disponible
+  }
+
+  return null;
+}
+
+/**
+ * Adaptador nativo real para Expo 57 y Android nativo.
  * Consulta getPermissionsAsync() / requestPermissionsAsync() de Expo, o
- * PermissionsAndroid en Android nativo.
+ * NotificationManagerCompat.areNotificationsEnabled() / PermissionsAndroid en Android nativo.
  * Si ninguna API nativa está disponible en la plataforma, devuelve 'no_disponible'
- * de forma veraz sin conceder permisos ficticios en memoria.
+ * de forma veraz sin conceder permisos ficticios en memoria ni asumir 'concedido' en Android < 33.
  */
 export class AdaptadorNativoExpo implements AdaptadorPermisosNotificaciones {
   private modulo: ModuloExpoNotifications | null;
+  private puenteAndroid: PuenteNotificacionesAndroid | null;
 
-  constructor(modulo?: ModuloExpoNotifications | null) {
+  constructor(
+    modulo?: ModuloExpoNotifications | null,
+    puenteAndroid?: PuenteNotificacionesAndroid | null
+  ) {
     this.modulo = modulo !== undefined ? modulo : resolverModuloExpoNotifications();
+    this.puenteAndroid =
+      puenteAndroid !== undefined ? puenteAndroid : resolverPuenteNotificacionesAndroid();
   }
 
   async obtenerPermiso(): Promise<EstadoPermisoDispositivo> {
     // 1. Prioridad: módulo Expo Notifications (iOS/Android en Expo)
+    // Expo Notifications verifica internamente NotificationManagerCompat.areNotificationsEnabled() en Android
     if (this.modulo) {
       try {
         const respuesta = await this.modulo.getPermissionsAsync();
@@ -133,26 +177,42 @@ export class AdaptadorNativoExpo implements AdaptadorPermisosNotificaciones {
       }
     }
 
-    // 2. Fallback: Android nativo con PermissionsAndroid
-    if (Platform.OS === 'android' && PermissionsAndroid) {
-      try {
-        const version =
-          typeof Platform.Version === 'number'
-            ? Platform.Version
-            : parseInt(String(Platform.Version), 10);
-        // Android < 33 (Android 12 y anterior) no requiere permiso en tiempo de ejecución
-        if (version < 33) {
-          return 'concedido';
+    // 2. Fallback: Android
+    if (Platform.OS === 'android') {
+      // 2.1 Si existe puente nativo equivalente a NotificationManagerCompat.areNotificationsEnabled()
+      if (this.puenteAndroid && typeof this.puenteAndroid.areNotificationsEnabled === 'function') {
+        try {
+          const habilitado = await this.puenteAndroid.areNotificationsEnabled();
+          return habilitado ? 'concedido' : 'denegado';
+        } catch {
+          return 'no_disponible';
         }
-        if (PermissionsAndroid.PERMISSIONS?.POST_NOTIFICATIONS) {
+      }
+
+      // 2.2 En Android 13+ (API >= 33), PermissionsAndroid permite consultar POST_NOTIFICATIONS
+      const version =
+        typeof Platform.Version === 'number'
+          ? Platform.Version
+          : parseInt(String(Platform.Version), 10);
+
+      if (
+        version >= 33 &&
+        PermissionsAndroid &&
+        PermissionsAndroid.PERMISSIONS?.POST_NOTIFICATIONS
+      ) {
+        try {
           const concedido = await PermissionsAndroid.check(
             PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
           );
           return concedido ? 'concedido' : 'no_determinado';
+        } catch {
+          return 'no_disponible';
         }
-      } catch {
-        return 'no_disponible';
       }
+
+      // En Android < 33 sin capacidad nativa de consulta de areNotificationsEnabled:
+      // Devolver verazmente 'no_disponible', nunca asumir 'concedido' sin consultarlo
+      return 'no_disponible';
     }
 
     return 'no_disponible';
@@ -169,17 +229,30 @@ export class AdaptadorNativoExpo implements AdaptadorPermisosNotificaciones {
       }
     }
 
-    // 2. Fallback: Android nativo con PermissionsAndroid (despliega diálogo nativo del SO)
-    if (Platform.OS === 'android' && PermissionsAndroid) {
-      try {
-        const version =
-          typeof Platform.Version === 'number'
-            ? Platform.Version
-            : parseInt(String(Platform.Version), 10);
-        if (version < 33) {
-          return 'concedido';
+    // 2. Fallback: Android
+    if (Platform.OS === 'android') {
+      // 2.1 Si existe puente nativo NotificationManagerCompat, consultar el estado efectivo
+      if (this.puenteAndroid && typeof this.puenteAndroid.areNotificationsEnabled === 'function') {
+        try {
+          const habilitado = await this.puenteAndroid.areNotificationsEnabled();
+          return habilitado ? 'concedido' : 'denegado';
+        } catch {
+          return 'no_disponible';
         }
-        if (PermissionsAndroid.PERMISSIONS?.POST_NOTIFICATIONS) {
+      }
+
+      // 2.2 En Android 13+ (API >= 33), solicitar POST_NOTIFICATIONS al sistema operativo
+      const version =
+        typeof Platform.Version === 'number'
+          ? Platform.Version
+          : parseInt(String(Platform.Version), 10);
+
+      if (
+        version >= 33 &&
+        PermissionsAndroid &&
+        PermissionsAndroid.PERMISSIONS?.POST_NOTIFICATIONS
+      ) {
+        try {
           const resultado = await PermissionsAndroid.request(
             PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
           );
@@ -192,10 +265,13 @@ export class AdaptadorNativoExpo implements AdaptadorPermisosNotificaciones {
           ) {
             return 'denegado';
           }
+        } catch {
+          return 'no_disponible';
         }
-      } catch {
-        return 'no_disponible';
       }
+
+      // En Android < 33 sin capacidad nativa de consulta:
+      return 'no_disponible';
     }
 
     return 'no_disponible';

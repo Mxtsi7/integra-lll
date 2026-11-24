@@ -13,6 +13,7 @@ import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import {
   AdaptadorNativoExpo,
   canalPushHabilitadoEnDispositivo,
+  crearControlPermisosNotificaciones,
   mapearEstadoPermisoExpo,
   type ControlPermisosNotificaciones,
   type EstadoPermisoDispositivo,
@@ -354,6 +355,60 @@ describe('Preferencias de Notificación Móvil (SE-32)', () => {
         expect(screen.queryByTestId('btn-solicitar-permiso')).toBeNull();
       });
     });
+
+    it('en Android 11/12 (API < 33) con notificaciones bloqueadas en Ajustes, cargar y volver desde Ajustes nunca muestra Habilitado hasta que se activan', async () => {
+      const origOS = Platform.OS;
+      const origVersion = Platform.Version;
+      (Platform as any).OS = 'android';
+      (Platform as any).Version = 30; // Android 11
+
+      try {
+        getMock.mockResolvedValueOnce({
+          ...PREFERENCIAS_BASE,
+          por_push: true,
+        });
+
+        // Notificaciones bloqueadas en Ajustes del SO
+        let notificacionesHabilitadas = false;
+        const puenteAndroid = {
+          areNotificationsEnabled: vi.fn(async () => notificacionesHabilitadas),
+        };
+
+        const adaptador = new AdaptadorNativoExpo(null, puenteAndroid);
+        const control = crearControlPermisosNotificaciones(adaptador);
+
+        render(<PreferenciasNotificacionesContenido controlPermisos={control} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId('preferencias-notificaciones-contenido')).toBeDefined();
+        });
+
+        // 1. Estado en dispositivo NUNCA debe ser Habilitado
+        const estadoDispositivo = screen.getByTestId('estado-push-dispositivo');
+        expect(estadoDispositivo.textContent).toBe('Inhabilitado (permiso denegado en dispositivo)');
+        expect(estadoDispositivo.textContent).not.toBe('Habilitado');
+        expect(screen.getByTestId('badge-push-dispositivo').textContent).toBe(
+          'Canal no habilitado en dispositivo'
+        );
+        expect(screen.getByTestId('btn-abrir-ajustes')).toBeDefined();
+
+        // 2. El usuario va a Ajustes del sistema y las habilita
+        notificacionesHabilitadas = true;
+
+        // 3. Al volver a la app (AppState 'active')
+        await act(async () => {
+          (AppState as any)._simulateStateChange('active');
+        });
+
+        await waitFor(() => {
+          expect(screen.getByTestId('estado-push-dispositivo').textContent).toBe('Habilitado');
+        });
+        expect(screen.queryByTestId('btn-abrir-ajustes')).toBeNull();
+      } finally {
+        (Platform as any).OS = origOS;
+        (Platform as any).Version = origVersion;
+      }
+    });
   });
 
   describe('Edición, borrador, descarte y guardado selectivo (PATCH)', () => {
@@ -591,15 +646,47 @@ describe('Preferencias de Notificación Móvil (SE-32)', () => {
       }
     });
 
-    it('AdaptadorNativoExpo en Android < 33 concede permisos automáticamente por diseño del SO', async () => {
+    it('AdaptadorNativoExpo en Android < 33 sin capacidad nativa de consulta devuelve no_disponible y nunca asume concedido', async () => {
       const origOS = Platform.OS;
       const origVersion = Platform.Version;
       (Platform as any).OS = 'android';
       (Platform as any).Version = 30;
 
       try {
-        const adaptador = new AdaptadorNativoExpo(null);
+        const adaptador = new AdaptadorNativoExpo(null, null);
+        expect(await adaptador.obtenerPermiso()).toBe('no_disponible');
+        expect(await adaptador.solicitarPermiso()).toBe('no_disponible');
+      } finally {
+        (Platform as any).OS = origOS;
+        (Platform as any).Version = origVersion;
+      }
+    });
+
+    it('AdaptadorNativoExpo en Android < 33 con puente NotificationManagerCompat consulta areNotificationsEnabled de forma veraz', async () => {
+      const origOS = Platform.OS;
+      const origVersion = Platform.Version;
+      (Platform as any).OS = 'android';
+      (Platform as any).Version = 30;
+
+      try {
+        const puente = {
+          areNotificationsEnabled: vi.fn(),
+        };
+        const adaptador = new AdaptadorNativoExpo(null, puente);
+
+        // Si están bloqueadas en Ajustes de Android
+        puente.areNotificationsEnabled.mockResolvedValueOnce(false);
+        expect(await adaptador.obtenerPermiso()).toBe('denegado');
+
+        // Si están habilitadas en Ajustes de Android
+        puente.areNotificationsEnabled.mockResolvedValueOnce(true);
         expect(await adaptador.obtenerPermiso()).toBe('concedido');
+
+        // Solicitar permiso en Android < 33 consulta el estado efectivo
+        puente.areNotificationsEnabled.mockResolvedValueOnce(false);
+        expect(await adaptador.solicitarPermiso()).toBe('denegado');
+
+        puente.areNotificationsEnabled.mockResolvedValueOnce(true);
         expect(await adaptador.solicitarPermiso()).toBe('concedido');
       } finally {
         (Platform as any).OS = origOS;

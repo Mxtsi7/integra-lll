@@ -481,6 +481,8 @@ export const Switch = React.forwardRef<HTMLInputElement, any>(
 );
 Switch.displayName = 'Switch';
 
+export const NativeModules: Record<string, any> = {};
+
 export default {
   View,
   KeyboardAvoidingView,
@@ -506,4 +508,5 @@ export default {
   Modal,
   Alert,
   PermissionsAndroid,
+  NativeModules,
 };
