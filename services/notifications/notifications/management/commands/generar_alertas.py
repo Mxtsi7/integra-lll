@@ -39,6 +39,10 @@ class Command(BaseCommand):
             f" {resultado.omitidas} omitida(s) por organización eliminada."
             if resultado.omitidas else ""
         )
+        # Lo mismo con las obsoletas (S3-FE-22): la suscripción cambió
+        # mientras corría y el aviso se deja para la próxima corrida.
+        if resultado.obsoletas:
+            omitidas += f" {resultado.obsoletas} postergada(s): la suscripción cambió mientras corría."
         self.stdout.write(
             f"{timezone.localtime(ahora):%Y-%m-%d %H:%M %Z}: "
             f"{len(resultado.creadas)} alerta(s) nueva(s), "
