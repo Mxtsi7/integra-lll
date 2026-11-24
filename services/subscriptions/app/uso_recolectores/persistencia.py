@@ -3,11 +3,14 @@ from datetime import timezone
 
 from django.db import IntegrityError, transaction
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from app.models import EventoUsoRecibido, Subscription
-from .validacion import ErrorEventoUso
+from events.uso import registrar_uso
+from shared.borrado.bloqueo import bloquear_organizacion
 from .proyeccion import proyectar
+from .validacion import ErrorEventoUso
 
 NOMBRE_RESTRICCION_CLAVE = 'uso_rx_evento_clave_unica'
 
@@ -30,6 +33,10 @@ def _conflicto(mensaje):
 @transaction.atomic
 def persistir(*, suscripcion, usuario_id, evento, correlacion):
     """Guarda el hecho y su trabajo pendiente antes de emitir el acuse."""
+    estado_org = bloquear_organizacion(suscripcion.organizacion_id, compartido=True)
+    if estado_org.eliminada:
+        raise PermissionDenied('La organización fue eliminada.')
+
     destino = Subscription.objects.select_for_update().filter(
         pk=suscripcion.pk, organizacion_id=suscripcion.organizacion_id,
     ).first()
@@ -63,6 +70,13 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
             proyectar(destino, usuario_id, evento.fecha, correlacion)
             recibido.proyeccion_pendiente = False
             recibido.save(update_fields=('proyeccion_pendiente', 'actualizado_en'))
+            registrar_uso(
+                organizacion_id=destino.organizacion_id,
+                suscripcion_id=destino.pk,
+                usuario_id=usuario_id,
+                evento=evento.cuerpo,
+                correlation_id=correlacion,
+            )
     except IntegrityError as error:
         diagnostico = getattr(getattr(error.__cause__, 'diag', None), 'constraint_name', None)
         if diagnostico != NOMBRE_RESTRICCION_CLAVE:

@@ -3,6 +3,7 @@ import { Database, Home, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
 import { CambiarContrasena } from '../components/Perfil/CambiarContrasena';
+import { CambiarCorreo } from '../components/Perfil/CambiarCorreo';
 import { EditarNombre } from '../components/Perfil/EditarNombre';
 import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
 import { Avatar } from '../components/ui/Avatar';
@@ -96,6 +97,8 @@ interface ContenidoPerfilProps {
 function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: ContenidoPerfilProps) {
   const [cambiandoContrasena, setCambiandoContrasena] = useState(false);
   const cerrarCambioContrasena = useCallback(() => setCambiandoContrasena(false), []);
+  const [cambiandoCorreo, setCambiandoCorreo] = useState(false);
+  const cerrarCambioCorreo = useCallback(() => setCambiandoCorreo(false), []);
   const plan = usuario.plan ?? 'gratuito';
   const esPremium = plan === 'premium';
   const etiquetaRol = usuario.rol === 'titular' ? 'Titular del hogar' : 'Integrante del hogar';
@@ -127,7 +130,12 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
         <Seccion titulo="Cuenta" icono={<UserRound size={19} aria-hidden="true" />} tinte="azul">
           <EditarNombre nombre={usuario.nombre} onGuardado={onNombreGuardado} />
           <Fila etiqueta="Correo electrónico" detalle={usuario.correo}>
-            <Boton variante="sutil" tamano="s" disabled title="Próximamente">
+            <Boton
+              variante="sutil"
+              tamano="s"
+              onClick={() => setCambiandoCorreo(true)}
+              aria-label="Cambiar correo electrónico"
+            >
               Editar
             </Boton>
           </Fila>
@@ -169,6 +177,7 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
         </Seccion>
       </div>
 
+      {cambiandoCorreo && <CambiarCorreo correoActual={usuario.correo} alCerrar={cerrarCambioCorreo} />}
       {cambiandoContrasena && (
         <CambiarContrasena alCerrar={cerrarCambioContrasena} onCambiada={onContrasenaCambiada} />
       )}

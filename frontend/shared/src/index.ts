@@ -17,6 +17,10 @@ export {
   type SuscripcionesPaginadas,
   esOrdenSuscripciones,
   ORDENES_SUSCRIPCIONES,
+  ORDEN_PREDETERMINADO,
+  descomponerOrden,
+  type CampoOrdenSuscripciones,
+  type DireccionOrden,
   type ConsultaSuscripciones,
   type OrdenSuscripciones,
   USAR_DATOS_DE_EJEMPLO,
@@ -51,6 +55,7 @@ export * from './validaciones';
 export * from './api/recomendaciones';
 export * from './api/asistente';
 export * from './api/candidatos';
+export * from './api/informes';
 export * from './api/preferencias';
 export * from './api/alertas';
 export * from './api/cuentas';
@@ -59,6 +64,7 @@ export * from './api/eliminarCuenta';
 export * from './api/verificacionCorreo';
 export * from './estadoCarga';
 export * from './api/calendario';
+export * from './api/presupuesto';
 export type { AuthSchemas } from './contratos/auth.generated';
 export type {
   AcuseUso,
@@ -75,3 +81,4 @@ export type {
   UUID,
 } from './contracts/uso-recolectores.dto';
 export * from './api/resumenPanel';
+export * from './api/cambioCorreo';

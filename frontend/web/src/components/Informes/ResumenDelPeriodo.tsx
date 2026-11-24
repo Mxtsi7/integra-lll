@@ -43,6 +43,9 @@ export function ResumenDelPeriodo({ resumen }: { resumen: Resumen }) {
             </tbody>
           </table>
         )}
+        {gastos.length > 0 && (
+          <p className={styles.nota}>«Gastado» cuenta solo los cobros de suscripciones que siguen activas.</p>
+        )}
       </Seccion>
 
       <Seccion titulo={`Suscripciones: ${resumen.conteo.total}`} tinte="azul">

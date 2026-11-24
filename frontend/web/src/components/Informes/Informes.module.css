@@ -99,3 +99,195 @@
   font-size: 14px;
   line-height: 1.5;
 }
+
+.nota {
+  margin: 8px 0 0;
+  color: var(--tinta-2);
+  font-size: 13px;
+}
+
+/* Informes (S3-CH-25): el mes y la moneda, las cifras, el gráfico y la descarga. */
+
+/* ---- Mes y moneda ---- */
+
+.moneda {
+  min-width: 200px;
+}
+
+/* ---- Estados ---- */
+
+.estadoCarga {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.vacio {
+  margin: 0;
+  padding: 24px 0;
+  font-size: 14px;
+  color: var(--tinta-2);
+}
+
+/* ---- Cifras del mes ---- */
+
+/* ---- Gráfico ---- */
+
+.grafico {
+  margin: 0 0 16px;
+}
+
+.barras {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 180px;
+  padding: 8px 4px 0;
+  border-bottom: 1px solid var(--vidrio-borde);
+}
+
+.columna {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 100%;
+}
+
+.pila {
+  display: flex;
+  flex-direction: column-reverse;
+  width: 100%;
+  max-width: 56px;
+  overflow: hidden;
+  border-radius: 6px 6px 0 0;
+}
+
+.columnaElegida .pila {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.real,
+.proyectado {
+  flex-basis: 0;
+}
+
+.real {
+  background: var(--acento);
+}
+
+/* Rayado, no solo un color más claro: se distingue sin depender del color. */
+.proyectado {
+  background: repeating-linear-gradient(135deg, var(--acento) 0 4px, transparent 4px 8px);
+  opacity: 0.7;
+}
+
+.etiquetas {
+  display: flex;
+  gap: 12px;
+  padding: 6px 4px 0;
+}
+
+.etiquetas span {
+  flex: 1;
+  font-size: 12px;
+  text-align: center;
+  color: var(--tinta-2);
+}
+
+.etiquetaElegida {
+  font-weight: 800;
+  color: var(--tinta);
+}
+
+.leyenda {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--tinta-2);
+}
+
+.claveReal::before,
+.claveProyectado::before {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  content: '';
+}
+
+.claveReal::before {
+  background: var(--acento);
+}
+
+.claveProyectado::before {
+  background: repeating-linear-gradient(135deg, var(--acento) 0 2px, transparent 2px 4px);
+  outline: 1px solid var(--acento);
+}
+
+/* ---- Tabla del detalle ---- */
+
+.tablaHistorico {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  color: var(--tinta);
+}
+
+.tablaTitulo {
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.tablaHistorico th,
+.tablaHistorico td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--vidrio-borde);
+  text-align: right;
+}
+
+.tablaHistorico th:first-child {
+  text-align: left;
+}
+
+.tablaHistorico thead th {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--tinta-2);
+}
+
+.tablaHistorico tbody th {
+  font-weight: 600;
+}
+
+.tablaHistorico tr[aria-current='true'] th,
+.tablaHistorico tr[aria-current='true'] td {
+  font-weight: 800;
+  background: var(--vidrio-2);
+}
+
+/* ---- Descarga ---- */
+
+.descarga {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.avisoDescarga {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+}
+
+.avisoDescarga[role='alert'] {
+  color: var(--coral);
+}

@@ -33,9 +33,36 @@ export const ESTADOS_SUSCRIPCION: Record<
   cancelado: { etiqueta: 'Cancelada', fondo: '#450a0a', texto: '#f87171' },
 };
 
+export interface InfoEstadoVisual {
+  etiqueta: string;
+  fondo: string;
+  texto: string;
+}
+
+export const INFO_ESTADO_FALLBACK: InfoEstadoVisual = {
+  etiqueta: 'Desconocido',
+  fondo: '#334155',
+  texto: '#ffffff',
+};
+
+export function obtenerInfoEstado(estado: EstadoSuscripcion): InfoEstadoVisual {
+  return (
+    ESTADOS_SUSCRIPCION[estado] ?? {
+      ...INFO_ESTADO_FALLBACK,
+      etiqueta: estado,
+    }
+  );
+}
+
+/** Sufijos estandarizados de periodicidad según el dominio. */
+export const MAPA_SUFIJOS_FRECUENCIA: Record<Frecuencia, string> = {
+  anual: '/año',
+  mensual: '/mes',
+};
+
 /** Formatea el sufijo de frecuencia según el estándar del producto. */
 export function sufijoFrecuencia(frecuencia: Frecuencia): string {
-  return frecuencia === 'anual' ? '/año' : '/mes';
+  return MAPA_SUFIJOS_FRECUENCIA[frecuencia] ?? '/mes';
 }
 
 /**
@@ -70,11 +97,7 @@ export function TarjetaSuscripcion({
     horas_uso_mes,
   } = suscripcion;
 
-  const infoEstado = ESTADOS_SUSCRIPCION[estado] ?? {
-    etiqueta: estado,
-    fondo: '#334155',
-    texto: '#ffffff',
-  };
+  const infoEstado = obtenerInfoEstado(estado);
 
   const inicial = (nombre.trim()[0] ?? '?').toUpperCase();
   const montoFormateado = formatearMonto(monto, moneda);
