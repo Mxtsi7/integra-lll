@@ -205,6 +205,38 @@ it('una moneda de la URL que el Panel no tiene se ignora: se usa la de siempre y
   expect(vi.mocked(getComparacionDePresupuesto).mock.calls.map(([, moneda]) => moneda)).not.toContain('XXX');
 });
 
+describe('los gráficos del Panel salen de los mismos meses que la cifra (S3-CH-12)', () => {
+  it('el gráfico tiene los seis meses hasta el de la URL, y el mes elegido coincide con la cifra del Panel', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) =>
+      resumenDePrueba({ periodo: mes, moneda, gasto_real: '1000.00', gasto_proyectado: '250.00', total_estimado: '1250.00' }));
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$1.250al mes'));
+    const filas = within(screen.getByRole('table', { name: 'Detalle por mes' })).getAllByRole('row');
+    expect(filas).toHaveLength(7);
+    expect(filas.at(-1)).toHaveAttribute('aria-current', 'true');
+    expect(filas.at(-1)).toHaveTextContent('$1.250');
+  });
+
+  it('mientras el gasto no llega no se dibuja gráfico ni series', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(() => new Promise(() => {}));
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    await screen.findByRole('region', { name: 'Resumen del mes' });
+    expect(screen.queryByRole('table', { name: 'Detalle por mes' })).not.toBeInTheDocument();
+  });
+
+  it('sin cobros en los seis meses no se dibuja gráfico con ceros', async () => {
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    // Llegó la respuesta (cero) y el gráfico no aparece: no hay serie que mostrar.
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$0al mes'));
+    expect(screen.queryByRole('table', { name: 'Detalle por mes' })).not.toBeInTheDocument();
+  });
+});
+
 describe('los indicadores del mes salen de Analytics (S3-CH-11)', () => {
   it('la cifra del mes es el total de Analytics para el mes y la moneda de la URL, con lo cobrado y lo que falta', async () => {
     vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) =>

@@ -9,6 +9,8 @@ import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
 import { TileProximo } from '../components/Dashboard/TileProximo';
 import { gastoDelMesDe, TileResumen } from '../components/Dashboard/TileResumen';
 import { TileSalud } from '../components/Dashboard/TileSalud';
+import { GraficoDeGastos } from '../components/Informes/GraficoDeGastos';
+import { sinGastos } from '../components/Informes/periodosDeInforme';
 import { useAuth } from '../context/AuthContext';
 import { useCatalogos } from '../context/CatalogosContext';
 import { useInformeMensual } from '../hooks/useInformeMensual';
@@ -92,6 +94,10 @@ export function DashboardPage() {
         <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
             <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} gastoDelMes={gastoDelMes} />
+            {/* Los mismos meses que la cifra del mes: salen de la misma respuesta (S3-CH-12). */}
+            {informe.tipo === 'listo' && !sinGastos(informe.meses) && (
+              <GraficoDeGastos meses={informe.meses} mesElegido={mes} />
+            )}
             <SeccionPresupuesto moneda={moneda} />
             <TileSalud suscripciones={delPanel} moneda={moneda} />
             <TileProximo suscripciones={delPanel} />
