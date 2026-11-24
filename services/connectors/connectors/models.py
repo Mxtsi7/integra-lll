@@ -1189,6 +1189,73 @@ class AvanceDeLectura(ModeloTenant):
         ),
     )
 
+    # ── S3-FE-18: cómo le fue a la lectura programada ────────────────
+    # Lo que hace observables los reintentos y los errores permanentes: el
+    # estado, cuántas veces seguidas falló y el último error, con su código.
+
+    class EstadoLectura(models.TextChoices):
+        AL_DIA = "al_dia", "Al día"
+        REINTENTANDO = "reintentando", "Reintentando un error transitorio"
+        AGOTADA = "agotada", "Reintentos agotados"
+        DETENIDA = "detenida", "Detenida por un error permanente"
+
+    estado_lectura = models.CharField(
+        max_length=16,
+        choices=EstadoLectura.choices,
+        default=EstadoLectura.AL_DIA,
+        verbose_name="Estado de la lectura programada",
+    )
+
+    fallos_seguidos = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Fallos transitorios seguidos",
+        help_text="Vuelve a cero con la primera lectura que funciona.",
+    )
+
+    ultimo_error = models.CharField(
+        max_length=60,
+        blank=True,
+        default="",
+        verbose_name="Código del último error",
+    )
+
+    ultimo_error_detalle = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name="Detalle del último error",
+        help_text="Para una persona. Nunca lleva tokens.",
+    )
+
+    ultimo_error_en = models.DateTimeField(null=True, blank=True, verbose_name="Último error el")
+
+    # ── el reintento pendiente (revisión de #214) ─────────────────────
+    # El reintento vive en la BASE y no solo en Celery: el planificador y las
+    # tareas sueltas lo respetan, y una sola cadena lo continúa.
+    proximo_intento_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Próximo reintento",
+        help_text="Antes de esto nadie lee la cuenta, salvo la cadena dueña del reintento.",
+    )
+    cadena_de_reintento = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Cadena dueña del reintento",
+        help_text="Solo la tarea que trae este valor continúa el reintento.",
+    )
+
+    detenida_en_version = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Credenciales con que se detuvo",
+        help_text=(
+            "Una lectura detenida por un error permanente no se vuelve a "
+            "programar mientras la cuenta siga con estas mismas credenciales. "
+            "Una reconexión las cambia y la lectura vuelve a correr."
+        ),
+    )
+
     class Meta(ModeloTenant.Meta):
         db_table = "avance_de_lectura"
         verbose_name = "Avance de lectura"
