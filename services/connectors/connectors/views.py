@@ -204,6 +204,14 @@ class CuentaConectadaViewSet(mixins.DestroyModelMixin, SoloLecturaTenantViewSet)
         """
         cuenta = self.get_object()
         revocacion.revocar_y_desconectar(cuenta)
+        cuenta.refresh_from_db()
+        if cuenta.estado == CuentaConectada.Estado.DESCONECTADA:
+            # S3-FE-20: la corrida a medias se descarta y la importación
+            # abierta se cierra. Las lecturas ya encoladas se cancelan solas
+            # al despertar (`lectura_programada`).
+            from .lectura_programada import cancelar_lectura
+
+            cancelar_lectura(cuenta)
 
         salida = self.get_serializer(cuenta)
         return Response(salida.data, status=status.HTTP_200_OK)
