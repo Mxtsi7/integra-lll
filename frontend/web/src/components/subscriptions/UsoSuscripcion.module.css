@@ -42,6 +42,10 @@
   color: var(--tinta-2);
 }
 
+.periodo {
+  margin-bottom: 8px;
+}
+
 .lista {
   list-style: none;
   margin: 0;

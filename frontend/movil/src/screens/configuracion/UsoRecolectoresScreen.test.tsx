@@ -65,14 +65,14 @@ describe('pantalla de acceso de uso Android', () => {
     await waitFor(() => expect(moduloNativo.leerTramos).toHaveBeenCalledWith(1000, 4000, ['com.ejemplo.app'], true));
     fireEvent.click(screen.getByRole('button', { name: 'Retirar autorización' }));
     await act(async () => resolverTramos([{ paquete: 'com.ejemplo.app', inicioMs: 2000, finMs: 3000 }]));
-    expect(screen.queryByText('Intervalos encontrados: 1.')).toBeNull();
+    expect(screen.queryByText(/Intervalos encontrados: 1\./)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Consultar intervalos' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Acepto autorizar la consulta local' }));
     reloj.mockReturnValue(8000);
     moduloNativo.leerTramos.mockResolvedValueOnce([{ paquete: 'com.ejemplo.app', inicioMs: 5000, finMs: 7000 }]);
     fireEvent.click(screen.getByRole('button', { name: 'Consultar intervalos' }));
-    expect(await screen.findByText('Intervalos encontrados: 1.')).toBeTruthy();
+    expect(await screen.findByText(/Intervalos encontrados: 1\.[\s\S]*0,03333 min/)).toBeTruthy();
     expect(moduloNativo.leerTramos).toHaveBeenLastCalledWith(4000, 8000, ['com.ejemplo.app'], true);
   });
 

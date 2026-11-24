@@ -20,6 +20,7 @@ export default function ConfiguracionScreen({
     EliminarCuenta: () => navigation.navigate('EliminarCuenta'),
     UsoRecolectores: () => navigation.navigate('UsoRecolectores'),
     AsociarPaqueteAndroid: () => navigation.navigate('AsociarPaqueteAndroid'),
+    PreferenciasNotificacion: () => navigation.navigate('PreferenciasNotificacion'),
   };
 
   return (
