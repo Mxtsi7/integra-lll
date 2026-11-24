@@ -549,6 +549,8 @@ class Importacion(ModeloTenant):
     #: Cuántos errores se guardan. Más que esto no ayuda a nadie a entender
     #: qué pasó, y una respuesta de polling tiene que caber en una pantalla.
     MAXIMO_ERRORES = 20
+    #: Lo que se guarda del `mensaje` de cada error; el resto se corta.
+    LARGO_MENSAJE_DE_ERROR = 200
 
     # ── los dos hitos, separados ─────────────────────────────────────
 
@@ -638,17 +640,30 @@ class Importacion(ModeloTenant):
             self.terminada_en = ahora
         return True
 
-    def anotar_error(self, codigo: str, mensaje: str, fila: int | None = None) -> None:
+    def anotar_error(
+        self,
+        codigo: str,
+        mensaje: str,
+        fila: int | None = None,
+        *,
+        identificador_origen: str | None = None,
+    ) -> None:
         """Suma un error. Guarda los primeros y cuenta todos.
 
         No guarda: el llamador decide cuándo persistir, porque anotar fila por
         fila haría un UPDATE por error.
+
+        `identificador_origen` lo pasa solo la lectura de correo (S3-FE-09):
+        un correo no tiene fila, y es lo que le permite no anotar dos veces el
+        mismo mensaje si una página se vuelve a leer. Sin él, la entrada queda
+        con las tres claves de siempre.
         """
         self.errores_totales += 1
         if len(self.errores) < self.MAXIMO_ERRORES:
-            self.errores.append(
-                {"codigo": codigo, "mensaje": mensaje[:200], "fila": fila}
-            )
+            error = {"codigo": codigo, "mensaje": mensaje[: self.LARGO_MENSAJE_DE_ERROR], "fila": fila}
+            if identificador_origen is not None:
+                error["identificador_origen"] = identificador_origen
+            self.errores.append(error)
 
     def confirmar_candidatos(self, *, cuando=None) -> bool:
         """Marca que la persona aceptó los candidatos (lo usará FE-11).
@@ -973,6 +988,33 @@ class CobroCandidato(ModeloTenant):
         return bool(cambiadas)
 
     @classmethod
+    def guardar_sin_duplicar(cls, filas) -> None:
+        """Inserta las que no existan, en el orden de la llave única (S3-FE-17).
+
+        La usan los dos lectores: el CSV (S3-FE-10) y el correo (S3-FE-09).
+
+        ── `ignore_conflicts` ───────────────────────────────────────────────
+        La unicidad de (organización, origen, identificador) es lo que hace
+        idempotente volver a leer: un reintento choca con sus propias filas y
+        no las duplica, y un cobro que ya estaba —propuesto, confirmado o
+        rechazado— no se vuelve a proponer. No dice cuántas insertó: quien
+        necesite el número lo cuenta después.
+
+        ── En el orden de la llave, no en el de la lectura ─────────────────
+        Dos lecturas que se traslapan comparten cobros, y pueden traerlos en
+        orden contrario. Si cada worker insertara en su orden, uno tomaría X y
+        esperaría Y mientras el otro tomó Y y espera X: PostgreSQL mata a uno
+        y esa lectura entera se revierte. Insertando todos en el MISMO orden
+        el que llega segundo espera al primero y ya no hay ciclo. Lo encontró
+        la revisión de #171.
+        """
+        ordenadas = sorted(
+            filas,
+            key=lambda fila: (str(fila.organizacion_id), fila.origen, fila.identificador_origen),
+        )
+        cls.objects.bulk_create(ordenadas, ignore_conflicts=True)
+
+    @classmethod
     def desde_candidato(cls, candidato, *, importacion: Importacion) -> "CobroCandidato":
         """Instancia SIN guardar, para que el llamador haga un `bulk_create`.
 
@@ -1144,6 +1186,73 @@ class AvanceDeLectura(ModeloTenant):
         help_text=(
             "La corrida en curso ya volvió una vez a su primera página. Un "
             "segundo rechazo en la misma corrida es un error, no otro reinicio."
+        ),
+    )
+
+    # ── S3-FE-18: cómo le fue a la lectura programada ────────────────
+    # Lo que hace observables los reintentos y los errores permanentes: el
+    # estado, cuántas veces seguidas falló y el último error, con su código.
+
+    class EstadoLectura(models.TextChoices):
+        AL_DIA = "al_dia", "Al día"
+        REINTENTANDO = "reintentando", "Reintentando un error transitorio"
+        AGOTADA = "agotada", "Reintentos agotados"
+        DETENIDA = "detenida", "Detenida por un error permanente"
+
+    estado_lectura = models.CharField(
+        max_length=16,
+        choices=EstadoLectura.choices,
+        default=EstadoLectura.AL_DIA,
+        verbose_name="Estado de la lectura programada",
+    )
+
+    fallos_seguidos = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Fallos transitorios seguidos",
+        help_text="Vuelve a cero con la primera lectura que funciona.",
+    )
+
+    ultimo_error = models.CharField(
+        max_length=60,
+        blank=True,
+        default="",
+        verbose_name="Código del último error",
+    )
+
+    ultimo_error_detalle = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name="Detalle del último error",
+        help_text="Para una persona. Nunca lleva tokens.",
+    )
+
+    ultimo_error_en = models.DateTimeField(null=True, blank=True, verbose_name="Último error el")
+
+    # ── el reintento pendiente (revisión de #214) ─────────────────────
+    # El reintento vive en la BASE y no solo en Celery: el planificador y las
+    # tareas sueltas lo respetan, y una sola cadena lo continúa.
+    proximo_intento_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Próximo reintento",
+        help_text="Antes de esto nadie lee la cuenta, salvo la cadena dueña del reintento.",
+    )
+    cadena_de_reintento = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Cadena dueña del reintento",
+        help_text="Solo la tarea que trae este valor continúa el reintento.",
+    )
+
+    detenida_en_version = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="Credenciales con que se detuvo",
+        help_text=(
+            "Una lectura detenida por un error permanente no se vuelve a "
+            "programar mientras la cuenta siga con estas mismas credenciales. "
+            "Una reconexión las cambia y la lectura vuelve a correr."
         ),
     )
 

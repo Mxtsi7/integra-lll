@@ -31,6 +31,7 @@ class RepositorioEnMemoria implements RepositorioUso {
 
 async function principal(): Promise<void> {
   const ruta = process.argv[2];
+  const modo = process.argv[3];
   if (!ruta) {
     throw new Error('falta la ruta del sobre JSON');
   }
@@ -38,18 +39,24 @@ async function principal(): Promise<void> {
   const sobre: unknown = JSON.parse(readFileSync(ruta, 'utf8'));
   const normalizado = validarYNormalizar(sobre);
   const repositorio = new RepositorioEnMemoria();
-  const resultado = await new ProcesadorUso(repositorio).procesar(sobre);
+  const procesador = new ProcesadorUso(repositorio);
+  const resultado = await procesador.procesar(sobre);
+  const salida: Record<string, unknown> = {
+    ok: true,
+    resultado,
+    ocurridoEn: normalizado.ocurridoEn.toISOString(),
+    fechaLocal: normalizado.fechaLocal,
+    eventId: normalizado.eventId,
+    usuarioId: normalizado.usuarioId,
+    llamadasAlRepositorio: repositorio.recibidos.length,
+  };
 
-  process.stdout.write(
-    JSON.stringify({
-      ok: true,
-      resultado,
-      ocurridoEn: normalizado.ocurridoEn.toISOString(),
-      fechaLocal: normalizado.fechaLocal,
-      eventId: normalizado.eventId,
-      llamadasAlRepositorio: repositorio.recibidos.length,
-    }),
-  );
+  if (modo === 'retry') {
+    salida.resultadoReintento = await procesador.procesar(sobre);
+    salida.llamadasAlRepositorio = repositorio.recibidos.length;
+  }
+
+  process.stdout.write(JSON.stringify(salida));
 }
 
 principal().catch((error: unknown) => {

@@ -71,7 +71,7 @@ class Command(BaseCommand):
                 f"{len(mensaje.texto)} car.{' (cortado)' if mensaje.texto_truncado else ''}"
             )
         for omitido in pagina.omitidos:
-            self.stdout.write(f"omitido {omitido.id_mensaje}: {omitido.motivo}")
+            self.stdout.write(f"omitido {omitido.id_mensaje or '(sin identificador)'}: {omitido.motivo}")
         self.stdout.write(
             f"{len(pagina.mensajes)} mensajes, {len(pagina.omitidos)} omitidos. "
             f"Siguiente página: {pagina.siguiente_pagina or '(no hay)'}"
