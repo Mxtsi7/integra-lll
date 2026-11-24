@@ -84,7 +84,7 @@ from .lectura_correo import (  # noqa: F401 — se reexportan para quien importe
     recortar,
     validar_limite,
 )
-from .lectura_correo import atribuir_rechazo
+from .lectura_correo import atribuir_rechazo, es_id_de_mensaje
 from .lectura_correo import cuenta_para_leer as _cuenta_para_leer
 from .models import CuentaConectada
 from .proveedores import TIEMPO_LIMITE
@@ -247,7 +247,7 @@ def leer_mensajes(
                 mensaje = _mensaje(cuenta.pk, crudo)
             except ValueError as exc:
                 identificador = crudo.get("id") if isinstance(crudo, dict) else None
-                omitidos.append(MensajeOmitido(str(identificador)[:64], str(exc)[:120]))
+                omitidos.append(MensajeOmitido.desde_la_lista(identificador, str(exc)[:120]))
                 continue
             # Graph ya filtró las fechas, pero a la hora redondeada al
             # segundo; aquí se aplican exactas. Quedar fuera no es un omitido.
@@ -410,7 +410,7 @@ def _mensaje(cuenta_id, crudo) -> MensajeCorreo:
     if not isinstance(crudo, dict):
         raise ValueError("el mensaje no es un objeto")
     id_mensaje = crudo.get("id")
-    if not isinstance(id_mensaje, str) or not id_mensaje or len(id_mensaje) > 512 or not id_mensaje.isprintable():
+    if not es_id_de_mensaje(id_mensaje):
         raise ValueError("el mensaje no trae un identificador válido")
     recibido_en = _fecha(crudo.get("receivedDateTime"))
 

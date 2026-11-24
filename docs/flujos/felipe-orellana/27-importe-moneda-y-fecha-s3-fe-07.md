@@ -19,7 +19,11 @@ guarda nada.
 | `ausente` | no venía y no hay respaldo |
 
 Cada campo trae además el `fragmento` de texto del que salió, para la
-evidencia del candidato (S3-FE-09).
+evidencia del candidato (S3-FE-09). Es una ventana alrededor del dato, no la
+línea: hasta 30 caracteres antes y 20 después, sin cruzar el fin de su frase
+o inciso y sin cortar palabras. Un HTML de un solo párrafo queda en una sola
+línea, con el nombre, el RUT o la tarjeta de la persona al lado del monto; la
+revisión de S3-FE-09 encontró que guardar la línea guardaba eso.
 
 ## Lo que queda para revisión
 
@@ -34,6 +38,12 @@ evidencia del candidato (S3-FE-09).
 | `Total: CLP 9.990,50` | importe ambiguo: el peso chileno no tiene centavos |
 | `IVA: CLP 1.595` (solo eso) | importe ambiguo: un impuesto no es lo cobrado |
 | sin ninguna fecha | **fecha supuesta**: el día en que llegó el correo, avisado |
+
+El día en que llegó es el de Chile (`TIME_ZONE`, America/Santiago), no el de
+UTC en que lo entregan los lectores: un correo de las 23:30 del 31 de octubre
+en Santiago es del 1 de noviembre en UTC, y la persona lo ve el 31 en su
+buzón. Lo da `MensajeCorreo.dia_recibido`, que usa también S3-FE-09 en el
+mensaje de cada error. Lo encontró la revisión de S3-FE-09.
 
 ## Cuál es el monto cobrado
 
