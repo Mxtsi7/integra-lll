@@ -136,6 +136,24 @@ describe("Historial de uso (CH-15)", () => {
   });
 });
 
+describe("El período del historial es de cada suscripción (S3-CH-18)", () => {
+  it("al cambiar de suscripción el selector vuelve a «Todo el historial» y se ven todos sus registros", async () => {
+    getUsosMock.mockImplementation(async (id: string) =>
+      id === "a" ? USOS_A : [{ fecha: "2026-10-15", minutos: 120 }, { fecha: "2026-09-02", minutos: 60 }],
+    );
+    await montar("/suscripciones/a");
+
+    await act(async () => fireEvent.change(screen.getByRole("combobox", { name: "Período" }), { target: { value: "2026-10" } }));
+    expect(filas()).toHaveLength(3);
+
+    await act(async () => fireEvent.click(screen.getByRole("link", { name: "Ir a Netflix" })));
+
+    expect(screen.getByRole("heading", { name: "Netflix", level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Período" })).toHaveValue("");
+    expect(filas()).toHaveLength(2);
+  });
+});
+
 describe("Horas de uso del mes con VI-10", () => {
   it("con cero horas este mes (VI-10 reinicia el conteo al cambiar de mes) dice 'Sin registrar'", async () => {
     getSuscripcionMock.mockResolvedValue({ ...SPOTIFY, horas_uso_mes: 0 });
