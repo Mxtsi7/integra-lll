@@ -1,6 +1,7 @@
 import { formatearFechaHora, type EstadoImportacion, type Importacion } from '@ojoalgasto/shared';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import { CobrosDeLaImportacion } from '../components/candidatos/CobrosDeLaImportacion';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
@@ -81,6 +82,13 @@ function DetalleImportacion({ importacion: imp, problema, onReintentar }: Detall
       )}
 
       {imp.estado === 'completada' && <Candidatos importacion={imp} />}
+      {/* S3-CH-06: lo que sí se leyó, aparte de lo que no. Cada bloque con lo suyo, y los dos se ven a la vez. */}
+      {imp.estado === 'completada' && imp.candidatos_detectados > 0 && (
+        <div className={styles.cobros}>
+          <h3 className={styles.subtitulo}>Cobros encontrados</h3>
+          <CobrosDeLaImportacion importacionId={imp.id} />
+        </div>
+      )}
       {imp.errores_totales > 0 && <ErroresPorFila importacion={imp} />}
     </section>
   );
@@ -130,6 +138,12 @@ function BarraProgreso({ importacion: imp }: { importacion: Importacion }) {
 
 function Candidatos({ importacion: imp }: { importacion: Importacion }) {
   const anterior = imp.candidatos_detectados;
+  // Una reimportación cuenta solo los cobros nuevos: lo que no es cobro ni error ya estaba importado (doc 22).
+  const yaImportadas = imp.origen === 'csv' ? Math.max(0, (imp.filas_totales ?? 0) - anterior - imp.errores_totales) : 0;
+  const avisoYaImportadas =
+    yaImportadas === 1
+      ? '1 fila ya estaba importada de antes: no se repite.'
+      : `${yaImportadas.toLocaleString('es-CL')} filas ya estaban importadas de antes: no se repiten.`;
   if (imp.candidatos_confirmados) {
     return (
       <p className={styles.candidatos}>
@@ -138,7 +152,11 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
     );
   }
   if (anterior === 0) {
-    return <p className={styles.candidatos}>No encontramos cobros que parezcan suscripciones.</p>;
+    return (
+      <p className={styles.candidatos}>
+        {yaImportadas > 0 ? avisoYaImportadas : 'No encontramos cobros que parezcan suscripciones.'}
+      </p>
+    );
   }
   return (
     <div className={styles.candidatos}>
@@ -146,6 +164,7 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
         Encontramos {anterior === 1 ? '1 cobro posible' : `${anterior.toLocaleString('es-CL')} cobros posibles`}.{' '}
         <strong>Todavía no se creó ni cambió ninguna suscripción:</strong> primero los revisas y los confirmas.
       </p>
+      {yaImportadas > 0 && <p>{avisoYaImportadas}</p>}
       {/* El paso a la previsualización (FE-10) todavía no existe en la web. */}
       <Boton variante="secundario" tamano="s" disabled title="Muy pronto">
         Revisar cobros encontrados
@@ -156,11 +175,19 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
 
 function ErroresPorFila({ importacion: imp }: { importacion: Importacion }) {
   const resto = imp.errores_totales - imp.errores.length;
+  // Un archivo se corrige y se vuelve a subir; una lectura de correo no tiene nada que corregir.
+  const sePuedeCorregir = imp.origen === 'csv';
   return (
     <div className={styles.errores}>
       <h3 className={styles.subtitulo}>
         {imp.errores_totales === 1 ? '1 problema' : `${imp.errores_totales.toLocaleString('es-CL')} problemas`}
       </h3>
+      {/* Un cobro que ya se encontró no se duplica: su identificador depende del cobro, no del archivo. */}
+      {sePuedeCorregir && (
+        <p className={styles.detalle}>
+          Corrige estas filas en tu archivo y vuelve a subirlo: un cobro que ya se encontró no se duplica.
+        </p>
+      )}
       <ul className={styles.listaErrores}>
         {imp.errores.map((error, indice) => (
           <li key={`${error.fila ?? 'x'}-${indice}`}>
@@ -171,6 +198,11 @@ function ErroresPorFila({ importacion: imp }: { importacion: Importacion }) {
       </ul>
       {/* FE-08 guarda solo los primeros; el total es el real. */}
       {resto > 0 && <p className={styles.detalle}>Y {resto.toLocaleString('es-CL')} más.</p>}
+      {resto > 0 && sePuedeCorregir && (
+        <p className={styles.detalle}>
+          Aquí solo ves las primeras filas con problemas. Cuando corrijas estas y vuelvas a subir el archivo, verás las que falten.
+        </p>
+      )}
     </div>
   );
 }

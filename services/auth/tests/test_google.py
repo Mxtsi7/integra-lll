@@ -76,6 +76,13 @@ def test_primera_vinculacion_exige_password_y_emite_proveedor(usuario):
     renovada = cliente.post("/api/auth/refresh/", {"refresh_token": respuesta.data["refresh_token"]}, format="json")
     assert renovada.status_code == 200
     assert jwt.decode(renovada.data["access_token"], settings.JWT_SECRET, algorithms=["HS256"])["proveedor"] == "google"
+    historial = cliente.get(
+        "/api/usuarios/me/historial-accesos/",
+        HTTP_X_USUARIO_ID=str(usuario.pk),
+        HTTP_X_ORGANIZACION_ID=str(usuario.organizacion_id),
+    )
+    assert historial.status_code == 200
+    assert [acceso["metodo"] for acceso in historial.json()["resultados"]] == ["google"]
 
 
 @pytest.mark.django_db
