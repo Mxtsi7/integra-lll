@@ -80,18 +80,22 @@ def id_de_ventana(organizacion_id, suscripcion_id, tipo: str, fecha, ventana) ->
 CREADA = "creada"
 REPETIDA = "repetida"      # esa ventana ya avisó: la segunda corrida del día
 OMITIDA = "omitida"        # la organización fue eliminada (MX-07)
+OBSOLETA = "obsoleta"      # la suscripción cambió después de leerla (S3-FE-22)
 
 
 @dataclass
 class Resultado:
     """Qué hizo una corrida. `creadas` son alertas nuevas; `repetidas`, las
     que ya existían para esa ventana (lo normal al correr dos veces);
-    `omitidas`, las de una organización eliminada mientras corría."""
+    `omitidas`, las de una organización eliminada mientras corría;
+    `obsoletas`, las de una suscripción que cambió mientras corría (la
+    próxima corrida la avisa con lo nuevo)."""
 
     creadas: list[Alerta] = field(default_factory=list)
     repetidas: int = 0
     revisadas: int = 0
     omitidas: int = 0
+    obsoletas: int = 0
 
     def anotar(self, alerta: "Alerta | None", desenlace: str) -> None:
         """Cuenta un intento. Acá y no en cada generador para que los dos
@@ -102,6 +106,8 @@ class Resultado:
             self.repetidas += 1
         elif desenlace == OMITIDA:
             self.omitidas += 1
+        elif desenlace == OBSOLETA:
+            self.obsoletas += 1
         else:
             # Explícito para que un cuarto desenlace no se cuente en silencio
             # como omitido, que es lo que haría un `else` que suma.
@@ -112,6 +118,7 @@ class Resultado:
         self.repetidas += otro.repetidas
         self.revisadas += otro.revisadas
         self.omitidas += otro.omitidas
+        self.obsoletas += otro.obsoletas
         return self
 
 
@@ -149,7 +156,7 @@ def alguien_quiere_fin_de_prueba(organizacion_id) -> bool:
     )
 
 
-def _crear_una_vez(*, ahora: dt.datetime, **campos) -> tuple[Alerta | None, str]:
+def _crear_una_vez(*, ahora: dt.datetime, leida: SuscripcionVigilada, **campos) -> tuple[Alerta | None, str]:
     """Crea la alerta si su ventana no tiene una. (alerta, desenlace).
 
     ── Por qué la guarda de borrado va ACÁ ──────────────────────────────────
@@ -168,10 +175,34 @@ def _crear_una_vez(*, ahora: dt.datetime, **campos) -> tuple[Alerta | None, str]
     `planificar` va FUERA del punto de retorno de la restricción única, para
     que un `IntegrityError` suyo no se lea como "esta ventana ya avisó" y se
     propague, que es lo que corresponde.
+
+    ── La suscripción se relee bloqueada (revisión de #215) ──────────────────
+    `leida` es la fila que leyó la corrida, sin bloqueo. Si entre esa lectura
+    y este INSERT `proyeccion.aplicar` cancela la suscripción o le cambia la
+    fecha, `invalidacion.revisar` corre ANTES de que exista el aviso, no
+    encuentra nada que invalidar, y el aviso nacía con los datos viejos.
+
+    Por eso acá se toma la fila FOR UPDATE y se compara su `observada_en` con
+    la que se leyó. Si cambió, no se crea nada (`obsoleta`): la próxima
+    corrida avisa con lo nuevo, si todavía corresponde. El orden de bloqueos
+    es el mismo que en `aplicar` —organización, suscripción, alertas—, así
+    que no se cruzan:
+    - si `aplicar` tomó la fila primero, esto espera, la relee cambiada y no
+      crea;
+    - si esto la tomó primero, `aplicar` espera a que el aviso exista y su
+      `revisar` lo invalida.
     """
     with transaction.atomic():
         if bloquear_organizacion(campos["organizacion_id"], compartido=True).eliminada:
             return None, OMITIDA
+        actual = (
+            SuscripcionVigilada.objects.select_for_update()
+            .filter(pk=leida.pk)
+            .values_list("observada_en", flat=True)
+            .first()
+        )
+        if actual != leida.observada_en:
+            return None, OBSOLETA
         # Punto de retorno aparte para la restricción única: un
         # `IntegrityError` del `get_or_create` de `EstadoOrganizacion` no
         # puede confundirse con "esta ventana ya avisó".
@@ -236,6 +267,7 @@ def generar_proximos_cobros(*, ahora: dt.datetime) -> Resultado:
         for dias in sorted(candidatas)[:1]:
             alerta, desenlace = _crear_una_vez(
                 ahora=ahora,
+                leida=suscripcion,
                 organizacion_id=org,
                 tipo=Alerta.Tipo.PROXIMO_COBRO,
                 titulo=f"{suscripcion.nombre or 'Una suscripción'} se cobra "
@@ -296,6 +328,7 @@ def generar_fin_de_prueba(*, ahora: dt.datetime) -> Resultado:
         for ventana in sorted(candidatas)[:1]:
             alerta, desenlace = _crear_una_vez(
                 ahora=ahora,
+                leida=suscripcion,
                 organizacion_id=org,
                 tipo=Alerta.Tipo.FIN_PRUEBA,
                 titulo=f"La prueba de {suscripcion.nombre or 'una suscripción'} termina en menos de {ventana} h",

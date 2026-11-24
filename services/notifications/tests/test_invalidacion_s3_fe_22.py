@@ -219,7 +219,108 @@ class TestRepetidosYOrden:
         assert correo_de(con_aviso).estado == "descartada"
 
 
+class TestYaInvalidado:
+    def test_un_segundo_cambio_no_pisa_cuando_ni_por_que_quedo_obsoleto(self, con_aviso):
+        aplicar(sobre(ocurrido="2026-11-21T14:00:00Z", proximo_cobro=OTRO_COBRO))
+        primera = recargar(con_aviso).invalidada_en
+
+        aplicar(sobre("suscripcion.estado_cambiado", ocurrido="2026-11-21T15:00:00Z", estado="cancelado",
+                      proximo_cobro=OTRO_COBRO))
+
+        alerta = recargar(con_aviso)
+        assert (alerta.invalidada_en, alerta.motivo_invalidacion) == (primera, "cobro_cambiado")
+
+
 class TestRevisarSolo:
     def test_sin_cambios_no_toca_nada(self, con_aviso):
         resultado = revisar(SuscripcionVigilada.objects.get(suscripcion_id=uuid.UUID(SUSC)))
         assert resultado == {"invalidadas": 0, "reactivadas": 0, "entregas_descartadas": 0, "entregas_devueltas": 0}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #215 — el generador contra un cambio que llega a mitad
+# ══════════════════════════════════════════════════════════════════════
+
+
+def evento_a_mitad_de_la_corrida(monkeypatch, *eventos, cambia=True):
+    """Aplica `eventos` después de que la corrida LEYÓ la proyección y antes
+    de que cree el aviso: la intercalación que encontró la revisión. La
+    versión con dos conexiones está en `test_carrera_generador_postgres.py`."""
+    from notifications import generador
+
+    real = generador.bloquear_organizacion
+    pendientes = list(eventos)
+
+    def bloquear(*args, **kwargs):
+        while pendientes:
+            assert aplicar(pendientes.pop(0)) is cambia
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(generador, "bloquear_organizacion", bloquear)
+
+
+class TestCarreraConElGenerador:
+    @pytest.fixture(autouse=True)
+    def suscripcion(self):
+        PreferenciaNotificacion.objects.create(organizacion_id=ORG, usuario_id="42")
+        aplicar(sobre("suscripcion.creada", ocurrido="2026-11-01T12:00:00Z"))
+
+    def test_cancelada_a_mitad_no_nace_el_aviso(self, monkeypatch):
+        evento_a_mitad_de_la_corrida(monkeypatch, sobre(
+            "suscripcion.estado_cambiado", ocurrido="2026-11-21T14:00:00Z", estado="cancelado"))
+
+        resultado = generar(ahora=HOY)
+
+        assert (len(resultado.creadas), resultado.obsoletas) == (0, 1)
+        assert not Alerta.objects.exists()
+        # Y la corrida siguiente tampoco: ya no está vigente.
+        generar(ahora=HOY)
+        assert not Alerta.objects.exists()
+
+    def test_fecha_cambiada_a_mitad_se_avisa_la_nueva_en_la_corrida_siguiente(self, monkeypatch):
+        evento_a_mitad_de_la_corrida(monkeypatch, sobre(ocurrido="2026-11-21T14:00:00Z", proximo_cobro="2026-11-22"))
+
+        assert generar(ahora=HOY).obsoletas == 1
+        assert not Alerta.objects.exists()
+
+        generar(ahora=HOY)
+        (alerta,) = Alerta.objects.all()
+        assert alerta.datos["fecha_cobro"] == "2026-11-22" and alerta.invalidada_en is None
+
+    def test_un_evento_viejo_a_mitad_no_posterga(self, monkeypatch):
+        """Un evento que `aplicar` ignora no cambia la fila: el aviso nace."""
+        evento_a_mitad_de_la_corrida(
+            monkeypatch, sobre(ocurrido="2026-11-01T12:00:00Z", proximo_cobro="2026-11-22"), cambia=False)
+        resultado = generar(ahora=HOY)
+        assert (len(resultado.creadas), resultado.obsoletas) == (1, 0)
+
+    def test_fin_de_prueba_cambiado_a_mitad(self, monkeypatch):
+        from notifications.generador import generar_fin_de_prueba
+
+        aplicar(sobre(ocurrido="2026-11-02T12:00:00Z", estado="prueba", fin_prueba="2026-11-22"))
+        evento_a_mitad_de_la_corrida(monkeypatch, sobre(
+            ocurrido="2026-11-21T14:00:00Z", estado="prueba", fin_prueba="2026-12-01"))
+
+        assert generar_fin_de_prueba(ahora=HOY).obsoletas == 1
+        assert not Alerta.objects.filter(tipo=Alerta.Tipo.FIN_PRUEBA).exists()
+
+    def test_generar_suma_las_obsoletas_del_fin_de_prueba(self, monkeypatch):
+        """Por `generar()`, que junta los dos generadores: el cobro queda
+        fuera de la ventana y solo se intenta el aviso de fin de prueba."""
+        aplicar(sobre(ocurrido="2026-11-02T12:00:00Z", estado="prueba", fin_prueba="2026-11-22",
+                      proximo_cobro=OTRO_COBRO))
+        evento_a_mitad_de_la_corrida(monkeypatch, sobre(
+            ocurrido="2026-11-21T14:00:00Z", estado="prueba", fin_prueba="2026-12-01", proximo_cobro=OTRO_COBRO))
+
+        assert generar(ahora=HOY).obsoletas == 1
+
+    def test_el_comando_cuenta_las_postergadas(self, monkeypatch):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        evento_a_mitad_de_la_corrida(monkeypatch, sobre(
+            "suscripcion.estado_cambiado", ocurrido="2026-11-21T14:00:00Z", estado="cancelado"))
+        salida = StringIO()
+        call_command("generar_alertas", ahora="2026-11-21T10:00:00-03:00", stdout=salida)
+        assert "1 postergada(s)" in salida.getvalue()
