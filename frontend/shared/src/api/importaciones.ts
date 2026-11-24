@@ -17,6 +17,8 @@ export interface Importacion {
   origen: 'csv' | 'correo';
   origen_legible: string;
   nombre_archivo: string;
+  /** Id de la cuenta conectada de la que sale (solo en origen `correo`; null en CSV). */
+  cuenta?: string | null;
   estado: EstadoImportacion;
   estado_legible: string;
   /** Si el estado ya es terminal. */

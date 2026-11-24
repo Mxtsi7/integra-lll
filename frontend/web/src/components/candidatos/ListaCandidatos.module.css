@@ -121,9 +121,19 @@
   color: var(--tinta);
 }
 
+.monto {
+  white-space: nowrap;
+}
+
 .importe {
   font-variant-numeric: tabular-nums;
   color: var(--tinta);
+}
+
+/* S3-CH-05: el código de la moneda va siempre al lado del importe, más discreto. */
+.moneda {
+  font-size: 12px;
+  color: var(--tinta-3);
 }
 
 .detalle,
