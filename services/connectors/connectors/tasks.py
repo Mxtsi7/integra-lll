@@ -428,15 +428,16 @@ def programar_lecturas_de_correo() -> dict:
 
 
 @shared_task(bind=True, max_retries=None)
-def leer_cuenta_de_correo(self, cuenta_id: str) -> dict:
+def leer_cuenta_de_correo(self, cuenta_id: str, cadena: str | None = None) -> dict:
     """Lee una cuenta. Un error transitorio se reintenta con la espera que
-    decide `lectura_programada.espera_para`; el tope lo pone su lista de
-    esperas, no `max_retries`."""
+    decide `lectura_programada.espera_para`, llevando la `cadena` que lo deja
+    continuar. El contador y el tope viven en la base (`AvanceDeLectura`), no
+    en `request.retries`: ver `lectura_programada._tomar_turno`."""
     from .lectura_programada import leer_cuenta
 
-    resultado = leer_cuenta(cuenta_id, intento=self.request.retries)
+    resultado = leer_cuenta(cuenta_id, cadena=cadena)
     espera = resultado.get("reintentar_en")
     if espera is not None:
-        raise self.retry(countdown=espera)
+        raise self.retry(args=[cuenta_id], kwargs={"cadena": resultado["cadena"]}, countdown=espera)
     return resultado
 

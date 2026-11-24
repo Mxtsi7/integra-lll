@@ -13,6 +13,7 @@ Los correos son recibos que de verdad producen un candidato (los mismos de
 las pruebas de S3-FE-09).
 """
 
+import datetime as dt
 import uuid
 from datetime import datetime, timedelta, timezone as tz
 
@@ -32,6 +33,7 @@ from connectors.lectura_programada import (
     ENFRIAMIENTO,
     ESPERA_MAXIMA,
     ESPERAS,
+    GRACIA,
     PAGINAS_POR_TAREA,
     cancelar_lectura,
     cuentas_para_leer,
@@ -107,6 +109,17 @@ def lector(monkeypatch):
 
 def avance(c):
     return AvanceDeLectura.objects.get(cuenta=c)
+
+
+def en_reintento(c, *, fallos, proximo=AHORA):
+    """Deja la cuenta como si una cadena llevara `fallos` fallos y esperara
+    su próximo intento en `proximo`. Devuelve la cadena dueña."""
+    cadena = uuid.uuid4()
+    AvanceDeLectura.objects.update_or_create(cuenta=c, defaults={
+        "organizacion_id": c.organizacion_id, "estado_lectura": "reintentando", "fallos_seguidos": fallos,
+        "proximo_intento_en": proximo, "cadena_de_reintento": cadena,
+    })
+    return cadena
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -212,10 +225,11 @@ class TestTransitorio:
         assert (a.pagina, a.estado_lectura, a.fallos_seguidos, a.ultimo_error) == (
             "tok-2", "reintentando", 1, "falla_del_proveedor")
 
-        segundo = leer_cuenta(c.pk, intento=1, ahora=AHORA)
+        segundo = leer_cuenta(c.pk, cadena=primero["cadena"], ahora=AHORA + dt.timedelta(seconds=ESPERAS[0]))
         assert "reintentar_en" not in segundo
         a = avance(c)
-        assert (a.estado_lectura, a.fallos_seguidos, a.leido_hasta) == ("al_dia", 0, AHORA)
+        assert (a.estado_lectura, a.fallos_seguidos, a.proximo_intento_en, a.cadena_de_reintento) == (
+            "al_dia", 0, None, None)
         assert falso.llamadas == [None, "tok-2", "tok-2"]
         assert CobroCandidato.objects.count() == 2
 
@@ -231,8 +245,9 @@ class TestTransitorio:
     def test_agotar_los_reintentos_queda_observable(self, lector, caplog):
         c = cuenta()
         lector(ErrorTransitorio("Gmail falló (503).", codigo="falla_del_proveedor"))
+        cadena = en_reintento(c, fallos=len(ESPERAS))
         with caplog.at_level("ERROR"):
-            resultado = leer_cuenta(c.pk, intento=len(ESPERAS), ahora=AHORA)
+            resultado = leer_cuenta(c.pk, cadena=cadena, ahora=AHORA)
         assert resultado["agotada"] == "falla_del_proveedor"
         assert "reintentar_en" not in resultado
         a = avance(c)
@@ -242,7 +257,7 @@ class TestTransitorio:
     def test_una_cuenta_agotada_descansa_antes_de_volver_a_programarse(self, lector):
         c = cuenta()
         lector(ErrorTransitorio("x", codigo="falla_del_proveedor"))
-        leer_cuenta(c.pk, intento=len(ESPERAS), ahora=AHORA)
+        leer_cuenta(c.pk, cadena=en_reintento(c, fallos=len(ESPERAS)), ahora=AHORA)
         assert cuentas_para_leer(AHORA + ENFRIAMIENTO - timedelta(minutes=1)) == []
         assert cuentas_para_leer(AHORA + ENFRIAMIENTO + timedelta(minutes=1)) == [c.pk]
 
@@ -340,14 +355,14 @@ class TestTareas:
         lector(ErrorTransitorio("x", codigo="sin_conexion"))
         pedidos = []
 
-        def retry(countdown=None, **_):
-            pedidos.append(countdown)
+        def retry(args=None, kwargs=None, countdown=None, **_):
+            pedidos.append((countdown, args, set((kwargs or {}).keys())))
             raise Retry()
 
         monkeypatch.setattr(tasks.leer_cuenta_de_correo, "retry", retry)
         with pytest.raises(Retry):
             tasks.leer_cuenta_de_correo.run(str(c.pk))
-        assert pedidos == [ESPERAS[0]]
+        assert pedidos == [(ESPERAS[0], [str(c.pk)], {"cadena"})]
 
     def test_programar_encola_una_por_cuenta(self, monkeypatch):
         a, b = cuenta(correo="a@gmail.com"), cuenta(correo="b@gmail.com")
@@ -356,3 +371,99 @@ class TestTareas:
         monkeypatch.setattr(tasks.leer_cuenta_de_correo, "delay", encoladas.append)
         assert tasks.programar_lecturas_de_correo() == {"encoladas": 2}
         assert sorted(encoladas) == sorted([str(a.pk), str(b.pk)])
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Revisión de #214 — una sola cadena de reintentos por cuenta
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestUnaSolaCadena:
+    def test_el_caso_de_maxi_retry_after_de_una_hora(self, lector):
+        """Varios ticks del beat durante el Retry-After de una hora: nadie
+        encola ni lee antes de que venza. Al vencer, una sola continuación,
+        con el cursor y el contador conservados."""
+        c = cuenta()
+        falso = lector(pagina(c, 1, siguiente="tok-2"),
+                       ErrorTransitorio("429", codigo="cuota_excedida", reintentar_en=3600), pagina(c, 2))
+        primero = leer_cuenta(c.pk, ahora=AHORA)
+        assert primero["reintentar_en"] == 3600
+        assert avance(c).proximo_intento_en == AHORA + timedelta(seconds=3600)
+
+        for minutos in (15, 30, 45):
+            tick = AHORA + timedelta(minutes=minutos)
+            assert cuentas_para_leer(tick) == []
+            # Una tarea que encoló un beat anterior tampoco lee.
+            assert leer_cuenta(c.pk, ahora=tick) == {"omitida": "reintento_pendiente"}
+        assert len(falso.llamadas) == 2
+
+        segundo = leer_cuenta(c.pk, cadena=primero["cadena"], ahora=AHORA + timedelta(seconds=3600))
+        assert "reintentar_en" not in segundo
+        assert falso.llamadas == [None, "tok-2", "tok-2"]
+        assert avance(c).estado_lectura == "al_dia"
+        assert CobroCandidato.objects.count() == 2
+
+    def test_un_fallo_persistente_llega_al_tope_sin_cadenas_paralelas(self, lector):
+        c = cuenta()
+        falso = lector(ErrorTransitorio("x", codigo="sin_conexion"))
+        resultado = leer_cuenta(c.pk, ahora=AHORA)
+        momento = AHORA
+        while "reintentar_en" in resultado:
+            # Entre medio, el beat y las tareas sueltas no arrancan otra cadena.
+            assert cuentas_para_leer(momento + timedelta(seconds=1)) == []
+            assert leer_cuenta(c.pk, ahora=momento + timedelta(seconds=1)) == {"omitida": "reintento_pendiente"}
+            momento = momento + timedelta(seconds=resultado["reintentar_en"])
+            resultado = leer_cuenta(c.pk, cadena=resultado["cadena"], ahora=momento)
+        assert resultado["agotada"] == "sin_conexion"
+        assert len(falso.llamadas) == len(ESPERAS) + 1
+        assert avance(c).fallos_seguidos == len(ESPERAS) + 1
+
+    def test_una_cadena_que_no_es_la_duena_no_lee(self, lector):
+        c = cuenta()
+        falso = lector(pagina(c, 1))
+        en_reintento(c, fallos=2, proximo=AHORA + timedelta(minutes=5))
+        assert leer_cuenta(c.pk, cadena=uuid.uuid4(), ahora=AHORA) == {"omitida": "reintento_pendiente"}
+        assert falso.llamadas == []
+
+    def test_si_el_reintento_se_pierde_otra_tarea_lo_toma_con_el_mismo_contador(self, lector):
+        """Redis no es durable: el mensaje del reintento se puede perder. Pasada
+        la gracia, el beat vuelve a encolar la cuenta y esa tarea continúa con
+        el MISMO contador, no desde cero."""
+        c = cuenta()
+        vieja = en_reintento(c, fallos=3)
+        lector(ErrorTransitorio("x", codigo="sin_conexion"))
+        tarde = AHORA + GRACIA + timedelta(minutes=1)
+        assert cuentas_para_leer(tarde) == [c.pk]
+
+        resultado = leer_cuenta(c.pk, ahora=tarde)
+
+        assert resultado["reintentar_en"] == ESPERAS[3]
+        assert avance(c).fallos_seguidos == 4
+        # Si el mensaje perdido aparece después, ya no es el dueño.
+        assert leer_cuenta(c.pk, cadena=vieja, ahora=tarde) == {"omitida": "reintento_pendiente"}
+
+    def test_dos_tareas_que_toman_a_la_vez_no_leen_las_dos(self, lector):
+        """La toma es un arriendo: la primera queda dueña por la gracia, y la
+        segunda, que llega mientras la primera lee, no lee."""
+        c = cuenta()
+        en_reintento(c, fallos=1)
+        tarde = AHORA + GRACIA + timedelta(minutes=1)
+        resultados = []
+
+        def otra_tarea_llega_mientras_tanto():
+            resultados.append(leer_cuenta(c.pk, ahora=tarde))
+            return pagina(c, 1)
+
+        lector(otra_tarea_llega_mientras_tanto)
+        leer_cuenta(c.pk, ahora=tarde)
+        assert resultados == [{"omitida": "reintento_pendiente"}]
+        assert avance(c).estado_lectura == "al_dia"
+
+    def test_el_exito_limpia_el_reintento(self, lector):
+        c = cuenta()
+        cadena = en_reintento(c, fallos=2)
+        lector(pagina(c, 1))
+        leer_cuenta(c.pk, cadena=cadena, ahora=AHORA)
+        a = avance(c)
+        assert (a.estado_lectura, a.fallos_seguidos, a.proximo_intento_en, a.cadena_de_reintento) == (
+            "al_dia", 0, None, None)

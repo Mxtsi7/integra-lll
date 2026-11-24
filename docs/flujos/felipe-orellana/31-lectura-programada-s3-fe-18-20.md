@@ -52,6 +52,34 @@ importación que estuviera abierta. Una reconexión empieza limpia desde la
 El tope lo pone la lista de esperas, no `max_retries` de Celery: la tarea es
 la que decide cuándo parar y lo deja anotado.
 
+### Una sola cadena de reintentos por cuenta (revisión de #214)
+
+La primera versión llevaba el contador en `request.retries` de Celery. El
+beat no lo veía: cada 15 minutos volvía a encolar la cuenta `reintentando`
+con el intento en 0. Con un `Retry-After` de una hora, eso eran lecturas
+antes de tiempo y cadenas paralelas, cada una con su propio presupuesto de
+reintentos, así que el tope no se cumplía.
+
+Ahora el reintento vive en la base (`AvanceDeLectura`):
+
+| Campo | Qué es |
+|---|---|
+| `proximo_intento_en` | antes de esto nadie lee la cuenta |
+| `cadena_de_reintento` | el UUID de la única tarea que puede continuar el reintento |
+| `fallos_seguidos` | el contador: es el mismo para toda la cadena |
+
+- Al fallar, la tarea anota el próximo intento y una cadena nueva, y se
+  reencola llevando esa cadena (`leer_cuenta_de_correo(cuenta_id, cadena=...)`).
+- El beat no encola una cuenta `reintentando` hasta `proximo_intento_en +
+  GRACIA` (10 minutos), y una tarea sin la cadena devuelve
+  `{"omitida": "reintento_pendiente"}` sin leer.
+- Redis no es durable: si el mensaje del reintento se pierde, pasada la gracia
+  el beat vuelve a encolar la cuenta y esa tarea **toma** la cadena con el
+  mismo contador. La toma es un arriendo de una gracia, con la fila tomada
+  (`select_for_update`): dos tareas que llegan a la vez no leen las dos, y si
+  el mensaje perdido aparece después ya no es el dueño.
+- El éxito, el agotamiento y la detención limpian los dos campos.
+
 ## Una importación por ejecución, no por corrida
 
 `guardar_pagina` escribe en una `Importacion`. Cada **ejecución** de la tarea
@@ -82,7 +110,7 @@ la conectó, y los candidatos se listan por organización (S3-FE-14).
 | Las tareas de Celery | `connectors/tasks.py` → `programar_lecturas_de_correo`, `leer_cuenta_de_correo` |
 | El estado observable | `AvanceDeLectura` en `models.py`, migración `0012_lectura_programada` |
 | Cancelar al desconectar | `views.py`, la acción que desconecta |
-| Las pruebas | `tests/test_lectura_programada_s3_fe_18_20.py` (26) y `tests/test_carrera_desconexion_postgres.py` (1) |
+| Las pruebas | `tests/test_lectura_programada_s3_fe_18_20.py` (32) y `tests/test_carrera_desconexion_postgres.py` (1) |
 
 ## Cómo se comprobaron las pruebas
 
@@ -105,6 +133,12 @@ Se rompió el código a propósito 26 veces y cada vez falló al menos una prueb
 - que cancelar no descarte la corrida, o cierre importaciones de otra cuenta;
 - que la API no cancele;
 - que la tarea no reintente, o que programar no encole.
+
+La corrección de la revisión de #214 se comprobó igual, con 8 mutaciones más,
+y las 8 fallaron: que la tarea lea con un reintento pendiente, que no
+reconozca a su cadena, que la toma no arriende o reinicie el contador, que el
+beat no salte la cuenta, que el fallo no anote el próximo intento, que el
+éxito no limpie, y que la tarea no pase su cadena al reencolarse.
 
 La prueba con dos conexiones a PostgreSQL (la desconexión espera a que la
 lectura termine de guardar) **no se corrió en local**: no había PostgreSQL ni

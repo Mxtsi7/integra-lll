@@ -1229,6 +1229,22 @@ class AvanceDeLectura(ModeloTenant):
 
     ultimo_error_en = models.DateTimeField(null=True, blank=True, verbose_name="Último error el")
 
+    # ── el reintento pendiente (revisión de #214) ─────────────────────
+    # El reintento vive en la BASE y no solo en Celery: el planificador y las
+    # tareas sueltas lo respetan, y una sola cadena lo continúa.
+    proximo_intento_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Próximo reintento",
+        help_text="Antes de esto nadie lee la cuenta, salvo la cadena dueña del reintento.",
+    )
+    cadena_de_reintento = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Cadena dueña del reintento",
+        help_text="Solo la tarea que trae este valor continúa el reintento.",
+    )
+
     detenida_en_version = models.PositiveIntegerField(
         null=True,
         blank=True,

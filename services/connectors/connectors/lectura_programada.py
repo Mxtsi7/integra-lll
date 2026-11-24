@@ -50,6 +50,7 @@ guarda quién la conectó, y los candidatos se listan por organización.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import timedelta
 
 from django.db import transaction
@@ -81,6 +82,13 @@ ESPERA_MAXIMA = 3600
 
 #: Cuánto descansa una cuenta `agotada` antes de volver a programarse.
 ENFRIAMIENTO = timedelta(hours=1)
+
+#: Cuánto se espera, pasado `proximo_intento_en`, a que la cadena dueña del
+#: reintento aparezca. Si no aparece (Redis no es durable: el mensaje del
+#: reintento se puede perder), otra tarea toma la cadena y la continúa con el
+#: MISMO contador. Es también lo que dura la toma: dos tareas que llegan a la
+#: vez no pueden tomarla las dos.
+GRACIA = timedelta(minutes=10)
 
 USUARIO_DE_LA_LECTURA = "lectura-programada"
 
@@ -141,11 +149,49 @@ def _cerrar_importacion(importacion: Importacion | None, ahora) -> None:
 # ── leer una cuenta ─────────────────────────────────────────────────────────
 
 
-def leer_cuenta(cuenta_id, *, intento: int = 0, ahora=None) -> dict:
+def _tomar_turno(cuenta: CuentaConectada, cadena, ahora) -> tuple[str | None, uuid.UUID | None, int]:
+    """Decide si esta llamada puede leer, con la fila del avance tomada.
+
+    Devuelve (motivo para no leer o None, cadena con la que sigue, intento).
+
+    ── Una sola cadena de reintentos por cuenta (revisión de #214) ─────
+    Antes el reintento vivía solo en Celery (`request.retries`): el beat
+    siguiente no lo veía, encolaba otra tarea con intento 0, y quedaban
+    cadenas paralelas que acortaban la espera y se saltaban el tope. Ahora:
+
+    - una cuenta `reintentando` solo la lee la tarea que trae SU cadena;
+    - cualquier otra (el beat, una tarea encolada antes) no lee hasta
+      `proximo_intento_en + GRACIA`;
+    - pasado eso, la toma: queda dueña con una cadena nueva y el MISMO
+      contador de fallos, así que el presupuesto de reintentos es uno solo.
+    """
+    avance, _ = AvanceDeLectura.objects.get_or_create(
+        cuenta=cuenta, defaults={"organizacion_id": cuenta.organizacion_id},
+    )
+    avance = AvanceDeLectura.objects.select_for_update().get(pk=avance.pk)
+    if avance.estado_lectura == AvanceDeLectura.EstadoLectura.DETENIDA \
+            and avance.detenida_en_version == cuenta.credenciales_version:
+        return "detenida", None, 0
+    if avance.estado_lectura != AvanceDeLectura.EstadoLectura.REINTENTANDO:
+        return None, None, 0
+    intento = avance.fallos_seguidos
+    if cadena is not None and avance.cadena_de_reintento is not None and str(cadena) == str(avance.cadena_de_reintento):
+        return None, avance.cadena_de_reintento, intento
+    if avance.proximo_intento_en and ahora < avance.proximo_intento_en + GRACIA:
+        return "reintento_pendiente", None, intento
+    nueva = uuid.uuid4()
+    avance.cadena_de_reintento = nueva
+    avance.proximo_intento_en = ahora + GRACIA
+    avance.save(update_fields=["cadena_de_reintento", "proximo_intento_en", "actualizado_en"])
+    return None, nueva, intento
+
+
+def leer_cuenta(cuenta_id, *, cadena=None, ahora=None) -> dict:
     """Lee hasta `PAGINAS_POR_TAREA` páginas de la cuenta y las guarda.
 
     Devuelve un resumen. Si trae `reintentar_en`, la tarea tiene que volver a
-    llamarla en esos segundos con `intento + 1`.
+    llamarla en esos segundos con la `cadena` que trae el resumen: es la que
+    la deja continuar el reintento (ver `_tomar_turno`).
     """
     ahora = ahora or timezone.now()
     cuenta = CuentaConectada.objects.filter(pk=cuenta_id, proveedor__in=list(LECTORES)).first()
@@ -154,10 +200,10 @@ def leer_cuenta(cuenta_id, *, intento: int = 0, ahora=None) -> dict:
     if cuenta.estado != CuentaConectada.Estado.CONECTADA:
         # S3-FE-20, punto 2: la tarea encolada antes de desconectar no lee.
         return {"omitida": "no_conectada"}
-    avance = AvanceDeLectura.objects.filter(cuenta=cuenta).first()
-    if (avance is not None and avance.estado_lectura == AvanceDeLectura.EstadoLectura.DETENIDA
-            and avance.detenida_en_version == cuenta.credenciales_version):
-        return {"omitida": "detenida"}
+    with transaction.atomic():
+        motivo, cadena, intento = _tomar_turno(cuenta, cadena, ahora)
+    if motivo:
+        return {"omitida": motivo}
 
     lector = LECTORES[cuenta.proveedor]
     estado = {"importacion": None, "paginas": 0, "mensajes": 0}
@@ -200,25 +246,30 @@ def leer_cuenta(cuenta_id, *, intento: int = 0, ahora=None) -> dict:
         espera = espera_para(intento, error)
         if espera is None:
             _anotar_error(cuenta, error, estado=AvanceDeLectura.EstadoLectura.AGOTADA, ahora=ahora,
-                          fallos_seguidos=intento + 1)
+                          fallos_seguidos=intento + 1, proximo_intento_en=None, cadena_de_reintento=None)
             log.error("lectura de correo agotada: cuenta %s, %s tras %s intentos", cuenta.pk, error.codigo, intento + 1)
             return {"agotada": error.codigo, **_resumen(estado)}
+        siguiente = uuid.uuid4()
         _anotar_error(cuenta, error, estado=AvanceDeLectura.EstadoLectura.REINTENTANDO, ahora=ahora,
-                      fallos_seguidos=intento + 1)
+                      fallos_seguidos=intento + 1, proximo_intento_en=ahora + timedelta(seconds=espera),
+                      cadena_de_reintento=siguiente)
         log.warning("lectura de correo: cuenta %s, %s; reintento en %ss", cuenta.pk, error.codigo, espera)
-        return {"reintentar_en": espera, "error": error.codigo, **_resumen(estado)}
+        return {"reintentar_en": espera, "cadena": str(siguiente), "error": error.codigo, **_resumen(estado)}
     except ErrorDelProveedor as error:
         _anotar_error(cuenta, error, estado=AvanceDeLectura.EstadoLectura.DETENIDA, ahora=ahora,
-                      detenida_en_version=cuenta.credenciales_version)
+                      detenida_en_version=cuenta.credenciales_version, proximo_intento_en=None,
+                      cadena_de_reintento=None)
         log.error("lectura de correo detenida: cuenta %s, %s", cuenta.pk, error.codigo)
         return {"detenida": error.codigo, **_resumen(estado)}
     except (CuentaNoDisponible, CuentaDesconectadaAlGuardar) as error:
-        _anotar_error(cuenta, error, estado=AvanceDeLectura.EstadoLectura.AL_DIA, ahora=ahora)
+        _anotar_error(cuenta, error, estado=AvanceDeLectura.EstadoLectura.AL_DIA, ahora=ahora,
+                      proximo_intento_en=None, cadena_de_reintento=None)
         return {"omitida": getattr(error, "codigo", "cuenta_desconectada"), **_resumen(estado)}
     finally:
         _cerrar_importacion(estado["importacion"], timezone.now())
 
-    _anotar(cuenta, estado_lectura=AvanceDeLectura.EstadoLectura.AL_DIA, fallos_seguidos=0)
+    _anotar(cuenta, estado_lectura=AvanceDeLectura.EstadoLectura.AL_DIA, fallos_seguidos=0,
+            proximo_intento_en=None, cadena_de_reintento=None)
     return _resumen(estado)
 
 
@@ -249,6 +300,11 @@ def cuentas_para_leer(ahora=None) -> list:
                 continue
             if (avance.estado_lectura == AvanceDeLectura.EstadoLectura.AGOTADA
                     and avance.ultimo_error_en and avance.ultimo_error_en > ahora - ENFRIAMIENTO):
+                continue
+            # Revisión de #214: una cuenta con un reintento pendiente es de su
+            # cadena. El beat no la encola hasta que venza con su gracia.
+            if (avance.estado_lectura == AvanceDeLectura.EstadoLectura.REINTENTANDO
+                    and avance.proximo_intento_en and ahora < avance.proximo_intento_en + GRACIA):
                 continue
         elegidas.append(cuenta.pk)
     return elegidas
