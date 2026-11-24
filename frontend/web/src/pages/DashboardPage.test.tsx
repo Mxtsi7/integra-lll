@@ -1,23 +1,29 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getCatalogosSuscripciones, getComparacionDePresupuesto, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getCatalogosSuscripciones, getComparacionDePresupuesto, getResumenDelMes, getSuscripciones, type Suscripcion } from '@ojoalgasto/shared';
 import { AuthProvider } from '../context/AuthContext';
 import { CatalogosProvider } from '../context/CatalogosContext';
 import { ToastProvider } from '../context/ToastContext';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
 import { DashboardPage } from './DashboardPage';
 import { TileCategorias } from '../components/Dashboard/TileCategorias';
+import { resumenDePrueba } from '../test/informesDePrueba';
 
 vi.mock('@ojoalgasto/shared', async (original) => ({
   ...await original<typeof import('@ojoalgasto/shared')>(),
-  getSuscripciones: vi.fn(), getCatalogosSuscripciones: vi.fn(), getComparacionDePresupuesto: vi.fn(),
+  getSuscripciones: vi.fn(), getCatalogosSuscripciones: vi.fn(), getComparacionDePresupuesto: vi.fn(), getResumenDelMes: vi.fn(),
 }));
 vi.mock('../utils/exportarCsv', () => ({ descargarSuscripcionesCsv: vi.fn() }));
 vi.mock('../hooks/useConteo', () => ({ useConteo: (n: number) => n }));
 afterEach(cleanup);
+// Sin esto la cifra del mes pediría de verdad a Analytics, que en las pruebas no existe. Cero por defecto.
+beforeEach(() => {
+  vi.mocked(getResumenDelMes).mockReset().mockImplementation(async (mes, moneda) =>
+    resumenDePrueba({ periodo: mes, moneda, gasto_real: '0.00', gasto_proyectado: '0.00', total_estimado: '0.00' }));
+});
 // Sin esto el presupuesto del Panel pediría de verdad a la API, que en las pruebas no existe.
 beforeEach(() => {
   vi.mocked(getComparacionDePresupuesto).mockReset().mockImplementation(async (mes, moneda) => ({
@@ -42,7 +48,7 @@ it.each([
     <DashboardPage />
   </CatalogosProvider></AuthProvider></ToastProvider></MemoryRouter>);
   const resumen = await screen.findByRole('region', { name: 'Resumen del mes' });
-  expect(resumen).toHaveTextContent(`${esperado}al mes`);
+  // La cifra del mes viene de Analytics (S3-CH-11). Aquí se prueba el redondeo de lo que sale de las suscripciones.
   expect(within(resumen).getByText('Sin uso').parentElement).toHaveTextContent(esperado);
   const salud = screen.getByRole('region', { name: 'Salud del gasto' });
   expect(within(salud).getByText('Sin uso').parentElement).toHaveTextContent(esperado);
@@ -71,6 +77,7 @@ it('suma el total antes de redondear los subtotales de categorías', async () =>
 it('conserva los estados propios de resumen, salud, categorías y las más grandes', async () => {
   const base: Suscripcion = { id: 'activa', nombre: 'Activa', categoria: 'otro',
     monto: 1, moneda: 'EUR', frecuencia: 'mensual', estado: 'activo', fecha_proximo_cobro: '2026-11-10' };
+  vi.mocked(getResumenDelMes).mockResolvedValue(resumenDePrueba({ periodo: '2026-11', moneda: 'EUR', gasto_real: '0.00', gasto_proyectado: '13.01', total_estimado: '13.01' }));
   vi.mocked(getSuscripciones).mockResolvedValue([
     base,
     { ...base, id: 'fantasma', estado: 'fantasma', monto: 0.12, frecuencia: 'anual' },
@@ -84,7 +91,7 @@ it('conserva los estados propios de resumen, salud, categorías y las más grand
     <DashboardPage />
   </CatalogosProvider></AuthProvider></ToastProvider></MemoryRouter>);
   const resumen = await screen.findByRole('region', { name: 'Resumen del mes' });
-  expect(resumen).toHaveTextContent('13,01al mes');
+  await waitFor(() => expect(resumen).toHaveTextContent('13,01al mes'));
   expect(resumen).toHaveTextContent('2 suscripciones activas');
   const salud = screen.getByRole('region', { name: 'Salud del gasto' });
   expect(within(salud).getByRole('img')).toHaveAttribute('aria-label', '99 % del gasto en uso');
@@ -113,6 +120,10 @@ it('filtra todas las cifras, categorías y CSV por la moneda elegida, incluso si
     frecuencia: 'mensual', fecha_proximo_cobro: '2026-11-10', categoria: 'otro', estado: 'activo' };
   const euro: Suscripcion = { ...base, id: 'eur', nombre: 'Euros', moneda: 'EUR', monto: 4.99 };
   const dolar: Suscripcion = { ...base, id: 'usd', nombre: 'Dólares', moneda: 'USD', monto: 2.25, estado: 'fantasma' };
+  vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) => {
+    const total = moneda === 'CLP' ? '10000.00' : '4.99';
+    return resumenDePrueba({ periodo: mes, moneda, gasto_real: '0.00', gasto_proyectado: total, total_estimado: total });
+  });
   vi.mocked(getSuscripciones).mockResolvedValue([base, euro, dolar]);
   vi.mocked(getCatalogosSuscripciones).mockRejectedValue(new Error('sin red'));
   render(<MemoryRouter><ToastProvider><AuthProvider><CatalogosProvider>
@@ -120,10 +131,10 @@ it('filtra todas las cifras, categorías y CSV por la moneda elegida, incluso si
   </CatalogosProvider></AuthProvider></ToastProvider></MemoryRouter>);
   const selector = await screen.findByRole('combobox', { name: 'Moneda del panel' });
   expect(selector).toHaveValue('CLP');
-  expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$10.000');
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$10.000'));
   fireEvent.change(selector, { target: { value: 'EUR' } });
   const resumen = screen.getByRole('region', { name: 'Resumen del mes' });
-  expect(resumen).toHaveTextContent('4,99');
+  await waitFor(() => expect(resumen).toHaveTextContent('4,99'));
   expect(resumen).not.toHaveTextContent('10.000');
   expect(screen.getByRole('region', { name: 'Gasto por categoría' })).toHaveTextContent('4,99');
   expect(within(screen.getByRole('region', { name: 'Tus suscripciones más grandes' })).queryByText('Pesos')).toBeNull();
@@ -175,13 +186,14 @@ it('la moneda del Panel queda en la URL, y el presupuesto la sigue sin mezclar m
 });
 
 it('al recargar con ?moneda= el Panel se queda en esa moneda, y el presupuesto también (S3-CH-27)', async () => {
+  vi.mocked(getResumenDelMes).mockResolvedValue(resumenDePrueba({ periodo: '2026-10', moneda: 'EUR', gasto_real: '0.00', gasto_proyectado: '4.99', total_estimado: '4.99' }));
   montarElPanel('/dashboard?moneda=EUR&mes=2026-10');
 
   const selector = await screen.findByRole('combobox', { name: 'Moneda del panel' });
   expect(selector).toHaveValue('EUR');
   const presupuesto = screen.getByRole('region', { name: 'Presupuesto del mes' });
   expect(await within(presupuesto).findByText('Aún no defines un presupuesto para octubre de 2026 en EUR.')).toBeInTheDocument();
-  expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('4,99');
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('4,99'));
 });
 
 it('una moneda de la URL que el Panel no tiene se ignora: se usa la de siempre y no se pide el presupuesto en esa moneda (S3-CH-27)', async () => {
@@ -191,4 +203,32 @@ it('una moneda de la URL que el Panel no tiene se ignora: se usa la de siempre y
   expect(selector).toHaveValue('CLP');
   await screen.findByText('Aún no defines un presupuesto para noviembre de 2026 en CLP.');
   expect(vi.mocked(getComparacionDePresupuesto).mock.calls.map(([, moneda]) => moneda)).not.toContain('XXX');
+});
+
+describe('los indicadores del mes salen de Analytics (S3-CH-11)', () => {
+  it('la cifra del mes es el total de Analytics para el mes y la moneda de la URL, con lo cobrado y lo que falta', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) =>
+      resumenDePrueba({ periodo: mes, moneda, gasto_real: '1000.00', gasto_proyectado: '250.00', total_estimado: '1250.00' }));
+
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$1.250al mes'));
+    expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('Ya cobrado $1.000 · por cobrar $250');
+    expect(getResumenDelMes).toHaveBeenLastCalledWith('2026-09', 'CLP');
+  });
+
+  it('cambiar de mes con el presupuesto cambia la cifra del Panel', async () => {
+    vi.mocked(getResumenDelMes).mockImplementation(async (mes, moneda) => {
+      const real = mes === '2026-08' ? '800.00' : '1000.00';
+      return resumenDePrueba({ periodo: mes, moneda, gasto_real: real, gasto_proyectado: '0.00', total_estimado: real });
+    });
+    montarElPanel('/dashboard?moneda=CLP&mes=2026-09');
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$1.000al mes'));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Mes anterior/ }));
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Resumen del mes' })).toHaveTextContent('$800al mes'));
+    expect(getResumenDelMes).toHaveBeenLastCalledWith('2026-08', 'CLP');
+    expect(screen.getByTestId('ubicacion').textContent).toContain('mes=2026-08');
+  });
 });

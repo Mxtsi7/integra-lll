@@ -7,11 +7,14 @@ import { TileCategorias } from '../components/Dashboard/TileCategorias';
 import { TileHub } from '../components/Dashboard/TileHub';
 import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
 import { TileProximo } from '../components/Dashboard/TileProximo';
-import { TileResumen } from '../components/Dashboard/TileResumen';
+import { gastoDelMesDe, TileResumen } from '../components/Dashboard/TileResumen';
 import { TileSalud } from '../components/Dashboard/TileSalud';
 import { useAuth } from '../context/AuthContext';
 import { useCatalogos } from '../context/CatalogosContext';
+import { useInformeMensual } from '../hooks/useInformeMensual';
+import { useMesEnUrl } from '../hooks/useMesEnUrl';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
+import { fechaATexto } from '../utils/calendario';
 import styles from './DashboardPage.module.css';
 
 type EstadoCarga =
@@ -61,6 +64,11 @@ export function DashboardPage() {
   const moneda = monedas.includes(monedaElegida) ? monedaElegida
     : monedas.includes('CLP') ? 'CLP' : monedas[0] ?? catalogos?.predeterminados.moneda ?? 'CLP';
   const delPanel = todas.filter((s) => s.moneda === moneda);
+  // El mes lo elige el presupuesto del Panel (?mes=): las cifras y el presupuesto miran el mismo mes.
+  const { mes } = useMesEnUrl(fechaATexto(new Date()));
+  const { carga: informe } = useInformeMensual(mes, moneda);
+  // El último mes del informe es el elegido. Mientras no llega, no hay cifra que mostrar.
+  const gastoDelMes = informe.tipo === 'listo' ? gastoDelMesDe(informe.meses[informe.meses.length - 1]) : null;
 
   return (
     <AppLayout
@@ -83,7 +91,7 @@ export function DashboardPage() {
         </div>
         <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
-            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} />
+            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} gastoDelMes={gastoDelMes} />
             <SeccionPresupuesto moneda={moneda} />
             <TileSalud suscripciones={delPanel} moneda={moneda} />
             <TileProximo suscripciones={delPanel} />
