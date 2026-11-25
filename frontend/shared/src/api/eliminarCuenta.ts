@@ -3,8 +3,19 @@ import { ErrorDeApi, pedir } from './cliente';
 
 
 /**
- * MX-07 (DELETE /usuarios/me/) aún no está integrado en main (PR #72 en draft, espera FE-05).
- * Mientras sea false, la web muestra "Eliminar" deshabilitado. Al integrarse el backend: true.
+ * Habilita "Eliminar cuenta" en la WEB (Perfil y Ajustes, S3-AN-03). Es true porque MX-07 ya
+ * está en main (DELETE /usuarios/me/, limpieza duradera por el worker `auth-eliminaciones` y
+ * endpoints internos en suscripciones, conectores, analítica y notificaciones). Requiere
+ * ELIMINACION_INTERNA_SECRET y ELIMINACION_DESTINOS en el despliegue; si faltan, el backend
+ * responde 503 y la cuenta sigue activa. Para apagarlo en una emergencia: false.
+ */
+export const ELIMINAR_CUENTA_WEB_DISPONIBLE = true;
+
+/**
+ * Habilita la pantalla de Eliminar cuenta en MÓVIL (AN-19). Sigue en false a propósito: su
+ * pantalla llama cerrarSesion() al terminar sin comprobar que la sesión (ni la pantalla)
+ * sigan siendo las que pidieron el borrado, y una respuesta tardía podría cerrar la sesión de
+ * otra cuenta que entró después. Se enciende cuando AN-19 tenga esa protección.
  */
 export const ELIMINAR_CUENTA_DISPONIBLE = false;
 
