@@ -19,7 +19,8 @@ from rest_framework.test import APIClient
 from notifications import entregas
 from notifications.generador import generar
 from notifications.invalidacion import revisar
-from notifications.models import Alerta, DireccionCorreo, EntregaAlerta, PreferenciaNotificacion, SuscripcionVigilada
+from notifications.models import Alerta, EntregaAlerta, PreferenciaNotificacion, SuscripcionVigilada
+from tests.directorio_falso import DIRECTORIO
 from notifications.proyeccion import aplicar
 
 pytestmark = pytest.mark.django_db
@@ -55,7 +56,7 @@ def con_aviso():
     """Una suscripción que se cobra pasado mañana, su aviso generado y un
     correo planificado para una persona."""
     PreferenciaNotificacion.objects.create(organizacion_id=ORG, usuario_id="42")
-    DireccionCorreo.objects.create(organizacion_id=ORG, usuario_id="42", email="ana@ejemplo.cl")
+    DIRECTORIO.agregar(ORG, "42", "ana@ejemplo.cl")
     aplicar(sobre("suscripcion.creada", ocurrido="2026-11-01T12:00:00Z"))
     generar(ahora=HOY)
     (alerta,) = Alerta.objects.filter(tipo=Alerta.Tipo.PROXIMO_COBRO)

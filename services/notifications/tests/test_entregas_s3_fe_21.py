@@ -36,11 +36,11 @@ from notifications.canales import ErrorDeEnvio, clasificar_smtp
 from notifications.generador import generar
 from notifications.models import (
     Alerta,
-    DireccionCorreo,
     EntregaAlerta,
     PreferenciaNotificacion,
 )
 from notifications.politica_envio import PUSH, Politica, cuando_enviar, dia_local
+from tests.directorio_falso import DIRECTORIO
 from tests.smtp_de_prueba import ServidorSMTP, puerto_cerrado
 from tests.test_generador import HOY, vigilada
 
@@ -62,7 +62,7 @@ def persona(usuario="42", *, org=ORG, correo="ana@ejemplo.cl", **preferencias):
         organizacion_id=org, usuario_id=usuario, **preferencias,
     )
     if correo:
-        DireccionCorreo.objects.create(organizacion_id=org, usuario_id=usuario, email=correo)
+        DIRECTORIO.agregar(org, usuario, correo)
     return preferencia
 
 
@@ -175,9 +175,15 @@ class TestPlanificar:
 
 
 def sin_fila(usuario="42", *, org=ORG, correo="ana@ejemplo.cl"):
-    """Una persona conocida (tiene dirección) que nunca abrió Ajustes: no
-    tiene fila de preferencias. Es lo normal para quien no las cambió."""
-    return DireccionCorreo.objects.create(organizacion_id=org, usuario_id=usuario, email=correo)
+    """Una persona de la organización (auth la conoce) que nunca abrió
+    Ajustes: no tiene fila de preferencias. Es lo normal para quien no las
+    cambió."""
+    DIRECTORIO.agregar(org, usuario, correo)
+
+
+def se_va(usuario, *, org=ORG):
+    """Deja la organización: auth ya no la entrega (S3-FE-21)."""
+    DIRECTORIO.quitar(org, usuario)
 
 
 class TestPersonasSinFilaDePreferencias:
@@ -404,8 +410,11 @@ class TestCorreoAceptado:
 
 class TestErrorExplicito:
     def test_sin_direccion_conocida_falla_con_codigo_y_sin_mandar(self, mailoutbox):
-        persona("42", correo=None)
+        """Se planificó cuando era parte de la organización, y al mandar auth
+        ya no la entrega (la sacaron, o se desactivó)."""
+        persona("42")
         nueva_alerta()
+        se_va("42")
         assert entregas.despachar(ahora=a_las(10))[entregas.FALLIDA] == 1
         entrega = la_entrega()
         assert (entrega.estado, entrega.codigo_error) == (Estado.FALLIDA, "sin_direccion")
@@ -493,9 +502,10 @@ class TestErrorExplicito:
         """El criterio dicho al revés: después de una corrida, ninguna fila
         terminada queda muda."""
         persona("42")                                   # aceptada
-        persona("43", correo=None)                      # sin dirección
+        persona("43", correo="beto@ejemplo.cl")         # sin dirección al mandar
         persona("44", correo="otra@ejemplo.cl")         # transitorio
         nueva_alerta()
+        se_va("43")
         real = canales.CanalCorreo.enviar
 
         def enviar(self, envio):
@@ -797,7 +807,7 @@ class TestPreferenciasAlMandar:
         preferencia = persona("42")
         nueva_alerta()
         preferencia.delete()
-        DireccionCorreo.objects.all().delete()
+        se_va("42")
         entregas.despachar(ahora=a_las(10))
         assert (la_entrega().estado, la_entrega().codigo_error) == (Estado.FALLIDA, "sin_direccion")
         assert mailoutbox == []
@@ -910,7 +920,7 @@ class TestCuotaDelPush:
     def test_la_cuota_es_de_cada_persona(self, push):
         persona("42", por_email=False, por_push=True)
         self.aceptadas(a_las(10), a_las(12), usuario="42")
-        persona("43", por_email=False, por_push=True, correo=None)
+        persona("43", por_email=False, por_push=True, correo="beto@ejemplo.cl")
         alerta = nueva_alerta(ahora=a_las(15))
         entregas.despachar(ahora=a_las(15))
         assert alerta.entregas.get(usuario_id="43").estado == Estado.ACEPTADA
@@ -1094,8 +1104,9 @@ class TestClasificar:
 class TestComando:
     def test_informa_y_acepta_un_reloj_fijo(self, mailoutbox):
         persona("42")
-        persona("43", correo=None)
+        persona("43", correo="beto@ejemplo.cl")
         nueva_alerta()
+        se_va("43")
         salida = StringIO()
         call_command("despachar_alertas", ahora="2026-11-21T10:00:00-03:00", stdout=salida)
         texto = salida.getvalue()
@@ -1178,7 +1189,7 @@ def borrar_persona(org, usuario):
 
 
 class TestBorrado:
-    def test_la_limpieza_de_la_organizacion_se_lleva_entregas_y_direcciones(self, monkeypatch, mailoutbox):
+    def test_la_limpieza_de_la_organizacion_se_lleva_las_entregas(self, monkeypatch, mailoutbox):
         from tests.test_eliminacion_proyeccion import SECRETO, limpiar
 
         monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", SECRETO)
@@ -1189,9 +1200,7 @@ class TestBorrado:
         entregas.despachar(ahora=a_las(10))
         assert limpiar(ORG).status_code == 204
         assert not EntregaAlerta.objects.filter(organizacion_id=ORG).exists()
-        assert not DireccionCorreo.objects.filter(organizacion_id=ORG).exists()
         assert EntregaAlerta.objects.filter(organizacion_id=OTRA).count() == 1
-        assert DireccionCorreo.objects.filter(organizacion_id=OTRA).count() == 1
 
     def test_la_limpieza_de_una_persona_se_lleva_solo_lo_suyo(self, monkeypatch, mailoutbox):
         monkeypatch.setenv("ELIMINACION_INTERNA_SECRET", "secreto-solo-prueba")
@@ -1203,6 +1212,4 @@ class TestBorrado:
 
         assert borrar_persona(ORG, 42).status_code == 204
         assert not EntregaAlerta.objects.filter(usuario_id="42").exists()
-        assert not DireccionCorreo.objects.filter(usuario_id="42").exists()
         assert la_entrega(usuario="43").destino == "beto@ejemplo.cl"
-        assert DireccionCorreo.objects.filter(usuario_id="43").exists()

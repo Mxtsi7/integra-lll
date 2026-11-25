@@ -75,6 +75,8 @@ CONTENEDORES_ESPERADOS = set(SERVICIOS) | {
     # entre corridas, sin canal de consulta, así que Compose le desactiva el
     # healthcheck; igualmente debe existir y estar corriendo.
     "connectors-purga",
+    # Generar y despachar alertas (S3-FE-21): un bucle sin canal de consulta.
+    "notifications-alertas",
 }
 
 # Servicios sin healthcheck a propósito: se exige presencia y ejecución, pero
@@ -82,7 +84,7 @@ CONTENEDORES_ESPERADOS = set(SERVICIOS) | {
 # incompleto. `redis` no declara healthcheck en Compose; su disponibilidad se
 # comprueba indirectamente con el `/health/` de los servicios que lo usan.
 SIN_HEALTHCHECK = {"subscriptions-beat", "auth-eliminaciones", "frontend", "redis",
-                   "connectors-purga"}
+                   "connectors-purga", "notifications-alertas"}
 
 
 @dataclass

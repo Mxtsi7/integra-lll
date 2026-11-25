@@ -50,13 +50,16 @@ TRABAJADORES = {
     # Purga de archivos de importación (FE-07): un bucle que duerme entre
     # corridas, sin canal de consulta.
     "connectors-purga": "connectors",
+    # Generar y despachar alertas cada 15 minutos (S3-FE-21). Cruza a la red
+    # de auth para consultar el directorio de destinatarios.
+    "notifications-alertas": "notifications",
 }
 INFRAESTRUCTURA = {"postgres", "rabbitmq", "redis"}
 # Los que no exponen un canal de consulta. Se exige que declaren
 # `disable: true` y que estén presentes y corriendo (ver
 # scripts/verificar_servicios.py), no que finjan salud.
 SIN_HEALTHCHECK_PERMITIDO = {"subscriptions-beat", "auth-eliminaciones",
-                             "connectors-purga"}
+                             "connectors-purga", "notifications-alertas"}
 # D-11: sólo gateway y web publican puerto. Los dominios se alcanzan por la
 # red interna; publicarlos otra vez rompería el aislamiento.
 SERVICIOS_PUBLICOS = {"gateway": 8000}

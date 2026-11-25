@@ -153,6 +153,17 @@ trasladar_secreto ghcr .dockerconfigjson
 trasladar_secreto ojoalgasto SECRET_KEY,ELIMINACION_INTERNA_SECRET
 trasladar_secreto "ojoalgasto-bd-$SERVICIO" DATABASE_URL
 trasladar_secreto ojoalgasto-rabbitmq RABBITMQ_URL
+# S3-FE-21: lo que usan SOLO los Jobs de alertas (el secreto del directorio y
+# la cuenta de correo), en un Secret aparte para que la API no lo reciba. Si
+# el núcleo todavía no lo tiene, el despliegue sigue: los Jobs lo referencian
+# como opcional y sin él los correos quedan diferidos.
+if [ "$SERVICIO" = "notifications" ]; then
+  if [ -n "$(kubectl get secret ojoalgasto-alertas -n "$NS_NUCLEO" -o name 2>/dev/null)" ]; then
+    trasladar_secreto ojoalgasto-alertas DIRECTORIO_INTERNO_SECRET,EMAIL_HOST_USER,EMAIL_HOST_PASSWORD,DEFAULT_FROM_EMAIL
+  else
+    echo "   ojoalgasto-alertas: no existe en $NS_NUCLEO; las alertas no saldrán por correo (k8s/tandas/README.md)" >&2
+  fi
+fi
 
 echo "── aplicando el servicio ──"
 kubectl apply -n "$NS_SATELITE" -f "$MANIFIESTOS"
