@@ -1,6 +1,7 @@
 import {
   ErrorDeApi,
   subirArchivoImportacion,
+  validarArchivoCsv,
   type Importacion,
 } from '@ojoalgasto/shared';
 import { Upload } from 'lucide-react';
@@ -19,8 +20,9 @@ export interface SubirArchivoCsvProps {
 }
 
 /**
- * Selector y envío de archivo CSV para importación (S3-SE-02, FE-07).
- * Conecta el multipart POST /api/importaciones/archivos/ con el id devuelto,
+ * Selector y envío de archivo CSV para importación (S3-SE-02, S3-SE-03, FE-07).
+ * Valida tipo y tamaño en el cliente antes de subir, permite corregir,
+ * conecta el multipart POST /api/importaciones/archivos/ con el id devuelto,
  * redirige al progreso sin afirmar éxito prematuro y aísla por sesión.
  */
 export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
@@ -42,6 +44,13 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
   async function manejarEnvio(evento: FormEvent) {
     evento.preventDefault();
     if (!archivo || cargando) return;
+
+    // Validación preventiva en cliente (S3-SE-03): archivos incompatibles no se envían.
+    const validacion = validarArchivoCsv(archivo);
+    if (!validacion.valido) {
+      setError(validacion.error ?? 'Archivo incompatible.');
+      return;
+    }
 
     setError('');
     setCargando(true);
@@ -82,9 +91,22 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
 
   function alCambiarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
     const seleccionado = e.target.files?.[0] ?? null;
+    if (!seleccionado) {
+      setArchivo(null);
+      setError('');
+      return;
+    }
+
+    const validacion = validarArchivoCsv(seleccionado);
     setArchivo(seleccionado);
-    setError('');
+    if (!validacion.valido) {
+      setError(validacion.error ?? 'Archivo incompatible.');
+    } else {
+      setError('');
+    }
   }
+
+  const esValido = Boolean(archivo && !error);
 
   return (
     <section className={styles.contenedor} aria-labelledby="titulo-subir-csv">
@@ -114,7 +136,7 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
             variante="primario"
             tamano="s"
             cargando={cargando}
-            disabled={!archivo || cargando}
+            disabled={!esValido || cargando}
             icono={<Upload size={14} aria-hidden="true" />}
           >
             Subir archivo

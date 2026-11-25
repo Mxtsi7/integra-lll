@@ -108,28 +108,93 @@ describe('SubirArchivoCsv (S3-SE-02, FE-07)', () => {
     expect(screen.queryByText(/éxito/i)).not.toBeInTheDocument();
   });
 
-  it('muestra el mensaje de error cuando el backend rechaza con ErrorDeApi', async () => {
+  it('rechaza formato no admitido en cliente, deshabilita el botón y permite corregir (S3-SE-03)', () => {
+    const onSubirMock = vi.fn();
+    render(<ContenedorPrueba onSubir={onSubirMock} />);
+
+    const input = screen.getByLabelText(/seleccionar archivo csv/i);
+    const archivoExcel = new File(['datos'], 'cartola.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+
+    fireEvent.change(input, { target: { files: [archivoExcel] } });
+
+    const alerta = screen.getByRole('alert');
+    expect(alerta).toHaveTextContent('Formato no admitido. Solo se admiten archivos .csv.');
+    const boton = screen.getByRole('button', { name: /subir archivo/i });
+    expect(boton).toBeDisabled();
+    expect(onSubirMock).not.toHaveBeenCalled();
+
+    // Posibilidad de corregir: selecciona ahora un archivo CSV válido
+    const archivoValido = new File(['fecha,descripcion,monto\n2026-10-01,Netflix,5990'], 'cartola.csv', {
+      type: 'text/csv',
+    });
+    fireEvent.change(input, { target: { files: [archivoValido] } });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(boton).not.toBeDisabled();
+  });
+
+  it('rechaza archivo vacío (0 bytes) en el cliente y no lo envía (S3-SE-03)', () => {
+    const onSubirMock = vi.fn();
+    render(<ContenedorPrueba onSubir={onSubirMock} />);
+
+    const input = screen.getByLabelText(/seleccionar archivo csv/i);
+    const archivoVacio = new File([], 'vacio.csv', { type: 'text/csv' });
+
+    fireEvent.change(input, { target: { files: [archivoVacio] } });
+
+    const alerta = screen.getByRole('alert');
+    expect(alerta).toHaveTextContent('El archivo está vacío.');
+    expect(screen.getByRole('button', { name: /subir archivo/i })).toBeDisabled();
+    expect(onSubirMock).not.toHaveBeenCalled();
+  });
+
+  it('rechaza archivo que excede 5 MB en el cliente y no lo envía (S3-SE-03)', () => {
+    const onSubirMock = vi.fn();
+    render(<ContenedorPrueba onSubir={onSubirMock} />);
+
+    const input = screen.getByLabelText(/seleccionar archivo csv/i);
+    // Creamos un Blob/File simulando 5 MB + 1 byte
+    const archivoPesado = new File(['x'.repeat(100)], 'pesado.csv', { type: 'text/csv' });
+    Object.defineProperty(archivoPesado, 'size', { value: 5 * 1024 * 1024 + 1 });
+
+    fireEvent.change(input, { target: { files: [archivoPesado] } });
+
+    const alerta = screen.getByRole('alert');
+    expect(alerta).toHaveTextContent('El archivo supera el tamaño máximo permitido de 5 MB.');
+    expect(screen.getByRole('button', { name: /subir archivo/i })).toBeDisabled();
+    expect(onSubirMock).not.toHaveBeenCalled();
+  });
+
+  it('una validación cliente aprobada sigue sujeta a validación del servidor (S3-SE-03)', async () => {
     const errorBackend = new ErrorDeApi(
-      'Solo se admiten archivos .csv o cartolas .pdf.',
+      'El CSV tiene una sola columna: no se encontró un separador.',
       400,
-      { archivo: ['Solo se admiten archivos .csv o cartolas .pdf.'] },
+      { archivo: ['El CSV tiene una sola columna: no se encontró un separador.'] },
       undefined,
-      'formato_no_admitido',
+      'contenido_incompatible',
     );
     const onSubirMock = vi.fn().mockRejectedValue(errorBackend);
 
     render(<ContenedorPrueba onSubir={onSubirMock} />);
 
     const input = screen.getByLabelText(/seleccionar archivo csv/i);
-    const archivo = new File(['invalido'], 'test.txt', { type: 'text/plain' });
+    const archivo = new File(['solounacolumna'], 'cartola.csv', { type: 'text/csv' });
     fireEvent.change(input, { target: { files: [archivo] } });
 
+    // En cliente tiene .csv y tamaño > 0, así que el botón se habilita
+    const boton = screen.getByRole('button', { name: /subir archivo/i });
+    expect(boton).not.toBeDisabled();
+
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /subir archivo/i }));
+      fireEvent.click(boton);
     });
 
+    // El backend rechaza por contenido incompatible y se muestra el error del servidor
+    expect(onSubirMock).toHaveBeenCalledTimes(1);
     const alerta = screen.getByRole('alert');
-    expect(alerta).toHaveTextContent('Solo se admiten archivos .csv o cartolas .pdf.');
+    expect(alerta).toHaveTextContent('El CSV tiene una sola columna: no se encontró un separador.');
   });
 
   it('muestra MENSAJE_SIN_RED ante un fallo de red (TypeError)', async () => {
