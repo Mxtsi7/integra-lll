@@ -29,6 +29,7 @@ function contratacionDe(extra: Partial<Record<string, unknown>> = {}) {
     operacion: null,
     mensajeError: null,
     precioDemo: null,
+    recuperando: false,
     contratar: vi.fn(),
     continuarPago: vi.fn(),
     verificar: vi.fn(),
@@ -107,6 +108,13 @@ describe('PlanPremium', () => {
 
     expect(screen.getByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
     expect(screen.getByText('Plan Gratuito')).toBeInTheDocument();
+  });
+
+  it('mientras se recupera una contratación guardada, no ofrece Mejorar a Premium', () => {
+    estado.contratacion = contratacionDe({ recuperando: true });
+    render(<PlanPremium />);
+
+    expect(screen.queryByRole('button', { name: 'Mejorar a Premium' })).toBeNull();
   });
 
   it('mientras se vuelven a leer los permisos, el aviso de pago confirmado sigue y no reaparece Mejorar a Premium', () => {

@@ -36,6 +36,7 @@ export function crearClaveIdempotencia(): string {
 }
 
 export const MENSAJE_CHECKOUT_INSEGURO = 'No pudimos abrir el pago de forma segura. Inténtalo de nuevo más tarde.';
+export const MENSAJE_CONTRATACION_PENDIENTE = 'Ya tienes una contratación pendiente. Verifica su estado o cancélala.';
 export const MENSAJE_PENDIENTE_NO_RECUPERABLE =
   'Ya tienes una contratación pendiente, pero no pudimos encontrarla en este navegador.';
 export const MENSAJE_NO_RECUPERO_PENDIENTE =
@@ -68,7 +69,7 @@ export const TEXTOS_CONTRATACION: Record<ContratacionPlan['estado'], { titulo: s
 export function mensajeDeErrorDeContratacion(error: unknown): string {
   if (error instanceof ErrorDeApi) {
     if (error.status === 403) return 'Solo la persona titular de la organización puede contratar Premium.';
-    if (error.status === 409) return 'Ya tienes una contratación pendiente. Verifica su estado o cancélala.';
+    if (error.status === 409) return MENSAJE_CONTRATACION_PENDIENTE;
     if (error.status === 503) return 'La contratación no está disponible por ahora. Inténtalo más tarde.';
   }
   if (error instanceof TypeError) return MENSAJE_SIN_RED;

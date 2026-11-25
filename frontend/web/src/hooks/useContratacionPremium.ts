@@ -12,6 +12,7 @@ import {
   crearClaveIdempotencia,
   esUrlCheckoutValida,
   MENSAJE_CHECKOUT_INSEGURO,
+  MENSAJE_CONTRATACION_PENDIENTE,
   MENSAJE_NO_RECUPERO_PENDIENTE,
   MENSAJE_PENDIENTE_NO_RECUPERABLE,
   mensajeDeErrorDeContratacion,
@@ -60,6 +61,11 @@ export function useContratacionPremium({
   const montado = useRef(true);
   /** Termina cuando se recuperó el intento guardado. Las acciones esperan a que termine. */
   const restauracion = useRef<Promise<void>>(Promise.resolve());
+  /** Verdadero mientras se pide al servidor la contratación guardada. La pantalla no ofrece contratar en ese intervalo. */
+  const [recuperando, setRecuperando] = useState(false);
+  // Lo que el servidor ya dijo. Se lee desde una ref porque una acción puede ejecutarse antes de que React pinte el cambio.
+  const contratoConocido = useRef<ContratacionPlan | null>(null);
+  const idSinCargarConocido = useRef<string | null>(null);
 
   useEffect(() => {
     montado.current = true;
@@ -89,27 +95,35 @@ export function useContratacionPremium({
     [capturarSesion],
   );
 
+  const fijarIdSinCargar = useCallback((id: string | null) => {
+    idSinCargarConocido.current = id;
+    setIdSinCargar(id);
+  }, []);
+
   /** Aplica lo que el servidor dice. Si la contratación ya terminó, se olvida el intento guardado. */
   const aplicar = useCallback(
     (actual: ContratacionPlan) => {
       if (!montado.current) return;
+      contratoConocido.current = actual;
       setContrato(actual);
-      setIdSinCargar(null);
+      fijarIdSinCargar(null);
       if (actual.estado !== 'pendiente') {
         claveActual.current = null;
         almacen?.borrar();
       }
     },
-    [almacen],
+    [almacen, fijarIdSinCargar],
   );
 
   // Al entrar (o si cambia la persona) se recupera la contratación pendiente que se guardó en este navegador.
   useEffect(() => {
     let vigente = true;
+    contratoConocido.current = null;
     setContrato(null);
-    setIdSinCargar(null);
+    fijarIdSinCargar(null);
     const guardado = almacen?.leer() ?? null;
     claveActual.current = guardado?.clave ?? null;
+    setRecuperando(Boolean(guardado?.contratoId));
     restauracion.current = (async () => {
       if (!guardado?.contratoId) return; // la respuesta se perdió: se resuelve al volver a contratar con la misma clave
       try {
@@ -122,15 +136,17 @@ export function useContratacionPremium({
           almacen?.borrar();
         } else {
           // Fallo temporal: se conserva lo guardado y se ofrece verificarla de nuevo.
-          setIdSinCargar(guardado.contratoId);
+          fijarIdSinCargar(guardado.contratoId);
           setMensajeError(MENSAJE_NO_RECUPERO_PENDIENTE);
         }
+      } finally {
+        if (vigente && montado.current) setRecuperando(false);
       }
     })();
     return () => {
       vigente = false;
     };
-  }, [almacen, aplicar]);
+  }, [almacen, aplicar, fijarIdSinCargar]);
 
   /** Corre una operación con candado y manejo de error común. La sesión se captura al empezar. */
   const ejecutar = useCallback(
@@ -158,6 +174,16 @@ export function useContratacionPremium({
   const contratar = useCallback(
     () =>
       ejecutar('iniciando', async (marca) => {
+        // Antes de generar una clave: si la contratación recuperada ya está pagada o sigue pendiente, no se manda otra.
+        const conocida = contratoConocido.current;
+        if (conocida?.estado === 'exitosa') {
+          alPlanCambiar?.();
+          return;
+        }
+        if (conocida?.estado === 'pendiente' || idSinCargarConocido.current !== null) {
+          setMensajeError(MENSAJE_CONTRATACION_PENDIENTE);
+          return;
+        }
         claveActual.current ??= crearClaveIdempotencia();
         const clave = claveActual.current;
         // Se guarda ANTES de pedir: si la respuesta se pierde, el reintento manda esta misma clave.
@@ -167,7 +193,7 @@ export function useContratacionPremium({
         try {
           nuevo = await iniciarContratacion(clave);
         } catch (error) {
-          if (error instanceof ErrorDeApi && error.status === 409 && !idPendiente) {
+          if (error instanceof ErrorDeApi && error.status === 409) {
             setMensajeError(MENSAJE_PENDIENTE_NO_RECUPERABLE);
             return;
           }
@@ -187,7 +213,7 @@ export function useContratacionPremium({
         }
         irAlCheckout(nuevo.url_checkout);
       }),
-    [aplicar, almacen, alPlanCambiar, ejecutar, idPendiente, irAlCheckout, sigueVigente],
+    [aplicar, almacen, alPlanCambiar, ejecutar, irAlCheckout, sigueVigente],
   );
 
   /**
@@ -240,7 +266,7 @@ export function useContratacionPremium({
     [aplicar, alPlanCambiar, ejecutar, idPendiente, sigueVigente],
   );
 
-  return { contrato, idSinCargar, operacion, mensajeError, precioDemo, contratar, continuarPago, verificar, cancelar };
+  return { contrato, idSinCargar, operacion, mensajeError, precioDemo, recuperando, contratar, continuarPago, verificar, cancelar };
 }
 
 /** Lo que devuelve el hook. Las acciones de Ajustes y Perfil lo reciben ya creado. */

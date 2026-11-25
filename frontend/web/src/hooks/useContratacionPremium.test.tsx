@@ -10,7 +10,12 @@ import {
   type ContratacionPlan,
   type PlanDisponible,
 } from '@ojoalgasto/shared';
-import { MENSAJE_CHECKOUT_INSEGURO, MENSAJE_NO_RECUPERO_PENDIENTE, MENSAJE_PENDIENTE_NO_RECUPERABLE } from '../components/Planes/reglasContratacion';
+import {
+  MENSAJE_CHECKOUT_INSEGURO,
+  MENSAJE_CONTRATACION_PENDIENTE,
+  MENSAJE_NO_RECUPERO_PENDIENTE,
+  MENSAJE_PENDIENTE_NO_RECUPERABLE,
+} from '../components/Planes/reglasContratacion';
 import { useContratacionPremium } from './useContratacionPremium';
 
 // Solo se simulan las llamadas de red y la sesión. El hook y las reglas son los reales.
@@ -244,6 +249,52 @@ describe('useContratacionPremium', () => {
     expect(getContratacion).toHaveBeenLastCalledWith('c-1');
     expect(irAlCheckout).toHaveBeenCalledWith(urlNueva);
     expect(iniciarContratacion).not.toHaveBeenCalled();
+  });
+
+  it('mientras se recupera una contratación, recuperando es true y luego false', async () => {
+    window.localStorage.setItem(CLAVE_DEL_INTENTO, JSON.stringify({ alcance: '7:org-a', clave: 'k-1', contratoId: 'c-9' }));
+    const recuperacion = diferida<ContratacionPlan>();
+    vi.mocked(getContratacion).mockReturnValue(recuperacion.promesa);
+    const { result } = montar();
+
+    expect(result.current.recuperando).toBe(true);
+    recuperacion.resolver(contrato({ id: 'c-9', estado: 'exitosa' }));
+    await waitFor(() => expect(result.current.recuperando).toBe(false));
+  });
+
+  it('contratar durante la recuperación no manda otra contratación si la recuperada ya está pagada', async () => {
+    window.localStorage.setItem(CLAVE_DEL_INTENTO, JSON.stringify({ alcance: '7:org-a', clave: 'k-1', contratoId: 'c-9' }));
+    const recuperacion = diferida<ContratacionPlan>();
+    vi.mocked(getContratacion).mockReturnValue(recuperacion.promesa);
+    const { result } = montar();
+
+    let operacion!: Promise<void>;
+    act(() => {
+      operacion = result.current.contratar();
+    });
+    recuperacion.resolver(contrato({ id: 'c-9', estado: 'exitosa' }));
+    await act(() => operacion);
+
+    expect(iniciarContratacion).not.toHaveBeenCalled();
+    expect(irAlCheckout).not.toHaveBeenCalled();
+    expect(alPlanCambiar).toHaveBeenCalled();
+  });
+
+  it('contratar durante la recuperación no manda otra si la recuperada sigue pendiente', async () => {
+    window.localStorage.setItem(CLAVE_DEL_INTENTO, JSON.stringify({ alcance: '7:org-a', clave: 'k-1', contratoId: 'c-9' }));
+    const recuperacion = diferida<ContratacionPlan>();
+    vi.mocked(getContratacion).mockReturnValue(recuperacion.promesa);
+    const { result } = montar();
+
+    let operacion!: Promise<void>;
+    act(() => {
+      operacion = result.current.contratar();
+    });
+    recuperacion.resolver(contrato({ id: 'c-9', estado: 'pendiente' }));
+    await act(() => operacion);
+
+    expect(iniciarContratacion).not.toHaveBeenCalled();
+    expect(result.current.mensajeError).toBe(MENSAJE_CONTRATACION_PENDIENTE);
   });
 
   it('verificar consulta la contratación pendiente y vuelve a leer el plan', async () => {

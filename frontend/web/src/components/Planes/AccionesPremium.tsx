@@ -71,7 +71,11 @@ export function AccionesPremium({ contratacion, esGratuitoConfirmado, avisoActiv
         </>
       )}
 
-      {!hayPendiente && !avisoActivacion && esGratuitoConfirmado && (
+      {!hayPendiente && !avisoActivacion && contratacion.recuperando && (
+        <p className={styles.texto}>Comprobando si tienes un pago pendiente…</p>
+      )}
+
+      {!hayPendiente && !avisoActivacion && esGratuitoConfirmado && !contratacion.recuperando && (
         <>
           <Boton
             variante="secundario"
