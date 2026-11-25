@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AsociarPaqueteAndroidScreen from './AsociarPaqueteAndroidScreen';
 
 const { listar, asociar, quitar, getSuscripciones } = vi.hoisted(() => ({
-  listar: vi.fn(async () => []),
-  asociar: vi.fn(async (_suscripcionId: string, _paquete: string) => {}),
+  listar: vi.fn(async (): Promise<{ suscripcionId: string; paquete: string }[]> => []),
+  asociar: vi.fn(async (_suscripcionId: string, _paquete: string, _anterior?: { suscripcionId: string; paquete: string }) => {}),
   quitar: vi.fn(async (_paquete: string) => {}),
   getSuscripciones: vi.fn(async () => [{
     id: 'suscripcion-propia', nombre: 'Música', monto: 10, moneda: 'CLP',
@@ -28,5 +28,16 @@ describe('pantalla de asociación manual Android', () => {
     fireEvent.click(screen.getByTestId('guardar-asociacion-paquete'));
 
     await waitFor(() => expect(asociar).toHaveBeenCalledWith('suscripcion-propia', 'com.ejemplo.musica'));
+  });
+  it('carga la asociación elegida y confirma su corrección explícitamente', async () => {
+    const anterior = { suscripcionId: 'suscripcion-propia', paquete: 'com.ejemplo.app' };
+    listar.mockResolvedValueOnce([anterior]);
+    render(<AsociarPaqueteAndroidScreen />);
+
+    fireEvent.click(await screen.findByTestId('corregir-asociacion-com.ejemplo.app'));
+    fireEvent.change(screen.getByTestId('entrada-paquete-android'), { target: { value: 'com.ejemplo.nueva' } });
+    fireEvent.click(screen.getByText('Confirmar corrección'));
+
+    await waitFor(() => expect(asociar).toHaveBeenCalledWith('suscripcion-propia', 'com.ejemplo.nueva', anterior));
   });
 });
