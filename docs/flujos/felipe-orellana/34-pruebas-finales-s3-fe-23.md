@@ -42,7 +42,7 @@ nadie se conecta a esas URL.
 | Lado | Doble | Real |
 |---|---|---|
 | connectors | solo `requests.get` del lector de Gmail (`GoogleFalso`, con las respuestas copiadas de la API de Gmail) | el lector, la lectura programada, el guardado de candidatos, la tarea que procesa el CSV, la confirmación, el outbox y la API de desconexión |
-| notifications | el proveedor de correo es el buzón en memoria de Django (`locmem`) | la proyección, el generador, la invalidación, la planificación, el despacho completo y la API de la campana |
+| notifications | el proveedor de correo es el buzón en memoria de Django (`locmem`), y el directorio de personas y correos de auth (`tests/directorio_falso.py`, desde S3-FE-21) | la proyección, el generador, la invalidación, la planificación, el despacho completo y la API de la campana |
 
 ## Los casos
 

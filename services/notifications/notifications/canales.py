@@ -9,8 +9,8 @@ Es el canal que respaldan los documentos: RF-09 dice que «el correo siempre
 está disponible como canal; el push es adicional en el móvil»,
 `CANALES_HABILITADOS` trae `email` por omisión desde FE-21, y `.env.example`
 ya tiene la sección «Correo (servicios auth y notifications)». No hay un
-acuerdo escrito propio de S3-FE-21: lo valida quien recibe la entrega. De
-dónde sale la DIRECCIÓN tampoco está acordado (ver `DireccionCorreo`). Se manda con el backend de correo de
+acuerdo escrito propio de S3-FE-21: lo valida quien recibe la entrega. La
+DIRECCIÓN se le pregunta a auth al momento de mandar (`directorio.py`). Se manda con el backend de correo de
 Django y las MISMAS variables que usa auth para recuperar la contraseña
 (`EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`,
 `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `EMAIL_TIMEOUT`, `DEFAULT_FROM_EMAIL`).
@@ -41,7 +41,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.mail import BadHeaderError, EmailMessage
 from django.core.validators import validate_email
 
-from .models import DireccionCorreo
+from . import directorio
 
 #: Lo que cabe en `EntregaAlerta.detalle_error`.
 LARGO_DETALLE = 300
@@ -111,19 +111,20 @@ class CanalCorreo:
     nombre = "email"
 
     def destino(self, organizacion_id, usuario_id) -> str | None:
-        """La dirección de la persona, o None si no se conoce."""
-        direccion = (
-            DireccionCorreo.objects.filter(organizacion_id=organizacion_id, usuario_id=usuario_id)
-            .values_list("email", flat=True)
-            .first()
-        )
+        """La dirección VIGENTE de la persona según auth, o None si auth no la
+        conoce en esa organización (dejó de ser parte, o se desactivó).
+
+        Si auth no responde, `directorio.DirectorioNoDisponible`: quien llama
+        decide esperar, porque una caída de auth no dice nada de la persona.
+        """
+        direccion = directorio.destinatarios(organizacion_id).get(str(usuario_id))
         if direccion is None:
             return None
         try:
             validate_email(direccion)
         except ValidationError:
             # Sin el valor: el detalle queda en la fila y en el log no va.
-            raise ErrorDeEnvio("direccion_invalida", "la dirección guardada no es un correo", permanente=True) from None
+            raise ErrorDeEnvio("direccion_invalida", "auth entregó algo que no es un correo", permanente=True) from None
         return direccion
 
     def message_id(self, entrega_id) -> str:

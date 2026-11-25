@@ -174,3 +174,48 @@ def test_comparador_externo_tiene_acceso_solo_al_gateway_autorizado():
     assert args[-1] == "http://gateway.student-forellana.svc.cluster.local:8000/api/suscripciones/"
     assert "Host: gateway" in args
     assert "Authorization: Bearer $(TOKEN_CARGA)" in args
+
+
+# ── S3-FE-21: el directorio de destinatarios ────────────────────────────────
+
+
+def _ns_notifications():
+    for linea in (RAIZ / "k8s/reparto.env").read_text(encoding="utf-8").splitlines():
+        if linea.startswith("NS_NOTIFICATIONS="):
+            return linea.split("=", 1)[1].strip()
+    raise AssertionError("k8s/reparto.env no declara NS_NOTIFICATIONS")
+
+
+def test_solo_los_jobs_de_alertas_llegan_a_auth_ademas_del_gateway():
+    alertas = {"app": "notifications", "componente": "alertas"}
+    api = {"app": "notifications", "componente": "api"}
+    assert permitido("notifications", "auth", 8001, etiquetas_origen=alertas)
+    assert permitido("notifications", "auth", 8001, namespace=_ns_notifications(), etiquetas_origen=alertas)
+    assert not permitido("notifications", "auth", 8001, etiquetas_origen=api)
+    assert not permitido("notifications", "auth", 8001, namespace=_ns_notifications(), etiquetas_origen=api)
+    assert not permitido("notifications", "auth", 8001, namespace="otro-grupo", etiquetas_origen=alertas)
+
+
+def test_en_compose_solo_el_proceso_de_alertas_cruza_a_auth():
+    servicios = documentos("docker-compose.yml")[0]["services"]
+    alertas = servicios["notifications-alertas"]
+    assert set(alertas["networks"]) == {"notifications", "auth"}
+    assert not alertas.get("ports")
+    assert set(servicios["notifications"]["networks"]) == {"notifications"}
+
+
+def test_la_cuenta_de_correo_solo_llega_al_contenedor_que_despacha():
+    cronjob = documentos("k8s/tandas/alertas-notifications.yaml")[0]
+    pod = cronjob["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    nombres = lambda c: {e["name"] for e in c.get("env", [])}
+    (generar,) = pod["initContainers"]
+    (despachar,) = pod["containers"]
+    assert despachar["command"][-1] == "despachar_alertas"
+    assert {"EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"} <= nombres(despachar)
+    assert not {"EMAIL_HOST_USER", "EMAIL_HOST_PASSWORD"} & nombres(generar)
+    for contenedor in (generar, despachar):
+        ref = {e["name"]: e for e in contenedor["env"]}["DIRECTORIO_INTERNO_SECRET"]["valueFrom"]["secretKeyRef"]
+        assert ref == {"name": "ojoalgasto-alertas", "key": "DIRECTORIO_INTERNO_SECRET", "optional": True}
+    for doc in documentos("k8s/tandas/notifications.yaml"):
+        assert "EMAIL_HOST_PASSWORD" not in str(doc), "la API y el consumidor no mandan correos"
+        assert "ojoalgasto-alertas" not in str(doc)
