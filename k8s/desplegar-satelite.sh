@@ -89,12 +89,22 @@ if [ "$NS_NUCLEO" = "$NS_SATELITE" ]; then
   echo "El satélite no puede ser el namespace del núcleo." >&2
   exit 1
 fi
+# Mientras la cuota global de Services esté llena, la API de connectors corre
+# en el pod `web` del núcleo (k8s/parches/connectors-api-en-web.yaml) y acá
+# solo van el worker y la purga, que no necesitan Service.
+API_EN_EL_NUCLEO=""
+if [ "$SERVICIO" = "connectors" ] && [ "$(leer_reparto CONNECTORS_API)" = "web" ]; then
+  API_EN_EL_NUCLEO="web"
+  DEPLOYMENTS="connectors-worker"
+fi
 
 REGISTRO="${REGISTRO:-ghcr.io/felipeorellanacaro}"
 ETIQUETA="${ETIQUETA:-$(git rev-parse --short HEAD)}"
 IMAGEN="$REGISTRO/ojoalgasto-$SERVICIO:$ETIQUETA"
 [[ "$IMAGEN" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/@:-]+$ ]] || { echo "Referencia de imagen inválida" >&2; exit 1; }
 URL_SATELITE="http://$SERVICIO.$NS_SATELITE:$PUERTO"
+# Con la API en el pod web, el núcleo la busca ahí (lo mismo que escribe desplegar.sh).
+[ -n "$API_EN_EL_NUCLEO" ] && URL_SATELITE="http://$API_EN_EL_NUCLEO:$PUERTO"
 
 echo "── $SERVICIO: núcleo $NS_NUCLEO → satélite $NS_SATELITE ($IMAGEN) ──"
 
@@ -133,8 +143,9 @@ fi
 MANIFIESTOS="$(mktemp)"
 trap 'rm -f "$MANIFIESTOS"' EXIT
 MARCA_IMAGEN="IMAGEN_$(printf '%s' "$SERVICIO" | tr '[:lower:]' '[:upper:]')"
-for f in "k8s/tandas/$SERVICIO.yaml" "k8s/tandas/alertas-$SERVICIO.yaml"; do
+for f in "k8s/tandas/$SERVICIO.yaml" "k8s/tandas/alertas-$SERVICIO.yaml" "k8s/tandas/worker-$SERVICIO.yaml"; do
   [ -f "$f" ] || continue
+  [ -n "$API_EN_EL_NUCLEO" ] && [ "$f" = "k8s/tandas/$SERVICIO.yaml" ] && continue
   echo "---"
   sed -e "s|$MARCA_IMAGEN|$IMAGEN|g" "$f"
 done > "$MANIFIESTOS"

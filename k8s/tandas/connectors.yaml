@@ -9,12 +9,14 @@
 #
 # ── Qué corre ────────────────────────────────────────────────────────────────
 #   connectors          la API (cuentas conectadas, OAuth, importaciones,
-#                       candidatos) detrás del gateway del núcleo
-#   connectors-worker   Celery con beat: procesa los CSV subidos, rescata
-#                       importaciones estancadas y lee las cuentas de correo
-#                       cada 15 minutos (S3-FE-18/20)
-#   purgar-archivos     CronJob diario: borra el contenido de los archivos de
-#                       importación vencidos (FE-07, retención de 7 días)
+#                       candidatos) detrás del gateway del núcleo, con su
+#                       Service. El worker y la purga están en
+#                       k8s/tandas/worker-connectors.yaml.
+#
+# ── Mientras no haya cupo de Services ────────────────────────────────────────
+# Este archivo NO se aplica si k8s/reparto.env dice `CONNECTORS_API=web`: la
+# cuota global de Services del clúster está llena y la API corre dentro del
+# pod `web` del núcleo (k8s/parches/connectors-api-en-web.yaml).
 #
 # ── Lo que NO recibe ─────────────────────────────────────────────────────────
 # La clave administradora de PostgreSQL, el secreto de los JWT, la cuenta de
@@ -113,105 +115,3 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 10
           resources: *recursos_api
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: connectors-worker
-  labels: { app.kubernetes.io/part-of: ojoalgasto }
-spec:
-  # Uno solo: beat corre dentro del worker, y dos beats programarían todo
-  # dos veces.
-  replicas: 1
-  strategy: { type: Recreate }
-  selector: { matchLabels: { app: connectors-worker } }
-  template:
-    metadata:
-      labels: { app: connectors-worker, app.kubernetes.io/part-of: ojoalgasto }
-    spec:
-      imagePullSecrets: [{ name: ghcr }]
-      containers:
-        - name: worker
-          image: IMAGEN_CONNECTORS
-          imagePullPolicy: Always
-          # Usa su propia cola y canal de control (`connectors`), así que
-          # compartir el Redis del núcleo con subscriptions no le roba tareas.
-          #
-          # --concurrency fijo: Celery cuenta los CPU del NODO, no los del
-          # límite, y arrancaba 8 procesos que superaban los 320Mi (OOMKilled
-          # en el primer despliegue, 25-11). Con 2, un CSV se procesa mientras
-          # se lee una cuenta de correo.
-          command: [sh, entrypoint.sh, celery, -A, connectors_config, worker, --beat, --concurrency=2, --loglevel=info, --schedule, /tmp/celerybeat-schedule]
-          envFrom:
-            - configMapRef: { name: ojoalgasto }
-          env:
-            - name: SECRET_KEY
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
-            - name: CLAVES_CIFRADO
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO }
-            - name: OAUTH_GMAIL_CLIENT_ID
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_ID, optional: true }
-            - name: OAUTH_GMAIL_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_SECRET, optional: true }
-            - name: OAUTH_OUTLOOK_CLIENT_ID
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_ID, optional: true }
-            - name: OAUTH_OUTLOOK_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_SECRET, optional: true }
-            - { name: ESQUEMA_BD, value: connectors }
-            - { name: APLICAR_MIGRACIONES, value: "0" }
-          resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits: { cpu: 250m, memory: 320Mi }
----
-apiVersion: batch/v1
-kind: CronJob
-metadata:
-  name: purgar-archivos
-  labels: { app.kubernetes.io/part-of: ojoalgasto }
-spec:
-  # Una vez al día, de madrugada en Chile (el clúster corre en UTC).
-  schedule: "0 8 * * *"
-  # Llega suspendido, como todo CronJob de tanda: se habilita a mano.
-  suspend: true
-  concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 3600
-  successfulJobsHistoryLimit: 1
-  failedJobsHistoryLimit: 2
-  jobTemplate:
-    spec:
-      backoffLimit: 0
-      activeDeadlineSeconds: 600
-      template:
-        metadata:
-          labels: { app: connectors, componente: purga, app.kubernetes.io/part-of: ojoalgasto }
-        spec:
-          restartPolicy: Never
-          imagePullSecrets: [{ name: ghcr }]
-          containers:
-            - name: purgar
-              image: IMAGEN_CONNECTORS
-              # Sin --aplicar el comando solo cuenta lo que borraría.
-              command: [sh, entrypoint.sh, python, manage.py, purgar_archivos_importacion, --aplicar]
-              envFrom:
-                - configMapRef: { name: ojoalgasto }
-              env:
-                - name: SECRET_KEY
-                  valueFrom:
-                    secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
-                - name: DATABASE_URL
-                  valueFrom:
-                    secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
-                - { name: ESQUEMA_BD, value: connectors }
-                - { name: APLICAR_MIGRACIONES, value: "0" }
-              resources:
-                requests: { cpu: 25m, memory: 64Mi }
-                limits: { cpu: 150m, memory: 160Mi }

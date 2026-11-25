@@ -76,6 +76,12 @@ if [ -n "$NS_CONNECTORS" ]; then
   # organización: tiene que estar en la lista de borrado.
   DESTINOS_ELIMINACION="$DESTINOS_ELIMINACION,connectors"
 fi
+# Mientras la cuota global de Services esté llena, la API de connectors corre
+# dentro del pod `web` (k8s/parches/connectors-api-en-web.yaml). Solo `web`.
+CONNECTORS_API="$(leer_reparto CONNECTORS_API)"
+if [ "$CONNECTORS_API" = "web" ]; then
+  URL_CONNECTORS="http://web:8003"
+fi
 
 # Sustituye imágenes, host público y el reparto. Todo manifiesto que se aplica
 # pasa por acá: aplicar uno en crudo devolvería el gateway a la dirección
@@ -97,6 +103,7 @@ IMAGEN_AUTH="$REGISTRO/ojoalgasto-auth:$ETIQUETA"
 IMAGEN_SUBSCRIPTIONS="$REGISTRO/ojoalgasto-subscriptions:$ETIQUETA"
 IMAGEN_GATEWAY="$REGISTRO/ojoalgasto-gateway:$ETIQUETA"
 IMAGEN_WEB="$REGISTRO/ojoalgasto-web:$ETIQUETA"
+IMAGEN_CONNECTORS="$REGISTRO/ojoalgasto-connectors:$ETIQUETA"
 
 if [ "${SOLO_APLICAR:-0}" != "1" ]; then
   echo "── construyendo imágenes ($ETIQUETA) ──"
@@ -108,10 +115,17 @@ if [ "${SOLO_APLICAR:-0}" != "1" ]; then
   # Dockerfile ademas lo rechaza, por si alguien construye a mano.
   MSYS_NO_PATHCONV=1 docker build -q -f k8s/Dockerfile.web --build-arg "VITE_API_URL=/api" -t "$IMAGEN_WEB" frontend/
 
+  if [ "$CONNECTORS_API" = "web" ]; then
+    docker build -q -f k8s/Dockerfile.servicio --build-arg SERVICIO=services/connectors -t "$IMAGEN_CONNECTORS" .
+  fi
+
   echo "── publicando ──"
   for i in "$IMAGEN_AUTH" "$IMAGEN_SUBSCRIPTIONS" "$IMAGEN_GATEWAY" "$IMAGEN_WEB"; do
     docker push -q "$i"
   done
+  if [ "$CONNECTORS_API" = "web" ]; then
+    docker push -q "$IMAGEN_CONNECTORS"
+  fi
 fi
 
 echo "── credencial del registro ──"
@@ -220,6 +234,19 @@ for f in k8s/00-configuracion.yaml k8s/01-postgres.yaml \
   fi
   renderizar "$f" | kubectl apply -f -
 done
+
+if [ "$CONNECTORS_API" = "web" ]; then
+  echo "── la API de connectors en el pod web ──"
+  # Parche y no manifiesto: `kubectl apply` de 13-web.yaml no borra un
+  # contenedor que no declaró, pero sí hay que traerle la imagen nueva.
+  PARCHE_WEB="$(mktemp)"
+  sed "s|IMAGEN_CONNECTORS|$IMAGEN_CONNECTORS|g" k8s/parches/connectors-api-en-web.yaml > "$PARCHE_WEB"
+  kubectl patch deployment web --type=strategic --patch-file "$PARCHE_WEB"
+  rm -f "$PARCHE_WEB"
+  # La lista entera, con nombres: así el parche es el mismo cada vez.
+  kubectl patch service web --type=merge \
+    -p '{"spec":{"ports":[{"name":"http","port":80,"targetPort":8080},{"name":"connectors","port":8003,"targetPort":8003}]}}'
+fi
 
 echo "── esperando a que todo quede arriba ──"
 kubectl rollout status statefulset/postgres --timeout=300s

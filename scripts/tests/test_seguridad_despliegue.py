@@ -219,3 +219,13 @@ def test_la_cuenta_de_correo_solo_llega_al_contenedor_que_despacha():
     for doc in documentos("k8s/tandas/notifications.yaml"):
         assert "EMAIL_HOST_PASSWORD" not in str(doc), "la API y el consumidor no mandan correos"
         assert "ojoalgasto-alertas" not in str(doc)
+
+
+def test_la_api_de_connectors_en_la_web_no_abre_la_base_a_cualquier_web():
+    con_connectors = {"app": "web", "componente": "con-connectors"}
+    for destino, puerto in (("postgres", 5432), ("redis", 6379)):
+        assert permitido("web", destino, puerto, etiquetas_origen=con_connectors)
+        assert not permitido("web", destino, puerto)
+    assert permitido("gateway", "web", 8003)
+    assert not permitido("subscriptions", "web", 8003)
+    assert not permitido("gateway", "web", 8003, namespace="otro-grupo")
