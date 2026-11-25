@@ -73,9 +73,10 @@ export function crearControlAsociacionPaquetes(dependencias: DependenciasAsociac
       return [...(asociaciones[sesion] ?? [])];
     },
 
-    async asociar(suscripcionId: string, paqueteRecibido: string): Promise<void> {
+    async asociar(suscripcionId: string, paqueteRecibido: string, anterior?: Readonly<AsociacionPaquete>): Promise<void> {
       const sesion = dependencias.obtenerSesion();
       if (!sesion) throw new Error('Inicia sesión para asociar un paquete Android.');
+      const original = anterior && { ...anterior, paquete: validarPaqueteAndroid(anterior.paquete) };
       return serializarMutacion(sesion, async () => {
         const paquete = validarPaqueteAndroid(paqueteRecibido);
         const suscripcionValidada = await dependencias.obtenerSuscripcion(suscripcionId);
@@ -86,12 +87,17 @@ export function crearControlAsociacionPaquetes(dependencias: DependenciasAsociac
         exigirMismaSesion(sesion, 'antes de escribir');
         const asociacionesSesion = asociacionesPorSesion[sesion] ?? [];
         const asociacionExistente = asociacionesSesion.find((asociacion) => asociacion.paquete === paquete);
-        if (asociacionExistente && asociacionExistente.suscripcionId !== suscripcionId) {
+        if (original && !asociacionesSesion.some(asociacion =>
+          asociacion.paquete === original.paquete && asociacion.suscripcionId === original.suscripcionId,
+        )) {
+          throw new Error('La asociación original cambió. Actualiza la lista y vuelve a intentarlo.');
+        }
+        if (asociacionExistente && paquete !== original?.paquete && asociacionExistente.suscripcionId !== suscripcionId) {
           throw new Error('Este paquete ya está asociado a otra suscripción.');
         }
 
         asociacionesPorSesion[sesion] = [
-          ...asociacionesSesion.filter((asociacion) => asociacion.paquete !== paquete),
+          ...asociacionesSesion.filter((asociacion) => asociacion.paquete !== paquete && asociacion.paquete !== original?.paquete),
           { suscripcionId, paquete },
         ];
         await dependencias.almacen.guardar(JSON.stringify(asociacionesPorSesion));
