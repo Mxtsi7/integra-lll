@@ -190,3 +190,75 @@ export function erroresCambioContrasenaDesdeServidor(campos: Record<string, stri
 } {
   return repartirErrores(campos, CAMPO_CAMBIO_DESDE_API);
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Validaciones de archivos de importación (S3-SE-03, FE-07)
+// ─────────────────────────────────────────────────────────────────
+
+export const TAMANO_MAXIMO_ARCHIVO_IMPORTACION_BYTES = 5 * 1024 * 1024; // 5 MB
+
+export interface ArchivoAValidar {
+  name: string;
+  size: number;
+}
+
+export type CodigoErrorArchivo =
+  | 'formato_no_admitido'
+  | 'archivo_vacio'
+  | 'archivo_excedido';
+
+export interface ResultadoValidacionArchivo {
+  valido: boolean;
+  error: string | null;
+  codigo?: CodigoErrorArchivo;
+}
+
+/** Extrae la extensión en minúsculas sin punto, o cadena vacía si no tiene. */
+function obtenerExtension(nombre: string): string {
+  const indice = nombre.lastIndexOf('.');
+  if (indice === -1 || indice === nombre.length - 1) return '';
+  return nombre.slice(indice + 1).toLowerCase();
+}
+
+/**
+ * Valida un archivo CSV antes de enviarlo a POST /api/importaciones/archivos/.
+ * Reglas acordes a FE-07 (services/connectors/connectors/archivos.py):
+ * - Extensión .csv (no admite otras extensiones ni sin extensión).
+ * - Tamaño > 0 (no vacío).
+ * - Tamaño <= 5 MB (no excedido).
+ */
+export function validarArchivoCsv(
+  archivo: ArchivoAValidar,
+  tamanoMaximoBytes = TAMANO_MAXIMO_ARCHIVO_IMPORTACION_BYTES,
+): ResultadoValidacionArchivo {
+  const extension = obtenerExtension(archivo.name || '');
+  if (extension !== 'csv') {
+    return {
+      valido: false,
+      error: 'Formato no admitido. Solo se admiten archivos .csv.',
+      codigo: 'formato_no_admitido',
+    };
+  }
+
+  if (archivo.size === 0) {
+    return {
+      valido: false,
+      error: 'El archivo está vacío.',
+      codigo: 'archivo_vacio',
+    };
+  }
+
+  if (archivo.size > tamanoMaximoBytes) {
+    return {
+      valido: false,
+      error: 'El archivo supera el tamaño máximo permitido de 5 MB.',
+      codigo: 'archivo_excedido',
+    };
+  }
+
+  return {
+    valido: true,
+    error: null,
+  };
+}
+

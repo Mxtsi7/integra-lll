@@ -85,6 +85,14 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
+      # La E2E de S3-VI-23 importa el validador real del gateway y ejecuta el
+      # verificador con el código de Analytics como proceso separado. Sin esas
+      # dependencias la suite falla en la importación, así que se instalan en
+      # el mismo job que recolecta `pytest -v`.
+      - name: Dependencias Python del recorrido E2E
+        if: matrix.servicio == 'subscriptions'
+        run: pip install -r ../../gateway/requirements.txt -r ../analytics/requirements.txt
+
       # El contrato de `uso.registrado` se prueba de verdad en el borde:
       # Python construye el sobre y el validador TypeScript real lo consume.
       # Sin Node, esa prueba falla a propósito (no se omite), así que acá se

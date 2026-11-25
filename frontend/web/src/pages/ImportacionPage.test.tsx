@@ -215,6 +215,98 @@ describe("Progreso de una importación (CH-27)", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reintentar" })));
     expect(screen.getByText("Análisis completado")).toBeInTheDocument();
   });
+
+  describe("Avance real y fallos del CSV (S3-SE-04)", () => {
+    it("distingue la aceptación del archivo (pendiente) del procesamiento activo y su término sin éxito prematuro", async () => {
+      vi.useFakeTimers();
+      const EN_COLA: Importacion = {
+        ...BASE,
+        estado: "pendiente",
+        estado_legible: "Pendiente",
+        progreso: null,
+        filas_totales: 100,
+        filas_procesadas: 0,
+      };
+      const PROCESANDO_MITAD: Importacion = {
+        ...BASE,
+        estado: "procesando",
+        estado_legible: "Procesando",
+        progreso: 50,
+        filas_totales: 100,
+        filas_procesadas: 50,
+      };
+      getMock
+        .mockResolvedValueOnce(EN_COLA)
+        .mockResolvedValueOnce(PROCESANDO_MITAD)
+        .mockResolvedValueOnce(COMPLETADA);
+
+      await montar();
+      expect(screen.getByText("En cola: empieza en unos momentos.")).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(screen.getByText("Leyendo el archivo…")).toBeInTheDocument();
+      expect(barra()).toHaveAttribute("aria-valuenow", "50");
+      expect(screen.getByText("50 de 100 filas (50 %)")).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(screen.getByText("El análisis terminó.")).toBeInTheDocument();
+      expect(screen.getByText(/Todavía no se creó ni cambió ninguna suscripción/)).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      // No se consulta indefinidamente: se detiene al llegar a completada
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(getMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("al fallar el procesamiento del CSV muestra los problemas, aclara que no hubo cambios y corta el polling", async () => {
+      vi.useFakeTimers();
+      const FALLIDA_CSV: Importacion = {
+        ...BASE,
+        estado: "fallida",
+        estado_legible: "Fallida",
+        terminada: true,
+        progreso: 20,
+        filas_totales: 100,
+        filas_procesadas: 20,
+        errores: [
+          { codigo: "monto_invalido", mensaje: "Monto inválido en la fila.", fila: 21 },
+        ],
+        errores_totales: 1,
+      };
+      getMock
+        .mockResolvedValueOnce(BASE)
+        .mockResolvedValueOnce(FALLIDA_CSV);
+
+      await montar();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+
+      expect(screen.getByText(/La importación no se pudo terminar/)).toBeInTheDocument();
+      expect(screen.getByText(/No se creó ni cambió ninguna suscripción/)).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "1 problema" })).toBeInTheDocument();
+      expect(screen.getByText(/Fila 21/)).toBeInTheDocument();
+      expect(screen.getByText(/Corrige estas filas en tu archivo y vuelve a subirlo/)).toBeInTheDocument();
+
+      // Al ser fallida (terminal), el polling se detiene
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(getMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("con progreso null no inventa avance porcentual y mantiene la barra indeterminada", async () => {
+      vi.useFakeTimers();
+      getMock.mockResolvedValue({
+        ...BASE,
+        estado: "procesando",
+        progreso: null,
+        filas_totales: null,
+        filas_procesadas: 0,
+      });
+      await montar();
+
+      expect(barra()).not.toHaveAttribute("aria-valuenow");
+      expect(barra()).toHaveAttribute("aria-valuetext", "Todavía no sabemos cuántas filas son.");
+      expect(screen.getByText("Todavía no sabemos cuántas filas son.")).toBeInTheDocument();
+    });
+  });
 });
 
 describe("Tus importaciones (CH-27)", () => {
