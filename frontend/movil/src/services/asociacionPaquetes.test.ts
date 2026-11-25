@@ -64,6 +64,28 @@ describe('asociación explícita de paquete Android y suscripción', () => {
     expect(almacen.guardar).not.toHaveBeenCalled();
   });
 
+  it('corrige paquete y destino en una sola escritura después de validar el destino', async () => {
+    const sesion = 'org:usuario:sesion-a';
+    const anterior = { suscripcionId: 'suscripcion-1', paquete: 'com.ejemplo.app' };
+    const almacen = crearAlmacen(JSON.stringify({ [sesion]: [anterior] }));
+    const obtenerSuscripcion = vi.fn(async (id: string) => {
+      if (id === 'suscripcion-ajena') throw new Error('No autorizada');
+      return { id };
+    });
+    const control = crearControlAsociacionPaquetes({ obtenerSesion: () => sesion, obtenerSuscripcion, almacen });
+
+    await expect(control.asociar('suscripcion-ajena', 'com.ejemplo.nueva', anterior)).rejects.toThrow('No autorizada');
+    await expect(control.listar()).resolves.toEqual([anterior]);
+    expect(almacen.guardar).not.toHaveBeenCalled();
+
+    await control.asociar('suscripcion-2', 'com.ejemplo.nueva', anterior);
+    await expect(control.listar()).resolves.toEqual([
+      { suscripcionId: 'suscripcion-2', paquete: 'com.ejemplo.nueva' },
+    ]);
+    await expect(control.asociar('suscripcion-1', 'com.ejemplo.app', anterior)).rejects.toThrow('original cambió');
+    expect(almacen.guardar).toHaveBeenCalledOnce();
+  });
+
   it('serializa asociaciones simultáneas para no perder una escritura', async () => {
     const almacen = crearAlmacen();
     const control = crearControlAsociacionPaquetes({
