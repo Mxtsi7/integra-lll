@@ -9,6 +9,7 @@ import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia } from '../components/ui/Insignia';
 import { useAuth } from '../context/AuthContext';
 import { MENSAJE_SIN_RED } from '../utils/mensajes';
+import { SubirArchivoCsv } from '../components/importaciones/SubirArchivoCsv';
 import { TONO_ESTADO } from './ImportacionPage';
 import styles from './ImportacionesPage.module.css';
 
@@ -75,6 +76,7 @@ export function ImportacionesPage() {
 
   return (
     <AppLayout headerTitulo="Importaciones" headerSubtitulo="Tus cartolas y lecturas de correo." angosto>
+      <SubirArchivoCsv />
       {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tus importaciones…</p>}
       {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((anterior) => anterior + 1)} />}
       {estado.tipo === 'listo' && estado.importaciones.length === 0 && (

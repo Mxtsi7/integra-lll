@@ -87,6 +87,46 @@ describe("pedir(): JWT en cada petición e interceptor 401", () => {
         "Authorization",
       );
     });
+
+    it("con FormData no fija Content-Type application/json y conserva Authorization", async () => {
+      guardarTokens({ access_token: "token-form", refresh_token: "ref" });
+      fetchMock.mockResolvedValue(respuesta(200, { id: "imp-123" }));
+
+      const formData = new FormData();
+      formData.append("archivo", new Blob(["col1,col2\n1,2"], { type: "text/csv" }), "datos.csv");
+
+      const resultado = await pedir<{ id: string }>("/importaciones/archivos/", {
+        method: "POST",
+        body: formData,
+      });
+
+      expect(resultado).toEqual({ id: "imp-123" });
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe("http://api.test/api/importaciones/archivos/");
+      expect(init.method).toBe("POST");
+      expect(init.body).toBe(formData);
+      expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer token-form");
+      expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+    });
+
+    it("extrae mensaje y codigo cuando el backend responde con {codigo, archivo}", async () => {
+      fetchMock.mockResolvedValue(
+        respuesta(400, {
+          codigo: "formato_no_admitido",
+          archivo: "Solo se admiten archivos .csv o cartolas .pdf.",
+        }),
+      );
+
+      await expect(pedir("/importaciones/archivos/")).rejects.toMatchObject({
+        status: 400,
+        message: "Solo se admiten archivos .csv o cartolas .pdf.",
+        codigo: "formato_no_admitido",
+        campos: {
+          codigo: ["formato_no_admitido"],
+          archivo: ["Solo se admiten archivos .csv o cartolas .pdf."],
+        },
+      });
+    });
   });
 
   describe("interceptor 401", () => {
