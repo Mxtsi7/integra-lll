@@ -31,6 +31,11 @@
    - La comprobación definitiva del contenido (ausencia de bytes nulos, decodificación UTF-8 / Latin-1, presencia de cabecera con separador reconocido y al menos una fila de datos) y la cuota diaria de la organización continúan realizándose en el servidor en `POST /api/importaciones/archivos/`.
    - Si el backend rechaza con un 400 (`contenido_incompatible`, `archivo_vacio`, etc.) o 429 (`cuota_excedida`), el mensaje devuelto por el servidor se presenta tal cual en la interfaz.
 
+4. **Recuperación tras error de transporte sin bloquear reintento:**
+   - La validez del archivo se calcula a partir del `File` y las reglas de `validarArchivoCsv`, separada del estado de error de subida o red.
+   - Si ocurre una desconexión o falla de transporte (`TypeError` / red caída), el error se expone en `role="alert"`, pero el botón de subida se mantiene habilitado con el archivo ya seleccionado, permitiendo reintentar de inmediato sin tener que volver a buscar el archivo en el explorador.
+   - En caso de seleccionar un archivo inválido (extensión incorrecta o tamaño excedido), el botón permanece deshabilitado.
+
 ---
 
 ## Dónde está
@@ -59,11 +64,12 @@ Rutas relativas a `frontend/`.
    - 57 pruebas pasando en la suite.
 
 2. **Pruebas en `web`:**
-   - `web/src/components/importaciones/SubirArchivoCsv.test.tsx`: 9 pruebas pasando, cubriendo:
+   - `web/src/components/importaciones/SubirArchivoCsv.test.tsx`: 10 pruebas pasando, cubriendo:
      - Bloqueo de archivos incompatibles (no llaman a `onSubir`).
      - Despeje de error y habilitación de botón al corregir selección.
      - Error por archivo vacío y por exceder 5 MB.
      - Simulación de archivo aprobado por el cliente que es rechazado por el backend con 400 (`contenido_incompatible`), comprobando que se muestra el mensaje del servidor.
+     - Reintento con el mismo archivo tras un fallo de red o transporte (`TypeError`), manteniendo el botón habilitado.
 
 3. **Typecheck general:**
    - `npm run typecheck`: 0 errores en todos los paquetes.

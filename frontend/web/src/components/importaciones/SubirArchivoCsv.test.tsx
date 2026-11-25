@@ -197,7 +197,7 @@ describe('SubirArchivoCsv (S3-SE-02, FE-07)', () => {
     expect(alerta).toHaveTextContent('El CSV tiene una sola columna: no se encontró un separador.');
   });
 
-  it('muestra MENSAJE_SIN_RED ante un fallo de red (TypeError)', async () => {
+  it('muestra MENSAJE_SIN_RED ante un fallo de red (TypeError) y mantiene el botón habilitado', async () => {
     const onSubirMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
     render(<ContenedorPrueba onSubir={onSubirMock} />);
 
@@ -205,12 +205,55 @@ describe('SubirArchivoCsv (S3-SE-02, FE-07)', () => {
     const archivo = new File(['a,b\n1,2'], 'movimientos.csv', { type: 'text/csv' });
     fireEvent.change(input, { target: { files: [archivo] } });
 
+    const boton = screen.getByRole('button', { name: /subir archivo/i });
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /subir archivo/i }));
+      fireEvent.click(boton);
     });
 
     const alerta = screen.getByRole('alert');
     expect(alerta).toHaveTextContent(MENSAJE_SIN_RED);
+    expect(boton).not.toBeDisabled();
+  });
+
+  it('permite reintentar el envío con el mismo archivo tras un fallo de transporte o red', async () => {
+    let intento = 0;
+    const onSubirMock = vi.fn().mockImplementation(async () => {
+      intento += 1;
+      if (intento === 1) {
+        throw new TypeError('Failed to fetch');
+      }
+      return IMPORTACION_PENDIENTE;
+    });
+
+    render(<ContenedorPrueba onSubir={onSubirMock} />);
+
+    const input = screen.getByLabelText(/seleccionar archivo csv/i);
+    const archivo = new File(['fecha,descripcion,monto\n2026-10-01,Netflix,5990'], 'cartola.csv', {
+      type: 'text/csv',
+    });
+    fireEvent.change(input, { target: { files: [archivo] } });
+
+    const boton = screen.getByRole('button', { name: /subir archivo/i });
+    expect(boton).not.toBeDisabled();
+
+    // Primer intento: falla por error de transporte
+    await act(async () => {
+      fireEvent.click(boton);
+    });
+
+    expect(onSubirMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('alert')).toHaveTextContent(MENSAJE_SIN_RED);
+    // El botón debe permanecer habilitado: la validez del CSV no se pierde por un fallo de red
+    expect(boton).not.toBeDisabled();
+
+    // Reintento con el mismo archivo sin necesidad de volver a seleccionarlo
+    await act(async () => {
+      fireEvent.click(boton);
+    });
+
+    expect(onSubirMock).toHaveBeenCalledTimes(2);
+    expect(onSubirMock).toHaveBeenLastCalledWith(archivo);
+    expect(screen.getByTestId('pagina-progreso')).toBeInTheDocument();
   });
 
   it('descarta la redirección si la sesión cambia mientras la subida está en curso', async () => {

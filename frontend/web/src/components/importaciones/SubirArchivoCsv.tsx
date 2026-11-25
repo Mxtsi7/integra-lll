@@ -30,7 +30,8 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
   const { capturarSesion } = useAuth();
   const [archivo, setArchivo] = useState<File | null>(null);
   const [cargando, setCargando] = useState(false);
-  const [error, setError] = useState('');
+  const [errorValidacion, setErrorValidacion] = useState('');
+  const [errorSubida, setErrorSubida] = useState('');
   const montadoRef = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -48,11 +49,12 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
     // Validación preventiva en cliente (S3-SE-03): archivos incompatibles no se envían.
     const validacion = validarArchivoCsv(archivo);
     if (!validacion.valido) {
-      setError(validacion.error ?? 'Archivo incompatible.');
+      setErrorValidacion(validacion.error ?? 'Archivo incompatible.');
       return;
     }
 
-    setError('');
+    setErrorValidacion('');
+    setErrorSubida('');
     setCargando(true);
     const sesionAlIniciar = capturarSesion();
 
@@ -76,11 +78,11 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
       }
 
       if (err instanceof TypeError) {
-        setError(MENSAJE_SIN_RED);
+        setErrorSubida(MENSAJE_SIN_RED);
       } else if (err instanceof ErrorDeApi) {
-        setError(err.message);
+        setErrorSubida(err.message);
       } else {
-        setError('No pudimos subir el archivo. Intenta de nuevo.');
+        setErrorSubida('No pudimos subir el archivo. Intenta de nuevo.');
       }
     } finally {
       if (montadoRef.current && capturarSesion() === sesionAlIniciar) {
@@ -91,22 +93,25 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
 
   function alCambiarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
     const seleccionado = e.target.files?.[0] ?? null;
+    setErrorSubida('');
     if (!seleccionado) {
       setArchivo(null);
-      setError('');
+      setErrorValidacion('');
       return;
     }
 
     const validacion = validarArchivoCsv(seleccionado);
     setArchivo(seleccionado);
     if (!validacion.valido) {
-      setError(validacion.error ?? 'Archivo incompatible.');
+      setErrorValidacion(validacion.error ?? 'Archivo incompatible.');
     } else {
-      setError('');
+      setErrorValidacion('');
     }
   }
 
-  const esValido = Boolean(archivo && !error);
+  // La validez depende del archivo y su validación, no de errores de transporte/servidor.
+  const archivoValido = Boolean(archivo && !errorValidacion && validarArchivoCsv(archivo).valido);
+  const mensajeError = errorValidacion || errorSubida;
 
   return (
     <section className={styles.contenedor} aria-labelledby="titulo-subir-csv">
@@ -136,16 +141,16 @@ export function SubirArchivoCsv({ onSubir, onExito }: SubirArchivoCsvProps) {
             variante="primario"
             tamano="s"
             cargando={cargando}
-            disabled={!esValido || cargando}
+            disabled={!archivoValido || cargando}
             icono={<Upload size={14} aria-hidden="true" />}
           >
             Subir archivo
           </Boton>
         </div>
 
-        {error && (
+        {mensajeError && (
           <p role="alert" className={styles.error}>
-            {error}
+            {mensajeError}
           </p>
         )}
       </form>
