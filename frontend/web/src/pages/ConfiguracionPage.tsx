@@ -1,5 +1,6 @@
 import { Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
 import { PreferenciasAvisos } from '../components/Configuracion/PreferenciasAvisos';
+import { RecolectoresDeUso } from '../components/Configuracion/RecolectoresDeUso';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
@@ -62,6 +63,7 @@ export function ConfiguracionPage() {
             </div>
           </Seccion>
 
+          <RecolectoresDeUso />
           <Seccion titulo="Tus datos" icono={<Database size={19} aria-hidden="true" />} tinte="azul">
             {/* TODO: habilitar cuando existan los endpoints correspondientes */}
             <Fila etiqueta="Exportar mis datos">
