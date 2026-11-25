@@ -21,6 +21,11 @@ import { ToastProvider } from "../context/ToastContext";
 import { RutaPrivada } from "../components/RutaPrivada";
 import { PerfilPage } from "./PerfilPage";
 
+// El flujo de contratación tiene sus propias pruebas; aquí solo se comprueba dónde aparece.
+vi.mock("../components/Planes/AccionesPremium", () => ({
+  AccionesPremium: () => <p data-testid="acciones-premium" />,
+}));
+
 // Solo se simulan las llamadas de red. Tokens, sesión, validaciones y el
 // redirect de <RutaPrivada> son los reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
@@ -143,6 +148,19 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+describe("Mejorar a Premium desde Perfil (SE-03)", () => {
+  it("con plan gratuito ofrece el mismo flujo de contratación que Ajustes", async () => {
+    await montar();
+    expect(screen.getByTestId("acciones-premium")).toBeInTheDocument();
+  });
+
+  it("con plan Premium no ofrece contratar otra vez", async () => {
+    getUsuarioActualMock.mockResolvedValue({ ...USUARIO, plan: "premium" });
+    await montar();
+    expect(screen.queryByTestId("acciones-premium")).toBeNull();
+  });
 });
 
 describe("Eliminar cuenta desde Perfil (S3-AN-03)", () => {

@@ -232,6 +232,20 @@ describe('useContratacionPremium', () => {
     expect(result.current.precioDemo).toBeNull();
   });
 
+  it('al volver del checkout, continuar al pago pide la contratación de nuevo y no crea otra', async () => {
+    const urlNueva = 'https://pagos.ejemplo.cl/api/pagos/mock/?token=nuevo';
+    window.localStorage.setItem(CLAVE_DEL_INTENTO, JSON.stringify({ alcance: '7:org-a', clave: 'k-1', contratoId: 'c-1' }));
+    vi.mocked(getContratacion).mockResolvedValue(contrato({ url_checkout: urlNueva }));
+    const { result } = montar();
+    await waitFor(() => expect(result.current.contrato?.id).toBe('c-1'));
+
+    await act(() => result.current.continuarPago());
+
+    expect(getContratacion).toHaveBeenLastCalledWith('c-1');
+    expect(irAlCheckout).toHaveBeenCalledWith(urlNueva);
+    expect(iniciarContratacion).not.toHaveBeenCalled();
+  });
+
   it('verificar consulta la contratación pendiente y vuelve a leer el plan', async () => {
     vi.mocked(iniciarContratacion).mockResolvedValue(contrato());
     vi.mocked(getContratacion).mockResolvedValue(contrato({ estado: 'exitosa' }));

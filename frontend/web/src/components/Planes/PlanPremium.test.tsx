@@ -27,6 +27,7 @@ function contratacionDe(extra: Partial<Record<string, unknown>> = {}) {
     mensajeError: null,
     precioDemo: null,
     contratar: vi.fn(),
+    continuarPago: vi.fn(),
     verificar: vi.fn(),
     cancelar: vi.fn(),
     ...extra,
@@ -72,6 +73,15 @@ describe('PlanPremium', () => {
     estado.contratacion = contratacionDe({ precioDemo: null });
     render(<PlanPremium />);
     expect(screen.queryByText(TEXTO_PRECIO_DEMO)).toBeNull();
+  });
+
+  it('con una contratación pendiente, Continuar al pago vuelve al pago de esa misma contratación', () => {
+    const continuarPago = vi.fn();
+    estado.contratacion = contratacionDe({ contrato: { id: 'c-1', estado: 'pendiente' } as ContratacionPlan, continuarPago });
+    render(<PlanPremium />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar al pago' }));
+    expect(continuarPago).toHaveBeenCalledTimes(1);
   });
 
   it('con una contratación pendiente ofrece verificarla o cancelarla, no contratar de nuevo', () => {

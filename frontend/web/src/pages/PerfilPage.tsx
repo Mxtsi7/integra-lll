@@ -6,6 +6,7 @@ import { CambiarContrasena } from '../components/Perfil/CambiarContrasena';
 import { CambiarCorreo } from '../components/Perfil/CambiarCorreo';
 import { EditarNombre } from '../components/Perfil/EditarNombre';
 import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
+import { AccionesPremium } from '../components/Planes/AccionesPremium';
 import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
@@ -118,11 +119,7 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
               ? 'Asistente financiero y recomendaciones avanzadas.'
               : 'Alertas de cobro y de prueba gratis incluidas.'}
           </p>
-          {!esPremium && (
-            <Boton variante="secundario" tamano="s" disabled title="Próximamente">
-              Mejorar a Premium
-            </Boton>
-          )}
+          {!esPremium && <AccionesPremium />}
         </div>
       </section>
 

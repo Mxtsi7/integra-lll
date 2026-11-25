@@ -18,7 +18,7 @@ import {
 } from '../components/Planes/reglasContratacion';
 import { useAuth } from '../context/AuthContext';
 
-export type OperacionContratacion = 'iniciando' | 'verificando' | 'cancelando' | null;
+export type OperacionContratacion = 'iniciando' | 'continuando' | 'verificando' | 'cancelando' | null;
 
 export interface OpcionesContratacion {
   /** Manda a la persona al pago. Por defecto, en la misma pestaña: el pago vuelve a /planes/retorno. */
@@ -190,6 +190,30 @@ export function useContratacionPremium({
     [aplicar, almacen, alPlanCambiar, ejecutar, idPendiente, irAlCheckout, sigueVigente],
   );
 
+  /**
+   * Vuelve a la pantalla de pago de la contratación pendiente. Se pide la contratación de nuevo porque
+   * la dirección del pago caduca: así se usa una vigente, sin crear otra contratación.
+   */
+  const continuarPago = useCallback(
+    () =>
+      ejecutar('continuando', async (marca) => {
+        if (!idPendiente) return;
+        const actual = await getContratacion(idPendiente);
+        if (!sigueVigente(marca)) return;
+        aplicar(actual);
+        if (actual.estado !== 'pendiente') {
+          alPlanCambiar?.();
+          return;
+        }
+        if (!esUrlCheckoutValida(actual.url_checkout)) {
+          setMensajeError(MENSAJE_CHECKOUT_INSEGURO);
+          return;
+        }
+        irAlCheckout(actual.url_checkout);
+      }),
+    [aplicar, alPlanCambiar, ejecutar, idPendiente, irAlCheckout, sigueVigente],
+  );
+
   /** Consulta cómo va la contratación pendiente y vuelve a leer el plan. */
   const verificar = useCallback(
     () =>
@@ -216,5 +240,5 @@ export function useContratacionPremium({
     [aplicar, alPlanCambiar, ejecutar, idPendiente, sigueVigente],
   );
 
-  return { contrato, idSinCargar, operacion, mensajeError, precioDemo, contratar, verificar, cancelar };
+  return { contrato, idSinCargar, operacion, mensajeError, precioDemo, contratar, continuarPago, verificar, cancelar };
 }
