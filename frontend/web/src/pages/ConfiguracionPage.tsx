@@ -72,9 +72,9 @@ export function ConfiguracionPage() {
               </Boton>
             </Fila>
             <Fila etiqueta="Historial de accesos">
-              <Boton variante="sutil" tamano="s" disabled title="Próximamente">
+              <BotonEnlace to="/configuracion/historial-accesos" variante="sutil" tamano="s">
                 Ver
-              </Boton>
+              </BotonEnlace>
             </Fila>
             <Fila etiqueta="Eliminar cuenta" detalle="Borra tu cuenta y tus suscripciones.">
               <EliminarCuenta className={styles.peligro} />

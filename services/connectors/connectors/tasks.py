@@ -7,9 +7,11 @@ y `autodiscover_tasks` las encuentra por vivir en este módulo.
     latido                            que beat programa y el worker ejecuta
     procesar_importacion              S3-FE-10: el archivo subido → candidatos
     rescatar_importaciones_estancadas  la red bajo el trapecio (ver abajo)
+    programar_lecturas_de_correo      S3-FE-18/20: una lectura por cuenta conectada
+    leer_cuenta_de_correo             S3-FE-18/20: la lectura de una cuenta, con reintentos
 
-La lectura de correo (FE-13) todavía no existe; cuando llegue, va acá y se
-programa en CELERY_BEAT_SCHEDULE (connectors_config/settings.py).
+La lógica de las dos últimas vive en `lectura_programada.py`; aquí solo está
+lo que es de Celery.
 
 ── Por qué el procesamiento es una tarea y no parte de la subida ────────────
 `SubirArchivoView` tiene que contestar un 201 con el id de la importación de
@@ -406,3 +408,36 @@ def rescatar_importaciones_estancadas() -> dict:
             estancadas,
         )
     return {"reencoladas": len(pendientes), "fallidas": estancadas}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# S3-FE-18 / S3-FE-20 — la lectura programada del correo
+# ══════════════════════════════════════════════════════════════════════
+
+
+@shared_task
+def programar_lecturas_de_correo() -> dict:
+    """Encola una lectura por cada cuenta que toca leer. Beat la corre cada
+    `CONECTORES_LECTURA_CORREO_SEGUNDOS`."""
+    from .lectura_programada import cuentas_para_leer
+
+    cuentas = cuentas_para_leer()
+    for cuenta_id in cuentas:
+        leer_cuenta_de_correo.delay(str(cuenta_id))
+    return {"encoladas": len(cuentas)}
+
+
+@shared_task(bind=True, max_retries=None)
+def leer_cuenta_de_correo(self, cuenta_id: str, cadena: str | None = None) -> dict:
+    """Lee una cuenta. Un error transitorio se reintenta con la espera que
+    decide `lectura_programada.espera_para`, llevando la `cadena` que lo deja
+    continuar. El contador y el tope viven en la base (`AvanceDeLectura`), no
+    en `request.retries`: ver `lectura_programada._tomar_turno`."""
+    from .lectura_programada import leer_cuenta
+
+    resultado = leer_cuenta(cuenta_id, cadena=cadena)
+    espera = resultado.get("reintentar_en")
+    if espera is not None:
+        raise self.retry(args=[cuenta_id], kwargs={"cadena": resultado["cadena"]}, countdown=espera)
+    return resultado
+
