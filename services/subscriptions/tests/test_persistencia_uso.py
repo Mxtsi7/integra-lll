@@ -5,14 +5,15 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from django.conf import settings
 from django.db import close_old_connections, connection
 from rest_framework.test import APIClient
 
-from app.models import EventoUsoRecibido, Subscription
+from app.models import EventoUsoRecibido, OutboxEvento, Subscription
+from events.uso import EVENTO_USO, crear_sobre_uso
 
 EJEMPLOS = json.loads((Path(__file__).resolve().parents[3] /
     'docs/contratos/uso-recolectores-v1.ejemplos.json').read_text())
@@ -53,6 +54,37 @@ def test_persiste_antes_de_aceptar_y_reintento_es_idempotente(destino, evento):
     assert recibida.suscripcion_id == destino.id
     assert recibida.usuario_id == 42
     assert not recibida.proyeccion_pendiente
+
+
+def test_solo_la_primera_aceptacion_deja_un_evento_en_el_outbox(destino, evento):
+    assert connection.vendor == 'postgresql'
+    primera = enviar(destino, evento)
+    repetida = enviar(destino, evento)
+    assert (primera.status_code, repetida.status_code) == (201, 200)
+
+    filas = OutboxEvento.objects.filter(evento=EVENTO_USO)
+    assert filas.count() == 1
+    publicacion = filas.get()
+    assert publicacion.version == 1
+    assert publicacion.organizacion_id == destino.organizacion_id
+    assert publicacion.datos['event_id'] == evento['event_id']
+    assert publicacion.datos['suscripcion_id'] == str(destino.id)
+    assert publicacion.datos['usuario_id'] == str(
+        uuid5(NAMESPACE_URL, 'https://integra.example/usuarios/42')
+    )
+    assert publicacion.correlation_id
+    sobre = crear_sobre_uso(publicacion)
+    assert sobre['id'] == evento['event_id']
+    assert sobre['organizacion_id'] == str(destino.organizacion_id)
+    assert 'organizacion_id' not in publicacion.datos
+    assert 'suscripcion_id' not in evento
+
+
+def test_conflicto_no_genera_otra_fila_de_outbox(destino, evento):
+    assert connection.vendor == 'postgresql'
+    assert enviar(destino, evento).status_code == 201
+    assert enviar(destino, {**evento, 'cobertura': 'parcial'}).status_code == 409
+    assert OutboxEvento.objects.filter(evento=EVENTO_USO).count() == 1
 
 
 def test_misma_clave_con_cuerpo_o_destino_distinto_es_conflicto(destino, evento):

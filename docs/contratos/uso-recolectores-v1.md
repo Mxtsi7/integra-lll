@@ -387,3 +387,27 @@ IANA existente, cobertura sin huecos y unión temporal entre fuentes. También
 comprueba el rechazo de identidad en el cuerpo y de los casos negativos de
 destino ajeno, duración inconsistente, tramo fuera de ventana, zona inválida y
 cruce de día.
+
+## 13. Cierre de integración v1.0 (S3-VI-23 / S3-VI-24)
+
+**Fecha:** 2026-11-24 · **Estado:** contrato implementado y verificado de punta
+a punta con PostgreSQL y RabbitMQ reales. Esta sección no cambia las reglas
+anteriores: registra qué eslabones quedaron conectados y con qué evidencia.
+El detalle, el checklist de calidad v1.0 y la retrospectiva están en
+[docs/entregas/sprint-3-victor.md](../entregas/sprint-3-victor.md).
+
+| Punto del contrato | Cierre verificado |
+|---|---|
+| Bearer y tenant | El gateway valida el token y el middleware de prueba inyecta las cabeceras resultantes; la identidad nunca se toma del cuerpo. |
+| Recepción y outbox | `registrar_uso` se ejecuta dentro del savepoint de **primera aceptación**. El `201` crea un evento durable; el `200` y el `409` no crean otra fila. |
+| Forma del sobre | `usuario_id` entero de Auth se deriva de forma estable a UUID v5 con `NAMESPACE_URL`; el sobre no repite `organizacion_id` ni `suscripcion_id` en `datos`. |
+| RabbitMQ y consumidor | Despacho real del outbox al exchange dedicado; el worker TypeScript corre como proceso separado y confirma, deduplica y aísla por organización. Redelivery confirmado sin repetir efectos. |
+| Persistencia analítica | Tablas `analytics.uso_evento`, `uso_tramo`, `uso_diario` y `uso_mensual_recolector` sobre PostgreSQL real; milisegundos exactos y proyección entera sin perder residuo. |
+| Barrera de borrado | Se aplica tanto en la recepción HTTP (`public`) como en el consumidor (`analytics`): `410` en HTTP y ACK sin reinserción en mensajes en vuelo. |
+| Precisión y gastos | 30 s positivos se acreditan con `minutos_enteros_proyectados = 0` sin clasificarse como uso cero; la cobertura/datos insuficientes no habilita penalización; los gastos se agrupan por moneda sin mezclar divisas. |
+| Evidencia | Contrato 57 pruebas, regresión enfocada 17, `subscriptions` 557 + 11 omitidas, Analytics 282, unitarias TS 58 + 8 omitidas, integración TS 8 y E2E 3 — todas ejecutadas en la sesión de cierre. |
+
+No se usó SQLite como sustituto en ninguna prueba de integración: la suite E2E
+falla explícitamente si `DATABASES["default"]` no apunta a PostgreSQL. Los
+valores de conexión y los secretos se inyectan por entorno y no se transcriben
+en este documento ni en la evidencia.
