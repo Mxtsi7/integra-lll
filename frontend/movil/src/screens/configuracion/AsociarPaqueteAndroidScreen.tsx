@@ -10,6 +10,13 @@ export default function AsociarPaqueteAndroidScreen() {
   const [asociaciones, setAsociaciones] = useState<AsociacionPaquete[]>([]);
   const [suscripcionSeleccionada, setSuscripcionSeleccionada] = useState<string | null>(null);
   const [paquete, setPaquete] = useState('');
+  const [asociacionEnCorreccion, setAsociacionEnCorreccion] = useState<AsociacionPaquete | null>(null);
+
+  const limpiarFormulario = () => {
+    setPaquete('');
+    setSuscripcionSeleccionada(null);
+    setAsociacionEnCorreccion(null);
+  };
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,9 +46,12 @@ export default function AsociarPaqueteAndroidScreen() {
     setCargando(true);
     setError(null);
     try {
-      await controlAsociacionPaquetes.asociar(suscripcionSeleccionada, paquete);
-      setPaquete('');
-      setSuscripcionSeleccionada(null);
+      if (asociacionEnCorreccion) {
+        await controlAsociacionPaquetes.asociar(suscripcionSeleccionada, paquete, asociacionEnCorreccion);
+      } else {
+        await controlAsociacionPaquetes.asociar(suscripcionSeleccionada, paquete);
+      }
+      limpiarFormulario();
       await cargar();
     } catch (errorAsociacion) {
       setError(errorAsociacion instanceof Error ? errorAsociacion.message : 'No se pudo guardar la asociación.');
@@ -106,10 +116,14 @@ export default function AsociarPaqueteAndroidScreen() {
           />
           <NavButton
             testID="guardar-asociacion-paquete"
-            title="Guardar asociación"
+            title={asociacionEnCorreccion ? 'Confirmar corrección' : 'Guardar asociación'}
             disabled={cargando || !paquete.trim()}
             onPress={() => void guardarAsociacion()}
           />
+          {asociacionEnCorreccion ? (
+            <NavButton title="Cancelar corrección" variant="secondary" disabled={cargando}
+              onPress={limpiarFormulario} />
+          ) : null}
         </View>
       ) : null}
 
@@ -117,6 +131,19 @@ export default function AsociarPaqueteAndroidScreen() {
         <View key={asociacion.paquete} style={styles.filaAsociacion}>
           <Text>{asociacion.paquete} → {suscripciones.find(({ id }) => id === asociacion.suscripcionId)?.nombre ?? 'Suscripción no disponible'}</Text>
           <NavButton
+            title="Corregir asociación"
+            testID={`corregir-asociacion-${asociacion.paquete}`}
+            variant="secondary"
+            disabled={cargando}
+            onPress={() => {
+              setError(null);
+              setAsociacionEnCorreccion(asociacion);
+              setSuscripcionSeleccionada(asociacion.suscripcionId);
+              setPaquete(asociacion.paquete);
+            }}
+          />
+          <NavButton
+            disabled={cargando}
             testID={`quitar-asociacion-${asociacion.paquete}`}
             title="Quitar"
             variant="secondary"

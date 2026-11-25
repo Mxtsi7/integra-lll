@@ -8,10 +8,16 @@ import { TileHub } from '../components/Dashboard/TileHub';
 import { TileFantasmas, TilePruebas } from '../components/Dashboard/TileListas';
 import { TileProximo } from '../components/Dashboard/TileProximo';
 import { TileResumen } from '../components/Dashboard/TileResumen';
+import { estadoDelMesDesde } from '../components/Dashboard/estadoDelMes';
 import { TileSalud } from '../components/Dashboard/TileSalud';
+import { GraficoDeGastos } from '../components/Informes/GraficoDeGastos';
+import { sinGastos } from '../components/Informes/periodosDeInforme';
 import { useAuth } from '../context/AuthContext';
 import { useCatalogos } from '../context/CatalogosContext';
+import { useInformeMensual } from '../hooks/useInformeMensual';
+import { useMesEnUrl } from '../hooks/useMesEnUrl';
 import { descargarSuscripcionesCsv } from '../utils/exportarCsv';
+import { fechaATexto } from '../utils/calendario';
 import styles from './DashboardPage.module.css';
 
 type EstadoCarga =
@@ -61,6 +67,10 @@ export function DashboardPage() {
   const moneda = monedas.includes(monedaElegida) ? monedaElegida
     : monedas.includes('CLP') ? 'CLP' : monedas[0] ?? catalogos?.predeterminados.moneda ?? 'CLP';
   const delPanel = todas.filter((s) => s.moneda === moneda);
+  // El mes lo elige el presupuesto del Panel (?mes=): las cifras y el presupuesto miran el mismo mes.
+  const { mes } = useMesEnUrl(fechaATexto(new Date()));
+  const { carga: informe, reintentar: reintentarInforme } = useInformeMensual(mes, moneda);
+  const estadoDelMes = estadoDelMesDesde(informe, reintentarInforme);
 
   return (
     <AppLayout
@@ -83,7 +93,11 @@ export function DashboardPage() {
         </div>
         <div className={styles.grilla} key={moneda}>
           <div className={styles.columnaIzquierda}>
-            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} />
+            <TileResumen suscripciones={delPanel} moneda={moneda} nombreHogar={nombreHogar} estado={estadoDelMes} />
+            {/* Los mismos meses que la cifra del mes: salen de la misma respuesta (S3-CH-12). */}
+            {informe.tipo === 'listo' && !sinGastos(informe.meses) && (
+              <GraficoDeGastos meses={informe.meses} mesElegido={mes} />
+            )}
             <SeccionPresupuesto moneda={moneda} />
             <TileSalud suscripciones={delPanel} moneda={moneda} />
             <TileProximo suscripciones={delPanel} />

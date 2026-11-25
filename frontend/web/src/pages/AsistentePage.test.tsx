@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { consultarAsistente, ErrorDeApi, type RespuestaAsistente } from "@ojoalgasto/shared";
+import { consultarAsistente, ErrorDeApi, getPermisosPlan, type PermisosPlan, type RespuestaAsistente } from "@ojoalgasto/shared";
 import { AuthProvider } from "../context/AuthContext";
 import { ToastProvider } from "../context/ToastContext";
 import { AsistentePage } from "./AsistentePage";
@@ -11,7 +11,7 @@ import { AsistentePage } from "./AsistentePage";
 // Solo se simula la red; la página, el hook y el componente del chat son reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, consultarAsistente: vi.fn() };
+  return { ...real, consultarAsistente: vi.fn(), getPermisosPlan: vi.fn() };
 });
 const consultarAsistenteMock = vi.mocked(consultarAsistente);
 
@@ -62,6 +62,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+const PLAN_PREMIUM: PermisosPlan = { plan: "premium", features: { asistente_financiero: true, recomendaciones_automaticas: true } };
+// Estas pruebas miran el chat: el plan que dice el servidor es Premium, para que el chat se vea.
+beforeEach(() => {
+  vi.mocked(getPermisosPlan).mockResolvedValue(PLAN_PREMIUM);
 });
 
 describe("Página del asistente (S3-CH-14 y S3-CH-15)", () => {

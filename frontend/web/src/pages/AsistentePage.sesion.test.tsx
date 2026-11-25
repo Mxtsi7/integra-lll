@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   consultarAsistente,
   getUsuarioActual,
+  getPermisosPlan,
   guardarTokens,
   obtenerAccessToken,
+  type PermisosPlan,
   revocarSesion,
   type RespuestaAsistente,
   type Usuario,
@@ -22,7 +24,7 @@ import { AsistentePage } from "./AsistentePage";
 // tokens y página reales; solo se simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, consultarAsistente: vi.fn(), getUsuarioActual: vi.fn(), revocarSesion: vi.fn() };
+  return { ...real, consultarAsistente: vi.fn(), getUsuarioActual: vi.fn(), revocarSesion: vi.fn(), getPermisosPlan: vi.fn() };
 });
 const consultarAsistenteMock = vi.mocked(consultarAsistente);
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
@@ -103,6 +105,12 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+});
+
+const PLAN_PREMIUM: PermisosPlan = { plan: "premium", features: { asistente_financiero: true, recomendaciones_automaticas: true } };
+// Estas pruebas miran el chat: el plan que dice el servidor es Premium, para que el chat se vea.
+beforeEach(() => {
+  vi.mocked(getPermisosPlan).mockResolvedValue(PLAN_PREMIUM);
 });
 
 describe("Asistente al cambiar de sesión (regla de sesión de Integra III)", () => {
