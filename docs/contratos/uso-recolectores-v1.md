@@ -390,8 +390,9 @@ cruce de día.
 
 ## 13. Cierre de integración v1.0 (S3-VI-23 / S3-VI-24)
 
-**Fecha:** 2026-11-25 · **Estado:** contrato integrado contra `main dba7019`;
-los dos P2 del review están corregidos. Esta sección no cambia las reglas
+**Fecha:** 2026-11-25 · **Estado:** contrato integrado desde la base del review
+`main dba7019` y verificado en el SHA `e1ef09b`; los dos P2 están corregidos.
+Esta sección no cambia las reglas
 anteriores: registra qué eslabones quedaron conectados, qué se sustituye por un
 doble y con qué evidencia. El detalle está en
 [docs/entregas/sprint-3-victor.md](../entregas/sprint-3-victor.md).

@@ -1,7 +1,8 @@
 # Entrega Sprint 3 — Víctor (Lote E: S3-VI-23 / S3-VI-24)
 
 **Fecha:** 2026-11-25 · **Rama:** `LoteE(VI-23-VI-24)` · **Responsable:** Víctor Gonzales
-**Base integrada:** `main dba7019` · **Tarjetas:** [S3-VI-23](https://trello.com/c/HFIsOVuT), [S3-VI-24](https://trello.com/c/iLmmVlOg)
+**Base del review:** `main dba7019` · **SHA integrado verificado:** `e1ef09b04f775b5b925f8efc31d10445c850b681` (merge posterior con `main ba4b62f`)
+**Tarjetas:** [S3-VI-23](https://trello.com/c/HFIsOVuT), [S3-VI-24](https://trello.com/c/iLmmVlOg)
 
 Cierre del Lote E luego del review contra `18217f34`. Se integró `main`,
 se corrigieron los dos P2 y se acotó la documentación al alcance real de las
@@ -63,9 +64,12 @@ Comprobación adicional del P2 de CI: sin `RABBITMQ_PRUEBA_URL`, `pytest -q
 tests/e2e/test_flujo_uso_recolectores.py` termina con `EXIT=1`, **3 errors**,
 ningún skip, y el mensaje `S3-VI-23 exige RABBITMQ_PRUEBA_URL`.
 
-El resto de los jobs del workflow (contrato, Analytics, `analytics-uso`,
-tipado y compilación TS) se valida con los checks del SHA integrado, no con
-afirmaciones reejecutadas a mano en este documento.
+El SHA integrado `e1ef09b` tiene **11/11 check-runs en `success`**, incluido
+`backend · subscriptions`, en
+[actions/runs/45538951211](https://github.com/Mxtsi7/integra-lll/actions/runs/45538951211).
+También pasaron `d11`, `analytics-uso`, frontend, shared y operación. Los
+comandos de cada job se ejecutaron en runners limpios del workflow, no en el
+entorno local de la entrega.
 
 ## 3. Alcance real de la E2E y dobles
 
@@ -99,7 +103,7 @@ cobertura insuficiente y gastos separados por moneda.
 - [ ] Validar autoridad real de consentimiento con el proveedor correspondiente.
 - [ ] Ejercitar el salto HTTP gateway→servicio en un entorno desplegado.
 - [ ] Ejercitar captura desde dispositivo y un proveedor de IA externo; hoy no están en la E2E.
-- [ ] Confirmar los checks del SHA final del PR.
+- [x] Confirmar los checks del SHA integrado `e1ef09b`: 11/11 en `success`.
 
 ## 5. Retrospectiva
 
@@ -139,7 +143,8 @@ Cierra el Lote E tras integrar `main dba7019` y resolver los dos P2 del review.
 ### Evidencia
 - Comando exacto del job, `pytest -v`: 585 passed, 3 E2E, 0 skipped (EXIT=0).
 - Sin `RABBITMQ_PRUEBA_URL`: 3 errores explícitos, 0 skips (EXIT=1).
-- Checks del SHA integrado: pendientes de publicar en este cuerpo.
+- Checks del SHA integrado `e1ef09b`: 11/11 en `success`; `backend · subscriptions`
+  en `actions/runs/45538951211`.
 
 ### Alcance real
 - El gateway HTTP se sustituye por un middleware de prueba que reutiliza el
