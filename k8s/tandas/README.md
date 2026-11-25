@@ -158,6 +158,29 @@ en esta demo: su borrado lógico aún no emite un hecho MX-21 y puede dejar avis
 vigentes (brecha RN-03 registrada en doc 11). Para limpiar los datos usar el
 flujo real de eliminación de la **organización**, que sí tiene ACK por destino.
 
+### Correo de las alertas (S3-FE-21)
+
+El mismo Job despacha los correos después de generar las alertas, y necesita
+el Secret `ojoalgasto-alertas` con `DIRECTORIO_INTERNO_SECRET`,
+`EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` y `DEFAULT_FROM_EMAIL`. Sin él, el Job
+corre igual pero ningún correo sale (quedan diferidos). Crearlo **una vez, en
+el núcleo**, sin que los valores pasen por la pantalla ni por el historial:
+
+```bash
+read -rs -p "clave de aplicacion del Gmail: " CLAVE; echo
+read -r -p "cuenta de Gmail: " CUENTA
+kubectl create secret generic ojoalgasto-alertas -n "$NS_NUCLEO" \
+  --from-literal=DIRECTORIO_INTERNO_SECRET="$(python -c 'import secrets; print(secrets.token_hex(32))')" \
+  --from-literal=EMAIL_HOST_USER="$CUENTA" --from-literal=EMAIL_HOST_PASSWORD="$CLAVE" \
+  --from-literal=DEFAULT_FROM_EMAIL="$CUENTA"
+unset CLAVE CUENTA
+kubectl rollout restart deployment/auth -n "$NS_NUCLEO"   # auth lee el secreto del directorio
+```
+
+Después, `bash k8s/desplegar-satelite.sh notifications` lo traslada al
+satélite. Los avisos de cobros que ya pasaron no salen (`aviso_vencido`), así
+que habilitar el despacho no manda correos viejos.
+
 El CronJob llega suspendido. Verificar que no exista otro Job activo y crear
 uno manual con nombre único. `Forbid` no protege Jobs manuales.
 

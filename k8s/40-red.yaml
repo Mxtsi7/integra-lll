@@ -27,6 +27,20 @@ spec:
               - { key: app, operator: In, values: [gateway] }
       ports:
         - { protocol: TCP, port: 8001 }
+    # S3-FE-21: los Jobs de alertas de notifications consultan el directorio
+    # de destinatarios (ruta interna, firma HMAC). Solo ellos (componente
+    # alertas), no la API de notifications, y solo desde el núcleo o desde el
+    # satélite de notifications de k8s/reparto.env: auth confía en las
+    # cabeceras de identidad del gateway, así que no se abre a cualquiera.
+    - from:
+        - podSelector:
+            matchLabels: { app: notifications, componente: alertas }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-maximiliano-saez-cd928ab3cf06 }
+          podSelector:
+            matchLabels: { app: notifications, componente: alertas }
+      ports:
+        - { protocol: TCP, port: 8001 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

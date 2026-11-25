@@ -92,6 +92,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Cuando el push exista, se agrega acá y nadie tiene que volver a elegirlo.
 CANALES_HABILITADOS = env.list("CANALES_HABILITADOS", default=["email", "in_app"])
 
+# ── A quién escribirle (S3-FE-21) ────────────────────────────────────
+# Las personas de cada organización y su correo se le preguntan a auth
+# (`notifications/directorio.py`), firmado con DIRECTORIO_INTERNO_SECRET.
+# En el clúster, para un satélite, `k8s/satelite.py` califica el host.
+URL_AUTH = env("URL_AUTH", default="http://auth:8001")
+
 # ── Correo de las alertas (S3-FE-21) ─────────────────────────────────
 # Las MISMAS variables y valores por omisión que auth
 # (`services/auth/config/settings.py`), que ya manda el correo de

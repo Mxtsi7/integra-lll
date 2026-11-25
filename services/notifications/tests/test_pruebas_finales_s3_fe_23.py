@@ -10,8 +10,10 @@ módulos REALES:
                                                         entregas.despachar ─▶ correo
 
 Qué es un doble y qué es real:
-- DOBLE: el proveedor de correo es el buzón en memoria de Django (`locmem`).
-  No sale ningún correo real.
+- DOBLES: el proveedor de correo es el buzón en memoria de Django (`locmem`),
+  así que no sale ningún correo real; y quiénes son las personas y su correo,
+  que en producción entrega auth (S3-FE-21), salen de
+  `tests/directorio_falso.py`.
 - REAL: todo lo demás, incluido el despacho completo (reclamo, canal de correo
   y anotación de la entrega) y la API de la campana.
 
@@ -27,8 +29,9 @@ from rest_framework.test import APIClient
 
 from notifications import entregas
 from notifications.generador import generar
-from notifications.models import Alerta, DireccionCorreo, EntregaAlerta, PreferenciaNotificacion
+from notifications.models import Alerta, EntregaAlerta, PreferenciaNotificacion
 from notifications.proyeccion import aplicar
+from tests.directorio_falso import DIRECTORIO
 from tests.test_invalidacion_s3_fe_22 import COBRO, HOY, ORG, sobre
 
 pytestmark = pytest.mark.django_db
@@ -48,7 +51,8 @@ def buzon(settings):
 @pytest.fixture(autouse=True)
 def persona():
     PreferenciaNotificacion.objects.create(organizacion_id=ORG, usuario_id="42")
-    DireccionCorreo.objects.create(organizacion_id=ORG, usuario_id="42", email="ana@ejemplo.cl")
+    # Su correo lo entrega auth (S3-FE-21); en las pruebas, el doble del directorio.
+    DIRECTORIO.agregar(ORG, "42", "ana@ejemplo.cl")
 
 
 def con_aviso_planificado():

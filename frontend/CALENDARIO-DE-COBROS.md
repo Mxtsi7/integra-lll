@@ -1,4 +1,4 @@
-# CH-18, CH-19, CH-20 y CH-21: Calendario de cobros y Agenda
+# CH-18, CH-19, CH-20 y CH-21: Calendario de cobros y Agenda.
 
 Rama: `Christopher/calendario_cobros`. Sale de `Christopher/perfil_cuentas_calendario`
 porque extiende el Calendario de CH-17.
