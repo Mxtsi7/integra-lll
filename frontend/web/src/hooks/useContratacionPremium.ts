@@ -242,3 +242,6 @@ export function useContratacionPremium({
 
   return { contrato, idSinCargar, operacion, mensajeError, precioDemo, contratar, continuarPago, verificar, cancelar };
 }
+
+/** Lo que devuelve el hook. Las acciones de Ajustes y Perfil lo reciben ya creado. */
+export type ContratacionPremium = ReturnType<typeof useContratacionPremium>;

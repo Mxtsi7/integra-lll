@@ -12,7 +12,10 @@ const estado = vi.hoisted(() => ({
   permisos: { tipo: 'listo', permisos: { plan: 'free', features: { asistente_financiero: false, recomendaciones_automaticas: false } } } as unknown,
   contratacion: {} as Record<string, unknown>,
 }));
-vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ usuario: estado.usuario }) }));
+// La sincronización del plan con el contexto se prueba en PerfilPage.test; aquí solo hace falta que exista.
+vi.mock('../../context/AuthContext', () => ({
+  useAuth: () => ({ usuario: estado.usuario, actualizarUsuario: () => true, capturarSesion: () => 1 }),
+}));
 vi.mock('../../hooks/usePermisosPlan', () => ({ usePermisosPlan: () => ({ estado: estado.permisos, reintentar: vi.fn() }) }));
 vi.mock('../../hooks/useContratacionPremium', () => ({ useContratacionPremium: () => estado.contratacion }));
 
@@ -104,6 +107,15 @@ describe('PlanPremium', () => {
 
     expect(screen.getByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
     expect(screen.getByText('Plan Gratuito')).toBeInTheDocument();
+  });
+
+  it('mientras se vuelven a leer los permisos, el aviso de pago confirmado sigue y no reaparece Mejorar a Premium', () => {
+    estado.permisos = { tipo: 'cargando' };
+    estado.contratacion = contratacionDe({ contrato: { id: 'c-1', estado: 'exitosa' } as ContratacionPlan });
+    render(<PlanPremium />);
+
+    expect(screen.getByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mejorar a Premium' })).toBeNull();
   });
 
   it('con plan Premium vigente no ofrece contratar', () => {

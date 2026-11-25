@@ -1,33 +1,36 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   actualizarNombre,
   cambiarContrasena,
+  cancelarContratacion,
   ErrorDeApi,
+  getContratacion,
+  getPermisosPlan,
+  getPlanes,
   getUsuarioActual,
   guardarTokens,
   hayTokenGuardado,
+  iniciarContratacion,
   MENSAJE_POLITICA_PASSWORD,
   obtenerAccessToken,
   revocarSesion,
+  type ContratacionPlan,
+  type PermisosPlan,
   type Usuario,
 } from "@ojoalgasto/shared";
 import { AuthProvider, useAuth } from "../context/AuthContext";
 import { ToastProvider } from "../context/ToastContext";
 import { RutaPrivada } from "../components/RutaPrivada";
+import { MENSAJE_PLAN_ACTIVANDO } from "../components/Planes/reglasContratacion";
 import { PerfilPage } from "./PerfilPage";
 
-// El flujo de contratación tiene sus propias pruebas; aquí solo se comprueba dónde aparece.
-vi.mock("../components/Planes/AccionesPremium", () => ({
-  AccionesPremium: () => <p data-testid="acciones-premium" />,
-}));
-
-// Solo se simulan las llamadas de red. Tokens, sesión, validaciones y el
-// redirect de <RutaPrivada> son los reales.
+// Solo se simulan las llamadas de red. Tokens, sesión, validaciones, el
+// redirect de <RutaPrivada> y el flujo de contratación (hooks reales) son los reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
   return {
@@ -36,12 +39,41 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     actualizarNombre: vi.fn(),
     cambiarContrasena: vi.fn(),
     revocarSesion: vi.fn(),
+    getPermisosPlan: vi.fn(),
+    getPlanes: vi.fn(),
+    getContratacion: vi.fn(),
+    iniciarContratacion: vi.fn(),
+    cancelarContratacion: vi.fn(),
   };
 });
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const actualizarNombreMock = vi.mocked(actualizarNombre);
 const cambiarContrasenaMock = vi.mocked(cambiarContrasena);
 const revocarSesionMock = vi.mocked(revocarSesion);
+const getPermisosPlanMock = vi.mocked(getPermisosPlan);
+const getPlanesMock = vi.mocked(getPlanes);
+const getContratacionMock = vi.mocked(getContratacion);
+const iniciarContratacionMock = vi.mocked(iniciarContratacion);
+const cancelarContratacionMock = vi.mocked(cancelarContratacion);
+
+const PERMISOS_GRATUITO: PermisosPlan = { plan: "free", features: { asistente_financiero: false, recomendaciones_automaticas: false } };
+const PERMISOS_PREMIUM: PermisosPlan = { plan: "premium", features: { asistente_financiero: true, recomendaciones_automaticas: true } };
+
+function contrato(estado: ContratacionPlan["estado"]): ContratacionPlan {
+  return {
+    id: "c-1",
+    estado,
+    plan_id: "premium",
+    importe: "4990.00",
+    moneda: "CLP",
+    precio_demo: true,
+    vigente_desde: null,
+    vigente_hasta: null,
+    url_checkout: "https://pagos.ejemplo.cl/api/pagos/mock/?token=t",
+    url_retorno: "https://app.ejemplo.cl/planes/retorno?contratacion_id=c-1",
+    permisos: PERMISOS_GRATUITO,
+  };
+}
 
 const USUARIO: Usuario = {
   id: "7",
@@ -144,22 +176,88 @@ beforeEach(() => {
   getUsuarioActualMock.mockReset().mockResolvedValue(USUARIO);
   actualizarNombreMock.mockReset();
   cambiarContrasenaMock.mockReset();
+  getPermisosPlanMock.mockReset().mockResolvedValue(PERMISOS_GRATUITO);
+  getPlanesMock.mockReset().mockResolvedValue([]);
+  getContratacionMock.mockReset();
+  iniciarContratacionMock.mockReset();
+  cancelarContratacionMock.mockReset();
 });
 
 afterEach(() => {
   cleanup();
 });
 
-describe("Mejorar a Premium desde Perfil (SE-03)", () => {
-  it("con plan gratuito ofrece el mismo flujo de contratación que Ajustes", async () => {
+describe("Plan Premium desde Perfil (SE-03)", () => {
+  const MEJORAR = { name: "Mejorar a Premium" };
+  // Solo la tarjeta de Perfil dice esto; la cabecera muestra el nombre del plan.
+  const DETALLE_PREMIUM = "Asistente financiero y recomendaciones avanzadas.";
+  const VERIFICAR = { name: "Verificar estado" };
+
+  it("con plan gratuito, según el servidor, ofrece Mejorar a Premium", async () => {
     await montar();
-    expect(screen.getByTestId("acciones-premium")).toBeInTheDocument();
+    expect(await screen.findByRole("button", MEJORAR)).toBeEnabled();
   });
 
-  it("con plan Premium no ofrece contratar otra vez", async () => {
-    getUsuarioActualMock.mockResolvedValue({ ...USUARIO, plan: "premium" });
+  it("con plan Premium según el servidor, muestra Plan Premium y no ofrece contratar", async () => {
+    getPermisosPlanMock.mockResolvedValue(PERMISOS_PREMIUM);
     await montar();
-    expect(screen.queryByTestId("acciones-premium")).toBeNull();
+    expect(await screen.findByText(DETALLE_PREMIUM)).toBeInTheDocument();
+    await waitFor(() => expect(barraSuperior()).toHaveTextContent("Plan Premium"));
+    expect(screen.queryByRole("button", MEJORAR)).toBeNull();
+  });
+
+  it("recupera un pago pendiente y, al verificarlo, el aviso sigue hasta que el servidor confirma Premium", async () => {
+    localStorage.setItem("contratacion_pendiente_7:org-1", JSON.stringify({ alcance: "7:org-1", clave: "clave-1", contratoId: "c-1" }));
+    let contratoServidor = contrato("pendiente");
+    let planServidor = PERMISOS_GRATUITO;
+    getContratacionMock.mockImplementation(async () => contratoServidor);
+    getPermisosPlanMock.mockImplementation(async () => planServidor);
+    await montar();
+
+    // Pago aprobado, pero el servidor todavía devuelve plan gratuito.
+    contratoServidor = contrato("exitosa");
+    fireEvent.click(await screen.findByRole("button", VERIFICAR));
+    expect(await screen.findByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
+    expect(screen.queryByRole("button", MEJORAR)).toBeNull();
+
+    // El segundo clic vuelve a consultar los permisos, sin iniciar otra contratación.
+    planServidor = PERMISOS_PREMIUM;
+    const consultasAntes = getPermisosPlanMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", VERIFICAR));
+    expect(await screen.findByText(DETALLE_PREMIUM)).toBeInTheDocument();
+    await waitFor(() => expect(barraSuperior()).toHaveTextContent("Plan Premium"));
+    expect(getPermisosPlanMock.mock.calls.length).toBeGreaterThan(consultasAntes);
+    expect(screen.queryByText(MENSAJE_PLAN_ACTIVANDO)).toBeNull();
+    expect(screen.queryByRole("button", MEJORAR)).toBeNull();
+    expect(iniciarContratacionMock).not.toHaveBeenCalled();
+  });
+
+  it("un fallo temporal al consultar permisos no borra el aviso y se resuelve con la siguiente respuesta", async () => {
+    localStorage.setItem("contratacion_pendiente_7:org-1", JSON.stringify({ alcance: "7:org-1", clave: "clave-1", contratoId: "c-1" }));
+    getContratacionMock.mockResolvedValue(contrato("exitosa"));
+    let planServidor = PERMISOS_GRATUITO;
+    let fallosPendientes = 0;
+    getPermisosPlanMock.mockImplementation(async () => {
+      if (fallosPendientes > 0) {
+        fallosPendientes -= 1;
+        throw new TypeError("Failed to fetch");
+      }
+      return planServidor;
+    });
+    await montar();
+    expect(await screen.findByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
+
+    fallosPendientes = 1;
+    fireEvent.click(screen.getByRole("button", VERIFICAR));
+    expect(await screen.findByText("No pudimos comprobar tu plan. Intenta de nuevo.")).toBeInTheDocument();
+    expect(screen.getByText(MENSAJE_PLAN_ACTIVANDO)).toBeInTheDocument();
+    expect(screen.queryByRole("button", MEJORAR)).toBeNull();
+
+    planServidor = PERMISOS_PREMIUM;
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByText(DETALLE_PREMIUM)).toBeInTheDocument();
+    await waitFor(() => expect(barraSuperior()).toHaveTextContent("Plan Premium"));
+    expect(screen.queryByText(MENSAJE_PLAN_ACTIVANDO)).toBeNull();
   });
 });
 

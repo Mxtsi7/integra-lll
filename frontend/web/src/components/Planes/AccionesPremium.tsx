@@ -1,5 +1,5 @@
 import { useAuth } from '../../context/AuthContext';
-import { useContratacionPremium } from '../../hooks/useContratacionPremium';
+import type { ContratacionPremium } from '../../hooks/useContratacionPremium';
 import { Boton } from '../ui/Boton';
 import styles from './AccionesPremium.module.css';
 import { MENSAJE_PLAN_ACTIVANDO, TEXTO_PRECIO_DEMO, TEXTOS_CONTRATACION } from './reglasContratacion';
@@ -7,24 +7,24 @@ import { MENSAJE_PLAN_ACTIVANDO, TEXTO_PRECIO_DEMO, TEXTOS_CONTRATACION } from '
 const MENSAJE_SOLO_TITULAR = 'Solo la persona titular de la organización puede contratar Premium.';
 
 interface AccionesPremiumProps {
-  /** Se llama cuando el plan puede haber cambiado, para que la pantalla que lo muestra lo vuelva a leer. */
-  alPlanCambiar?: () => void;
+  contratacion: ContratacionPremium;
+  /** El servidor confirmó que el plan es gratuito. Solo entonces se ofrece contratar. */
+  esGratuitoConfirmado: boolean;
+  /** El pago ya se aprobó y el plan todavía no lo refleja. */
+  avisoActivacion: boolean;
 }
 
 /**
- * Los botones para pasar a Premium: contratar, continuar un pago pendiente, verificar o cancelar.
- * Se usa en Ajustes y en Perfil. Solo se muestra a quien todavía no tiene Premium.
+ * Los botones para pasar a Premium, en Ajustes y en Perfil. Qué se ofrece lo decide `usePlanPremium`;
+ * aquí solo se muestra y se llaman las acciones de la contratación.
  */
-export function AccionesPremium({ alPlanCambiar }: AccionesPremiumProps) {
+export function AccionesPremium({ contratacion, esGratuitoConfirmado, avisoActivacion }: AccionesPremiumProps) {
   const { usuario } = useAuth();
-  const contratacion = useContratacionPremium({ alPlanCambiar });
   // Si todavía no sabemos quién es la persona, el servidor decide: contratar lo rechaza con 403.
   const esTitular = !usuario || usuario.rol === 'titular';
   const ocupado = contratacion.operacion !== null;
   const contratoActual = contratacion.contrato;
   const hayPendiente = contratoActual?.estado === 'pendiente' || contratacion.idSinCargar !== null;
-  // El pago ya se aprobó: no se ofrece pagar otra vez mientras el servidor no actualice el plan.
-  const pagoAprobado = contratoActual?.estado === 'exitosa';
 
   return (
     <div className={styles.pie}>
@@ -54,22 +54,7 @@ export function AccionesPremium({ alPlanCambiar }: AccionesPremiumProps) {
         </>
       )}
 
-      {!hayPendiente && !pagoAprobado && (
-        <>
-          <Boton
-            variante="secundario"
-            onClick={() => void contratacion.contratar()}
-            cargando={contratacion.operacion === 'iniciando'}
-            disabled={ocupado || !esTitular}
-          >
-            Mejorar a Premium
-          </Boton>
-          {!esTitular && <p className={styles.texto}>{MENSAJE_SOLO_TITULAR}</p>}
-          {contratacion.precioDemo === true && <p className={styles.texto}>{TEXTO_PRECIO_DEMO}</p>}
-        </>
-      )}
-
-      {pagoAprobado && (
+      {!hayPendiente && avisoActivacion && (
         <>
           <p role="status" className={styles.texto}>
             {MENSAJE_PLAN_ACTIVANDO}
@@ -83,6 +68,21 @@ export function AccionesPremium({ alPlanCambiar }: AccionesPremiumProps) {
           >
             Verificar estado
           </Boton>
+        </>
+      )}
+
+      {!hayPendiente && !avisoActivacion && esGratuitoConfirmado && (
+        <>
+          <Boton
+            variante="secundario"
+            onClick={() => void contratacion.contratar()}
+            cargando={contratacion.operacion === 'iniciando'}
+            disabled={ocupado || !esTitular}
+          >
+            Mejorar a Premium
+          </Boton>
+          {!esTitular && <p className={styles.texto}>{MENSAJE_SOLO_TITULAR}</p>}
+          {contratacion.precioDemo === true && <p className={styles.texto}>{TEXTO_PRECIO_DEMO}</p>}
         </>
       )}
 
