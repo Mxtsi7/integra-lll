@@ -4,6 +4,7 @@ from django.http import HttpResponse, JsonResponse
 from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from app.google_login import GoogleLoginView, GoogleNonceView
+from app.historial_accesos import HistorialAccesosView
 
 from app.views import (
     ConfirmacionRecuperacionView,
@@ -67,6 +68,7 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("api/usuarios/me/", UsuarioActualView.as_view(), name="usuario-actual"),
+    path("api/usuarios/me/historial-accesos/", HistorialAccesosView.as_view(), name="historial-accesos"),
     path("api/organizacion/", OrganizacionView.as_view(), name="organizacion"),
     path("api/usuarios/<int:pk>/", UserDetailView.as_view(), name="usuario-detalle"),
     path("", inicio),

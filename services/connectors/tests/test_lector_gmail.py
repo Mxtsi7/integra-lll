@@ -555,7 +555,9 @@ class TestMensajesQueNoSePuedenTraer:
         google.lista = {"messages": [{"id": "../../otra-cosa"}, {"id": None}]}
         pagina = leer(cuenta)
         assert pagina.mensajes == ()
-        assert len(pagina.omitidos) == 2
+        # El raro va entero (sirve para reconocerlo, no para pedirlo); el que
+        # no trae `id` queda sin `id`, no como «None».
+        assert [o.id_mensaje for o in pagina.omitidos] == ["../../otra-cosa", ""]
         assert len(google.peticiones) == 1
 
     def test_si_gmail_devuelve_otro_mensaje_no_se_acepta(self, claves, google):

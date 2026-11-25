@@ -1,6 +1,5 @@
 """Inserta hechos durables y resuelve reintentos según la clave v1."""
 from datetime import timezone
-from uuid import NAMESPACE_URL, uuid5, UUID
 
 from django.db import IntegrityError, transaction
 from rest_framework import status
@@ -14,17 +13,6 @@ from .proyeccion import proyectar
 from .validacion import ErrorEventoUso
 
 NOMBRE_RESTRICCION_CLAVE = 'uso_rx_evento_clave_unica'
-#: Auth identifica al usuario con un entero; el sobre v1 exige un UUID. La
-#: derivación es estable para que el mismo usuario siempre produzca el mismo
-#: `datos.usuario_id` y no se pueda falsificar desde el cuerpo del recolector.
-ESPACIO_USUARIO_USO = 'https://integra.example/usuarios/'
-
-
-def _usuario_para_sobre(usuario_id):
-    try:
-        return UUID(str(usuario_id))
-    except (TypeError, ValueError, AttributeError):
-        return uuid5(NAMESPACE_URL, f'{ESPACIO_USUARIO_USO}{usuario_id}')
 
 
 def _acuse(evento, estado, codigo_http):
@@ -45,9 +33,8 @@ def _conflicto(mensaje):
 @transaction.atomic
 def persistir(*, suscripcion, usuario_id, evento, correlacion):
     """Guarda el hecho y su trabajo pendiente antes de emitir el acuse."""
-    # `main` agregó la barrera también acá para escrituras que no pasan por el
-    # middleware HTTP. En HTTP el middleware ya responde 410; este chequeo es
-    # la defensa en profundidad para llamadas internas.
+    # La barrera HTTP ya responde 410 en el middleware; este chequeo cubre
+    # también las escrituras internas que no pasan por él.
     estado_org = bloquear_organizacion(suscripcion.organizacion_id, compartido=True)
     if estado_org.eliminada:
         raise PermissionDenied('La organización fue eliminada.')
@@ -85,12 +72,13 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
             # Dentro del savepoint de primera aceptación: un reenvío 200, un
             # conflicto 409 o un fallo de proyección no dejan otra fila de
             # outbox. `registrar_uso` no publica; sólo prepara el despacho
-            # posterior al commit con el cuerpo canónico ya normalizado.
+            # posterior al commit. El entero de Auth se conserva hasta acá:
+            # `events.uso` lo convierte con su namespace canónico.
             registrar_uso(
                 organizacion_id=destino.organizacion_id,
                 suscripcion_id=destino.pk,
                 evento=evento.cuerpo,
-                usuario_id=_usuario_para_sobre(usuario_id),
+                usuario_id=usuario_id,
                 correlation_id=correlacion,
             )
             proyectar(destino, usuario_id, evento.fecha, correlacion)

@@ -7,9 +7,11 @@ y `autodiscover_tasks` las encuentra por vivir en este módulo.
     latido                            que beat programa y el worker ejecuta
     procesar_importacion              S3-FE-10: el archivo subido → candidatos
     rescatar_importaciones_estancadas  la red bajo el trapecio (ver abajo)
+    programar_lecturas_de_correo      S3-FE-18/20: una lectura por cuenta conectada
+    leer_cuenta_de_correo             S3-FE-18/20: la lectura de una cuenta, con reintentos
 
-La lectura de correo (FE-13) todavía no existe; cuando llegue, va acá y se
-programa en CELERY_BEAT_SCHEDULE (connectors_config/settings.py).
+La lógica de las dos últimas vive en `lectura_programada.py`; aquí solo está
+lo que es de Celery.
 
 ── Por qué el procesamiento es una tarea y no parte de la subida ────────────
 `SubirArchivoView` tiene que contestar un 201 con el id de la importación de
@@ -273,24 +275,13 @@ def procesar_importacion(importacion_id: str) -> dict:
         # contradice. Ahí no hay filas que rescatar.
         return _terminar_mal(importacion, exc.codigo, exc.mensaje)
 
-    # ── En el orden de la llave, no en el del archivo ──────────────────────
-    # Dos cartolas que se traslapan comparten cobros, y pueden traerlos en
-    # orden contrario. Si cada worker insertara en el orden de su archivo, uno
-    # tomaría X y esperaría Y mientras el otro tomó Y y espera X: PostgreSQL
-    # mata a uno y esa importación entera se revierte. Insertando todos en el
-    # MISMO orden —el de la llave única— el que llega segundo espera al
-    # primero y ya no hay ciclo. Dentro de una importación la organización y
-    # el origen son los mismos, así que ordenar por el identificador es
-    # ordenar por la llave completa. La ocurrencia ya se asignó al leer, en
-    # el orden del archivo, y ordenar después no la cambia. Lo encontró la
-    # revisión de #171.
-    filas = sorted(
-        (
-            CobroCandidato.desde_candidato(candidato, importacion=importacion)
-            for candidato in resultado.candidatos
-        ),
-        key=lambda fila: fila.identificador_origen,
-    )
+    # El orden de inserción lo fija `CobroCandidato.guardar_sin_duplicar` (el
+    # de la llave única, revisión de #171). La ocurrencia ya se asignó al
+    # leer, en el orden del archivo, y ordenar después no la cambia.
+    filas = [
+        CobroCandidato.desde_candidato(candidato, importacion=importacion)
+        for candidato in resultado.candidatos
+    ]
 
     # Los errores se arman en memoria con `anotar_error`, que es quien sabe
     # cuántos se guardan (`MAXIMO_ERRORES`) y cuántos se cuentan.
@@ -330,14 +321,14 @@ def procesar_importacion(importacion_id: str) -> dict:
             candidatos_detectados=len(filas),
         )
         if cerrada:
-            # `ignore_conflicts`: la unicidad de (organización, origen,
-            # identificador) es lo que hace idempotente a esta tarea. Un
-            # reintento choca con sus propias filas y no las duplica.
-            CobroCandidato.objects.bulk_create(filas, ignore_conflicts=True)
-            # Y se cuenta de verdad: `bulk_create` con `ignore_conflicts` no
-            # dice cuántas insertó, y en un reintento las de la corrida
-            # anterior ya estaban. Lo que la persona tiene que ver es cuántos
-            # candidatos EXISTEN, no cuántos se intentaron.
+            # La unicidad de (organización, origen, identificador) es lo que
+            # hace idempotente a esta tarea: un reintento choca con sus
+            # propias filas y no las duplica.
+            CobroCandidato.guardar_sin_duplicar(filas)
+            # Y se cuenta de verdad: insertar sin duplicar no dice cuántas
+            # insertó, y en un reintento las de la corrida anterior ya
+            # estaban. Lo que la persona tiene que ver es cuántos candidatos
+            # EXISTEN, no cuántos se intentaron.
             guardados = CobroCandidato.objects.filter(importacion=importacion).count()
             if guardados != len(filas):
                 Importacion.objects.filter(pk=importacion.pk).update(
@@ -417,3 +408,36 @@ def rescatar_importaciones_estancadas() -> dict:
             estancadas,
         )
     return {"reencoladas": len(pendientes), "fallidas": estancadas}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# S3-FE-18 / S3-FE-20 — la lectura programada del correo
+# ══════════════════════════════════════════════════════════════════════
+
+
+@shared_task
+def programar_lecturas_de_correo() -> dict:
+    """Encola una lectura por cada cuenta que toca leer. Beat la corre cada
+    `CONECTORES_LECTURA_CORREO_SEGUNDOS`."""
+    from .lectura_programada import cuentas_para_leer
+
+    cuentas = cuentas_para_leer()
+    for cuenta_id in cuentas:
+        leer_cuenta_de_correo.delay(str(cuenta_id))
+    return {"encoladas": len(cuentas)}
+
+
+@shared_task(bind=True, max_retries=None)
+def leer_cuenta_de_correo(self, cuenta_id: str, cadena: str | None = None) -> dict:
+    """Lee una cuenta. Un error transitorio se reintenta con la espera que
+    decide `lectura_programada.espera_para`, llevando la `cadena` que lo deja
+    continuar. El contador y el tope viven en la base (`AvanceDeLectura`), no
+    en `request.retries`: ver `lectura_programada._tomar_turno`."""
+    from .lectura_programada import leer_cuenta
+
+    resultado = leer_cuenta(cuenta_id, cadena=cadena)
+    espera = resultado.get("reintentar_en")
+    if espera is not None:
+        raise self.retry(args=[cuenta_id], kwargs={"cadena": resultado["cadena"]}, countdown=espera)
+    return resultado
+
