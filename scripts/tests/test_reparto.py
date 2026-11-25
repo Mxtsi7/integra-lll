@@ -88,6 +88,12 @@ def test_con_notifications_repartido_el_nucleo_lo_busca_en_el_satelite(tmp_path)
     assert datos["ELIMINACION_DESTINOS"] == "subscriptions,notifications"
     # Lo que vive en el núcleo se sigue llamando por su nombre corto.
     assert datos["URL_AUTH"] == "http://auth:8001"
+    # Pero auth acepta también su nombre calificado: así lo llaman los Jobs de
+    # alertas del satélite (S3-FE-21). Sin esto, Django responde 400.
+    hosts = datos["ALLOWED_HOSTS"].split(",")
+    for forma in ("auth.student-nucleo", "auth.student-nucleo.svc", "auth.student-nucleo.svc.cluster.local"):
+        assert forma in hosts
+    assert "auth" in hosts and "gateway" in hosts, "no se pierden los que ya estaban"
     assert datos["URL_SUBSCRIPTIONS"] == "http://subscriptions:8002"
 
 
