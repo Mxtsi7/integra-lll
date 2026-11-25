@@ -54,6 +54,12 @@ transcriben.
 |---|---|
 | `pytest -v` | **585 passed**, 7 warnings, **0 skipped**; incluye los **3 E2E** de `FlujoUsoRecolectoresE2E`. `EXIT=0`. |
 
+La reentrega y la barrera ya no infieren el ACK de que la cola quede sin
+mensajes listos: esperan, con un timeout explícito de 15 s, la línea JSON que
+el worker escribe justo después de `canal.ack(mensaje)`. El duplicado se
+reconoce por un resultado `duplicado` **nuevo** para el mismo `eventId`, no por
+la primera confirmación `aplicado`.
+
 Las tres pruebas E2E que aparecen en el log del SHA integrado son:
 
 - `test_aislamiento_de_organizaciones_y_barrera_de_borrado` — PASSED
@@ -80,7 +86,7 @@ entorno local de la entrega.
 | Consentimiento | El receptor durable exige un callable de consentimiento. | `_consentimiento_prueba` devuelve `True` incondicionalmente: **no** ejerce la autoridad de consentimiento. |
 | Eventos | El contrato v1 se valida y persiste con PostgreSQL real. | Los eventos son fixtures de `docs/contratos/uso-recolectores-v1.ejemplos.json`, no capturas desde dispositivo. |
 | Outbox y broker | `registrar_uso` escribe en la misma transacción; `despachar_pendientes` publica en RabbitMQ real con exchange y routing key propios. | Sin dobles de broker. |
-| Consumidor | El worker TypeScript corre como proceso separado, confirma, deduplica y aísla por organización en `analytics.uso_*`. | Sin dobles de base ni de worker. |
+| Consumidor | El worker TypeScript corre como proceso separado, confirma, deduplica y aísla por organización en `analytics.uso_*`. La reentrega y la barrera esperan su línea de resultado posterior al ACK. | Sin dobles de base ni de worker. |
 | Resumen y puntaje | El verificador invoca el código local de contexto/resumen sobre la misma base. | No interviene ningún proveedor de IA externo. |
 
 Escenarios cubiertos: Bearer → outbox → Rabbit → consumidor → redelivery;
@@ -96,6 +102,7 @@ cobertura insuficiente y gastos separados por moneda.
 - [x] Outbox único en `201`; `200` y `409` no publican ni crean otra fila.
 - [x] Barrera de borrado conservada en HTTP y en escrituras internas.
 - [x] E2E conectada a `RABBITMQ_PRUEBA_URL`; sin defaults, skips ni fallbacks.
+- [x] Reentrega y barrera esperan el log posterior al ACK con timeout explícito; el duplicado se distingue por un nuevo resultado.
 - [x] Dependencias Python de gateway/Analytics y Node instaladas en el job `backend/subscriptions`.
 - [x] `pytest -v` del job con 585 passed y 3 E2E en el SHA integrado.
 - [x] Alcance real, dobles y pendientes documentados.
@@ -137,6 +144,8 @@ Cierra el Lote E tras integrar `main dba7019` y resolver los dos P2 del review.
   aceptación, y se conserva la barrera de borrado de `main`.
 - La E2E usa solo `RABBITMQ_PRUEBA_URL`, falla explícitamente si falta el
   broker, npm, node o tsx, y no tiene skips ni defaults locales.
+- La reentrega y la barrera esperan con timeout el log posterior al ACK: el
+  duplicado se identifica por un nuevo resultado para el mismo `event_id`.
 - El job `backend/subscriptions` instala las dependencias Python de gateway y
   Analytics que necesita el recorrido.
 

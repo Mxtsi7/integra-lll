@@ -8,6 +8,8 @@ Lo que sí es real:
 * ``despachar_pendientes`` publica de verdad en RabbitMQ;
 * el worker de ``analytics-uso`` corre como proceso separado con la misma URL
   de PostgreSQL y escribe ``analytics.uso_*``;
+* la reentrega y la barrera esperan el log que el worker emite tras el ACK,
+  no sólo que la cola quede sin mensajes listos;
 * el verificador invoca el código local de contexto/resumen de Analytics.
 
 Dobles y límites explícitos:
@@ -90,6 +92,12 @@ TSX = SERVICIO_TS / "node_modules" / "tsx" / "dist" / "cli.mjs"
 RABBITMQ_PRUEBA_URL = os.environ.get("RABBITMQ_PRUEBA_URL", "")
 USUARIO_E2E = 42
 USUARIO_UUID = str(uuid_usuario_auth(USUARIO_E2E))
+# El consumidor escribe estas líneas justo después de `canal.ack(mensaje)`.
+CONFIRMACIONES_WORKER = {
+    "aplicado": "uso aplicado",
+    "duplicado": "uso duplicado confirmado sin efectos",
+    "ignorado": "uso de organización eliminada confirmado sin efectos",
+}
 
 
 # El gateway valida el token y descarta cualquier identidad enviada por el
@@ -166,6 +174,30 @@ def _esperar(condicion, mensaje: str, timeout: float = 25.0):
             return resultado
         time.sleep(0.1)
     raise AssertionError(f"Se agotó el tiempo esperando: {mensaje}")
+
+
+def _confirmaciones_worker(ruta: Path) -> list[dict]:
+    """Resultados que el worker emitió después del ACK de cada entrega.
+
+    El contador de mensajes listos no basta: puede caer a cero apenas RabbitMQ
+    entrega el mensaje. La línea de resultado se escribe tras `ack`, así que es
+    la señal que usa esta suite para confirmar la entrega concreta.
+    """
+    if not ruta.is_file():
+        return []
+    confirmaciones = []
+    for linea in ruta.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            entrada = json.loads(linea)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(entrada, dict)
+            and "eventId" in entrada
+            and entrada.get("resultado") in CONFIRMACIONES_WORKER
+        ):
+            confirmaciones.append(entrada)
+    return confirmaciones
 
 
 def _url_postgresql_de_prueba() -> str:
@@ -338,7 +370,47 @@ class FlujoUsoRecolectoresE2E(TransactionTestCase):
         _declarar_y_purgar()
         super().tearDown()
 
+    @pytest.fixture(autouse=True)
+    def _registro_worker(self, infra_real):
+        self.registro_worker = Path(infra_real["registro_worker"])
+
     # ── ayudas ────────────────────────────────────────────────────────
+    def _confirmaciones(self, event_id) -> list[dict]:
+        return [
+            entrada
+            for entrada in _confirmaciones_worker(self.registro_worker)
+            if str(entrada.get("eventId")) == str(event_id)
+        ]
+
+    def _esperar_confirmacion(
+        self, event_id, resultado: str, *, desde: int, timeout: float = 15.0
+    ) -> dict:
+        """Espera una confirmación post-ACK nueva para esta entrega concreta.
+
+        ``desde`` es el número de confirmaciones ya vidas para el mismo
+        `eventId`. Así el redelivery se distingue del primer procesamiento
+        aunque conserve el identificador.
+        """
+        mensaje = CONFIRMACIONES_WORKER[resultado]
+
+        def confirmada():
+            confirmaciones = self._confirmaciones(event_id)
+            if len(confirmaciones) <= desde:
+                return None
+            entrada = confirmaciones[desde]
+            if (
+                entrada.get("resultado") == resultado
+                and entrada.get("mensaje") == mensaje
+            ):
+                return entrada
+            return None
+
+        return _esperar(
+            confirmada,
+            f"la confirmación post-ACK '{resultado}' de {event_id}",
+            timeout=timeout,
+        )
+
     def _limpiar_analytics(self):
         with connection.cursor() as cursor:
             cursor.execute(
@@ -450,11 +522,16 @@ class FlujoUsoRecolectoresE2E(TransactionTestCase):
         assert publicacion.datos["usuario_id"] == USUARIO_UUID
         assert str(publicacion.correlation_id)
 
+        confirmaciones_previas = len(self._confirmaciones(evento["event_id"]))
         self._despachar()
         publicacion.refresh_from_db()
         assert publicacion.publicado_en is not None
         assert publicacion.intentos == 0
 
+        self._esperar_confirmacion(
+            evento["event_id"], "aplicado",
+            desde=confirmaciones_previas, timeout=15.0,
+        )
         self._esperar_eventos(self.organizacion_a, 1)
         fila = self._filas(
             "SELECT event_id::text, duracion_ms, cobertura, estado, "
@@ -494,11 +571,15 @@ class FlujoUsoRecolectoresE2E(TransactionTestCase):
         ).exists()
 
         # Redelivery real del mismo sobre: el repositorio debe deduplicar sin
-        # insertar otro evento ni another fila diaria/mensual.
+        # insertar otro evento ni otra fila diaria/mensual. El mismo event_id
+        # conserva su primera confirmación, así que se espera una nueva línea
+        # de resultado con `duplicado` antes de mirar Analytics o la cola de
+        # fallos.
+        desde_duplicado = len(self._confirmaciones(evento["event_id"]))
         publicar_uso(publicacion)
-        _esperar(
-            lambda: _mensajes_en_cola(COLA_USO) == 0,
-            "el redelivery sea confirmado por el consumidor",
+        self._esperar_confirmacion(
+            evento["event_id"], "duplicado",
+            desde=desde_duplicado, timeout=15.0,
         )
         assert self._contar("uso_evento", self.organizacion_a) == 1
         assert self._contar("uso_tramo", self.organizacion_a) == 1
@@ -550,10 +631,11 @@ class FlujoUsoRecolectoresE2E(TransactionTestCase):
             evento=evento_tardio,
             usuario_id=USUARIO_UUID,
         )
+        desde_tardio = len(self._confirmaciones(evento_tardio["event_id"]))
         publicar_uso(publicacion)
-        _esperar(
-            lambda: _mensajes_en_cola(COLA_USO) == 0,
-            "la redelivery del tenant eliminado sea confirmada",
+        self._esperar_confirmacion(
+            evento_tardio["event_id"], "ignorado",
+            desde=desde_tardio, timeout=15.0,
         )
         assert self._contar("uso_evento", self.organizacion_a) == 1
         assert _mensajes_en_cola(COLA_FALLOS_USO) == 0
