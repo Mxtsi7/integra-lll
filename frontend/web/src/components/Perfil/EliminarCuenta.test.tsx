@@ -4,14 +4,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { AuthError } from '@ojoalgasto/shared';
 import { EliminarCuenta } from './EliminarCuenta';
 
-const { navegar, cerrarSesionLocal, exito } = vi.hoisted(() => ({
+const { navegar, cerrarSesionLocal, exito, sesionActual } = vi.hoisted(() => ({
   navegar: vi.fn(),
-  cerrarSesionLocal: vi.fn(),
+  // Devuelve true: la sesión que pidió el borrado sigue siendo la vigente.
+  cerrarSesionLocal: vi.fn((_sesion?: number) => true),
+  // Marca de la sesión vigente; un test la cambia para simular otra sesión.
+  sesionActual: { valor: 1 },
   exito: vi.fn(),
 }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => navegar }));
-vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ cerrarSesionLocal }) }));
+vi.mock('../../context/AuthContext', () => ({ useAuth: () => ({ cerrarSesionLocal, capturarSesion: () => sesionActual.valor }) }));
 vi.mock('../../context/ToastContext', () => ({ useToast: () => ({ exito }) }));
 
 function abrir(onEliminar: (d: unknown) => Promise<unknown>) {
@@ -30,10 +33,11 @@ function botonConfirmar() {
   return screen.getByRole('button', { name: 'Eliminar mi cuenta' }) as HTMLButtonElement;
 }
 
-describe('EliminarCuenta (AN-18)', () => {
+describe('EliminarCuenta (AN-18 / S3-AN-03)', () => {
   beforeEach(() => {
     navegar.mockReset();
-    cerrarSesionLocal.mockReset();
+    cerrarSesionLocal.mockReset().mockReturnValue(true);
+    sesionActual.valor = 1;
     exito.mockReset();
   });
 
@@ -103,6 +107,7 @@ describe('EliminarCuenta (AN-18)', () => {
     completar();
     fireEvent.click(botonConfirmar());
     await waitFor(() => expect(cerrarSesionLocal).toHaveBeenCalledTimes(1));
+    expect(cerrarSesionLocal).toHaveBeenCalledWith(1);
     expect(onEliminar).toHaveBeenCalledWith({ password: 'Clave123', confirmacion: 'ELIMINAR' });
     expect(exito).toHaveBeenCalledWith('Tu cuenta fue eliminada y cerramos tu sesión.');
     expect(navegar).toHaveBeenCalledWith('/login', { replace: true });
@@ -170,6 +175,58 @@ describe('EliminarCuenta (AN-18)', () => {
     fireEvent.click(botonConfirmar());
     const alerta = await screen.findByRole('alert');
     expect(alerta.textContent).toContain('conectar con el servidor');
+    expect(cerrarSesionLocal).not.toHaveBeenCalled();
+    expect(navegar).not.toHaveBeenCalled();
+  });
+
+  it('409: la primera petición no manda confirmacion_organizacion; solo se agrega tras avisar', async () => {
+    const onEliminar = vi.fn().mockRejectedValueOnce(new AuthError('ultimo titular', 409));
+    abrir(onEliminar);
+    completar();
+    fireEvent.click(botonConfirmar());
+    await screen.findByText(/última persona titular de tu organización/);
+    expect(onEliminar).toHaveBeenCalledTimes(1);
+    expect(onEliminar).toHaveBeenCalledWith({ password: 'Clave123', confirmacion: 'ELIMINAR' });
+  });
+
+  it('un segundo clic mientras espera no manda otra petición', async () => {
+    let resolver!: (r: unknown) => void;
+    const onEliminar = vi.fn(() => new Promise((res) => { resolver = res; }));
+    abrir(onEliminar);
+    completar();
+    const formulario = botonConfirmar().closest('form') as HTMLFormElement;
+    fireEvent.click(botonConfirmar());
+    fireEvent.submit(formulario);
+    expect(onEliminar).toHaveBeenCalledTimes(1);
+    resolver({ estado: 'eliminada' });
+    await waitFor(() => expect(cerrarSesionLocal).toHaveBeenCalledTimes(1));
+  });
+
+  it('respuesta tardía de otra sesión: no avisa ni redirige', async () => {
+    let resolver!: (r: unknown) => void;
+    const onEliminar = vi.fn(() => new Promise((res) => { resolver = res; }));
+    abrir(onEliminar);
+    completar();
+    fireEvent.click(botonConfirmar());
+    // Mientras espera, la sesión cambió: cerrarSesionLocal(sesion) ya no la reconoce.
+    sesionActual.valor = 2;
+    cerrarSesionLocal.mockReturnValue(false);
+    resolver({ estado: 'eliminada' });
+    await waitFor(() => expect(cerrarSesionLocal).toHaveBeenCalledWith(1));
+    expect(exito).not.toHaveBeenCalled();
+    expect(navegar).not.toHaveBeenCalled();
+  });
+
+  it('error tardío de otra sesión: no muestra el error en la pantalla de la sesión actual', async () => {
+    let rechazar!: (e: unknown) => void;
+    const onEliminar = vi.fn(() => new Promise((_res, rej) => { rechazar = rej; }));
+    abrir(onEliminar);
+    completar();
+    fireEvent.click(botonConfirmar());
+    sesionActual.valor = 2;
+    rechazar(new AuthError('caído', 503));
+    await waitFor(() => expect(botonConfirmar().disabled).toBe(false));
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(cerrarSesionLocal).not.toHaveBeenCalled();
     expect(navegar).not.toHaveBeenCalled();
   });
