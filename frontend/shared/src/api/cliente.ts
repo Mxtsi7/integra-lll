@@ -98,6 +98,14 @@ type Opciones = {
 
 function mensajeDesdeCuerpo(data: Record<string, unknown>): string {
   if (typeof data.detail === "string") return data.detail;
+  if (typeof data.archivo === "string") return data.archivo;
+  for (const [clave, valor] of Object.entries(data)) {
+    if (clave === "code" || clave === "codigo") continue;
+    if (Array.isArray(valor) && typeof valor[0] === "string") {
+      return valor[0];
+    }
+    if (typeof valor === "string") return valor;
+  }
   const valores = Object.values(data);
   const primero = valores.length > 0 ? valores[0] : undefined;
   if (Array.isArray(primero) && typeof primero[0] === "string") {
@@ -135,17 +143,22 @@ export async function pedir<T>(
   }
 
   const token = obtenerAccessToken();
+  const esFormData = typeof FormData !== "undefined" && opciones.body instanceof FormData;
 
   const enviar = (autorizacion: string | null) => {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+    const headers: Record<string, string> = {};
+    if (!esFormData) {
+      headers["Content-Type"] = "application/json";
+    }
     if (autorizacion) headers.Authorization = `Bearer ${autorizacion}`;
     return fetch(`${urlBase}${path}`, {
       method: opciones.method ?? "GET",
       headers,
-      body:
-        opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+      body: esFormData
+        ? (opciones.body as FormData)
+        : opciones.body !== undefined
+          ? JSON.stringify(opciones.body)
+          : undefined,
       signal: opciones.signal,
     });
   };
@@ -229,6 +242,7 @@ export async function pedir<T>(
       message = mensajeDesdeCuerpo(data);
       campos = camposDesdeCuerpo(data);
       if (typeof data.code === "string") codigo = data.code;
+      if (typeof data.codigo === "string") codigo = data.codigo;
     } catch {
       // el cuerpo no era JSON
     }

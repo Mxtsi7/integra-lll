@@ -48,3 +48,25 @@ export async function getMisImportaciones(pagina = 1): Promise<Paginado<Importac
   const consulta = new URLSearchParams({ mias: 'true', page: String(pagina) });
   return await pedir(`/importaciones/?${consulta.toString()}`);
 }
+
+/**
+ * POST /api/importaciones/archivos/ (S3-SE-02, FE-07).
+ * Sube un archivo CSV o cartola mediante multipart/form-data (campo `archivo`).
+ * Devuelve la importación creada en estado 'pendiente' con su `id` para consultar su progreso.
+ */
+export async function subirArchivoImportacion(
+  archivo: File | Blob,
+  nombreArchivo?: string,
+): Promise<Importacion> {
+  const datos = new FormData();
+  if (nombreArchivo) {
+    datos.append('archivo', archivo, nombreArchivo);
+  } else {
+    datos.append('archivo', archivo);
+  }
+  return await pedir<Importacion>('/importaciones/archivos/', {
+    method: 'POST',
+    body: datos,
+  });
+}
+
