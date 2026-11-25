@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pedir } from './cliente';
-import { getImportacion, getMisImportaciones } from './importaciones';
+import { getImportacion, getMisImportaciones, subirArchivoImportacion } from './importaciones';
 
 vi.mock('./cliente', () => ({ pedir: vi.fn() }));
 
-describe('importaciones (CH-27, FE-08)', () => {
+describe('importaciones (CH-27, FE-08, S3-SE-02, FE-07)', () => {
   beforeEach(() => {
     vi.mocked(pedir).mockReset().mockResolvedValue({});
   });
@@ -21,5 +21,19 @@ describe('importaciones (CH-27, FE-08)', () => {
     expect(pedir).toHaveBeenCalledWith('/importaciones/?mias=true&page=1');
     await getMisImportaciones(3);
     expect(pedir).toHaveBeenLastCalledWith('/importaciones/?mias=true&page=3');
+  });
+
+  it('subirArchivoImportacion envía POST multipart con el campo archivo', async () => {
+    const fakeBlob = new Blob(['col1,col2\n1,2'], { type: 'text/csv' });
+    await subirArchivoImportacion(fakeBlob, 'movimientos.csv');
+
+    expect(pedir).toHaveBeenCalledTimes(1);
+    const [path, opciones] = vi.mocked(pedir).mock.calls[0];
+    expect(path).toBe('/importaciones/archivos/');
+    expect(opciones?.method).toBe('POST');
+    expect(opciones?.body).toBeInstanceOf(FormData);
+
+    const formData = opciones?.body as FormData;
+    expect(formData.get('archivo')).toBeDefined();
   });
 });

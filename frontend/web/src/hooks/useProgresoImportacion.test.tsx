@@ -106,6 +106,66 @@ describe("Polling del progreso (CH-27)", () => {
     expect(getMock).toHaveBeenCalledTimes(4);
   });
 
+  it("se detiene inmediatamente al llegar a fallida y no vuelve a consultar (S3-SE-04)", async () => {
+    const FALLIDA: Importacion = {
+      ...BASE,
+      estado: "fallida",
+      estado_legible: "Fallida",
+      terminada: true,
+      progreso: 50,
+      filas_procesadas: 50,
+      filas_totales: 100,
+      errores: [{ codigo: "formato", mensaje: "Fila con separador inválido.", fila: 51 }],
+      errores_totales: 1,
+    };
+    getMock
+      .mockResolvedValueOnce(BASE)
+      .mockResolvedValueOnce(procesando(50))
+      .mockResolvedValueOnce(FALLIDA);
+
+    const { result } = await montar();
+    expect(result.current.estado).toMatchObject({ tipo: "listo", importacion: { estado: "pendiente" } });
+
+    await pasar(1000);
+    expect(result.current.estado).toMatchObject({ importacion: { estado: "procesando", filas_procesadas: 50 } });
+
+    await pasar(1000);
+    expect(result.current.estado).toMatchObject({
+      tipo: "listo",
+      importacion: { estado: "fallida", terminada: true },
+      problema: null,
+    });
+    expect(getMock).toHaveBeenCalledTimes(3);
+
+    // Pasa más tiempo: al ser estado terminal (fallida), no vuelve a preguntar
+    await pasar(60_000);
+    expect(getMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("transición directa de pendiente a fallida se detiene sin consultar indefinidamente (S3-SE-04)", async () => {
+    const FALLIDA_DIRECTA: Importacion = {
+      ...BASE,
+      estado: "fallida",
+      estado_legible: "Fallida",
+      terminada: true,
+      errores: [{ codigo: "columna_faltante", mensaje: "Falta columna obligatoria fecha.", fila: null }],
+      errores_totales: 1,
+    };
+    getMock
+      .mockResolvedValueOnce(BASE)
+      .mockResolvedValueOnce(FALLIDA_DIRECTA);
+
+    const { result } = await montar();
+    expect(result.current.estado).toMatchObject({ tipo: "listo", importacion: { estado: "pendiente" } });
+
+    await pasar(1000);
+    expect(result.current.estado).toMatchObject({ tipo: "listo", importacion: { estado: "fallida" } });
+    expect(getMock).toHaveBeenCalledTimes(2);
+
+    await pasar(30_000);
+    expect(getMock).toHaveBeenCalledTimes(2);
+  });
+
   it("sin avance espera el doble cada vez, hasta 10 s; al avanzar vuelve a 1 s", async () => {
     getMock.mockResolvedValue(procesando(10));
     await montar();

@@ -8,6 +8,8 @@ import {
   validarNombre,
   validarPassword,
   validarRegistro,
+  validarArchivoCsv,
+  TAMANO_MAXIMO_ARCHIVO_IMPORTACION_BYTES,
   type DatosCambioContrasena,
   type DatosRegistro,
 } from "./validaciones";
@@ -221,3 +223,54 @@ describe("erroresCambioContrasenaDesdeServidor", () => {
     ).toEqual({ porCampo: {}, general: ["Algo falló.", "raro"] });
   });
 });
+
+describe("validarArchivoCsv (S3-SE-03, FE-07)", () => {
+  it("acepta un archivo .csv con tamaño válido", () => {
+    const res = validarArchivoCsv({ name: "cartola.csv", size: 1024 });
+    expect(res.valido).toBe(true);
+    expect(res.error).toBeNull();
+  });
+
+  it("acepta extensión en mayúsculas (.CSV)", () => {
+    const res = validarArchivoCsv({ name: "MOVIMIENTOS_BANCO.CSV", size: 500 });
+    expect(res.valido).toBe(true);
+    expect(res.error).toBeNull();
+  });
+
+  it("acepta un archivo en el límite exacto de 5 MB", () => {
+    const res = validarArchivoCsv({
+      name: "limite.csv",
+      size: TAMANO_MAXIMO_ARCHIVO_IMPORTACION_BYTES,
+    });
+    expect(res.valido).toBe(true);
+    expect(res.error).toBeNull();
+  });
+
+  it("rechaza archivos con formatos no admitidos (.xlsx, .txt, .pdf, sin extensión)", () => {
+    const formatosIncompatibles = ["cartola.xlsx", "datos.txt", "cartola.pdf", "sin_extension"];
+    for (const nombre of formatosIncompatibles) {
+      const res = validarArchivoCsv({ name: nombre, size: 1024 });
+      expect(res.valido).toBe(false);
+      expect(res.codigo).toBe("formato_no_admitido");
+      expect(res.error).toBe("Formato no admitido. Solo se admiten archivos .csv.");
+    }
+  });
+
+  it("rechaza archivos vacíos (0 bytes)", () => {
+    const res = validarArchivoCsv({ name: "vacio.csv", size: 0 });
+    expect(res.valido).toBe(false);
+    expect(res.codigo).toBe("archivo_vacio");
+    expect(res.error).toBe("El archivo está vacío.");
+  });
+
+  it("rechaza archivos que exceden 5 MB", () => {
+    const res = validarArchivoCsv({
+      name: "pesado.csv",
+      size: TAMANO_MAXIMO_ARCHIVO_IMPORTACION_BYTES + 1,
+    });
+    expect(res.valido).toBe(false);
+    expect(res.codigo).toBe("archivo_excedido");
+    expect(res.error).toBe("El archivo supera el tamaño máximo permitido de 5 MB.");
+  });
+});
+
