@@ -4,12 +4,14 @@ from uuid import NAMESPACE_URL, uuid5, UUID
 
 from django.db import IntegrityError, transaction
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from app.models import EventoUsoRecibido, Subscription
 from events.uso import registrar_uso
-from .validacion import ErrorEventoUso
+from shared.borrado.bloqueo import bloquear_organizacion
 from .proyeccion import proyectar
+from .validacion import ErrorEventoUso
 
 NOMBRE_RESTRICCION_CLAVE = 'uso_rx_evento_clave_unica'
 #: Auth identifica al usuario con un entero; el sobre v1 exige un UUID. La
@@ -43,6 +45,13 @@ def _conflicto(mensaje):
 @transaction.atomic
 def persistir(*, suscripcion, usuario_id, evento, correlacion):
     """Guarda el hecho y su trabajo pendiente antes de emitir el acuse."""
+    # `main` agregó la barrera también acá para escrituras que no pasan por el
+    # middleware HTTP. En HTTP el middleware ya responde 410; este chequeo es
+    # la defensa en profundidad para llamadas internas.
+    estado_org = bloquear_organizacion(suscripcion.organizacion_id, compartido=True)
+    if estado_org.eliminada:
+        raise PermissionDenied('La organización fue eliminada.')
+
     destino = Subscription.objects.select_for_update().filter(
         pk=suscripcion.pk, organizacion_id=suscripcion.organizacion_id,
     ).first()
