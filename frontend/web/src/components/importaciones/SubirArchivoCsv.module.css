@@ -1,0 +1,84 @@
+.contenedor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--vidrio-borde);
+  border-radius: var(--radio, 12px);
+  background: var(--superficie);
+  margin-bottom: 20px;
+}
+
+.encabezado {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.titulo {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--tinta);
+}
+
+.descripcion {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--tinta-2);
+  line-height: 1.4;
+}
+
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.selectorFila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.inputArchivo {
+  font-size: 13px;
+  color: var(--tinta);
+}
+
+.inputArchivo::file-selector-button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--vidrio-borde-fuerte);
+  background: var(--superficie-elevada, #f3f4f6);
+  color: var(--tinta);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  margin-right: 10px;
+  transition: background var(--rapido);
+}
+
+.inputArchivo::file-selector-button:hover:not(:disabled) {
+  background: var(--vidrio-borde);
+}
+
+.inputArchivo:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.archivoElegido {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tinta);
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--coral);
+}
