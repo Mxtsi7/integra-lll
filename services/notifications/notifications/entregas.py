@@ -69,6 +69,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from . import canales
+from .directorio import DirectorioNoDisponible
 from .canales import Envio, ErrorDeEnvio
 from .models import Alerta, EntregaAlerta, PreferenciaNotificacion
 from .politica_envio import POR_CANAL, SIN_RESTRICCIONES, cuando_enviar
@@ -94,6 +95,10 @@ MAX_INTENTOS = len(ESPERAS_REINTENTO) + 1
 #: Cuánto dura un reclamo. Mucho más que `EMAIL_TIMEOUT` (5 s): vence solo
 #: si el worker murió o se colgó, no porque el servidor tardó.
 DURACION_RECLAMO = dt.timedelta(minutes=5)
+
+#: Cuánto se difiere una entrega si auth no dice a dónde mandarla. No gasta
+#: un intento: una caída de auth no es un fallo del proveedor de correo.
+ESPERA_DIRECTORIO = dt.timedelta(minutes=5)
 
 #: Cuántas entregas atiende una corrida como máximo. El resto queda para la
 #: siguiente: elegibles no se pierden, solo esperan.
@@ -130,6 +135,30 @@ def zona_de(_usuario_id) -> dt.tzinfo:
 # ═══════════════════════════════════════════════════════════════════════
 # Planificar
 # ═══════════════════════════════════════════════════════════════════════
+
+MOTIVO_VENCIDO = "aviso_vencido"
+MOTIVO_DIRECTORIO = "directorio_no_disponible"
+
+
+def aviso_vencido(alerta: Alerta, ahora: dt.datetime) -> bool:
+    """¿Ya pasó aquello de lo que avisa?
+
+    Próximo cobro: vencido desde el día SIGUIENTE al cobro («se cobra hoy»
+    todavía sirve). Fin de prueba: vencido desde las 00:00 del día en que deja
+    de ser gratis, que es cuando el generador deja de avisarlo. Las fechas son
+    las que se guardaron en el aviso; los demás tipos no vencen.
+    """
+    datos = alerta.datos or {}
+    hoy = timezone.localdate(ahora)
+    try:
+        if alerta.tipo == Alerta.Tipo.PROXIMO_COBRO and datos.get("fecha_cobro"):
+            return dt.date.fromisoformat(datos["fecha_cobro"]) < hoy
+        if alerta.tipo == Alerta.Tipo.FIN_PRUEBA and datos.get("fin_prueba"):
+            return dt.date.fromisoformat(datos["fin_prueba"]) <= hoy
+    except (TypeError, ValueError):
+        return False
+    return False
+
 
 def dentro_de_su_anticipacion(preferencia: PreferenciaNotificacion, alerta: Alerta) -> bool:
     """¿El cobro ya entró en la anticipación que pidió ESTA persona?
@@ -337,6 +366,11 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
             # S3-FE-22: el aviso quedó obsoleto (cambió la fecha o se canceló
             # la suscripción) después de planificarlo. No sale.
             return _cerrar(entrega, DESCARTADA, ahora, motivo="alerta_obsoleta")
+        if aviso_vencido(entrega.alerta, ahora):
+            # S3-FE-21: el cobro ya pasó o la prueba ya terminó. Un correo que
+            # esperó (auth caído, reintentos, el despachador detenido) no sale
+            # tarde diciendo «se cobra en 2 días».
+            return _cerrar(entrega, DESCARTADA, ahora, motivo=MOTIVO_VENCIDO)
         if entrega.estado == Estado.ENVIANDO and entrega.intentos >= MAX_INTENTOS:
             # El último intento no informó resultado (el worker murió).
             return _cerrar(entrega, AGOTADA, ahora, error=ErrorDeEnvio(
@@ -389,6 +423,22 @@ def reclamar(entrega_id, *, ahora: dt.datetime) -> Reclamo | str:
             destino = canal.destino(entrega.organizacion_id, entrega.usuario_id)
         except ErrorDeEnvio as error:
             return _cerrar(entrega, FALLIDA, ahora, error=error)
+        except DirectorioNoDisponible as error:
+            # auth no respondió: se espera, sin gastar un intento. Si no
+            # vuelve, `aviso_vencido` la descarta cuando el aviso ya no sirva.
+            log.warning("entrega %s diferida: el directorio de auth no respondió (%s)", entrega.pk, error.codigo)
+            entrega.estado = Estado.DIFERIDA
+            entrega.motivo = MOTIVO_DIRECTORIO
+            entrega.codigo_error = f"directorio_{error.codigo}"
+            entrega.detalle_error = ""
+            entrega.proximo_intento_en = ahora + ESPERA_DIRECTORIO
+            entrega.reclamo_id = None
+            entrega.reclamada_hasta = None
+            entrega.save(update_fields=[
+                "estado", "motivo", "codigo_error", "detalle_error", "proximo_intento_en",
+                "reclamo_id", "reclamada_hasta", "actualizado_en",
+            ])
+            return DIFERIDA
         if destino is None:
             return _cerrar(entrega, FALLIDA, ahora, error=ErrorDeEnvio(
                 "sin_direccion", "no se conoce a dónde mandarle a esta persona", permanente=True,

@@ -1,4 +1,24 @@
-# Generador de alertas de FE-17 y FE-18.
+# Generador de alertas de FE-17 y FE-18, y su envio por correo (S3-FE-21).
+#
+# ── Que corre ────────────────────────────────────────────────────────────────
+# Un pod por corrida, como antes (la cuota no cambia):
+#   1. `generar_alertas` (initContainer): crea las alertas y planifica las
+#      entregas. Si falla, el despacho no corre.
+#   2. `despachar_alertas`: manda los correos pendientes. Es el UNICO
+#      contenedor que recibe la cuenta SMTP (regla 10: la API y el consumidor
+#      de notifications no mandan correos).
+# Los dos le preguntan a auth quienes son las personas y su correo (consulta
+# interna firmada, `shared/directorio.py`). Por eso el pod lleva
+# `componente: alertas`: `k8s/40-red.yaml` deja llegar a auth a ese pod y no
+# a la API de notifications.
+#
+# ── El Secret `ojoalgasto-alertas` ───────────────────────────────────────────
+# DIRECTORIO_INTERNO_SECRET, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD y
+# DEFAULT_FROM_EMAIL. Aparte del global para que solo estos Jobs lo vean. Se
+# crea a mano en el nucleo (k8s/tandas/README.md) y `desplegar-satelite.sh`
+# lo traslada si existe. Se referencia como OPCIONAL: sin el, el pod igual
+# corre, auth rechaza la consulta y los correos quedan diferidos; no se
+# inventa ningun envio.
 #
 # ── Por que vive en k8s/tandas/ y no en k8s/ ─────────────────────────────────
 # `notifications` NO esta desplegado en el cluster y su esquema no se migra,
@@ -73,8 +93,13 @@ spec:
           # `app: notifications` encaja con el permiso que ya existe --no se
           # abre PostgreSQL a nadie nuevo-- y `part-of` lo mantiene dentro
           # de la denegacion general de entrada del proyecto.
+          #
+          # `componente: alertas` (S3-FE-21) lo distingue de la API
+          # (`componente: api`): el Service no lo selecciona y la politica de
+          # auth lo deja entrar solo a el.
           labels:
             app: notifications
+            componente: alertas
             app.kubernetes.io/part-of: ojoalgasto
         spec:
           restartPolicy: Never
@@ -83,7 +108,7 @@ spec:
           # habria muerto en ImagePullBackOff en su primera corrida.
           imagePullSecrets:
             - name: ghcr
-          containers:
+          initContainers:
             - name: generar-alertas
               image: IMAGEN_NOTIFICATIONS
               command: ["python", "manage.py", "generar_alertas"]
@@ -112,10 +137,61 @@ spec:
                     secretKeyRef: { name: ojoalgasto-bd-notifications, key: DATABASE_URL }
                 - name: ESQUEMA_BD
                   value: notifications
+                # S3-FE-21: quienes son las personas (para planificar).
+                - name: DIRECTORIO_INTERNO_SECRET
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-alertas, key: DIRECTORIO_INTERNO_SECRET, optional: true }
               resources:
                 # 64Mi es el MINIMO del LimitRange del namespace; por debajo el
                 # pod ni se crea. El limite se queda en 160Mi como el de
                 # subscriptions-beat, que es el trabajo mas parecido: un
                 # proceso Django corto y sin servidor web.
+                requests: { cpu: 25m,  memory: 64Mi }
+                limits:   { cpu: 150m, memory: 160Mi }
+          containers:
+            - name: despachar-alertas
+              image: IMAGEN_NOTIFICATIONS
+              command: ["python", "manage.py", "despachar_alertas"]
+              envFrom:
+                - configMapRef: { name: ojoalgasto }
+              env:
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-bd-notifications, key: DATABASE_URL }
+                - name: ESQUEMA_BD
+                  value: notifications
+                # Las migraciones no son de este pod.
+                - name: APLICAR_MIGRACIONES
+                  value: "0"
+                - name: DIRECTORIO_INTERNO_SECRET
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-alertas, key: DIRECTORIO_INTERNO_SECRET, optional: true }
+                # ── La cuenta de correo, SOLO aca ───────────────────────────
+                # Lo no secreto va en claro; la cuenta y su clave de
+                # aplicacion, por referencia. El backend SMTP es el unico que
+                # `despachar_alertas` acepta como proveedor.
+                - name: EMAIL_BACKEND
+                  value: django.core.mail.backends.smtp.EmailBackend
+                - name: EMAIL_HOST
+                  value: smtp.gmail.com
+                - name: EMAIL_PORT
+                  value: "587"
+                - name: EMAIL_USE_TLS
+                  value: "True"
+                - name: EMAIL_HOST_USER
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-alertas, key: EMAIL_HOST_USER, optional: true }
+                - name: EMAIL_HOST_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-alertas, key: EMAIL_HOST_PASSWORD, optional: true }
+                - name: DEFAULT_FROM_EMAIL
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-alertas, key: DEFAULT_FROM_EMAIL, optional: true }
+              resources:
+                # Los mismos que el generador: corren uno despues del otro, y
+                # el pod pide el maximo de los dos, asi que la cuota no cambia.
                 requests: { cpu: 25m,  memory: 64Mi }
                 limits:   { cpu: 150m, memory: 160Mi }

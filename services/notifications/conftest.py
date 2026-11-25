@@ -24,6 +24,20 @@ def buzon_en_memoria_como_proveedor(settings):
     settings.EMAIL_BACKENDS_CON_PROVEEDOR = [*settings.EMAIL_BACKENDS_CON_PROVEEDOR, BACKEND_DE_PRUEBAS]
 
 
+@pytest.fixture(autouse=True)
+def directorio_falso(monkeypatch):
+    """Las personas y sus correos salen de auth (S3-FE-21). En las pruebas,
+    de un doble: `tests/directorio_falso.py`. Las pruebas del cliente HTTP
+    real (`test_directorio_s3_fe_21.py`) lo desactivan."""
+    from notifications import directorio
+    from tests.directorio_falso import DIRECTORIO
+
+    DIRECTORIO.reiniciar()
+    monkeypatch.setattr(directorio, "destinatarios", DIRECTORIO.destinatarios)
+    yield DIRECTORIO
+    DIRECTORIO.reiniciar()
+
+
 @pytest.fixture(scope="session")
 def django_db_setup(django_db_blocker):
     """Configura la BD de tests: search_path=public para PostgreSQL,
