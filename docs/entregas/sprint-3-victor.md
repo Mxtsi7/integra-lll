@@ -1,179 +1,154 @@
 # Entrega Sprint 3 — Víctor (Lote E: S3-VI-23 / S3-VI-24)
 
-**Fecha:** 2026-11-24 · **Rama:** `LoteE(VI-23-VI-24)` · **Responsable:** Víctor Gonzales
+**Fecha:** 2026-11-25 · **Rama:** `LoteE(VI-23-VI-24)` · **Responsable:** Víctor Gonzales
+**Base integrada:** `main dba7019` · **Tarjetas:** [S3-VI-23](https://trello.com/c/HFIsOVuT), [S3-VI-24](https://trello.com/c/iLmmVlOg)
 
-Cierre del Lote E: conexión de punta a punta del pipeline de uso de recolectores
-v1 y documentación final. La entrega cubre
-`HTTP Bearer → outbox → RabbitMQ → consumidor TypeScript → PostgreSQL → Analytics`.
+Cierre del Lote E luego del review contra `18217f34`. Se integró `main`,
+se corrigieron los dos P2 y se acotó la documentación al alcance real de las
+pruebas. El PR sigue abierto: no se ha fusionado ni desplegado.
 
-Este documento separa deliberadamente la evidencia unitaria de la integración
-real. Ninguna prueba de integración sustituye PostgreSQL por SQLite ni RabbitMQ
-por un doble en memoria.
+## 1. Correcciones del review
 
-## 1. Alcance entregado
+### P2 — identidad de usuario
 
-| Tarjeta | Cierre |
+`persistencia.py` vuelve a conservar el `usuario_id` entero de Auth hasta
+`registrar_uso`. El sobre se construye con `events.uso.uuid_usuario_auth`, que
+usa `NAMESPACE_USUARIO_AUTH`, congelado en `main`. Se eliminaron
+`NAMESPACE_URL`, `ESPACIO_USUARIO_USO` y `_usuario_para_sobre`, junto con sus
+expectativas copiadas en `tests/test_persistencia_uso.py` y en la E2E.
+
+- `uuid_usuario_auth(42)` → `9180eff3-4e75-5137-95fa-1879656f1c43` (canónico).
+- El namespace alternativo producía `1b9d5b33-5cfd-5e00-a82c-9b73ca2fac90` y
+  ya no existe en la recepción ni en las pruebas.
+- `tests/test_uso_contrato_cruzado.py` cubre productor → validador/huella: el
+  sobre con el entero convertido pasa el validador TypeScript y el reintento no
+  cambia la identidad ni el `event_id`.
+
+Se conservó la barrera `bloquear_organizacion` de `main` y un único
+`registrar_uso` dentro del savepoint de primera aceptación. Un reenvío `200`,
+un conflicto `409` o un fallo de proyección no dejan otra fila de outbox.
+
+### P2 — integración de la E2E con CI
+
+`tests/e2e/test_flujo_uso_recolectores.py` lee únicamente
+`RABBITMQ_PRUEBA_URL`, la variable que publica el job `backend/subscriptions`.
+No existe default local ni fallback a `test:test@localhost:55672`. La fixture
+falla explícitamente si falta el broker, npm, node o `tsx`; no hay `skip` ni
+marcador `opt-in`. La clase fija además `settings.RABBITMQ_URL` al mismo broker
+del job para que `despachar_pendientes` use la infraestructura efímera.
+
+`.github/workflows/ci.yml` instala, solo para `subscriptions`, las dependencias
+Python de `gateway` y `services/analytics` junto a las de Node ya presentes.
+Así la importación del validador real y el verificador de Analytics no dependen
+del entorno del desarrollador.
+
+## 2. Evidencia del comando exacto de CI
+
+Ejecutado localmente desde `services/subscriptions` con el mismo comando del
+job (`pytest -v`), PostgreSQL y RabbitMQ efímeros, y las variables de entorno
+inyectadas por el runner. Las cadenas de conexión y secretos reales no se
+transcriben.
+
+| Comando | Resultado |
 |---|---|
-| **S3-VI-23** | Suite E2E con infra real: validación Bearer del gateway, outbox transaccional, despacho al exchange dedicado, worker TypeScript como proceso separado, agregados `analytics.uso_*`, redelivery, aislamiento por organización y barrera de borrado. |
-| **S3-VI-24** | Documentación de cierre: contrato v1 actualizado, checklist de calidad v1.0, retrospectiva y cuerpo listo para el PR final. |
+| `pytest -v` | **585 passed**, 7 warnings, **0 skipped**; incluye los **3 E2E** de `FlujoUsoRecolectoresE2E`. `EXIT=0`. |
 
-### Cambios de código y pruebas
+Las tres pruebas E2E que aparecen en el log del SHA integrado son:
 
-- `services/subscriptions/app/uso_recolectores/persistencia.py`: `registrar_uso`
-  se llama dentro del savepoint de **primera aceptación**. Un reenvío `200`, un
-  conflicto `409` o un fallo de proyección no dejan una segunda fila de outbox.
-  El `usuario_id` entero de Auth se convierte de forma determinista a UUID v5
-  (`NAMESPACE_URL`, `https://integra.example/usuarios/{usuario_id}`) para cumplir
-  el sobre v1 sin aceptar identidad del cuerpo.
-- `services/subscriptions/tests/test_persistencia_uso.py`: regresiones de
-  outbox único en `201`, ausencia de outbox en `200`/`409` y forma del sobre.
-- `services/subscriptions/tests/e2e/test_flujo_uso_recolectores.py`: tres
-  escenarios E2E contra PostgreSQL y RabbitMQ reales. Falla explícitamente si la
-  configuración Django no usa PostgreSQL.
-- `services/subscriptions/tests/e2e/verificar_analytics_uso.py`: proceso Python
-  separado que ejecuta el código real de Analytics sobre la misma base de la
-  E2E. Sólo imprime agregados; no imprime tokens ni configuración.
-- `docs/contratos/uso-recolectores-v1.md`: sección 13 con el cierre de
-  integración v1.0.
+- `test_aislamiento_de_organizaciones_y_barrera_de_borrado` — PASSED
+- `test_flujo_bearer_outbox_rabbit_consumidor_y_redelivery` — PASSED
+- `test_precision_cobertura_y_gastos_por_moneda_en_analytics` — PASSED
 
-## 2. Evidencia unitaria
+Comprobación adicional del P2 de CI: sin `RABBITMQ_PRUEBA_URL`, `pytest -q
+tests/e2e/test_flujo_uso_recolectores.py` termina con `EXIT=1`, **3 errors**,
+ningún skip, y el mensaje `S3-VI-23 exige RABBITMQ_PRUEBA_URL`.
 
-Se ejecutó con el entorno de pruebas efímero; los valores de `DATABASE_URL` y
-`RABBITMQ_URL` se inyectaron por variable de entorno y **no se transcriben aquí**.
+El resto de los jobs del workflow (contrato, Analytics, `analytics-uso`,
+tipado y compilación TS) se valida con los checks del SHA integrado, no con
+afirmaciones reejecutadas a mano en este documento.
 
-| Suite | Comando (sin valores sensibles) | Resultado |
+## 3. Alcance real de la E2E y dobles
+
+| Capa | Qué se ejercita de verdad | Doble o límite explícito |
 |---|---|---|
-| Contrato canónico | `python -m pytest docs/contratos/tests -q` | **57 passed** |
-| Regresión enfocada de outbox/publicador | `python -m pytest tests/test_persistencia_uso.py tests/test_uso_publicador.py -q` | **17 passed**, 1 aviso de deprecación |
-| `subscriptions` (sin E2E) | `python -m pytest tests --ignore=tests/e2e -q` | **557 passed**, 11 skipped, 3 avisos de deprecación |
-| `analytics` | `python -m pytest -q` | **282 passed**, 3 avisos de deprecación |
-| `analytics-uso` unitaria | `npm test` | **58 passed**, 8 skipped (integración omitida a propósito) |
-| Tipado y compilación TS | `npm run typecheck` y `npm run build` | sin errores |
+| Identidad HTTP | `leer_token`/`validar` del gateway rechazan tokens inválidos y descartan identidad enviada por el cliente. | El salto de red gateway→servicio se sustituye por `BearerGatewayMiddleware`, que inyecta las cabeceras ya validadas. |
+| Sesiones | Se comprueba el flujo con sesión vigente. | `CACHES` usa `LocMemCache`, no Redis. |
+| Consentimiento | El receptor durable exige un callable de consentimiento. | `_consentimiento_prueba` devuelve `True` incondicionalmente: **no** ejerce la autoridad de consentimiento. |
+| Eventos | El contrato v1 se valida y persiste con PostgreSQL real. | Los eventos son fixtures de `docs/contratos/uso-recolectores-v1.ejemplos.json`, no capturas desde dispositivo. |
+| Outbox y broker | `registrar_uso` escribe en la misma transacción; `despachar_pendientes` publica en RabbitMQ real con exchange y routing key propios. | Sin dobles de broker. |
+| Consumidor | El worker TypeScript corre como proceso separado, confirma, deduplica y aísla por organización en `analytics.uso_*`. | Sin dobles de base ni de worker. |
+| Resumen y puntaje | El verificador invoca el código local de contexto/resumen sobre la misma base. | No interviene ningún proveedor de IA externo. |
 
-Los avisos son de `asyncio.iscoroutinefunction` en Django y no afectan el
-comportamiento bajo prueba.
+Escenarios cubiertos: Bearer → outbox → Rabbit → consumidor → redelivery;
+aislamiento entre organizaciones y barrera de borrado en `public`/`analytics`;
+precisión en milisegundos, 30 s con 0 minutos enteros sin penalización,
+cobertura insuficiente y gastos separados por moneda.
 
-## 3. Evidencia de integración real
+## 4. Checklist de cierre
 
-Infraestructura efímera levantada con
-`docker compose -f docker-compose.analytics-uso-test.yml up -d --wait`
-(PostgreSQL y RabbitMQ en puertos aislados del entorno de desarrollo).
-
-| Suite | Condición | Resultado |
-|---|---|---|
-| `analytics-uso` integración | `INTEGRACION_USO=1`, `EXIGIR_INTEGRACION_USO=1`, PostgreSQL/RabbitMQ reales | **8 passed** |
-| E2E `S3-VI-23` | `DATABASE_URL` PostgreSQL, `RABBITMQ_URL`, worker Node separado y verificador de Analytics separado | **3 passed** |
-
-### Escenarios E2E verificados
-
-1. **Bearer → outbox → Rabbit → consumidor → redelivery.** Sin token hay `401`
-   y ningún outbox; con token el par `201`/`200` conserva `recibido_en` y un solo
-   `EventoUsoRecibido`. El despacho publica, el consumidor escribe
-   `analytics.uso_evento`/`uso_tramo`/`uso_diario`/`uso_mensual_recolector`, y un
-   redelivery del mismo sobre no duplica efectos ni envía a la cola de fallos.
-   Se comprueba `duracion_ms = 30000`, `minutos_netos = 0` y `ms_residuo = 30000`.
-2. **Aislamiento y barrera de borrado.** Dos organizaciones publican el mismo
-   evento y cada una queda con su fila. Al marcar una organización como
-   eliminada en `public` y en `analytics`, la HTTP responde `410
-   organizacion_eliminada`, el outbox no crece, un mensaje tardío se confirma sin
-   reinsertar y la otra organización sigue procesando normalmente.
-3. **Precisión, cobertura y gastos en Analytics.** 30 s positivos con 0 minutos
-   enteros se clasifican como `uso_positivo_confirmado` sin recomendación
-   automática; la pausa conocida queda como `sin_medicion` / `pausado`,
-   `datos_insuficientes` y sin penalización. Los gastos salen separados por
-   moneda (`1000.00 CLP`, `25.50 USD`) y el resumen conserva la incertidumbre.
-
-La integración TS cubre además unión de tramos con solapamiento, convivencia con
-`analytics.uso_mensual` de Django, duplicados, `event_id` reutilizado con otro
-contenido (cola de fallos), misma clave en otra organización y eventos tardíos
-de tenants eliminados.
-
-## 4. Checklist de calidad v1.0
-
-- [x] Contrato canónico, esquema y fixtures ejecutados con las mismas reglas.
-- [x] Bearer validado con el código real del gateway; identidad resuelta desde la sesión.
-- [x] Cuerpo sin `usuario_id`, `organizacion_id` ni `suscripcion_id`.
-- [x] Outbox escrito en la misma transacción que el hecho durable.
-- [x] `201` crea efectos una sola vez; `200` y `409` no crean otra fila ni otra publicación.
-- [x] Publicación real en RabbitMQ con exchange/routing propios del contrato.
-- [x] Consumidor TypeScript real, con ACK/NACK, deduplicación y cola de fallos.
-- [x] Redelivery verificado sin duplicar eventos, tramos ni agregados.
-- [x] PostgreSQL real con esquema `analytics.uso_*`; sin SQLite en integración.
-- [x] Aislamiento por organización verificado en HTTP, outbox y consumidor.
-- [x] Barrera de borrado verificada en `public` y en `analytics`.
-- [x] Milisegundos exactos y proyección entera con residuo conservado.
-- [x] 30 s positivos con 0 minutos enteros no se presentan como uso cero.
-- [x] Cobertura incompleta, pausa o sin medición no habilitan penalización automática.
-- [x] Gastos agregados por moneda sin mezclar divisas.
-- [x] Evidencia unitaria separada de evidencia de integración real.
+- [x] Conflicto de `persistencia.py` resuelto contra `main dba7019`.
+- [x] Identidad canónica `9180eff3-4e75-5137-95fa-1879656f1c43` desde recepción y publicación.
+- [x] Prueba cruzada productor → validador/huella y reintento en la misma suite.
+- [x] Outbox único en `201`; `200` y `409` no publican ni crean otra fila.
+- [x] Barrera de borrado conservada en HTTP y en escrituras internas.
+- [x] E2E conectada a `RABBITMQ_PRUEBA_URL`; sin defaults, skips ni fallbacks.
+- [x] Dependencias Python de gateway/Analytics y Node instaladas en el job `backend/subscriptions`.
+- [x] `pytest -v` del job con 585 passed y 3 E2E en el SHA integrado.
+- [x] Alcance real, dobles y pendientes documentados.
 - [x] Sin secretos, tokens ni cadenas de conexión del `.env` en documentos o evidencia.
-- [x] Documentación de cierre y cuerpo de PR listos.
+- [ ] Validar autoridad real de consentimiento con el proveedor correspondiente.
+- [ ] Ejercitar el salto HTTP gateway→servicio en un entorno desplegado.
+- [ ] Ejercitar captura desde dispositivo y un proveedor de IA externo; hoy no están en la E2E.
+- [ ] Confirmar los checks del SHA final del PR.
 
 ## 5. Retrospectiva
 
-**Qué funcionó.** Mantener el contrato como única fuente de verdad permitió que
-las mismas fixtures alimentaran la regresión unitaria y la E2E. Levantar la
-infra efímera antes de integrar evitó sorpresas de esquema y hizo visibles los
-dos contextos Django distintos (`subscriptions` y `analytics`).
-
 **Hallazgos corregidos.**
 
-1. El outbox se preparaba fuera de la rama de primera aceptación; un reenvío
-   podía dejar una segunda publicación. Se movió `registrar_uso` al savepoint
-   que ya distingue `201`, `200` y `409`.
-2. Auth entrega `usuario_id` como entero y el sobre v1 exige UUID. Se derivó con
-   `uuid5(NAMESPACE_URL, ...)`, estable y no falsificable desde el cuerpo.
-3. El verificador de Analytics consultaba los gastos dentro de
-   `uso_recolectores`, pero el agregado vive en la raíz del contexto. Al
-   ejecutarlo como proceso separado contra la BD real quedó claro el origen del
-   array vacío; se corrigió la lectura y se eliminaron los campos de depuración.
-4. El worker hijo dejaba la BD ocupada al cerrar la sesión. Se lanza directo con
-   Node sobre `node_modules/tsx`, sin procesos intermedios.
-5. La E2E necesita forzar `DJANGO_SETTINGS_MODULE=analytics_config.settings`,
-   cargar catálogos y crear la vista `subscriptions.subscription` sobre `public`.
-   Todo quedó explícito en la fixture; nada depende del entorno del desarrollador.
+1. La derivación alternativa partía la identidad en `analytics.uso_evento`. Se
+   eliminó y se reutilizó el helper canónico de `events.uso`.
+2. La E2E apuntaba a un broker local distinto del que publica el job de CI. Se
+   conectó a `RABBITMQ_PRUEBA_URL` y se hizo fallar en ausencia de infraestructura.
+3. La documentación describía los dobles como si fueran eslabones reales. Ahora
+   separa explícitamente middleware, `LocMemCache`, consentimiento `True`,
+   fixtures y código local de resumen.
 
-**Lecciones.** La idempotencia HTTP y la idempotencia del consumidor deben
-probarse por separado: una no implica la otra. El silencio del recolector no es
-medición; cualquier agregado que lo convierta en cero debe fallar la prueba. Y
-la evidencia creíble es la que puede repetirse con infra real y sin secretos.
+**Lección.** Una suite puede ser real en PostgreSQL/RabbitMQ y seguir teniendo
+dobles importantes. La evidencia creíble nombra ambos.
 
-**Seguimiento.** No quedan pendientes de Lote E. La operación futura debe
-monitorear la cola de fallos y la tasa de redelivery como señales de salud del
-pipeline, sin cambiar el contrato v1.
-
-## 6. Cuerpo listo para el PR final
+## 6. Estado y cuerpo para el PR final
 
 **Título:** `S3-VI-23 / S3-VI-24 — cierre de integración del pipeline de uso recolector v1`
 
-**Tarjetas:** S3-VI-23, S3-VI-24
+**Tarjetas:** [S3-VI-23](https://trello.com/c/HFIsOVuT), [S3-VI-24](https://trello.com/c/iLmmVlOg)
 
 ```markdown
-Cierra el Lote E: el pipeline de uso de recolectores v1 queda conectado de
-punta a punta y documentado.
+Cierra el Lote E tras integrar `main dba7019` y resolver los dos P2 del review.
 
 ### Cambios
-- El outbox se escribe dentro del savepoint de primera aceptación: `201`
-  publica una vez; `200` y `409` no generan otra fila ni otra publicación.
-- `usuario_id` entero de Auth se deriva a UUID v5 estable para el sobre v1.
-- Suite E2E con PostgreSQL y RabbitMQ reales: Bearer del gateway, despacho,
-  consumidor TypeScript separado, agregados `analytics.uso_*`, redelivery,
-  aislamiento de tenants y barrera de borrado en `public` y `analytics`.
-- Verificación real de Analytics: precisión en ms, 30 s con 0 minutos enteros
-  sin penalización y gastos agrupados por moneda sin mezclar divisas.
-- Documentación de cierre, checklist v1.0 y retrospectiva.
+- La identidad de Auth se convierte con `events.uso.uuid_usuario_auth`:
+  `42` → `9180eff3-4e75-5137-95fa-1879656f1c43`, el mismo namespace canónico
+  de `main`. Se eliminó el namespace alternativo.
+- El outbox sigue escribiéndose una sola vez, dentro del savepoint de primera
+  aceptación, y se conserva la barrera de borrado de `main`.
+- La E2E usa solo `RABBITMQ_PRUEBA_URL`, falla explícitamente si falta el
+  broker, npm, node o tsx, y no tiene skips ni defaults locales.
+- El job `backend/subscriptions` instala las dependencias Python de gateway y
+  Analytics que necesita el recorrido.
 
 ### Evidencia
-- Contrato: 57 passed.
-- Regresión enfocada: 17 passed.
-- `subscriptions`: 557 passed, 11 skipped (E2E se ejecuta por separado).
-- `analytics`: 282 passed.
-- `analytics-uso` unitaria: 58 passed, 8 skipped; typecheck y build sin errores.
-- `analytics-uso` integración real: 8 passed.
-- E2E real: 3 passed.
+- Comando exacto del job, `pytest -v`: 585 passed, 3 E2E, 0 skipped (EXIT=0).
+- Sin `RABBITMQ_PRUEBA_URL`: 3 errores explícitos, 0 skips (EXIT=1).
+- Checks del SHA integrado: pendientes de publicar en este cuerpo.
 
-Sin SQLite en integración y sin secretos ni cadenas de conexión en la
-documentación o en la evidencia. Detalle en
-`docs/entregas/sprint-3-victor.md` y contrato actualizado en
-`docs/contratos/uso-recolectores-v1.md`.
+### Alcance real
+- El gateway HTTP se sustituye por un middleware de prueba que reutiliza el
+  validador de tokens; las sesiones usan `LocMemCache`.
+- El consentimiento es un doble que siempre devuelve `True`.
+- Los eventos son fixtures y el resumen se calcula con código local.
+- No se ejercita captura desde dispositivo ni proveedores de IA externos;
+  quedan como pendientes, no como evidencia de cierre.
+
+Detalle: `docs/entregas/sprint-3-victor.md` y
+`docs/contratos/uso-recolectores-v1.md`. Sin secretos ni cadenas de conexión.
 ```

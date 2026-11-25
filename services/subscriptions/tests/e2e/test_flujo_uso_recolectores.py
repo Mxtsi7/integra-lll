@@ -1,19 +1,29 @@
-"""S3-VI-23: flujo completo con PostgreSQL, RabbitMQ y el consumidor real.
+"""S3-VI-23: flujo HTTP→outbox→broker→consumidor→Analytics con dobles acotados.
 
-La prueba no sustituye ningún eslabón:
+Lo que sí es real:
 
-* el Bearer se valida con ``leer_token``/``validar`` del gateway y un middleware
-  de prueba inyecta exactamente las cabeceras que el gateway inyectaría;
+* el Bearer se valida con ``leer_token``/``validar`` del gateway;
 * la recepción HTTP es la vista real de ``subscriptions`` y escribe el outbox
   en la misma transacción;
 * ``despachar_pendientes`` publica de verdad en RabbitMQ;
 * el worker de ``analytics-uso`` corre como proceso separado con la misma URL
   de PostgreSQL y escribe ``analytics.uso_*``;
-* las reglas de puntaje/contexto se ejecutan con el código real de Analytics.
+* el verificador invoca el código local de contexto/resumen de Analytics.
 
-La suite exige la infra efímera de ``docker-compose.analytics-uso-test.yml``.
-Si falta PostgreSQL o RabbitMQ, falla con un mensaje explícito: nunca degrada
-a SQLite ni a un doble en memoria.
+Dobles y límites explícitos:
+
+* el salto de red gateway→servicio se sustituye por ``BearerGatewayMiddleware``,
+  que inyecta las cabeceras resultantes;
+* las sesiones usan ``LocMemCache``, no Redis;
+* ``USO_VERIFICAR_CONSENTIMIENTO`` es ``_consentimiento_prueba`` y devuelve
+  ``True`` incondicionalmente: no ejerce la autoridad de consentimiento;
+* los eventos son las fixtures del contrato v1, no capturas desde dispositivo;
+* el resumen se calcula con código local: no intervienen proveedores de IA.
+
+La suite exige PostgreSQL y el broker efímero anunciado por
+``RABBITMQ_PRUEBA_URL``. Si falta infraestructura, npm, node o tsx, falla con
+un mensaje explícito: nunca degrada a SQLite, omite pruebas ni inventa un
+broker local.
 """
 
 from __future__ import annotations
@@ -28,7 +38,7 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.parse import quote
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 import jwt
 import pika
@@ -58,6 +68,7 @@ from events.uso import (
     declarar_uso,
     publicar_uso,
     registrar_uso,
+    uuid_usuario_auth,
 )
 
 RAIZ = Path(__file__).resolve().parents[4]
@@ -70,11 +81,15 @@ EJEMPLOS = json.loads(
     )
 )
 FIXTURAS = {entrada["nombre"]: entrada for entrada in EJEMPLOS["eventos_uso"]}
-NPM = shutil.which("npm") or "npm"
-NODO = shutil.which("node") or "node"
-RABBITMQ_URL = os.environ.get("RABBITMQ_URL") or "amqp://test:test@localhost:55672/"
+NPM = shutil.which("npm")
+NODO = shutil.which("node")
+TSX = SERVICIO_TS / "node_modules" / "tsx" / "dist" / "cli.mjs"
+# El job de CI expone el broker efímero con esta variable. No hay default
+# local: si falta, la fixture falla con un mensaje explícito en vez de apuntar
+# silenciosamente a otro puerto.
+RABBITMQ_PRUEBA_URL = os.environ.get("RABBITMQ_PRUEBA_URL", "")
 USUARIO_E2E = 42
-USUARIO_UUID = str(uuid5(NAMESPACE_URL, f"https://integra.example/usuarios/{USUARIO_E2E}"))
+USUARIO_UUID = str(uuid_usuario_auth(USUARIO_E2E))
 
 
 # El gateway valida el token y descarta cualquier identidad enviada por el
@@ -119,7 +134,8 @@ class BearerGatewayMiddleware:
         return self.get_response(request)
 
 
-def _consentimiento_real(**contexto):
+def _consentimiento_prueba(**contexto):
+    """Doble deliberado: la E2E no ejerce la autoridad de consentimiento."""
     return True
 
 
@@ -170,7 +186,7 @@ def _url_postgresql_de_prueba() -> str:
 
 
 def _conexion_rabbit():
-    return pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    return pika.BlockingConnection(pika.URLParameters(RABBITMQ_PRUEBA_URL))
 
 
 def _declarar_y_purgar():
@@ -197,6 +213,16 @@ def _mensajes_en_cola(cola: str) -> int:
 @pytest.fixture(scope="session")
 def infra_real(django_db_setup, django_db_blocker):
     """Aplica las migraciones reales, purga las colas y arranca el worker TS."""
+    # El broker del job de CI se anuncia por RABBITMQ_PRUEBA_URL. No hay
+    # default ni fallback a otro puerto: si falta infraestructura, la suite
+    # falla aquí con un mensaje explícito en vez de omitirse.
+    if not RABBITMQ_PRUEBA_URL:
+        pytest.fail("S3-VI-23 exige RABBITMQ_PRUEBA_URL; definir el broker efímero del job")
+    if NPM is None or NODO is None:
+        pytest.fail("S3-VI-23 exige npm y node disponibles en PATH; sin fallback")
+    if not TSX.is_file():
+        pytest.fail(f"S3-VI-23 exige tsx instalado en {SERVICIO_TS}; ejecutar npm ci")
+
     base_datos = _url_postgresql_de_prueba()
     with django_db_blocker.unblock():
         with connection.cursor() as cursor:
@@ -212,7 +238,7 @@ def infra_real(django_db_setup, django_db_blocker):
         "DJANGO_SETTINGS_MODULE": "analytics_config.settings",
         "DATABASE_URL": base_datos,
         "ESQUEMA_BD": "analytics",
-        "RABBITMQ_URL": RABBITMQ_URL,
+        "RABBITMQ_URL": RABBITMQ_PRUEBA_URL,
     }
     migrar = subprocess.run(
         [sys.executable, "manage.py", "migrate", "--noinput"],
@@ -228,7 +254,7 @@ def infra_real(django_db_setup, django_db_blocker):
     entorno_ts = {
         **os.environ,
         "DATABASE_URL": base_datos,
-        "RABBITMQ_URL": RABBITMQ_URL,
+        "RABBITMQ_URL": RABBITMQ_PRUEBA_URL,
         "LOG_LEVEL": "info",
     }
     ddl = subprocess.run(
@@ -248,11 +274,7 @@ def infra_real(django_db_setup, django_db_blocker):
         encoding="utf-8",
     )
     worker = subprocess.Popen(
-        [
-            NODO,
-            str(SERVICIO_TS / "node_modules" / "tsx" / "dist" / "cli.mjs"),
-            "src/worker.ts",
-        ],
+        [NODO, str(TSX), "src/worker.ts"],
         cwd=SERVICIO_TS,
         env=entorno_ts,
         stdout=registro,
@@ -270,7 +292,7 @@ def infra_real(django_db_setup, django_db_blocker):
         raise
     yield {
         "base_datos": base_datos,
-        "rabbitmq": RABBITMQ_URL,
+        "rabbitmq": RABBITMQ_PRUEBA_URL,
         "registro_worker": registro.name,
     }
     worker.terminate()
@@ -288,7 +310,9 @@ def infra_real(django_db_setup, django_db_blocker):
     CACHES=CACHES_E2E,
     JWT_SECRET="valor-de-prueba-e2e-sin-uso-real",
     JWT_ALGORITMO="HS256",
-    USO_VERIFICAR_CONSENTIMIENTO=_consentimiento_real,
+    RABBITMQ_URL=RABBITMQ_PRUEBA_URL,
+    # Doble explícito: siempre True. No se valida la autoridad de consentimiento.
+    USO_VERIFICAR_CONSENTIMIENTO=_consentimiento_prueba,
     USO_PERSISTIR_EVENTO="app.uso_recolectores.persistencia.persistir",
 )
 @pytest.mark.usefixtures("infra_real")
@@ -572,7 +596,7 @@ class FlujoUsoRecolectoresE2E(TransactionTestCase):
         entorno = {
             **os.environ,
             "DATABASE_URL": infra_real_base_datos(),
-            "RABBITMQ_URL": RABBITMQ_URL,
+            "RABBITMQ_URL": RABBITMQ_PRUEBA_URL,
             "ESQUEMA_BD": "analytics",
             "DJANGO_SETTINGS_MODULE": "analytics_config.settings",
             "E2E_ANALYTICS_PARAMETROS": json.dumps(parametros),
