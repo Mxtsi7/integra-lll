@@ -69,6 +69,7 @@ def _renderizar(tmp_path, reparto):
         "HOST_PUBLICO=ojoalgasto-forellana.dev.censei.cl",
         _bloque(guion, "leer_reparto() {", "}"),
         _bloque(guion, 'NS_NOTIFICATIONS="$(leer_reparto NS_NOTIFICATIONS)"', "fi"),
+        _bloque(guion, 'NS_CONNECTORS="$(leer_reparto NS_CONNECTORS)"', "fi"),
         _bloque(guion, "renderizar() {", "}"),
         "renderizar k8s/00-configuracion.yaml",
     ])
@@ -95,6 +96,22 @@ def test_con_notifications_repartido_el_nucleo_lo_busca_en_el_satelite(tmp_path)
         assert forma in hosts
     assert "auth" in hosts and "gateway" in hosts, "no se pierden los que ya estaban"
     assert datos["URL_SUBSCRIPTIONS"] == "http://subscriptions:8002"
+
+
+@pytest.mark.skipif(BASH is None, reason="Requiere bash")
+def test_con_connectors_repartido_el_nucleo_lo_busca_en_su_satelite(tmp_path):
+    datos = _renderizar(tmp_path, f"NS_NUCLEO=student-nucleo\nNS_NOTIFICATIONS={SATELITE}\nNS_CONNECTORS=student-otro\n")
+    assert datos["URL_CONNECTORS"] == "http://connectors.student-otro:8003"
+    assert datos["URL_NOTIFICATIONS"] == f"http://notifications.{SATELITE}:8005"
+    # Guarda datos de organizaciones: entra a la lista de borrado.
+    assert datos["ELIMINACION_DESTINOS"] == "subscriptions,notifications,connectors"
+
+
+@pytest.mark.skipif(BASH is None, reason="Requiere bash")
+def test_sin_connectors_repartido_se_busca_por_su_nombre_corto(tmp_path):
+    datos = _renderizar(tmp_path, f"NS_NUCLEO=student-nucleo\nNS_NOTIFICATIONS={SATELITE}\n")
+    assert datos["URL_CONNECTORS"] == "http://connectors:8003"
+    assert "connectors" not in datos["ELIMINACION_DESTINOS"].split(",")
 
 
 @pytest.mark.skipif(BASH is None, reason="Requiere bash")
@@ -135,24 +152,38 @@ def test_el_satelite_apunta_el_nucleo_solo_despues_de_ver_al_consumidor():
     assert validar < secretos < aplicar < consumidor < apuntar
 
 
-def test_del_secreto_global_solo_cruza_lo_que_el_servicio_lee():
-    """Las claves están nombradas una a una. La administradora de PostgreSQL,
-    el secreto de los JWT, las de cifrado y la cuenta de correo no cruzan."""
+def _servicios_del_satelite():
+    """Lo que `desplegar-satelite.sh` declara por servicio en su `case`."""
     guion = _texto("k8s/desplegar-satelite.sh")
-    traslados = dict(re.findall(r'^trasladar_secreto (\S+) (\S+)$', guion, flags=re.M))
-    assert traslados == {
-        "ghcr": ".dockerconfigjson",
-        "ojoalgasto": "SECRET_KEY,ELIMINACION_INTERNA_SECRET",
-        '"ojoalgasto-bd-$SERVICIO"': "DATABASE_URL",
-        "ojoalgasto-rabbitmq": "RABBITMQ_URL",
-    }
-    # Y coincide con lo que los manifiestos del servicio de verdad referencian.
-    referidas = set()
-    for ruta in ("k8s/tandas/notifications.yaml", "k8s/tandas/alertas-notifications.yaml"):
-        referidas |= set(re.findall(r"secretKeyRef: \{ name: (\S+), key: (\S+) \}", _texto(ruta)))
-    cruzan = {(s.strip('"').replace("$SERVICIO", "notifications"), c)
-              for s, claves in traslados.items() if s != "ghcr" for c in claves.split(",")}
-    assert referidas == cruzan
+    servicios = {}
+    for nombre, cuerpo in re.findall(r"^  (\w+)\)\n(.*?);;", guion, flags=re.M | re.S):
+        servicios[nombre] = dict(re.findall(r"(\w+)=([^;\s]+)", cuerpo))
+    return servicios
+
+
+def test_del_secreto_global_solo_cruza_lo_que_el_servicio_lee():
+    """Las claves están nombradas una a una y por servicio. La administradora
+    de PostgreSQL y el secreto de los JWT no cruzan nunca; las de cifrado,
+    solo al servicio que guarda tokens (connectors)."""
+    guion = _texto("k8s/desplegar-satelite.sh")
+    assert 'trasladar_secreto ojoalgasto "$CLAVES_GLOBALES"' in guion
+    servicios = _servicios_del_satelite()
+    assert set(servicios) == {"notifications", "connectors"}
+    for nombre, datos in servicios.items():
+        globales = set(datos["CLAVES_GLOBALES"].split(","))
+        assert not {"JWT_SECRET", "POSTGRES_PASSWORD", "DATABASE_URL"} & globales, nombre
+        assert ("CLAVES_CIFRADO" in globales) is (nombre == "connectors"), nombre
+        cruzan = {("ojoalgasto", c) for c in globales} | {(f"ojoalgasto-bd-{nombre}", "DATABASE_URL")}
+        if datos["USA_RABBITMQ"] == "1":
+            cruzan.add(("ojoalgasto-rabbitmq", "RABBITMQ_URL"))
+        # Lo que los manifiestos del servicio referencian como obligatorio.
+        # Los Secrets aparte y opcionales (alertas, OAuth) se trasladan solo
+        # si existen y no entran en esta cuenta.
+        referidas = set()
+        for ruta in (f"k8s/tandas/{nombre}.yaml", f"k8s/tandas/alertas-{nombre}.yaml"):
+            if (RAIZ / ruta).exists():
+                referidas |= set(re.findall(r"secretKeyRef: \{ name: (\S+), key: (\S+) \}", _texto(ruta)))
+        assert referidas == cruzan, nombre
 
 
 def test_el_parche_del_nucleo_no_depende_de_la_entrada_estandar():

@@ -26,10 +26,24 @@ RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$RAIZ"
 
 SERVICIO="${1:-}"
+# Por servicio: puerto, clave de reparto, qué claves del Secret global lee,
+# si usa RabbitMQ, si tiene un consumidor al que esperar y qué Deployments
+# tienen que quedar arriba antes de apuntar el núcleo.
 case "$SERVICIO" in
-  notifications) PUERTO=8005; CLAVE_REPARTO=NS_NOTIFICATIONS ;;
-  *) echo "Uso: desplegar-satelite.sh notifications" >&2
-     echo "(connectors y analytics todavía no tienen manifiestos: ver k8s/tandas/perfiles.yaml)" >&2
+  notifications)
+    PUERTO=8005; CLAVE_REPARTO=NS_NOTIFICATIONS
+    CLAVES_GLOBALES=SECRET_KEY,ELIMINACION_INTERNA_SECRET
+    USA_RABBITMQ=1; ESPERA_CONSUMIDOR=1
+    DEPLOYMENTS="notifications" ;;
+  connectors)
+    PUERTO=8003; CLAVE_REPARTO=NS_CONNECTORS
+    # CLAVES_CIFRADO cifra los tokens de las cuentas conectadas: solo viaja
+    # al satélite que las guarda.
+    CLAVES_GLOBALES=SECRET_KEY,ELIMINACION_INTERNA_SECRET,CLAVES_CIFRADO
+    USA_RABBITMQ=0; ESPERA_CONSUMIDOR=0
+    DEPLOYMENTS="connectors connectors-worker" ;;
+  *) echo "Uso: desplegar-satelite.sh notifications|connectors" >&2
+     echo "(analytics todavía no tiene manifiestos: ver k8s/tandas/perfiles.yaml)" >&2
      exit 1 ;;
 esac
 
@@ -100,7 +114,9 @@ for ns in "$NS_NUCLEO" "$NS_SATELITE"; do
 done
 
 echo "── el núcleo tiene lo que se va a copiar ──"
-for secreto in ghcr ojoalgasto "ojoalgasto-bd-$SERVICIO" ojoalgasto-rabbitmq; do
+REQUERIDOS="ghcr ojoalgasto ojoalgasto-bd-$SERVICIO"
+[ "$USA_RABBITMQ" = "1" ] && REQUERIDOS="$REQUERIDOS ojoalgasto-rabbitmq"
+for secreto in $REQUERIDOS; do
   kubectl get secret "$secreto" -n "$NS_NUCLEO" >/dev/null 2>&1 || {
     echo "Falta el Secret $secreto en $NS_NUCLEO: desplegar el núcleo primero (k8s/desplegar.sh)." >&2
     exit 1
@@ -116,9 +132,11 @@ fi
 
 MANIFIESTOS="$(mktemp)"
 trap 'rm -f "$MANIFIESTOS"' EXIT
+MARCA_IMAGEN="IMAGEN_$(printf '%s' "$SERVICIO" | tr '[:lower:]' '[:upper:]')"
 for f in "k8s/tandas/$SERVICIO.yaml" "k8s/tandas/alertas-$SERVICIO.yaml"; do
+  [ -f "$f" ] || continue
   echo "---"
-  sed -e "s|IMAGEN_NOTIFICATIONS|$IMAGEN|g" "$f"
+  sed -e "s|$MARCA_IMAGEN|$IMAGEN|g" "$f"
 done > "$MANIFIESTOS"
 
 echo "── validando los manifiestos contra el servidor ──"
@@ -150,9 +168,19 @@ trasladar_secreto ghcr .dockerconfigjson
 # Del Secret global solo lo que el servicio lee. Se quedan en el núcleo la
 # clave administradora de PostgreSQL, el secreto de los JWT, las claves de
 # cifrado de los conectores y la cuenta de correo.
-trasladar_secreto ojoalgasto SECRET_KEY,ELIMINACION_INTERNA_SECRET
+trasladar_secreto ojoalgasto "$CLAVES_GLOBALES"
 trasladar_secreto "ojoalgasto-bd-$SERVICIO" DATABASE_URL
-trasladar_secreto ojoalgasto-rabbitmq RABBITMQ_URL
+[ "$USA_RABBITMQ" = "1" ] && trasladar_secreto ojoalgasto-rabbitmq RABBITMQ_URL
+# Las credenciales OAuth de Google y Microsoft van en un Secret aparte, y son
+# opcionales: sin ellas connectors funciona, pero no se puede conectar una
+# cuenta de correo.
+if [ "$SERVICIO" = "connectors" ]; then
+  if [ -n "$(kubectl get secret ojoalgasto-conectores -n "$NS_NUCLEO" -o name 2>/dev/null)" ]; then
+    trasladar_secreto ojoalgasto-conectores OAUTH_GMAIL_CLIENT_ID,OAUTH_GMAIL_CLIENT_SECRET,OAUTH_OUTLOOK_CLIENT_ID,OAUTH_OUTLOOK_CLIENT_SECRET
+  else
+    echo "   ojoalgasto-conectores: no existe en $NS_NUCLEO; no se podrán conectar cuentas de correo (k8s/README.md)" >&2
+  fi
+fi
 # S3-FE-21: lo que usan SOLO los Jobs de alertas (el secreto del directorio y
 # la cuenta de correo), en un Secret aparte para que la API no lo reciba. Si
 # el núcleo todavía no lo tiene, el despliegue sigue: los Jobs lo referencian
@@ -167,8 +195,11 @@ fi
 
 echo "── aplicando el servicio ──"
 kubectl apply -n "$NS_SATELITE" -f "$MANIFIESTOS"
-kubectl rollout status "deployment/$SERVICIO" -n "$NS_SATELITE" --timeout=300s
+for d in $DEPLOYMENTS; do
+  kubectl rollout status "deployment/$d" -n "$NS_SATELITE" --timeout=300s
+done
 
+if [ "$ESPERA_CONSUMIDOR" = "1" ]; then
 echo "── esperando al consumidor ──"
 # La salud HTTP no prueba que el consumidor esté conectado al broker del
 # núcleo: es otro contenedor y otra conexión. Se espera su propia línea.
@@ -207,6 +238,7 @@ if [ "$escuchando" != "1" ]; then
   exit 1
 fi
 echo "   consumidor escuchando"
+fi
 
 echo "── apuntando el núcleo al satélite ──"
 # Mismos valores que k8s/desplegar.sh escribe a partir de reparto.env, para

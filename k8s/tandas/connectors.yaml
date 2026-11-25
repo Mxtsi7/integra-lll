@@ -1,0 +1,212 @@
+# connectors como satélite: corre en el namespace de otro integrante y usa
+# el PostgreSQL y el Redis del núcleo (ver k8s/README.md, «Reparto»).
+#
+# Se despliega con:
+#     ./k8s/desplegar-satelite.sh connectors
+# que construye la imagen, traslada la configuración y los secretos con las
+# direcciones calificadas (`postgres` → `postgres.<núcleo>`), aplica esto y
+# recién entonces apunta el gateway del núcleo hacia acá.
+#
+# ── Qué corre ────────────────────────────────────────────────────────────────
+#   connectors          la API (cuentas conectadas, OAuth, importaciones,
+#                       candidatos) detrás del gateway del núcleo
+#   connectors-worker   Celery con beat: procesa los CSV subidos, rescata
+#                       importaciones estancadas y lee las cuentas de correo
+#                       cada 15 minutos (S3-FE-18/20)
+#   purgar-archivos     CronJob diario: borra el contenido de los archivos de
+#                       importación vencidos (FE-07, retención de 7 días)
+#
+# ── Lo que NO recibe ─────────────────────────────────────────────────────────
+# La clave administradora de PostgreSQL, el secreto de los JWT, la cuenta de
+# correo ni RabbitMQ: connectors no publica eventos todavía. Las credenciales
+# OAuth de Google y Microsoft van en un Secret aparte, `ojoalgasto-conectores`,
+# opcional: sin él la API y la importación de CSV funcionan, pero conectar
+# Gmail u Outlook falla en la pantalla del proveedor.
+apiVersion: v1
+kind: Service
+metadata:
+  name: connectors
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # Solo la API: ni el worker ni la purga reciben tráfico HTTP.
+  selector: { app: connectors, componente: api }
+  ports: [{ name: http, port: 8003, targetPort: 8003 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectors
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # Recreate: con la cuota al tope un RollingUpdate se traba (k8s/README.md).
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: connectors, componente: api } }
+  template:
+    metadata:
+      labels: { app: connectors, componente: api, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      imagePullSecrets: [{ name: ghcr }]
+      initContainers:
+        # Las migraciones las aplica SOLO este paso; el worker y la purga
+        # arrancan con APLICAR_MIGRACIONES=0.
+        - name: migrar
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          command: [sh, entrypoint.sh, echo, migraciones listas]
+          envFrom: &config
+            - configMapRef: { name: ojoalgasto }
+          env: &entorno
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            # La cuenta restringida del esquema, no la administradora.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
+            # Valida la limpieza de una organización que pide auth (MX-07).
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            # Cifra los tokens de las cuentas conectadas en reposo.
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO }
+            - name: OAUTH_GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_ID, optional: true }
+            - name: OAUTH_GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_SECRET, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_ID, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_SECRET, optional: true }
+            - { name: ESQUEMA_BD, value: connectors }
+          resources: &recursos_api
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+      containers:
+        - name: api
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          command: [gunicorn, 'connectors_config.wsgi:application', '--bind', '0.0.0.0:8003', '--workers', '1', '--access-logfile', '-']
+          envFrom: *config
+          env: *entorno
+          ports: [{ name: http, containerPort: 8003 }]
+          startupProbe:
+            httpGet: &salud
+              path: /health/
+              port: http
+              httpHeaders: [{ name: Host, value: connectors }]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: *salud
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: *salud
+            periodSeconds: 20
+            timeoutSeconds: 10
+          resources: *recursos_api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectors-worker
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # Uno solo: beat corre dentro del worker, y dos beats programarían todo
+  # dos veces.
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: connectors-worker } }
+  template:
+    metadata:
+      labels: { app: connectors-worker, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      imagePullSecrets: [{ name: ghcr }]
+      containers:
+        - name: worker
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          # Usa su propia cola y canal de control (`connectors`), así que
+          # compartir el Redis del núcleo con subscriptions no le roba tareas.
+          command: [sh, entrypoint.sh, celery, -A, connectors_config, worker, --beat, --loglevel=info, --schedule, /tmp/celerybeat-schedule]
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+          env:
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO }
+            - name: OAUTH_GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_ID, optional: true }
+            - name: OAUTH_GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_SECRET, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_ID, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_SECRET, optional: true }
+            - { name: ESQUEMA_BD, value: connectors }
+            - { name: APLICAR_MIGRACIONES, value: "0" }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 320Mi }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: purgar-archivos
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # Una vez al día, de madrugada en Chile (el clúster corre en UTC).
+  schedule: "0 8 * * *"
+  # Llega suspendido, como todo CronJob de tanda: se habilita a mano.
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels: { app: connectors, componente: purga, app.kubernetes.io/part-of: ojoalgasto }
+        spec:
+          restartPolicy: Never
+          imagePullSecrets: [{ name: ghcr }]
+          containers:
+            - name: purgar
+              image: IMAGEN_CONNECTORS
+              # Sin --aplicar el comando solo cuenta lo que borraría.
+              command: [sh, entrypoint.sh, python, manage.py, purgar_archivos_importacion, --aplicar]
+              envFrom:
+                - configMapRef: { name: ojoalgasto }
+              env:
+                - name: SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
+                - { name: ESQUEMA_BD, value: connectors }
+                - { name: APLICAR_MIGRACIONES, value: "0" }
+              resources:
+                requests: { cpu: 25m, memory: 64Mi }
+                limits: { cpu: 150m, memory: 160Mi }

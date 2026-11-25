@@ -56,6 +56,7 @@ NS_NOTIFICATIONS="$(leer_reparto NS_NOTIFICATIONS)"
 URL_NOTIFICATIONS="http://notifications:8005"
 DESTINOS_ELIMINACION="subscriptions"
 HOSTS_AUTH_SATELITE=""
+URL_CONNECTORS="http://connectors:8003"
 if [ -n "$NS_NOTIFICATIONS" ]; then
   URL_NOTIFICATIONS="http://notifications.$NS_NOTIFICATIONS:8005"
   # Un servicio que guarda datos de una organización tiene que estar en la
@@ -68,6 +69,13 @@ if [ -n "$NS_NOTIFICATIONS" ]; then
   NUCLEO_REPARTO="$(leer_reparto NS_NUCLEO)"
   HOSTS_AUTH_SATELITE="${NUCLEO_REPARTO:+,auth.$NUCLEO_REPARTO,auth.$NUCLEO_REPARTO.svc,auth.$NUCLEO_REPARTO.svc.cluster.local}"
 fi
+NS_CONNECTORS="$(leer_reparto NS_CONNECTORS)"
+if [ -n "$NS_CONNECTORS" ]; then
+  URL_CONNECTORS="http://connectors.$NS_CONNECTORS:8003"
+  # Guarda cuentas conectadas, importaciones y candidatos de cada
+  # organización: tiene que estar en la lista de borrado.
+  DESTINOS_ELIMINACION="$DESTINOS_ELIMINACION,connectors"
+fi
 
 # Sustituye imágenes, host público y el reparto. Todo manifiesto que se aplica
 # pasa por acá: aplicar uno en crudo devolvería el gateway a la dirección
@@ -79,6 +87,7 @@ renderizar() {
       -e "s|IMAGEN_WEB|$IMAGEN_WEB|g" \
       -e "s|ojoalgasto-forellana.dev.censei.cl|$HOST_PUBLICO|g" \
       -e "s|^\(  URL_NOTIFICATIONS:\) .*\$|\1 $URL_NOTIFICATIONS|" \
+      -e "s|^\(  URL_CONNECTORS:\) .*\$|\1 $URL_CONNECTORS|" \
       -e "s|^\(  ELIMINACION_DESTINOS:\) .*\$|\1 $DESTINOS_ELIMINACION|" \
       -e "s|^\(  ALLOWED_HOSTS: .*\)\$|\1$HOSTS_AUTH_SATELITE|" \
       "$1"
