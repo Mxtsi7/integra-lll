@@ -136,7 +136,12 @@ spec:
           imagePullPolicy: Always
           # Usa su propia cola y canal de control (`connectors`), así que
           # compartir el Redis del núcleo con subscriptions no le roba tareas.
-          command: [sh, entrypoint.sh, celery, -A, connectors_config, worker, --beat, --loglevel=info, --schedule, /tmp/celerybeat-schedule]
+          #
+          # --concurrency fijo: Celery cuenta los CPU del NODO, no los del
+          # límite, y arrancaba 8 procesos que superaban los 320Mi (OOMKilled
+          # en el primer despliegue, 25-11). Con 2, un CSV se procesa mientras
+          # se lee una cuenta de correo.
+          command: [sh, entrypoint.sh, celery, -A, connectors_config, worker, --beat, --concurrency=2, --loglevel=info, --schedule, /tmp/celerybeat-schedule]
           envFrom:
             - configMapRef: { name: ojoalgasto }
           env:
