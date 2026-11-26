@@ -52,10 +52,12 @@ function contrato(extra: Partial<ContratacionPlan> = {}): ContratacionPlan {
 /** Promesa que el test resuelve o rechaza cuando quiere. */
 function diferida<T>() {
   let resolver!: (valor: T) => void;
-  const promesa = new Promise<T>((alResolver) => {
+  let rechazar!: (motivo: unknown) => void;
+  const promesa = new Promise<T>((alResolver, alRechazar) => {
     resolver = alResolver;
+    rechazar = alRechazar;
   });
-  return { promesa, resolver };
+  return { promesa, resolver, rechazar };
 }
 
 const CLAVE_DEL_INTENTO = 'contratacion_pendiente_7:org-a';
@@ -213,6 +215,8 @@ describe('useContratacionPremium', () => {
     act(() => {
       operacion = result.current.contratar();
     });
+    await act(async () => {}); // la petición ya salió: se prueba descartar su respuesta
+    expect(iniciarContratacion).toHaveBeenCalledTimes(1);
     sesion.marca = 2; // otra persona entró mientras esperábamos
     respuesta.resolver(contrato());
     await act(() => operacion);
@@ -321,5 +325,112 @@ describe('useContratacionPremium', () => {
     expect(cancelarContratacion).toHaveBeenCalledWith('c-1');
     expect(result.current.contrato?.estado).toBe('cancelada');
     expect(window.localStorage.getItem(CLAVE_DEL_INTENTO)).toBeNull();
+  });
+
+  describe('si cambia la sesión antes de que empiece una acción, la acción no sigue', () => {
+    const GUARDADO_DE_A = JSON.stringify({ alcance: '7:org-a', clave: 'k-1', contratoId: 'c-9' });
+
+    /** Nada de la sesión anterior llegó al servidor, al almacenamiento ni a otra pantalla. */
+    function esperarSinEfectosDeA() {
+      expect(iniciarContratacion).not.toHaveBeenCalled();
+      expect(cancelarContratacion).not.toHaveBeenCalled();
+      expect(getContratacion).toHaveBeenCalledTimes(1); // solo la recuperación de A
+      expect(irAlCheckout).not.toHaveBeenCalled();
+      expect(alPlanCambiar).not.toHaveBeenCalled();
+      expect(window.localStorage.getItem(CLAVE_DEL_INTENTO)).toBe(GUARDADO_DE_A);
+    }
+
+    /** Entra otra persona: RutaPrivada desmonta la pantalla de la anterior. */
+    function cambiarDeSesion(desmontar: () => void) {
+      sesion.marca = 2;
+      desmontar();
+    }
+
+    it.each(['contratar', 'verificar'] as const)('%s pedido durante la recuperación de A no se ejecuta en la sesión de B', async (accion) => {
+      window.localStorage.setItem(CLAVE_DEL_INTENTO, GUARDADO_DE_A);
+      const recuperacion = diferida<ContratacionPlan>();
+      vi.mocked(getContratacion).mockReturnValue(recuperacion.promesa);
+      const { result, unmount } = montar();
+
+      let operacion!: Promise<void>;
+      act(() => {
+        operacion = result.current[accion]();
+      });
+      cambiarDeSesion(unmount);
+      recuperacion.resolver(contrato({ id: 'c-9' }));
+      await act(() => operacion);
+
+      esperarSinEfectosDeA();
+    });
+
+    // Durante la recuperación todavía no se conoce el id, así que se prueban con la pendiente ya cargada.
+    it.each(['cancelar', 'continuarPago'] as const)('%s de A no se ejecuta si la sesión cambia antes de empezar', async (accion) => {
+      window.localStorage.setItem(CLAVE_DEL_INTENTO, GUARDADO_DE_A);
+      vi.mocked(getContratacion).mockResolvedValue(contrato({ id: 'c-9' }));
+      const { result, unmount } = montar();
+      await waitFor(() => expect(result.current.contrato?.id).toBe('c-9'));
+
+      let operacion!: Promise<void>;
+      act(() => {
+        operacion = result.current[accion]();
+      });
+      cambiarDeSesion(unmount);
+      await act(() => operacion);
+
+      esperarSinEfectosDeA();
+    });
+
+    it('después del cambio, B contrata con su propia clave', async () => {
+      window.localStorage.setItem(CLAVE_DEL_INTENTO, GUARDADO_DE_A);
+      const recuperacion = diferida<ContratacionPlan>();
+      vi.mocked(getContratacion).mockReturnValue(recuperacion.promesa);
+      const deA = montar();
+      let operacionDeA!: Promise<void>;
+      act(() => {
+        operacionDeA = deA.result.current.contratar();
+      });
+      cambiarDeSesion(deA.unmount);
+      recuperacion.resolver(contrato({ id: 'c-9' }));
+      await act(() => operacionDeA);
+
+      sesion.usuario = { id: '8', organizacion_id: 'org-b', rol: 'titular' };
+      vi.mocked(iniciarContratacion).mockResolvedValue(contrato({ id: 'c-20' }));
+      const deB = montar();
+      await act(() => deB.result.current.contratar());
+
+      expect(iniciarContratacion).toHaveBeenCalledTimes(1);
+      const [claveDeB] = vi.mocked(iniciarContratacion).mock.calls[0];
+      expect(claveDeB).toMatch(PATRON_UUID);
+      expect(claveDeB).not.toBe('k-1');
+      expect(irAlCheckout).toHaveBeenCalledWith(URL_PAGO);
+      expect(JSON.parse(window.localStorage.getItem('contratacion_pendiente_8:org-b') ?? 'null')).toEqual({
+        alcance: '8:org-b',
+        clave: claveDeB,
+        contratoId: 'c-20',
+      });
+      expect(window.localStorage.getItem(CLAVE_DEL_INTENTO)).toBe(GUARDADO_DE_A);
+    });
+
+    it.each([
+      ['sin red', new TypeError('Failed to fetch')],
+      ['409', new ErrorDeApi('pendiente', 409)],
+    ])('un error (%s) que llega cuando ya cambió la sesión no se muestra', async (_nombre, error) => {
+      const respuesta = diferida<ContratacionPlan>();
+      vi.mocked(iniciarContratacion).mockReturnValue(respuesta.promesa);
+      const { result } = montar();
+
+      let operacion!: Promise<void>;
+      act(() => {
+        operacion = result.current.contratar();
+      });
+      await act(async () => {}); // la petición ya salió
+      expect(iniciarContratacion).toHaveBeenCalledTimes(1);
+      sesion.marca = 2;
+      respuesta.rechazar(error);
+      await act(() => operacion);
+
+      expect(result.current.mensajeError).toBeNull();
+      expect(result.current.operacion).toBeNull();
+    });
   });
 });

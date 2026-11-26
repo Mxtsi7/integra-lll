@@ -148,7 +148,10 @@ export function useContratacionPremium({
     };
   }, [almacen, aplicar, fijarIdSinCargar]);
 
-  /** Corre una operación con candado y manejo de error común. La sesión se captura al empezar. */
+  /**
+   * Corre una operación con candado y manejo de error común. La sesión se captura al empezar y se
+   * vuelve a comprobar después de cada espera: lo que pidió una persona no sigue en la sesión de otra.
+   */
   const ejecutar = useCallback(
     async (nombre: Exclude<OperacionContratacion, null>, trabajo: (marca: ReturnType<typeof capturarSesion>) => Promise<void>) => {
       if (enCurso.current) return;
@@ -158,15 +161,18 @@ export function useContratacionPremium({
       setMensajeError(null);
       try {
         await restauracion.current;
+        // Mientras se esperaba pudo cambiar la sesión o cerrarse la pantalla: no se manda nada en su nombre.
+        if (!sigueVigente(marca)) return;
         await trabajo(marca);
       } catch (error) {
-        if (montado.current) setMensajeError(mensajeDeErrorDeContratacion(error));
+        if (sigueVigente(marca)) setMensajeError(mensajeDeErrorDeContratacion(error));
       } finally {
+        // El candado se suelta siempre: si no, la sesión nueva no podría operar.
         enCurso.current = false;
         if (montado.current) setOperacion(null);
       }
     },
-    [capturarSesion],
+    [capturarSesion, sigueVigente],
   );
 
   const idPendiente = contrato?.estado === 'pendiente' ? contrato.id : idSinCargar;
@@ -194,7 +200,7 @@ export function useContratacionPremium({
           nuevo = await iniciarContratacion(clave);
         } catch (error) {
           if (error instanceof ErrorDeApi && error.status === 409) {
-            setMensajeError(MENSAJE_PENDIENTE_NO_RECUPERABLE);
+            if (sigueVigente(marca)) setMensajeError(MENSAJE_PENDIENTE_NO_RECUPERABLE);
             return;
           }
           throw error;
