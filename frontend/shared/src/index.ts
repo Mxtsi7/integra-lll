@@ -82,4 +82,5 @@ export type {
 } from './contracts/uso-recolectores.dto';
 export * from './api/resumenPanel';
 export * from './api/cambioCorreo';
+export * from './api/historialAccesos';
 export * from './api/consentimientoUso';
