@@ -130,5 +130,6 @@ CELERY_BEAT_SCHEDULE = {
 LANGUAGE_CODE = "es-cl"
 TIME_ZONE = "America/Santiago"
 USO_PERSISTIR_EVENTO = "app.uso_recolectores.persistencia.persistir"
+USO_VERIFICAR_CONSENTIMIENTO = "app.uso_recolectores.consentimiento.verificar"
 USE_I18N = True
 USE_TZ = True
