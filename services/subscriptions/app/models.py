@@ -820,6 +820,26 @@ class TransicionEstado(ModeloTenant):
         verbose_name_plural = "Transiciones de estado"
 
 
+class ConsentimientoRecolector(ModeloTenant):
+    """Autorización propia; un UUID revocado nunca se vuelve a habilitar."""
+
+    suscripcion = models.ForeignKey(Subscription, on_delete=models.CASCADE)
+    usuario_id = models.PositiveBigIntegerField()
+    recolector_id = models.UUIDField()
+    origen = models.CharField(max_length=10, choices=[('android', 'Android'), ('navegador', 'Navegador')])
+    estado = models.CharField(max_length=10, default='activo')
+    version_texto = models.CharField(max_length=30)
+    # Intervalos [desde, hasta); hasta=null únicamente mientras captura está activa.
+    ventanas = models.JSONField(default=list)
+
+    class Meta(ModeloTenant.Meta):
+        db_table = 'consentimiento_recolector'
+        constraints = [models.UniqueConstraint(
+            fields=['organizacion_id', 'usuario_id', 'suscripcion', 'recolector_id'],
+            name='consentimiento_recolector_unico',
+        )]
+
+
 class OutboxEvento(ModeloTenant):
     """Evento durable pendiente de publicación después del commit de dominio."""
 
