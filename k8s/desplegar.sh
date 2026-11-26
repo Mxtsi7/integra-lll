@@ -55,11 +55,18 @@ leer_reparto() {
 NS_NOTIFICATIONS="$(leer_reparto NS_NOTIFICATIONS)"
 URL_NOTIFICATIONS="http://notifications:8005"
 DESTINOS_ELIMINACION="subscriptions"
+HOSTS_AUTH_SATELITE=""
 if [ -n "$NS_NOTIFICATIONS" ]; then
   URL_NOTIFICATIONS="http://notifications.$NS_NOTIFICATIONS:8005"
   # Un servicio que guarda datos de una organización tiene que estar en la
   # lista de borrado, o al eliminar la organización sus filas quedan huérfanas.
   DESTINOS_ELIMINACION="subscriptions,notifications"
+  # S3-FE-21: los Jobs de alertas del satélite le preguntan a auth por su
+  # nombre calificado (`k8s/satelite.py` reescribe URL_AUTH), y Django
+  # responde 400 a un Host que no está en ALLOWED_HOSTS. El gateway no lo
+  # nota porque usa el nombre corto. Pasó el 25-11 al activar el envío.
+  NUCLEO_REPARTO="$(leer_reparto NS_NUCLEO)"
+  HOSTS_AUTH_SATELITE="${NUCLEO_REPARTO:+,auth.$NUCLEO_REPARTO,auth.$NUCLEO_REPARTO.svc,auth.$NUCLEO_REPARTO.svc.cluster.local}"
 fi
 
 # Sustituye imágenes, host público y el reparto. Todo manifiesto que se aplica
@@ -73,6 +80,7 @@ renderizar() {
       -e "s|ojoalgasto-forellana.dev.censei.cl|$HOST_PUBLICO|g" \
       -e "s|^\(  URL_NOTIFICATIONS:\) .*\$|\1 $URL_NOTIFICATIONS|" \
       -e "s|^\(  ELIMINACION_DESTINOS:\) .*\$|\1 $DESTINOS_ELIMINACION|" \
+      -e "s|^\(  ALLOWED_HOSTS: .*\)\$|\1$HOSTS_AUTH_SATELITE|" \
       "$1"
 }
 
