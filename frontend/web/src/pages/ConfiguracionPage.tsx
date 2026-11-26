@@ -1,6 +1,7 @@
 import { Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
 import { PreferenciasAvisos } from '../components/Configuracion/PreferenciasAvisos';
 import { RecolectoresDeUso } from '../components/Configuracion/RecolectoresDeUso';
+import { PlanPremium } from '../components/Planes/PlanPremium';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
@@ -82,13 +83,7 @@ export function ConfiguracionPage() {
           </Seccion>
 
           <Seccion titulo="Plan" icono={<Wallet size={19} aria-hidden="true" />} tinte="verde">
-            <Fila etiqueta="Plan Gratuito" detalle="Alertas de cobro y de prueba gratis incluidas." />
-            <div className={styles.pieSeccion}>
-              {/* TODO: habilitar cuando exista el flujo de pago */}
-              <Boton variante="secundario" disabled title="Próximamente">
-                Mejorar a Premium
-              </Boton>
-            </div>
+            <PlanPremium />
           </Seccion>
         </div>
       </div>
