@@ -2,18 +2,24 @@ import { UMBRAL_INACTIVIDAD_SEGUNDOS } from './observador.js';
 import { crearControlador } from './controlador.js';
 
 const controlador = crearControlador(chrome);
+let sincronizacion;
+export function conectarSincronizacion(integracion) { sincronizacion = integracion; }
 function actualizar(senal) {
-  controlador.actualizar(senal).catch(() => console.warn('No se pudo actualizar el estado del recolector'));
+  controlador.actualizar(senal, () => sincronizacion?.comprobarSesion(), () => sincronizacion?.sesionVigente() ?? true)
+    .then(() => sincronizacion?.ciclo()).catch(() => console.warn('No se pudo actualizar el estado del recolector'));
 }
 chrome.runtime.onMessage.addListener((mensaje, emisor, responder) => {
   if (emisor.id !== chrome.runtime.id) return false;
+  if (sincronizacion && emisor.url !== chrome.runtime.getURL('popup.html')) return false;
   let operacion;
-  if (mensaje.tipo === 'iniciar_autorizacion') operacion = controlador.iniciarAutorizacion(mensaje.intentoId, mensaje.dominios, mensaje.asociaciones);
+  if (sincronizacion) operacion = sincronizacion.mensaje(mensaje, controlador);
+  if (operacion) { /* La integración reclama mensajes de autenticación y consentimiento. */ }
+  else if (mensaje.tipo === 'iniciar_autorizacion') operacion = controlador.iniciarAutorizacion(mensaje.intentoId, mensaje.dominios, mensaje.asociaciones);
   else if (mensaje.tipo === 'cancelar_autorizacion') operacion = controlador.cancelarAutorizacion(mensaje.intentoId);
   else if (mensaje.tipo === 'guardar') operacion = controlador.guardar(mensaje.configuracion, mensaje.intentoId);
   else if (mensaje.tipo === 'retirar') operacion = controlador.retirar();
   else return false;
-  operacion.then(resultado => responder(resultado ?? { ok: true }), () => responder({ ok: false }));
+  operacion.then(resultado => responder(resultado ?? { ok: true }), error => responder({ ok: false, error: error?.message ?? 'No se pudo completar.' }));
   return true;
 });
 chrome.tabs.onActivated.addListener(({ tabId, windowId }) => actualizar({

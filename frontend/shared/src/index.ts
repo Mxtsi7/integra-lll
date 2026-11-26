@@ -83,3 +83,4 @@ export type {
 export * from './api/resumenPanel';
 export * from './api/cambioCorreo';
 export * from './api/consentimientoUso';
+export * from './recolectores/colaUso';
