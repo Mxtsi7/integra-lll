@@ -41,6 +41,12 @@ type AuthValue = {
   cerrarSesion: () => Promise<void>;
   reintentarCierre: () => Promise<boolean>;
   recargarPerfil: () => Promise<void>;
+  /**
+   * Marca de la sesión de este momento. Quien pide algo a la red la anota al empezar y la
+   * compara al terminar: si cambió (cerró sesión, entró otra cuenta), la respuesta ya no es
+   * de la sesión actual y no debe tocarla.
+   */
+  capturarSesion: () => number;
 };
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -370,6 +376,8 @@ export function AuthProvider({
     await cargarPerfil(sesionVigente.current);
   }, [cargarPerfil, cerrarLocalmente]);
 
+  const capturarSesion = useCallback(() => sesionVigente.current, []);
+
   const value = useMemo<AuthValue>(
     () => ({
       usuario,
@@ -382,6 +390,7 @@ export function AuthProvider({
       cerrarSesion,
       reintentarCierre,
       recargarPerfil,
+      capturarSesion,
     }),
     [
       usuario,
@@ -393,6 +402,7 @@ export function AuthProvider({
       cerrarSesion,
       reintentarCierre,
       recargarPerfil,
+      capturarSesion,
     ]
   );
 
