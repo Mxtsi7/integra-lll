@@ -1,15 +1,18 @@
 # Historial de accesos (S3-AN-06)
 
 ## Qué hay
-- Ruta `/configuracion/historial-accesos` (privada) y el botón **Ver** de Ajustes, que antes estaba deshabilitado, ahora lleva a ella.
-- `HistorialAccesosPage` recibe `cargarAccesos?: () => Promise<AccesoRegistrado[]>`.
-  - **Sin `cargarAccesos`** (hoy): dice "Esta función todavía no está disponible". No muestra accesos de ejemplo.
-  - **Con él**: estados cargando / error con "Reintentar" / vacío / lista (máximo 50 y avisa si hay más).
-  - Una respuesta que llega cuando ya cambió la sesión, o de un intento reemplazado, no se pinta.
+- Ruta `/configuracion/historial-accesos` (privada); el botón **Ver** de Ajustes lleva a ella.
+- `obtenerHistorialAccesos()` (`shared/src/api/historialAccesos.ts`) llama `GET /api/usuarios/me/historial-accesos/?limit=20&offset=N` (servicio auth) y devuelve `{ accesos: [{ iniciadaEn, metodo }], siguienteOffset }`. `metodo` es `local` (contraseña) o `google`.
+- Una respuesta con otra forma se trata como error, no como "sin accesos".
+- La página muestra fecha y método, pide de 20 en 20 con **Cargar más** (usa `siguiente_offset`) y no acumula más de 100 en pantalla.
+- Estados: cargando, error con **Reintentar**, vacío y lista. Si falla **Cargar más**, se conserva lo ya mostrado y se avisa.
+- Una respuesta (inicial o de "Cargar más") que llega cuando ya cambió la sesión, o de una carga reemplazada, no se pinta.
 
-## Pendiente
-- **No existe el endpoint** de historial de accesos en el backend; nadie lo tiene asignado. `AccesoRegistrado` (`id`, `fecha`, `dispositivo`, `ubicacion?`, `actual?`) es un contrato **provisional**: quien cree el endpoint debe ajustarlo.
-- Para conectarlo: crear la función en `shared` (con `pedir`), y pasarla como `cargarAccesos` en la ruta de `App.tsx`. No hay que tocar la página.
+## Límites (lo que el backend entrega)
+- Solo `iniciada_en` y `metodo`: **no hay dispositivo ni ubicación**, por eso no se muestran.
+- Las sesiones se conservan según la retención del backend (`limpiar_sesiones`, 7 días por defecto) y las anteriores a la migración no aparecen. La página lo dice con "Solo se muestran los inicios de sesión que conservamos".
+- Pendiente: verificar contra el backend desplegado (no se ejecutó de punta a punta).
 
 ## Pruebas
-`HistorialAccesosPage.test.tsx`: sin endpoint, lista y sesión actual, vacío, error y reintento, tope de 50, respuesta de otra sesión.
+- `historialAccesos.test.ts`: URL y paginación, conversión de nombres, respuestas con formato inesperado, errores.
+- `HistorialAccesosPage.test.tsx`: lista, vacío, error y reintento, Cargar más (agrega, falla, doble clic), tope de 100, respuestas de otra sesión.
