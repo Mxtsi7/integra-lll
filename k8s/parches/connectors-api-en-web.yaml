@@ -20,6 +20,15 @@
 # - La liveness tiene margen para las migraciones del arranque.
 # - ALLOWED_HOSTS propio: el gateway la llama como `web`.
 # - Recibe lo mismo que la API del satélite, ni más ni menos.
+#
+# ── Lo que le cuesta a la cuota del núcleo ───────────────────────────────────
+# Suma requests 50m/96Mi y límites 200m/256Mi al pod web (los pods no cambian).
+# Lectura del servidor el 25-11-2026 con el contenedor ya puesto: 10/12 pods,
+# límites 1750m/2 CPU y 2432Mi/2752Mi. Con eso cabe que UN HPA (gateway o
+# subscriptions, máximo 2 réplicas cada uno) escale; los DOS a la vez no
+# (2150m y 2944Mi): la cuota rechaza el segundo pod, sin tumbar nada. Antes de
+# este contenedor cabían los dos. Es parte del costo del atajo: con el Service
+# propio en el satélite, el núcleo recupera ese margen.
 spec:
   template:
     metadata:

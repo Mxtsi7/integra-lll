@@ -160,10 +160,14 @@ spec:
               - { key: app.kubernetes.io/name, operator: In, values: [ingress-nginx, rke2-ingress-nginx] }
       ports:
         - { protocol: TCP, port: 8080 }
-    # La API de connectors dentro del pod web: solo el gateway la llama.
+    # La API de connectors dentro del pod web. La llaman el gateway y
+    # auth-eliminaciones, que le pide borrar los datos de una organización o
+    # de una persona (MX-07; ELIMINACION_DESTINOS incluye connectors). Nadie
+    # más: auth-eliminaciones firma, y aun así no se abre a otros pods.
     - from:
         - podSelector:
-            matchLabels: { app: gateway }
+            matchExpressions:
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
       ports:
         - { protocol: TCP, port: 8003 }
 ---
@@ -204,6 +208,14 @@ spec:
         # cualquier web: solo la que lleva ese contenedor.
         - podSelector:
             matchLabels: { app: web, componente: con-connectors }
+        # connectors repartido (k8s/reparto.env, NS_CONNECTORS): su worker, su
+        # purga y, cuando haya cupo de Services, su API. Solo ese namespace y
+        # solo esas apps; un podSelector sin namespaceSelector no los alcanza.
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-casolis }
+          podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [connectors, connectors-worker] }
       ports:
         - { protocol: TCP, port: 5432 }
 ---
@@ -222,6 +234,14 @@ spec:
               - { key: app, operator: In, values: [gateway, auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
         - podSelector:
             matchLabels: { app: web, componente: con-connectors }
+        # connectors repartido (k8s/reparto.env, NS_CONNECTORS): su worker, su
+        # purga y, cuando haya cupo de Services, su API. Solo ese namespace y
+        # solo esas apps; un podSelector sin namespaceSelector no los alcanza.
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-casolis }
+          podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [connectors, connectors-worker] }
       ports:
         - { protocol: TCP, port: 6379 }
 ---
