@@ -12,12 +12,11 @@ import { ErrorDeApi, pedir } from './cliente';
 export const ELIMINAR_CUENTA_WEB_DISPONIBLE = true;
 
 /**
- * Habilita la pantalla de Eliminar cuenta en MÓVIL (AN-19). Sigue en false a propósito: su
- * pantalla llama cerrarSesion() al terminar sin comprobar que la sesión (ni la pantalla)
- * sigan siendo las que pidieron el borrado, y una respuesta tardía podría cerrar la sesión de
- * otra cuenta que entró después. Se enciende cuando AN-19 tenga esa protección.
+ * Habilita la pantalla de Eliminar cuenta en MÓVIL (AN-19). Es true desde que la pantalla
+ * ignora las respuestas que llegan cuando ya cambió la sesión (antes una respuesta tardía podía
+ * cerrar la sesión de otra cuenta que entró después). Para apagarla en una emergencia: false.
  */
-export const ELIMINAR_CUENTA_DISPONIBLE = false;
+export const ELIMINAR_CUENTA_DISPONIBLE = true;
 
 /** Cuerpo de DELETE /usuarios/me/ (MX-07). */
 export interface DatosEliminacion {
