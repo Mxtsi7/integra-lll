@@ -6,7 +6,9 @@ metadata:
   labels: { app.kubernetes.io/part-of: ojoalgasto }
 spec:
   selector: { app: web }
-  ports: [{ port: 80, targetPort: 8080 }]
+  # Con nombre: un Service con más de un puerto exige nombrarlos todos, y
+  # `desplegar.sh` le agrega el 8003 de connectors (CONNECTORS_API=web).
+  ports: [{ name: http, port: 80, targetPort: 8080 }]
 ---
 apiVersion: apps/v1
 kind: Deployment

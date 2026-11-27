@@ -1,0 +1,88 @@
+# La API de connectors como contenedor extra del pod `web` (parche
+# estratégico sobre el Deployment `web` del núcleo).
+#
+# ── Por qué existe ───────────────────────────────────────────────────────────
+# connectors corre como satélite en el namespace de Cris, pero el clúster del
+# ramo no deja crear su Service: la cuota GLOBAL `students-host-envelope`
+# (120 Services entre todos los estudiantes) está llena desde el 25-11-2026.
+# Sin Service, el gateway no le llega. Mientras no haya cupo:
+#   - la API corre acá, dentro del pod `web`, y se expone por el puerto 8003
+#     del Service `web`, que ya existe;
+#   - el worker y la purga siguen en el satélite (k8s/tandas/worker-connectors.yaml).
+# Lo activa `CONNECTORS_API=web` en k8s/reparto.env; `desplegar.sh` construye
+# la imagen y aplica este parche. Cuando haya cupo: borrar esa línea y
+# desplegar el satélite completo (`desplegar-satelite.sh connectors`).
+#
+# ── Lo que se cuidó ──────────────────────────────────────────────────────────
+# - SIN readinessProbe: un pod está listo solo si TODOS sus contenedores lo
+#   están. Con una, la web entera quedaría fuera mientras connectors arranca
+#   o si connectors falla. La web no depende de connectors; al revés tampoco.
+# - La liveness tiene margen para las migraciones del arranque.
+# - ALLOWED_HOSTS propio: el gateway la llama como `web`.
+# - Recibe lo mismo que la API del satélite, ni más ni menos.
+#
+# ── Lo que le cuesta a la cuota del núcleo ───────────────────────────────────
+# Suma requests 50m/96Mi y límites 200m/256Mi al pod web (los pods no cambian).
+# Lectura del servidor el 25-11-2026 con el contenedor ya puesto: 10/12 pods,
+# límites 1750m/2 CPU y 2432Mi/2752Mi. Con eso cabe que UN HPA (gateway o
+# subscriptions, máximo 2 réplicas cada uno) escale; los DOS a la vez no
+# (2150m y 2944Mi): la cuota rechaza el segundo pod, sin tumbar nada. Antes de
+# este contenedor cabían los dos. Es parte del costo del atajo: con el Service
+# propio en el satélite, el núcleo recupera ese margen.
+spec:
+  template:
+    metadata:
+      labels:
+        # Las políticas de red abren Postgres y Redis solo a los pods web con
+        # esta etiqueta (k8s/40-red.yaml), no a cualquier nginx.
+        componente: con-connectors
+    spec:
+      containers:
+        - name: connectors-api
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          # entrypoint.sh espera la base y aplica las migraciones de connectors
+          # antes de arrancar: el worker del satélite no migra.
+          command: [sh, entrypoint.sh, gunicorn, 'connectors_config.wsgi:application', '--bind', '0.0.0.0:8003', '--workers', '1', '--access-logfile', '-']
+          envFrom:
+            - configMapRef: { name: ojoalgasto }
+          env:
+            - { name: ALLOWED_HOSTS, value: "web,connectors,localhost,127.0.0.1" }
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO }
+            - name: OAUTH_GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_ID, optional: true }
+            - name: OAUTH_GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_SECRET, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_ID, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_SECRET, optional: true }
+            - { name: ESQUEMA_BD, value: connectors }
+          ports: [{ name: connectors, containerPort: 8003 }]
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: connectors
+              httpHeaders: [{ name: Host, value: web }]
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 200m, memory: 256Mi }
