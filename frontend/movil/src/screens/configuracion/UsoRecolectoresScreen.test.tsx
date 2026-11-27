@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import UsoRecolectoresScreen from './UsoRecolectoresScreen';
 
 const { moduloNativo, appState } = vi.hoisted(() => ({
@@ -17,6 +17,13 @@ vi.mock('@ojoalgasto/shared', () => ({
   sesionDelToken: () => 'sesion-de-prueba',
 }));
 
+const colaPantalla = { fase: 'activo', pendientes: [], ultimoEnvio: undefined };
+const controles = vi.hoisted(() => ({ aceptar: vi.fn(), ciclo: vi.fn(), pausar: vi.fn(), revocar: vi.fn(), estado: vi.fn() }));
+vi.mock('../../services/usoAndroidSincronizacion', () => ({
+  aceptarUsoAndroid: controles.aceptar, cicloUsoAndroid: controles.ciclo, pausarUsoAndroid: controles.pausar,
+  revocarUsoAndroid: controles.revocar, estadoUsoAndroid: controles.estado,
+}));
+
 vi.mock('../../services/usoAndroidNativo', () => ({ usoAndroidNativo: moduloNativo }));
 vi.mock('react-native', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-native')>()),
@@ -24,6 +31,11 @@ vi.mock('react-native', async (importOriginal) => ({
 }));
 
 describe('pantalla de acceso de uso Android', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    controles.estado.mockResolvedValue({ seleccion: null, estado: null });
+    appState.addEventListener.mockReturnValue({ remove: vi.fn() });
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it('vuelve a verificar al regresar de Ajustes y no captura por abrirlo', async () => {
@@ -44,36 +56,29 @@ describe('pantalla de acceso de uso Android', () => {
     expect(await screen.findByText('El permiso de Android está concedido.')).toBeTruthy();
     expect(moduloNativo.leerEstadisticas).not.toHaveBeenCalled();
   });
-  it('lee solo tras la aceptación y descarta un resultado tardío al retirarla', async () => {
-    const reloj = vi.spyOn(Date, 'now').mockReturnValue(1000);
+  it('autoriza y sincroniza con controles separados de pausar y retirar', async () => {
     appState.addEventListener.mockReturnValue({ remove: vi.fn() });
     moduloNativo.tienePermiso.mockResolvedValue(true);
-    let resolverTramos!: (tramos: { paquete: string; inicioMs: number; finMs: number }[]) => void;
-    moduloNativo.leerTramos.mockImplementationOnce(() => new Promise(resolve => { resolverTramos = resolve; }));
-
+    let autorizado = false;
+    controles.estado.mockImplementation(async () => ({
+      seleccion: autorizado ? { paquete: 'com.ejemplo.app' } : null,
+      estado: autorizado ? colaPantalla : null,
+    }));
+    controles.aceptar.mockImplementation(async () => { autorizado = true; });
+    controles.revocar.mockImplementation(async () => { autorizado = false; });
     render(<UsoRecolectoresScreen />);
     await screen.findByText('El permiso de Android está concedido.');
-    fireEvent.change(screen.getByLabelText('Paquete autorizado para consulta'), {
-      target: { value: 'com.ejemplo.app' },
-    });
-    expect(moduloNativo.leerTramos).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Acepto autorizar la consulta local' }));
-    expect(moduloNativo.leerTramos).not.toHaveBeenCalled();
-    reloj.mockReturnValue(4000);
-    fireEvent.click(screen.getByRole('button', { name: 'Consultar intervalos' }));
-    await waitFor(() => expect(moduloNativo.leerTramos).toHaveBeenCalledWith(1000, 4000, ['com.ejemplo.app'], true));
+    fireEvent.change(screen.getByLabelText('Paquete autorizado para consulta'), { target: { value: 'com.ejemplo.app' } });
+    expect(controles.aceptar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Acepto capturar y sincronizar el uso' }));
+    await screen.findByText('Paquete autorizado: com.ejemplo.app');
+    expect(controles.aceptar).toHaveBeenCalledWith('com.ejemplo.app');
+    fireEvent.click(screen.getByRole('button', { name: 'Sincronizar ahora' }));
+    await waitFor(() => expect(controles.ciclo).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Pausar captura' }));
+    await waitFor(() => expect(controles.pausar).toHaveBeenCalled());
     fireEvent.click(screen.getByRole('button', { name: 'Retirar autorización' }));
-    await act(async () => resolverTramos([{ paquete: 'com.ejemplo.app', inicioMs: 2000, finMs: 3000 }]));
-    expect(screen.queryByText(/Intervalos encontrados: 1\./)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Consultar intervalos' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Acepto autorizar la consulta local' }));
-    reloj.mockReturnValue(8000);
-    moduloNativo.leerTramos.mockResolvedValueOnce([{ paquete: 'com.ejemplo.app', inicioMs: 5000, finMs: 7000 }]);
-    fireEvent.click(screen.getByRole('button', { name: 'Consultar intervalos' }));
-    expect(await screen.findByText(/Intervalos encontrados: 1\.[\s\S]*0,03333 min/)).toBeTruthy();
-    expect(moduloNativo.leerTramos).toHaveBeenLastCalledWith(4000, 8000, ['com.ejemplo.app'], true);
+    await waitFor(() => expect(controles.revocar).toHaveBeenCalled());
+    await screen.findByRole('button', { name: 'Acepto capturar y sincronizar el uso' });
   });
-
 });
