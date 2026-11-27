@@ -26,6 +26,7 @@ export function crearControlador(api) {
     return pendiente;
   }
   return {
+    coordinarMedicion: encolar,
     actualizar: (senal = {}, antesDeObservar = () => {}, autorizado = () => true) => {
       const actual = ++revision;
       // Las pausas son hechos recibidos; una reconsulta solo vale si sigue vigente.
