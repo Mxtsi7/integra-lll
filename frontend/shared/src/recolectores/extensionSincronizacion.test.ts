@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
+// @ts-ignore El observador de Chrome es JavaScript sin declaraciones de tipos.
+import { avanzarMedicion } from '../../../extension/src/medicion.js';
 import { crearSincronizacionNavegador, validarBackend } from '../../../extension/src/sincronizacion';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -27,6 +29,7 @@ it('conecta login, consentimiento, ventana corregible y reintento durable tras r
   const token = `a.${btoa(JSON.stringify({ user_id: 42, organizacion_id: 'org-A', sid: 'sesion-A' }))}.b`;
   const hechos: unknown[] = [];
   let sinRed = true;
+  let esperarRed: (() => Promise<void>) | undefined;
   const fetcher = vi.fn(async (url: string, opciones?: RequestInit) => {
     let respuesta: unknown;
     const cuerpo = opciones?.body ? JSON.parse(opciones.body as string) : null;
@@ -37,6 +40,7 @@ it('conecta login, consentimiento, ventana corregible y reintento durable tras r
     else if (url.endsWith('/uso/recolector/')) {
       hechos.push(cuerpo);
       if (sinRed) throw new TypeError('sin red');
+      if (esperarRed) await esperarRed();
       respuesta = { event_id: cuerpo.event_id, suscripcion_id: id, estado: 'duplicado', recibido_en: new Date(ahora).toISOString() };
     } else if (url.endsWith(`/suscripciones/${id}/`)) respuesta = { id, nombre: 'Servicio', monto: '1000' };
     else throw new Error('Ruta inesperada: ' + url);
@@ -73,5 +77,42 @@ it('conecta login, consentimiento, ventana corregible y reintento durable tras r
   await reiniciado.ciclo();
   expect(hechos[1]).toEqual(hechos[0]);
   expect(JSON.stringify(sesion.datos.sincronizacion)).toContain('"pendientes":0');
+  // Crear otro pendiente y dejarlo en vuelo mientras el observador corrige idle.
+  sinRed = true;
+  const inicio = Date.parse('2026-11-25T12:01:10Z');
+  sesion.datos.medicion = { sesionId: 'medicion-A', sesiones: [], tramo: {
+    dominio: 'example.com', suscripcionId: id, inicio, confirmadoHasta: ahora } };
+  ahora += 20_000;
+  await reiniciado.ciclo();
+  expect(sesion.datos.sincronizacion).toEqual([expect.objectContaining({ pendientes: 1 })]);
+  sinRed = false;
+  let liberar!: () => void;
+  let iniciado!: () => void;
+  const enVuelo = new Promise<void>(resolve => { iniciado = resolve; });
+  const acuse = new Promise<void>(resolve => { liberar = resolve; });
+  esperarRed = async () => { esperarRed = undefined; iniciado(); await acuse; };
+  ahora += 1000;
+  const ciclo = reiniciado.ciclo();
+  await enVuelo;
+  sesion.datos.medicion = avanzarMedicion(sesion.datos.medicion, {
+    sesionId: 'medicion-A', dominio: null, estado: 'inactivo', observadoEn: ahora });
+  ahora += 9000;
+  liberar();
+  await ciclo;
+  expect(hechos.at(-1)).toMatchObject({ cobertura: 'parcial', duracion_ms: 1000,
+    inicio: '2026-11-25T12:01:30.000Z', fin: '2026-11-25T12:01:40.000Z' });
+
+  // Una pausa debe publicar su fase aunque la captura ya no esté autorizada.
+  sinRed = true;
+  ahora += 30000;
+  await reiniciado.ciclo();
+  expect(sesion.datos.sincronizacion).toEqual([expect.objectContaining({ fase: 'activo', pendientes: 1, error: expect.any(String) })]);
+  await reiniciado.mensaje({ tipo: 'pausar' }, controlador);
+  expect(sesion.datos.sincronizacion).toEqual([expect.objectContaining({ fase: 'pausado', pendientes: 1 })]);
+  ahora += 10000;
+  sinRed = false;
+  await reiniciado.mensaje({ tipo: 'sincronizar' }, controlador);
+  expect(sesion.datos.sincronizacion).toEqual([expect.objectContaining({ fase: 'pausado', pendientes: 0,
+    error: null, ultimoEnvio: new Date(ahora).toISOString() })]);
   expect(Object.values(local.datos).every(v => !String(v).includes('access_token'))).toBe(true);
 });
