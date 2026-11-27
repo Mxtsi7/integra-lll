@@ -16,7 +16,9 @@ export function validarBackend(valor: string): string {
   return url.origin + '/api';
 }
 
-export function crearSincronizacionNavegador(api: ApiChrome) {
+type CoordinarMedicion = <T>(accion: () => Promise<T>) => Promise<T>;
+
+export function crearSincronizacionNavegador(api: ApiChrome, coordinarMedicion: CoordinarMedicion = accion => accion()) {
   let urlBase = '';
   let tokens: Record<string, string> = {};
   let escrituras = Promise.resolve();
@@ -77,40 +79,65 @@ export function crearSincronizacionNavegador(api: ApiChrome) {
     const { configuracion } = await api.storage.session.get('configuracion');
     if (configuracion) await api.storage.session.set({ configuracion: { ...configuracion, id: crypto.randomUUID(), pausado: true } });
   }
+  async function publicarEstado(actual = generacion) {
+    const estados: EstadoColaUso[] = [];
+    for (const recolector of controles.values()) {
+      const estado = await recolector.estado();
+      if (estado) estados.push(estado);
+    }
+    if (actual !== generacion || !sesion()) return;
+    await api.storage.session.set({ sincronizacion: estados.map(e => ({ suscripcionId: e.suscripcionId, fase: e.fase,
+      pendientes: e.pendientes.length, ultimoEnvio: e.ultimoEnvio ?? null, error: e.error ?? null, accionPendiente: e.accionPendiente ?? null })) });
+  }
   async function cicloInterno() {
     if (!sesion() || retirando) return;
     const actual = generacion;
-    const { configuracion, medicion } = await api.storage.session.get(['configuracion', 'medicion']);
-    const todos = await propios();
-    for (const recolector of todos) await recolector.sincronizar();
-    if (!configuracion?.consentimiento || configuracion.pausado || actual !== generacion) return;
-    const ids = [...new Set<string>(Object.values(configuracion.asociaciones ?? {}) as string[])];
-    const limite = Date.now() - 60_000;
-    let corteSeguro = limite;
-    for (const id of ids) {
-      const recolector = control(id);
-      const estado = await recolector.estado();
-      if (!estado || estado.fase !== 'activo' || estado.sesionId !== sesion()) continue;
-      const fin = Math.min(limite, estado.cursor + 86_400_000);
-      if (fin <= estado.cursor) { corteSeguro = Math.min(corteSeguro, estado.cursor); continue; }
-      const observados = [...(medicion?.sesiones ?? []), ...(medicion?.tramo ? [{ ...medicion.tramo, fin: medicion.tramo.confirmadoHasta }] : [])];
-      const tramos = observados.filter(t => t.suscripcionId === id && t.fin > t.inicio)
-        .map(t => ({ inicio: t.inicio, fin: t.fin }));
-      if (actual !== generacion) return;
-      await recolector.capturar(fin, tramos);
-      corteSeguro = Math.min(corteSeguro, fin);
-      await recolector.sincronizar();
+    try {
+      const todos = await propios();
+      for (const recolector of todos) {
+        if (actual !== generacion) return;
+        await recolector.sincronizar();
+      }
+      // Leer después de los reintentos y serializar con el observador. No mantener
+      // bloqueada la observación durante ninguna espera de red.
+      const capturados = await coordinarMedicion(async () => {
+        const limite = Date.now() - 60_000;
+        const { configuracion, medicion } = await api.storage.session.get(['configuracion', 'medicion']);
+        const resultado: Control[] = [];
+        if (!configuracion?.consentimiento || configuracion.pausado || actual !== generacion || retirando) return resultado;
+        const ids = [...new Set<string>(Object.values(configuracion.asociaciones ?? {}) as string[])];
+        let corteSeguro = limite;
+        const observados = [...(medicion?.sesiones ?? []), ...(medicion?.tramo ? [{ ...medicion.tramo, fin: medicion.tramo.confirmadoHasta }] : [])];
+        for (const id of ids) {
+          if (actual !== generacion) return resultado;
+          const recolector = control(id);
+          const estado = await recolector.estado();
+          if (!estado || estado.fase !== 'activo' || estado.sesionId !== sesion()) continue;
+          const fin = Math.min(limite, estado.cursor + 86_400_000);
+          if (fin <= estado.cursor) { corteSeguro = Math.min(corteSeguro, estado.cursor); continue; }
+          const tramos = observados.filter(t => t.suscripcionId === id && t.fin > t.inicio)
+            .map(t => ({ inicio: t.inicio, fin: t.fin }));
+          if (actual !== generacion) return resultado;
+          await recolector.capturar(fin, tramos);
+          corteSeguro = Math.min(corteSeguro, fin);
+          resultado.push(recolector);
+        }
+        // El cursor y sus eventos ya son durables. El observador usa la misma
+        // cola para que la poda no sobrescriba una transición de idle.
+        if (medicion && actual === generacion) {
+          const { medicion: vigente } = await api.storage.session.get('medicion');
+          if (vigente?.sesionId === medicion.sesionId && vigente) await api.storage.session.set({ medicion: { ...vigente,
+            sesiones: vigente.sesiones.filter((t: { fin: number }) => t.fin > corteSeguro), limiteAlcanzado: false } });
+        }
+        return resultado;
+      });
+      for (const recolector of capturados) {
+        if (actual !== generacion) return;
+        await recolector.sincronizar();
+      }
+    } finally {
+      if (!retirando && actual === generacion) await publicarEstado(actual);
     }
-    // El cursor y sus eventos ya son durables; conservar el último minuto corregible.
-    if (medicion && actual === generacion) {
-      const { medicion: vigente } = await api.storage.session.get('medicion');
-      if (vigente) await api.storage.session.set({ medicion: { ...vigente,
-        sesiones: vigente.sesiones.filter((t: { fin: number }) => t.fin > corteSeguro), limiteAlcanzado: false } });
-    }
-    const estados: EstadoColaUso[] = [];
-    for (const recolector of controles.values()) { const estado = await recolector.estado(); if (estado) estados.push(estado); }
-    await api.storage.session.set({ sincronizacion: estados.map(e => ({ suscripcionId: e.suscripcionId, fase: e.fase,
-      pendientes: e.pendientes.length, ultimoEnvio: e.ultimoEnvio ?? null, error: e.error ?? null, accionPendiente: e.accionPendiente ?? null })) });
   }
   return {
     sesionVigente: () => !!sesion() && !retirando,
@@ -141,6 +168,7 @@ export function crearSincronizacionNavegador(api: ApiChrome) {
             urlBase = '';
           } else if (!fallo && mensaje.tipo === 'retirar') await controlador.retirar();
           retirando = false;
+          if (mensaje.tipo === 'pausar' || (mensaje.tipo === 'retirar' && fallo)) await publicarEstado();
           if (fallo) throw new Error('Captura detenida. Falta confirmar el retiro o pausa con el servidor; vuelve a intentarlo.');
           return { ok: true };
         });
@@ -199,6 +227,7 @@ export function crearSincronizacionNavegador(api: ApiChrome) {
         await api.storage.session.set({ configuracion: { ...vigente, id: crypto.randomUUID(), pausado: false, versionTexto: 'uso-v1' } });
         retirando = false;
         await controlador.actualizar();
+        await publicarEstado(actual);
         return { ok: true };
       });
     },
