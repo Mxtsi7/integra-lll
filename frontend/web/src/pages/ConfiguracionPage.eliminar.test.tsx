@@ -13,6 +13,7 @@ vi.mock("../components/layout/AppLayout", () => ({
   AppLayout: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
 vi.mock("../components/Configuracion/PreferenciasAvisos", () => ({ PreferenciasAvisos: () => null }));
+vi.mock("../components/Planes/PlanPremium", () => ({ PlanPremium: () => null })); // hace sus propias peticiones de plan
 vi.mock("../context/AuthContext", () => ({
   useAuth: () => ({ cerrarSesionLocal: () => true, capturarSesion: () => 1 }),
 }));

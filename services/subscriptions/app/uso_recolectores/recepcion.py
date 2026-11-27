@@ -2,6 +2,7 @@
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.utils.module_loading import import_string
 
 from .validacion import ErrorEventoUso, MAXIMO_CUERPO_BYTES, validar_evento
@@ -14,11 +15,14 @@ def proveedor(nombre):
     return import_string(configurado) if isinstance(configurado, str) else configurado
 
 
+@transaction.atomic
 def recibir(request, suscripcion, usuario_id, correlacion):
     # Medir antes de parsear JSON; la suscripción y la identidad ya están autorizadas.
     if len(request.body) > MAXIMO_CUERPO_BYTES:
         raise ErrorEventoUso('El cuerpo supera 4 KiB.')
     validado = validar_evento(request.data)
+    from .consentimiento import bloquear_destino
+    bloquear_destino(suscripcion)
     comprobar = proveedor('USO_VERIFICAR_CONSENTIMIENTO')
     contexto = dict(suscripcion=suscripcion, usuario_id=usuario_id, evento=validado)
     if comprobar is None or not comprobar(**contexto):
