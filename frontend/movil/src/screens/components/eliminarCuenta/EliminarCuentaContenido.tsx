@@ -14,6 +14,8 @@ export interface EliminarCuentaContenidoProps {
   onEliminada: (resultado: ResultadoEliminacion) => void;
   /** Cancelar: vuelve atrás sin tocar nada. */
   onCancelar: () => void;
+  /** Marca de sesión (AuthContext.capturarSesion): descarta respuestas de otra sesión. */
+  capturarSesion?: () => number;
   /** Solo en pruebas. */
   onEliminar?: (datos: DatosEliminacion) => Promise<ResultadoEliminacion>;
   /** Solo en pruebas. Mientras el backend no esté activo, el formulario no se muestra. */
@@ -24,9 +26,10 @@ export function EliminarCuentaContenido({
   onEliminada,
   onCancelar,
   onEliminar,
+  capturarSesion,
   disponible = ELIMINAR_CUENTA_DISPONIBLE,
 }: EliminarCuentaContenidoProps) {
-  const formulario = useEliminarCuenta({ onEliminar, onEliminada });
+  const formulario = useEliminarCuenta({ onEliminar, onEliminada, capturarSesion });
 
   if (!disponible) {
     return (
