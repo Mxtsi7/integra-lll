@@ -14,6 +14,7 @@ import { ConfiguracionPage } from './pages/ConfiguracionPage';
 import { SuscripcionDetallePage } from './pages/SuscripcionDetallePage';
 import { ProximamentePage } from './pages/ProximamentePage';
 import { CuentasConectadasPage } from './pages/CuentasConectadasPage';
+import { PlanesRetornoPage } from './pages/PlanesRetornoPage';
 import { RetornoOAuthPage } from './pages/RetornoOAuthPage';
 import { ImportacionPage } from './pages/ImportacionPage';
 import { ImportacionesPage } from './pages/ImportacionesPage';
@@ -138,6 +139,7 @@ export function App() {
               />
               {/* AN-16: retorno del proveedor OAuth (Gmail / Outlook) con sesión activa. */}
               <Route path="/oauth/retorno" element={<RetornoOAuthPage />} />
+              <Route path="/planes/retorno" element={<PlanesRetornoPage />} />
               {/* CH-27: el progreso de una importación (FE-08). FE-07 lleva
                   acá después de subir un archivo. */}
               <Route path="/importaciones" element={<ImportacionesPage />} />

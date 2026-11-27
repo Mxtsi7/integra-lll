@@ -6,6 +6,8 @@ import { CambiarContrasena } from '../components/Perfil/CambiarContrasena';
 import { CambiarCorreo } from '../components/Perfil/CambiarCorreo';
 import { EditarNombre } from '../components/Perfil/EditarNombre';
 import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
+import { AccionesPremium } from '../components/Planes/AccionesPremium';
+import { usePlanPremium } from '../hooks/usePlanPremium';
 import { Avatar } from '../components/ui/Avatar';
 import { Boton } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
@@ -99,8 +101,17 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
   const cerrarCambioContrasena = useCallback(() => setCambiandoContrasena(false), []);
   const [cambiandoCorreo, setCambiandoCorreo] = useState(false);
   const cerrarCambioCorreo = useCallback(() => setCambiandoCorreo(false), []);
-  const plan = usuario.plan ?? 'gratuito';
-  const esPremium = plan === 'premium';
+  // El plan sale de `/usuarios/me/permisos/`, igual que en Ajustes; `usuario.plan` no es la fuente.
+  const { estado: estadoPlan, reintentar, esPremium, contratacion, esGratuitoConfirmado, avisoActivacion } = usePlanPremium();
+  const etiquetaPlan = estadoPlan.tipo === 'listo' ? (esPremium ? 'Plan Premium' : 'Plan Gratuito') : 'Plan';
+  const detallePlan =
+    estadoPlan.tipo === 'listo'
+      ? esPremium
+        ? 'Asistente financiero y recomendaciones avanzadas.'
+        : 'Alertas de cobro y de prueba gratis incluidas.'
+      : estadoPlan.tipo === 'error'
+        ? estadoPlan.mensaje
+        : 'Comprobando tu plan…';
   const etiquetaRol = usuario.rol === 'titular' ? 'Titular del hogar' : 'Integrante del hogar';
 
   return (
@@ -112,17 +123,18 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
           <p className={styles.usuarioCorreo}>{usuario.correo}</p>
         </div>
         <div className={styles.plan}>
-          <p className={styles.planNombre}>{esPremium ? 'Plan Premium' : 'Plan Gratuito'}</p>
-          <p className={styles.planDetalle}>
-            {esPremium
-              ? 'Asistente financiero y recomendaciones avanzadas.'
-              : 'Alertas de cobro y de prueba gratis incluidas.'}
-          </p>
-          {!esPremium && (
-            <Boton variante="secundario" tamano="s" disabled title="Próximamente">
-              Mejorar a Premium
+          <p className={styles.planNombre}>{etiquetaPlan}</p>
+          <p className={styles.planDetalle}>{detallePlan}</p>
+          {estadoPlan.tipo === 'error' && (
+            <Boton variante="sutil" tamano="s" onClick={reintentar}>
+              Reintentar
             </Boton>
           )}
+          <AccionesPremium
+            contratacion={contratacion}
+            esGratuitoConfirmado={esGratuitoConfirmado}
+            avisoActivacion={avisoActivacion}
+          />
         </div>
       </section>
 

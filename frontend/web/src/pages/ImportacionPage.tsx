@@ -1,9 +1,9 @@
 import { formatearFechaHora, type EstadoImportacion, type Importacion } from '@ojoalgasto/shared';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { CobrosDeLaImportacion } from '../components/candidatos/CobrosDeLaImportacion';
+import { RevisionDeCandidatos } from '../components/candidatos/RevisionDeCandidatos';
 import { AppLayout } from '../components/layout/AppLayout';
-import { Boton, BotonEnlace } from '../components/ui/Boton';
+import { BotonEnlace } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia, type TonoInsignia } from '../components/ui/Insignia';
 import { hayQueReconectar, type EstadoCuentaDeImportacion } from '../components/importacion/reconexion';
@@ -95,11 +95,12 @@ function DetalleImportacion({ importacion: imp, problema, onReintentar, cuenta }
 
       {imp.estado === 'completada' && <Candidatos importacion={imp} />}
       {hayQueReconectar(imp, cuenta) && <AvisoDeReconexion cuenta={cuenta} />}
-      {/* S3-CH-06: lo que sí se leyó, aparte de lo que no. Cada bloque con lo suyo, y los dos se ven a la vez. */}
+      {/* S3-CH-06: lo que sí se leyó, aparte de lo que no. Cada bloque con lo suyo, y los dos se ven a la vez.
+          S3-CH-07 a S3-CH-10: ahí mismo se eligen, se confirman o se rechazan, y se ve qué pasó con cada uno. */}
       {imp.estado === 'completada' && imp.candidatos_detectados > 0 && (
         <div className={styles.cobros}>
           <h3 className={styles.subtitulo}>Cobros encontrados</h3>
-          <CobrosDeLaImportacion importacionId={imp.id} />
+          <RevisionDeCandidatos importacion={imp.id} />
         </div>
       )}
       {imp.errores_totales > 0 && <ErroresPorFila importacion={imp} />}
@@ -175,13 +176,10 @@ function Candidatos({ importacion: imp }: { importacion: Importacion }) {
     <div className={styles.candidatos}>
       <p>
         Encontramos {anterior === 1 ? '1 cobro posible' : `${anterior.toLocaleString('es-CL')} cobros posibles`}.{' '}
-        <strong>Todavía no se creó ni cambió ninguna suscripción:</strong> primero los revisas y los confirmas.
+        <strong>Todavía no se creó ni cambió ninguna suscripción:</strong> revísalos en «Cobros encontrados» y confirma
+        los que reconozcas.
       </p>
       {yaImportadas > 0 && <p>{avisoYaImportadas}</p>}
-      {/* El paso a la previsualización (FE-10) todavía no existe en la web. */}
-      <Boton variante="secundario" tamano="s" disabled title="Muy pronto">
-        Revisar cobros encontrados
-      </Boton>
     </div>
   );
 }
