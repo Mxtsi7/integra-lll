@@ -24,9 +24,9 @@ afterEach(() => {
 });
 
 describe("Eliminar cuenta en Ajustes (S3-AN-03)", () => {
-  it("la bandera web está habilitada y la de móvil sigue apagada (AN-19 sin protección de sesión)", () => {
+  it("las banderas de web y de móvil están habilitadas", () => {
     expect(ELIMINAR_CUENTA_WEB_DISPONIBLE).toBe(true);
-    expect(ELIMINAR_CUENTA_DISPONIBLE).toBe(false);
+    expect(ELIMINAR_CUENTA_DISPONIBLE).toBe(true);
   });
 
   it("el botón está activo y abre el diálogo con contraseña y confirmación explícita", () => {
