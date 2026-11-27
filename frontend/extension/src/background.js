@@ -3,6 +3,11 @@ import { crearControlador } from './controlador.js';
 
 const controlador = crearControlador(chrome);
 let sincronizacion;
+/**
+ * @template T
+ * @param {() => Promise<T>} accion
+ * @returns {Promise<T>}
+ */
 export function coordinarMedicion(accion) { return controlador.coordinarMedicion(accion); }
 export function conectarSincronizacion(integracion) { sincronizacion = integracion; }
 function actualizar(senal) {

@@ -20,6 +20,11 @@ export function crearControlador(api) {
     const sobrantes = (permisos.origins ?? []).filter(origen => !vigentes.has(origen));
     if (sobrantes.length) await api.permissions.remove({ origins: sobrantes });
   }
+  /**
+   * @template T
+   * @param {() => Promise<T>} operacion
+   * @returns {Promise<T>}
+   */
   function encolar(operacion) {
     const pendiente = cola.then(operacion);
     cola = pendiente.catch(() => {}); // El llamador recibe el rechazo; la cola sigue utilizable.
