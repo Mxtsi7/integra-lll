@@ -3,6 +3,7 @@ import { crearControlador } from './controlador.js';
 
 const controlador = crearControlador(chrome);
 let sincronizacion;
+export function coordinarMedicion(accion) { return controlador.coordinarMedicion(accion); }
 export function conectarSincronizacion(integracion) { sincronizacion = integracion; }
 function actualizar(senal) {
   controlador.actualizar(senal, () => sincronizacion?.comprobarSesion(), () => sincronizacion?.sesionVigente() ?? true)
