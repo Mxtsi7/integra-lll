@@ -13,7 +13,8 @@ Permite que un usuario elimine permanentemente su cuenta desde el teléfono, rep
 Puntos clave para explicar en la defensa:
 
 - **Doble validación antes de habilitar el envío:** La pantalla explica primero las consecuencias del borrado. El botón **"Eliminar mi cuenta"** permanece deshabilitado hasta que la persona ingresa su **contraseña actual** y escribe exactamente la palabra **`ELIMINAR`**.
-- **Interruptor de despliegue (`Feature Flag`):** Si `ELIMINAR_CUENTA_DISPONIBLE` está en `false` dentro de `shared/src/api/eliminarCuenta.ts`, la pantalla muestra *"estará disponible próximamente"* en lugar del formulario (igual que en web). Para encenderlo en ambos clientes basta con cambiar esa bandera a `true` en un commit aparte.
+- **Interruptor de despliegue (`Feature Flag`):** `ELIMINAR_CUENTA_DISPONIBLE` (en `shared/src/api/eliminarCuenta.ts`) está en `true`. Si se pone en `false`, la pantalla muestra *"estará disponible próximamente"* en lugar del formulario. La web usa otra bandera, `ELIMINAR_CUENTA_WEB_DISPONIBLE`.
+- **Respuestas de otra sesión (S3-AN-03/AN-19):** al confirmar se anota la marca de sesión (`capturarSesion()` de `AuthContext`). Si al responder la marca cambió (salió la cuenta A y entró B), no se llama `cerrarSesion()`, no se avisa ni se muestra el error: `cerrarSesion()` cierra la sesión que haya en ese momento y cerraría la de B. Si la pantalla ya se cerró, tampoco se actualiza su estado.
 - **Cierre de sesión solo tras confirmación del servidor:** La sesión local nunca se toca antes de tiempo. Únicamente cuando el backend responde con éxito (`204` o `202`), se ejecuta `cerrarSesion()`, que borra los tokens del almacenamiento seguro (`SecureStore`) y devuelve la app al login. Si el usuario cancela o ocurre cualquier error, la cuenta y la sesión siguen intactas.
 
 ---

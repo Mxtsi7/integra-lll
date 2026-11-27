@@ -1,7 +1,7 @@
 # Eliminar cuenta en web
 
 ## Qué cambió
-- Nueva bandera `ELIMINAR_CUENTA_WEB_DISPONIBLE = true` (`shared/src/api/eliminarCuenta.ts`): habilita el botón en Perfil y Ajustes (web). `ELIMINAR_CUENTA_DISPONIBLE` (móvil AN-19) **sigue en `false`**: esa pantalla cierra sesión al terminar sin comprobar que la sesión ni la pantalla sigan siendo las mismas, y una respuesta tardía podría cerrar la sesión de otra cuenta. Se enciende cuando AN-19 tenga esa protección (pendiente).
+- Nueva bandera `ELIMINAR_CUENTA_WEB_DISPONIBLE = true` (`shared/src/api/eliminarCuenta.ts`): habilita el botón en Perfil y Ajustes (web). `ELIMINAR_CUENTA_DISPONIBLE` (móvil AN-19) también está en `true` desde que la pantalla móvil descarta las respuestas de otra sesión (ver `movil/docs/IMPLEMENTAR_BORRADO_CUENTA_MOVIL_AN19.MD`).
 - `EliminarCuenta.tsx` anota la sesión (`capturarSesion()`) antes de pedir el borrado. Si cuando llega la respuesta ya hay otra sesión (otra cuenta entró o se cerró), **no** cierra sesión, no avisa y no redirige; tampoco muestra errores de la sesión anterior.
 
 ## Cómo funciona el diálogo

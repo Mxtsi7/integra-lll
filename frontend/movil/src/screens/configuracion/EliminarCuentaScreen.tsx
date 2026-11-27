@@ -8,14 +8,16 @@ import type { ConfiguracionScreenProps } from '../../navigation/types';
 
 /** AN-19. La lógica está en `components/eliminarCuenta/`; esta pantalla solo la coloca. */
 export default function EliminarCuentaScreen({ navigation }: ConfiguracionScreenProps<'EliminarCuenta'>) {
-  const { cerrarSesion } = useAuth();
+  const { cerrarSesion, capturarSesion } = useAuth();
 
   return (
     <ScrollView testID="screen-eliminar-cuenta" contentContainerStyle={styles.contenedor} keyboardShouldPersistTaps="handled">
       <Text style={styles.titulo}>Eliminar cuenta</Text>
       <EliminarCuentaContenido
+        capturarSesion={capturarSesion}
         onCancelar={() => navigation.goBack()}
         onEliminada={(resultado) => {
+          // Solo llega aquí si la sesión sigue siendo la que pidió el borrado (lo comprueba el hook).
           // El backend ya revocó las sesiones. cerrarSesion borra los tokens del teléfono y la app vuelve al login.
           void cerrarSesion();
           Alert.alert('Cuenta', resultado.estado === 'pendiente' ? MENSAJE_ELIMINACION_PENDIENTE : MENSAJE_CUENTA_ELIMINADA);

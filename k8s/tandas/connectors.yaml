@@ -1,0 +1,117 @@
+# connectors como satélite: corre en el namespace de otro integrante y usa
+# el PostgreSQL y el Redis del núcleo (ver k8s/README.md, «Reparto»).
+#
+# Se despliega con:
+#     ./k8s/desplegar-satelite.sh connectors
+# que construye la imagen, traslada la configuración y los secretos con las
+# direcciones calificadas (`postgres` → `postgres.<núcleo>`), aplica esto y
+# recién entonces apunta el gateway del núcleo hacia acá.
+#
+# ── Qué corre ────────────────────────────────────────────────────────────────
+#   connectors          la API (cuentas conectadas, OAuth, importaciones,
+#                       candidatos) detrás del gateway del núcleo, con su
+#                       Service. El worker y la purga están en
+#                       k8s/tandas/worker-connectors.yaml.
+#
+# ── Mientras no haya cupo de Services ────────────────────────────────────────
+# Este archivo NO se aplica si k8s/reparto.env dice `CONNECTORS_API=web`: la
+# cuota global de Services del clúster está llena y la API corre dentro del
+# pod `web` del núcleo (k8s/parches/connectors-api-en-web.yaml).
+#
+# ── Lo que NO recibe ─────────────────────────────────────────────────────────
+# La clave administradora de PostgreSQL, el secreto de los JWT, la cuenta de
+# correo ni RabbitMQ: connectors no publica eventos todavía. Las credenciales
+# OAuth de Google y Microsoft van en un Secret aparte, `ojoalgasto-conectores`,
+# opcional: sin él la API y la importación de CSV funcionan, pero conectar
+# Gmail u Outlook falla en la pantalla del proveedor.
+apiVersion: v1
+kind: Service
+metadata:
+  name: connectors
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  # Solo la API: ni el worker ni la purga reciben tráfico HTTP.
+  selector: { app: connectors, componente: api }
+  ports: [{ name: http, port: 8003, targetPort: 8003 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: connectors
+  labels: { app.kubernetes.io/part-of: ojoalgasto }
+spec:
+  replicas: 1
+  # Recreate: con la cuota al tope un RollingUpdate se traba (k8s/README.md).
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: connectors, componente: api } }
+  template:
+    metadata:
+      labels: { app: connectors, componente: api, app.kubernetes.io/part-of: ojoalgasto }
+    spec:
+      imagePullSecrets: [{ name: ghcr }]
+      initContainers:
+        # Las migraciones las aplica SOLO este paso; el worker y la purga
+        # arrancan con APLICAR_MIGRACIONES=0.
+        - name: migrar
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          command: [sh, entrypoint.sh, echo, migraciones listas]
+          envFrom: &config
+            - configMapRef: { name: ojoalgasto }
+          env: &entorno
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: SECRET_KEY }
+            # La cuenta restringida del esquema, no la administradora.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-bd-connectors, key: DATABASE_URL }
+            # Valida la limpieza de una organización que pide auth (MX-07).
+            - name: ELIMINACION_INTERNA_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            # Cifra los tokens de las cuentas conectadas en reposo.
+            - name: CLAVES_CIFRADO
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO }
+            - name: OAUTH_GMAIL_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_ID, optional: true }
+            - name: OAUTH_GMAIL_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_GMAIL_CLIENT_SECRET, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_ID
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_ID, optional: true }
+            - name: OAUTH_OUTLOOK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-conectores, key: OAUTH_OUTLOOK_CLIENT_SECRET, optional: true }
+            - { name: ESQUEMA_BD, value: connectors }
+          resources: &recursos_api
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { cpu: 200m, memory: 256Mi }
+      containers:
+        - name: api
+          image: IMAGEN_CONNECTORS
+          imagePullPolicy: Always
+          command: [gunicorn, 'connectors_config.wsgi:application', '--bind', '0.0.0.0:8003', '--workers', '1', '--access-logfile', '-']
+          envFrom: *config
+          env: *entorno
+          ports: [{ name: http, containerPort: 8003 }]
+          startupProbe:
+            httpGet: &salud
+              path: /health/
+              port: http
+              httpHeaders: [{ name: Host, value: connectors }]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: *salud
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet: *salud
+            periodSeconds: 20
+            timeoutSeconds: 10
+          resources: *recursos_api
