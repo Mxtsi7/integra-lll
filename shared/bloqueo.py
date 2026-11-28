@@ -53,6 +53,7 @@ ESPACIOS = {
     "resumen_organizacion": 29,  # subscriptions · por organización
     "cobertura_uso": 30,      # analytics · FE-29, por (tenant, suscripción)
     "cuota_importacion": 31,  # connectors · FE-07, por organización
+    "confirmacion_candidato": 32,  # subscriptions · por (tenant, servicio)
 }
 
 

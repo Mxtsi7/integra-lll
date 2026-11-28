@@ -6,8 +6,11 @@ import uuid
 
 import pytest
 
-from app.models import RegistroUso, Subscription
-from app.serializers import RegistrarUsoSerializer, RegistroUsoSerializer, SubscriptionSerializer
+from app.models import Cobro, RegistroUso, Subscription
+from app.serializers import (
+    CobroSerializer, RegistrarUsoSerializer, RegistroUsoSerializer,
+    SubscriptionSerializer,
+)
 
 
 # ── fixtures ────────────────────────────────────────────────────────
@@ -99,6 +102,24 @@ class TestSubscriptionSerializerValid:
         assert instancia.organizacion_id == org_id
         assert isinstance(instancia.id, uuid.UUID)
         assert instancia.creado_en is not None
+
+
+@pytest.mark.django_db
+def test_el_serializer_de_cobro_expone_el_origen_guardado(valid_payload: dict) -> None:
+    """La API debe mostrar de dónde salió el cobro, no repetir 'manual'."""
+    suscripcion = SubscriptionSerializer(data=valid_payload)
+    assert suscripcion.is_valid(), suscripcion.errors
+    suscripcion.save(organizacion_id=uuid.uuid4())
+    cobro = Cobro.objects.create(
+        organizacion_id=suscripcion.instance.organizacion_id,
+        suscripcion=suscripcion.instance,
+        monto=Decimal("9990.00"),
+        moneda="CLP",
+        fecha=date(2026, 10, 1),
+        origen=Cobro.Origen.CORREO,
+    )
+    datos = CobroSerializer(cobro).data
+    assert datos["origen"] == "correo"
 
 
 @pytest.mark.django_db

@@ -473,6 +473,11 @@ class Cobro(ReferenciasCatalogo, ModeloTenant):
     se calcula desde la suscripción.
     """
 
+    class Origen(models.TextChoices):
+        MANUAL = "manual", "Manual"
+        CSV = "csv", "Importación CSV"
+        CORREO = "correo", "Lectura de correo"
+
     suscripcion = models.ForeignKey(
         Subscription,
         on_delete=models.CASCADE,
@@ -501,6 +506,23 @@ class Cobro(ReferenciasCatalogo, ModeloTenant):
 
     fecha = models.DateField(verbose_name="Fecha del cobro")
 
+    origen = models.CharField(
+        max_length=10,
+        choices=Origen.choices,
+        default=Origen.MANUAL,
+        verbose_name="Origen del cobro",
+        help_text="Los cobros históricos eran manuales; csv/correo llegan de un candidato confirmado.",
+    )
+
+    # UUID suelto, no FK: el candidato vive en otro servicio y su outbox puede
+    # purgarse. La restricción parcial de abajo es la última línea de defensa
+    # de la idempotencia; la primera es TrabajoDerivado (por evento).
+    candidato_id = models.UUIDField(
+        null=True,
+        blank=True,
+        verbose_name="Candidato confirmado",
+    )
+
     class Meta(ModeloTenant.Meta):
         db_table = "cobro"
         ordering = ["-fecha"]
@@ -508,6 +530,14 @@ class Cobro(ReferenciasCatalogo, ModeloTenant):
             models.CheckConstraint(
                 condition=models.Q(monto__gt=Decimal("0")),
                 name="cobro_monto_positivo",
+            ),
+            # `NULL` no colisiona: miles de cobros manuales siguen siendo
+            # válidos. Un candidato, en cambio, solo puede acreditar UN cobro
+            # por organización aunque llegue con otro `evento_id`.
+            models.UniqueConstraint(
+                fields=["organizacion_id", "candidato_id"],
+                condition=models.Q(candidato_id__isnull=False),
+                name="cobro_unico_por_candidato",
             ),
         ]
         indexes = [
@@ -995,6 +1025,7 @@ class TrabajoDerivado(ModeloTenant):
 
     class Trabajo(models.TextChoices):
         RESUMEN = "resumen_organizacion", "Recalcular el resumen de la organización"
+        CANDIDATO_APLICADO = "candidato_aplicado", "Aplicar un candidato confirmado"
 
     evento_id = models.UUIDField(
         verbose_name="Evento del outbox",

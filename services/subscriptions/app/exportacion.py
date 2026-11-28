@@ -40,11 +40,10 @@ COLUMNAS = (
     "estado",
 )
 
-# Los cobros existentes se cargaron a mano; cuando exista ingesta CSV/PDF/
-# correo, el origen real podrá venir de un campo del cobro. Mientras tanto
-# "manual" es la respuesta verdadera, no un valor inventado.
-ORIGEN_POR_DEFECTO = "manual"
-ORIGENES_SOPORTADOS = frozenset({ORIGEN_POR_DEFECTO})
+# El origen lo guarda `Cobro.origen`. Los cobros históricos migran como
+# `manual`; los que vienen de una confirmación traen `csv` o `correo`.
+ORIGEN_POR_DEFECTO = Cobro.Origen.MANUAL
+ORIGENES_SOPORTADOS = frozenset(Cobro.Origen.values)
 
 
 def normalizar_moneda(valor: object) -> str | None:
@@ -65,12 +64,10 @@ def normalizar_moneda(valor: object) -> str | None:
 
 
 def normalizar_origen(valor: object) -> str | None:
-    """Valida ``origen`` contra los orígenes realmente soportados.
+    """Valida ``origen`` contra los valores de ``Cobro.Origen``.
 
-    ``Cobro`` todavía no guarda procedencia: todos los cobros de este alcance
-    son manuales. Se acepta ``manual`` y se rechazan explícitamente los
-    orígenes que aún no existen (``csv``, ``correo``) en lugar de etiquetar
-    filas con una procedencia que no se puede demostrar.
+    Un código fuera de ese enum es un 400: no se inventa una procedencia ni
+    se devuelve silenciosamente el listado completo.
     """
     if valor is None or str(valor).strip() == "":
         return None
@@ -79,8 +76,9 @@ def normalizar_origen(valor: object) -> str | None:
         raise ValidationError(
             {
                 "origen": (
-                    "Origen no soportado. Los cobros actuales son 'manual'; "
-                    "csv/correo todavía no tienen procedencia registrada."
+                    "Origen no soportado. Los valores válidos son: "
+                    + ", ".join(sorted(ORIGENES_SOPORTADOS))
+                    + "."
                 )
             }
         )
@@ -123,10 +121,8 @@ def construir_csv_cobros(
     """Construye el CSV completo (encabezados + filas) para el rango inclusivo.
 
     ``moneda`` y ``origen`` ya llegan normalizados por
-    :func:`normalizar_moneda` / :func:`normalizar_origen`. El origen ``manual``
-    no necesita filtro en la consulta porque es el único soportado hoy; se
-    mantiene explícito para que el contrato no cambie cuando exista un campo
-    de procedencia real.
+    :func:`normalizar_moneda` / :func:`normalizar_origen`. El filtro se aplica
+    sobre la procedencia guardada en cada cobro, no sobre un valor fijo.
     """
     cobros = Cobro.objects.filter(
         organizacion_id=organizacion_id,
@@ -137,9 +133,7 @@ def construir_csv_cobros(
     if moneda:
         cobros = cobros.filter(moneda=moneda)
     if origen:
-        # ``origen`` ya está restringido a ``manual``; se deja el punto de
-        # extensión preparado para cuando el modelo registre procedencia.
-        assert origen == ORIGEN_POR_DEFECTO
+        cobros = cobros.filter(origen=origen)
     cobros = cobros.select_related("suscripcion").order_by("fecha", "id")
 
     salida = StringIO(newline="")
@@ -156,7 +150,7 @@ def construir_csv_cobros(
                 f"{cobro.monto:.2f}",
                 escapar_formula_csv(cobro.moneda),
                 cobro.fecha.isoformat(),
-                escapar_formula_csv(ORIGEN_POR_DEFECTO),
+                escapar_formula_csv(cobro.origen),
                 escapar_formula_csv(_estado_suscripcion(cobro)),
             )
         )
