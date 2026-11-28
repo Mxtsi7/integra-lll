@@ -52,6 +52,14 @@ despliegue. Lo reprodujo la revisión de la PR.
 Ahora la decisión sale de la evidencia durable vinculada al evento: si el
 POST acreditó el trabajo de ESTE evento, se omite; si no, se hace. Sea cual
 sea la bandera de este proceso. Ver `events/trabajo.py`.
+
+── Dos colas, un solo proceso ────────────────────────────────────────────────
+Además del resumen v2, acá se aplican los `candidato.confirmado` v1 que
+publica connectors. Cada cola tiene SU cola de fallos: mezclarlas haría
+imposible saber qué trabajo quedó pendiente. El enrutamiento es por la cola
+de entrega, no por adivinar desde el cuerpo: un mensaje inválido de una cola
+nunca debe caer en la DLQ de la otra. Con `--uno` se detiene tras el PRIMER
+mensaje de cualquiera de las dos, para poder probarlas por separado.
 """
 
 import json
@@ -67,13 +75,18 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.db.utils import InterfaceError, OperationalError
 
+from events.confirmaciones import procesar_confirmacion
 from events.contrato import routing_key
 from events.validacion import errores as errores_de_contrato
 from events.topologia import (
+    COLA_CONFIRMACIONES,
     COLA_FALLIDOS,
+    COLA_FALLIDOS_CONFIRMACIONES,
     COLA_RESUMEN,
     EVENTOS_DEL_RESUMEN,
     EXCHANGE,
+    EVENTO_CONFIRMADO,
+    VERSION_CONFIRMADO,
     declarar,
 )
 from events.trabajo import (
@@ -254,44 +267,70 @@ class Command(BaseCommand):
         signal.signal(signal.SIGTERM, apagar)
         signal.signal(signal.SIGINT, apagar)
 
-        def al_recibir(canal_, metodo, _propiedades, cuerpo):
-            self.atender(canal_, metodo, cuerpo)
-            if opciones["uno"]:
-                # Con --uno se corta después del primer mensaje, sea cual sea
-                # el desenlace. Si solo cortara al tener éxito, una prueba de
-                # un mensaje inválido se quedaría colgada para siempre.
-                canal_.stop_consuming()
+        def escucha_en(cola):
+            def al_recibir(canal_, metodo, _propiedades, cuerpo):
+                self.atender(canal_, metodo, cuerpo, cola=cola)
+                if opciones["uno"]:
+                    # Con --uno se corta después del primer mensaje, sea cual
+                    # sea el desenlace y de qué cola viniera. Si solo cortara
+                    # al tener éxito, una prueba con un mensaje inválido se
+                    # quedaría colgada para siempre.
+                    canal_.stop_consuming()
+            return al_recibir
 
-        canal.basic_consume(queue=COLA_RESUMEN, on_message_callback=al_recibir)
+        canal.basic_consume(
+            queue=COLA_RESUMEN, on_message_callback=escucha_en(COLA_RESUMEN)
+        )
+        canal.basic_consume(
+            queue=COLA_CONFIRMACIONES,
+            on_message_callback=escucha_en(COLA_CONFIRMACIONES),
+        )
         self.stdout.write(
             f"escuchando {COLA_RESUMEN} en {EXCHANGE} "
             f"({', '.join(routing_key(_Clave(n, v)) for n, v in EVENTOS_DEL_RESUMEN)}); "
-            f"los fallos van a {COLA_FALLIDOS}"
+            f"los fallos van a {COLA_FALLIDOS}\n"
+            f"escuchando {COLA_CONFIRMACIONES} en {EXCHANGE} "
+            f"({routing_key(_Clave(EVENTO_CONFIRMADO, VERSION_CONFIRMADO))}); "
+            f"los fallos van a {COLA_FALLIDOS_CONFIRMACIONES}"
         )
         canal.start_consuming()
         conexion.close()
 
-    def atender(self, canal_, metodo, cuerpo) -> Desenlace:
+    def atender(self, canal_, metodo, cuerpo, *, cola=COLA_RESUMEN) -> Desenlace:
         """Procesa UN mensaje y lo confirma o lo aparta. Devuelve el desenlace.
 
-        El ack va después de `procesar`, nunca antes: `procesar` solo devuelve
-        `confirmar=True` cuando el trabajo quedó confirmado en la base, cuando
+        El ack va después del trabajo, nunca antes: el procesador solo devuelve
+        `confirmar=True` cuando el efecto quedó confirmado en la base, cuando
         encontró la evidencia de que ya estaba o cuando la organización ya fue
         eliminada y el evento quedó obsoleto. Si se cae entre medio, el
         mensaje sigue sin confirmar y RabbitMQ lo vuelve a entregar.
+
+        `cola` decide QUÉ trabajo se hace y a dónde van los fallos. Los tests
+        antiguos llaman sin este argumento: siguen ejerciendo el resumen v2.
         """
         # Django cierra las conexiones a la base por petición HTTP; acá no
         # hay peticiones, así que hay que limpiarlas a mano o se quedan
         # conexiones muertas después de un corte.
         close_old_connections()
 
-        desenlace = procesar(cuerpo, avisar=self.stderr.write)
+        if cola == COLA_CONFIRMACIONES:
+            resultado = procesar_confirmacion(cuerpo, avisar=self.stderr.write)
+            desenlace = Desenlace(
+                confirmar=resultado.confirmar, motivo=resultado.motivo
+            )
+            cola_fallos = COLA_FALLIDOS_CONFIRMACIONES
+        else:
+            desenlace = procesar(cuerpo, avisar=self.stderr.write)
+            cola_fallos = COLA_FALLIDOS
+
         if desenlace.confirmar:
             canal_.basic_ack(delivery_tag=metodo.delivery_tag)
         else:
-            # Rechaza sin reencolar: la cola tiene DLX, así que el mensaje se
-            # va a `COLA_FALLIDOS` en vez de borrarse.
-            self.stderr.write(f"a {COLA_FALLIDOS}: {desenlace.motivo} | {cuerpo[:200]!r}")
+            # Rechaza sin reencolar: su cola tiene DLX, así que el mensaje se
+            # va a la DLQ de ESE flujo en vez de borrarse.
+            self.stderr.write(
+                f"a {cola_fallos}: {desenlace.motivo} | {cuerpo[:200]!r}"
+            )
             registro.warning("evento apartado (%s): %r", desenlace.motivo, cuerpo[:500])
             canal_.basic_reject(delivery_tag=metodo.delivery_tag, requeue=False)
         return desenlace
