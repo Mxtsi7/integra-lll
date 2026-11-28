@@ -18,7 +18,7 @@ export function usePlanPremium() {
   // La cabecera lee el plan de `usuario` (que viene de /me). Cuando el servidor confirma el plan en
   // permisos, se copia al contexto para que la cabecera no muestre un plan viejo hasta recargar.
   useEffect(() => {
-    if (estado.tipo !== 'listo' || usuario === null) return;
+    if (estado.tipo !== 'listo' || !usuario) return;
     const planConfirmado = estado.permisos.plan === 'premium' ? 'premium' : 'gratuito';
     if (usuario.plan === planConfirmado) return;
     actualizarUsuario({ ...usuario, plan: planConfirmado }, capturarSesion());

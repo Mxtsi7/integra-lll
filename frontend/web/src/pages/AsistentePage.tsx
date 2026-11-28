@@ -1,14 +1,12 @@
 import { AppLayout } from '../components/layout/AppLayout';
 import { ChatAsistente } from '../components/asistente/ChatAsistente';
-import { RestriccionPremium } from '../components/asistente/RestriccionPremium';
-import { Spinner } from '../components/Spinner';
-import { ErrorConReintento } from '../components/ui/ErrorConReintento';
+import { BloqueoPremium } from '../components/planes/BloqueoPremium';
 import { useAsistente } from '../hooks/useAsistente';
 import { usePermisosPlan } from '../hooks/usePermisosPlan';
 
 /**
  * S3-CH-14, S3-CH-15 y S3-CH-16: el chat con el asistente financiero, solo si el plan que dice el
- * servidor lo incluye. La página solo une los hooks con la interfaz.
+ * servidor lo incluye. Consume la política y restricción universal de SE-02.
  */
 export function AsistentePage() {
   const { mensajes, envio, enviarPregunta, reintentar } = useAsistente();
@@ -20,10 +18,11 @@ export function AsistentePage() {
       headerSubtitulo="Pregunta sobre tus suscripciones y tus gastos."
       angosto
     >
-      {permisos.tipo === 'cargando' && <Spinner size={18} etiqueta="Comprobando tu plan" />}
-      {permisos.tipo === 'error' && <ErrorConReintento mensaje={permisos.mensaje} onReintentar={reintentarPermisos} />}
-      {permisos.tipo === 'listo' && !permisos.permisos.features.asistente_financiero && <RestriccionPremium />}
-      {permisos.tipo === 'listo' && permisos.permisos.features.asistente_financiero && (
+      <BloqueoPremium
+        feature="asistente_financiero"
+        permisos={permisos}
+        onReintentar={reintentarPermisos}
+      >
         <ChatAsistente
           mensajes={mensajes}
           estaEnviando={envio.tipo === 'enviando'}
@@ -31,7 +30,7 @@ export function AsistentePage() {
           alEnviar={enviarPregunta}
           alReintentar={reintentar}
         />
-      )}
+      </BloqueoPremium>
     </AppLayout>
   );
 }
