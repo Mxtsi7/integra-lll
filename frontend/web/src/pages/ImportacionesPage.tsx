@@ -1,91 +1,94 @@
-import { formatearFechaHora, getMisImportaciones, type Importacion } from '@ojoalgasto/shared';
+import { formatearFechaHora, getLecturasDeCorreo, getMisImportaciones, type Importacion } from '@ojoalgasto/shared';
 import { ChevronRight, FileSpreadsheet } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useId, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import EmptyState from '../components/subscriptions/EmptyState';
 import { Boton } from '../components/ui/Boton';
 import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 import { Insignia } from '../components/ui/Insignia';
-import { useAuth } from '../context/AuthContext';
-import { MENSAJE_SIN_RED } from '../utils/mensajes';
 import { SubirArchivoCsv } from '../components/importaciones/SubirArchivoCsv';
+import { useListaDeImportaciones } from '../hooks/useListaDeImportaciones';
 import { TONO_ESTADO } from './ImportacionPage';
 import styles from './ImportacionesPage.module.css';
 
-type Estado =
-  | { tipo: 'cargando' }
-  | { tipo: 'error'; mensaje: string }
-  | { tipo: 'listo'; importaciones: Importacion[]; hayMas: boolean; pagina: number; cargandoMas: boolean; errorMas: string | null };
-
-const mensajeError = (err: unknown) =>
-  err instanceof TypeError ? MENSAJE_SIN_RED : 'No pudimos cargar tus importaciones. Intenta de nuevo.';
-
-/** Las importaciones de quien consulta (CH-27), de la más nueva a la más vieja, para llegar a su progreso. */
+/**
+ * Las importaciones (CH-27) en dos partes: las cartolas que subió quien consulta y las lecturas de
+ * correo de su organización (RF-14, CU-13). Las lecturas programadas no las pide una persona, así
+ * que no están entre «las propias»: se listan aparte para poder abrirlas y revisar sus cobros.
+ */
 export function ImportacionesPage() {
-  const [estado, setEstado] = useState<Estado>({ tipo: 'cargando' });
-  const [intento, setIntento] = useState(0);
-  // La sesión con que se montó la página. Si cambia, <RutaPrivada> la vuelve
-  // a montar: filas y paginación empiezan de cero, y una página de la sesión
-  // anterior que llega tarde queda en la página desmontada (revisión de #130).
-  const { capturarSesion } = useAuth();
-  const [sesion] = useState(capturarSesion);
-
-  useEffect(() => {
-    let vigente = true;
-    setEstado({ tipo: 'cargando' });
-    getMisImportaciones(1)
-      .then((pagina) => {
-        if (vigente) {
-          setEstado({ tipo: 'listo', importaciones: pagina.results, hayMas: pagina.next !== null, pagina: 1, cargandoMas: false, errorMas: null });
-        }
-      })
-      .catch((err: unknown) => {
-        if (vigente) setEstado({ tipo: 'error', mensaje: mensajeError(err) });
-      });
-    return () => {
-      vigente = false;
-    };
-  }, [intento]);
-
-  const verMas = async () => {
-    if (estado.tipo !== 'listo' || estado.cargandoMas) return;
-    // Con la sesión ya cambiada, la lista es de la cuenta anterior: no se pide
-    // su página siguiente con el token de la nueva.
-    if (capturarSesion() !== sesion) return;
-    const siguiente = estado.pagina + 1;
-    setEstado({ ...estado, cargandoMas: true, errorMas: null });
-    try {
-      const pagina = await getMisImportaciones(siguiente);
-      setEstado((actual) =>
-        actual.tipo === 'listo'
-          ? {
-              ...actual,
-              // Si entró una nueva mientras tanto, la página corre una posición: no se repite.
-              importaciones: [...actual.importaciones, ...pagina.results.filter((importacionNueva) => !actual.importaciones.some((importacionExistente) => importacionExistente.id === importacionNueva.id))],
-              hayMas: pagina.next !== null,
-              pagina: siguiente,
-              cargandoMas: false,
-            }
-          : actual,
-      );
-    } catch (err: unknown) {
-      setEstado((actual) => (actual.tipo === 'listo' ? { ...actual, cargandoMas: false, errorMas: mensajeError(err) } : actual));
-    }
-  };
+  const cartolas = useListaDeImportaciones(getMisImportaciones, 'No pudimos cargar tus importaciones. Intenta de nuevo.');
+  const lecturas = useListaDeImportaciones(getLecturasDeCorreo, 'No pudimos cargar las lecturas de correo. Intenta de nuevo.');
 
   return (
     <AppLayout headerTitulo="Importaciones" headerSubtitulo="Tus cartolas y lecturas de correo." angosto>
       <SubirArchivoCsv />
-      {estado.tipo === 'cargando' && <p className={styles.mensaje}>Cargando tus importaciones…</p>}
-      {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={() => setIntento((anterior) => anterior + 1)} />}
-      {estado.tipo === 'listo' && estado.importaciones.length === 0 && (
-        <EmptyState
-          icon={<FileSpreadsheet size={48} aria-hidden="true" />}
-          title="Todavía no tienes importaciones"
-          description="Cuando subas una cartola o leamos tu correo, aquí vas a ver cómo va."
-        />
-      )}
+      <ListaDeImportaciones
+        titulo="Tus cartolas"
+        lista={cartolas}
+        textoCargando="Cargando tus importaciones…"
+        textoVerMas="Ver más"
+        detalle={(cartola) => formatearFechaHora(cartola.creado_en)}
+        sinImportaciones={
+          <EmptyState
+            icon={<FileSpreadsheet size={48} aria-hidden="true" />}
+            title="Todavía no tienes importaciones"
+            description="Cuando subas una cartola, aquí vas a ver cómo va."
+          />
+        }
+      />
+      <ListaDeImportaciones
+        titulo="Lecturas de correo"
+        lista={lecturas}
+        textoCargando="Cargando las lecturas de correo…"
+        textoVerMas="Ver más lecturas"
+        detalle={detalleDeLectura}
+        sinImportaciones={
+          <p className={styles.mensaje}>
+            Todavía no hay lecturas de correo. Aparecen aquí cuando revisamos una cuenta conectada en{' '}
+            <Link to="/cuentas">Cuentas conectadas</Link>.
+          </p>
+        }
+      />
+    </AppLayout>
+  );
+}
+
+/** Cuándo se leyó y, si la lectura se completó, cuántos cobros trae: solo en esas la página ofrece revisarlos. */
+function detalleDeLectura(lectura: Importacion): string {
+  const fecha = formatearFechaHora(lectura.creado_en);
+  if (lectura.estado !== 'completada') return fecha;
+  return `${fecha} · ${fraseDeCobros(lectura.candidatos_detectados)}`;
+}
+
+function fraseDeCobros(cantidad: number): string {
+  if (cantidad === 0) return 'Sin cobros encontrados';
+  return cantidad === 1 ? '1 cobro encontrado' : `${cantidad.toLocaleString('es-CL')} cobros encontrados`;
+}
+
+interface ListaDeImportacionesProps {
+  titulo: string;
+  lista: ReturnType<typeof useListaDeImportaciones>;
+  textoCargando: string;
+  textoVerMas: string;
+  /** La segunda línea de cada fila. */
+  detalle: (importacion: Importacion) => string;
+  /** Lo que se muestra cuando el servidor responde que no hay ninguna. */
+  sinImportaciones: ReactNode;
+}
+
+function ListaDeImportaciones({ titulo, lista, textoCargando, textoVerMas, detalle, sinImportaciones }: ListaDeImportacionesProps) {
+  const idTitulo = useId();
+  const { estado, verMas, reintentar } = lista;
+  return (
+    <section className={styles.seccion} aria-labelledby={idTitulo}>
+      <h2 id={idTitulo} className={styles.tituloSeccion}>
+        {titulo}
+      </h2>
+      {estado.tipo === 'cargando' && <p className={styles.mensaje}>{textoCargando}</p>}
+      {estado.tipo === 'error' && <ErrorConReintento mensaje={estado.mensaje} onReintentar={reintentar} />}
+      {estado.tipo === 'listo' && estado.importaciones.length === 0 && sinImportaciones}
       {estado.tipo === 'listo' && estado.importaciones.length > 0 && (
         <>
           <ul className={styles.lista}>
@@ -94,7 +97,7 @@ export function ImportacionesPage() {
                 <Link to={`/importaciones/${encodeURIComponent(imp.id)}`} className={`tile ${styles.itemLista}`}>
                   <span className={styles.itemTexto}>
                     <span className={styles.itemTitulo}>{imp.nombre_archivo || imp.origen_legible}</span>
-                    <span className={styles.detalle}>{formatearFechaHora(imp.creado_en)}</span>
+                    <span className={styles.detalle}>{detalle(imp)}</span>
                   </span>
                   <Insignia tono={TONO_ESTADO[imp.estado]}>{imp.estado_legible}</Insignia>
                   <ChevronRight size={16} aria-hidden="true" />
@@ -105,11 +108,11 @@ export function ImportacionesPage() {
           {estado.errorMas && <ErrorConReintento mensaje={estado.errorMas} onReintentar={verMas} />}
           {estado.hayMas && !estado.errorMas && (
             <Boton variante="secundario" cargando={estado.cargandoMas} onClick={verMas} className={styles.verMas}>
-              Ver más
+              {textoVerMas}
             </Boton>
           )}
         </>
       )}
-    </AppLayout>
+    </section>
   );
 }

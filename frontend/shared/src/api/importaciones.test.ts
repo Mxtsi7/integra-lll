@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { pedir } from './cliente';
-import { getImportacion, getMisImportaciones, subirArchivoImportacion } from './importaciones';
+import { getImportacion, getLecturasDeCorreo, getMisImportaciones, subirArchivoImportacion } from './importaciones';
 
 vi.mock('./cliente', () => ({ pedir: vi.fn() }));
 
@@ -21,6 +21,13 @@ describe('importaciones (CH-27, FE-08, S3-SE-02, FE-07)', () => {
     expect(pedir).toHaveBeenCalledWith('/importaciones/?mias=true&page=1');
     await getMisImportaciones(3);
     expect(pedir).toHaveBeenLastCalledWith('/importaciones/?mias=true&page=3');
+  });
+
+  it('las lecturas de correo con ?origen=correo y sin mias: las programadas no las pidió una persona', async () => {
+    await getLecturasDeCorreo();
+    expect(pedir).toHaveBeenCalledWith('/importaciones/?origen=correo&page=1');
+    await getLecturasDeCorreo(3);
+    expect(pedir).toHaveBeenLastCalledWith('/importaciones/?origen=correo&page=3');
   });
 
   it('subirArchivoImportacion envía POST multipart con el campo archivo', async () => {
