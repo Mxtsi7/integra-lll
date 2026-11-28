@@ -13,7 +13,6 @@ import signal
 import pika
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db import close_old_connections
 
 from events import consumidor
 from events.contrato import (
@@ -23,6 +22,7 @@ from events.contrato import (
     EXCHANGE,
     VERSION_APLICADO,
 )
+from events.db import close_old_connections
 from events.topologia import declarar_aplicaciones
 
 

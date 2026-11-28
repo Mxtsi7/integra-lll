@@ -56,7 +56,7 @@ import unicodedata
 import uuid
 
 from django.conf import settings
-from django.db import IntegrityError, close_old_connections, transaction
+from django.db import IntegrityError, transaction
 from django.db.utils import InterfaceError, OperationalError
 from django.utils import timezone
 
@@ -64,6 +64,7 @@ from shared.bloqueo import bloquear
 from shared.borrado.bloqueo import bloquear_organizacion
 
 from app.models import Cobro, Subscription, TrabajoDerivado
+from events.db import close_old_connections
 from events.outbox import (
     registrar_actualizada,
     registrar_candidato_aplicado,

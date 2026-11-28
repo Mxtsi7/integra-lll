@@ -72,11 +72,11 @@ from dataclasses import dataclass
 import pika
 from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db import close_old_connections
 from django.db.utils import InterfaceError, OperationalError
 
 from events.confirmaciones import procesar_confirmacion
 from events.contrato import routing_key
+from events.db import close_old_connections
 from events.validacion import errores as errores_de_contrato
 from events.topologia import (
     COLA_CONFIRMACIONES,

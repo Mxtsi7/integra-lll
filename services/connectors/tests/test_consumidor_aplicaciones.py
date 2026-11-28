@@ -343,3 +343,16 @@ class TestComando:
 
         assert canal.entregados == [COLA_APLICACIONES] * 2
         assert canal.acks == [1, 2]
+
+    def test_la_limpieza_no_cierra_la_conexion_de_la_prueba(self):
+        """El helper respeta la transacción de `django_db`.
+
+        Con `close_old_connections()` de Django, `autocommit` no coincide con
+        `AUTOCOMMIT` y la conexión se cerraba: el ack no podía consultar la
+        fecha y la suite de CI veía `KeyError: 'tag'`.
+        """
+        from django.db import connection
+
+        assert connection.in_atomic_block
+        consumir_eventos.close_old_connections()
+        assert CobroCandidato.objects.count() == 0

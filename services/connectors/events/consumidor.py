@@ -21,12 +21,13 @@ import logging
 import time
 import uuid
 
-from django.db import close_old_connections, transaction
+from django.db import transaction
 from django.db.utils import InterfaceError, OperationalError
 
 from connectors.models import CobroCandidato
 from events import validacion
 from events.contrato import EVENTO_APLICADO, VERSION_APLICADO
+from events.db import close_old_connections
 
 registro = logging.getLogger(__name__)
 

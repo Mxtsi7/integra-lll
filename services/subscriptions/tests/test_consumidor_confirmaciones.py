@@ -183,3 +183,15 @@ class TestDosColas:
 
         assert canal.entregados == [cola]
         assert canal.paradas == 1
+
+    def test_la_limpieza_no_cierra_la_conexion_de_la_prueba(self):
+        """El helper respeta la transacción de `django_db`.
+
+        Con `close_old_connections()` de Django, la conexión se cerraba y el
+        ack no podía contar `Cobro`/`TrabajoDerivado` dentro del canal falso.
+        """
+        from django.db import connection
+
+        assert connection.in_atomic_block
+        consumir_eventos.close_old_connections()
+        assert Subscription.objects.count() == 0
