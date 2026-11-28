@@ -18,6 +18,7 @@ from decimal import Decimal
 import pytest
 from django.apps import apps
 from django.db import models
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from connectors import confirmacion, views
@@ -295,9 +296,9 @@ def test_por_http_el_orden_inverso_tambien_da_conflicto(monkeypatch):
 
 def test_un_confirmado_dice_que_su_aplicacion_esta_pendiente():
     """Lo que piden las dos revisiones para la interfaz: poder distinguir la
-    orden guardada de la suscripción creada. Hoy no hay publicador ni
-    consumidor, así que TODO confirmado está pendiente, y la respuesta lo
-    dice en vez de dejar que `estado="confirmado"` se lea como «ya está»."""
+    orden guardada de la suscripción creada. Sin acuse de vuelta, el
+    confirmado sigue pendiente; la respuesta lo dice en vez de dejar que
+    `estado="confirmado"` se lea como «ya está»."""
     candidato = crear_candidato(uuid.uuid4())
 
     respuesta = confirmar_por_http(candidato)
@@ -327,15 +328,20 @@ def test_la_lista_tambien_lo_dice_y_solo_para_los_confirmados():
     }
 
 
-def test_ningun_valor_afirma_que_la_suscripcion_existe():
-    """No hay quien pueda afirmarlo todavía. El día que exista el consumidor
-    y aparezca `aplicada`, esta prueba se cambia a propósito, en la misma PR
-    que lo implemente y con la evidencia de que la suscripción se creó."""
+def test_solo_el_acuse_afirma_que_la_suscripcion_existe():
+    """`aplicada` exige evidencia: `aplicado_en` escrito por el consumidor
+    del acuse. El mero estado confirmado no alcanza."""
     from connectors.serializers import CobroCandidatoSerializer
 
+    serializador = CobroCandidatoSerializer()
     valores = {
-        CobroCandidatoSerializer().get_aplicacion(CobroCandidato(estado=estado))
+        serializador.get_aplicacion(CobroCandidato(estado=estado))
         for estado in CobroCandidato.Estado.values
     }
     assert valores == {None, "pendiente"}
+    aplicado = CobroCandidato(
+        estado=CobroCandidato.Estado.CONFIRMADO,
+        aplicado_en=timezone.now(),
+    )
+    assert serializador.get_aplicacion(aplicado) == "aplicada"
 

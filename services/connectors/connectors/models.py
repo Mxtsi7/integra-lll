@@ -927,6 +927,18 @@ class CobroCandidato(ModeloTenant):
         ),
     )
 
+    aplicado_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Aplicado en Suscripciones el",
+        help_text=(
+            "NULL mientras no haya acuse de Suscripciones. Lo escribe el "
+            "consumidor de `candidato.aplicado` con la fecha del evento, no "
+            "con la de confirmación: confirmar deja una orden durable, no "
+            "una suscripción creada. Una reentrega no la mueve."
+        ),
+    )
+
     evidencia = models.JSONField(
         default=dict,
         blank=True,

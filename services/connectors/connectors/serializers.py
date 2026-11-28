@@ -280,29 +280,33 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
     aplicacion = serializers.SerializerMethodField(
         help_text=(
             "Si lo confirmado ya existe en Suscripciones. `null` mientras el "
-            "candidato no está confirmado; `pendiente` cuando lo está: la "
-            "orden de crear quedó guardada, pero todavía NO hay suscripción "
-            "ni cobro creados."
+            "candidato no está confirmado; `pendiente` cuando la orden sigue "
+            "en vuelo; `aplicada` cuando llegó el acuse y la suscripción (y "
+            "el cobro, si correspondía) quedaron creados."
         )
     )
 
     # ── «Confirmado» no es «aplicado» ───────────────────────────────────
     # Confirmar deja el candidato confirmado y una orden durable en el
     # outbox, los dos o ninguno. Lo que NO hace es crear la suscripción ni el
-    # cobro: eso pasa en `subscriptions`, cuando alguien publique y consuma
-    # esa orden, y hoy no hay ni publicador ni consumidor.
+    # cobro: eso pasa en `subscriptions` cuando consume esa orden. El
+    # publicador y el consumidor ya existen; este campo distingue los dos
+    # momentos sin confundirlos.
     #
     # Sin este campo la interfaz solo ve `estado="confirmado"` y no tiene
     # cómo saber que del otro lado todavía no existe nada: mostraría como
     # hecho algo que está en cola. Lo pidieron las dos revisiones de #159.
     #
-    # Hoy vale `pendiente` para todo confirmado, y es la verdad: ninguna
-    # orden se ha aplicado nunca. El valor `aplicada` llega con el
-    # consumidor, que es quien puede afirmarlo; inventarlo acá sería dar por
-    # creada una suscripción que nadie creó.
+    # `aplicada` NO se deduce del estado: lo dice el acuse que publica
+    # Suscripciones desde la misma transacción en que creó el cobro. Sin esa
+    # evidencia, un confirmado sigue siendo `pendiente`; inventar `aplicada`
+    # sería mostrar como hecho algo que todavía está en cola.
     APLICACION_PENDIENTE = "pendiente"
+    APLICACION_APLICADA = "aplicada"
 
     def get_aplicacion(self, candidato) -> str | None:
+        if candidato.aplicado_en is not None:
+            return self.APLICACION_APLICADA
         if candidato.estado == CobroCandidato.Estado.CONFIRMADO:
             return self.APLICACION_PENDIENTE
         return None
