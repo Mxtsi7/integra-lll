@@ -368,3 +368,55 @@ def test_la_infraestructura_del_nucleo_solo_cruza_a_namespaces_del_reparto():
                 if nombre == _ns_notifications():
                     assert peer["podSelector"] == {"matchLabels": {"app": "notifications"}}, (destino, peer)
 
+
+def test_la_api_de_connectors_en_la_web_no_abre_la_base_a_cualquier_web():
+    con_connectors = {"app": "web", "componente": "con-connectors"}
+    for destino, puerto in (("postgres", 5432), ("redis", 6379)):
+        assert permitido("web", destino, puerto, etiquetas_origen=con_connectors)
+        assert not permitido("web", destino, puerto)
+    assert permitido("gateway", "web", 8003)
+    assert not permitido("subscriptions", "web", 8003)
+    assert not permitido("gateway", "web", 8003, namespace="otro-grupo")
+
+
+# ── Revisión de #233: los otros receptores de connectors ────────────────────
+
+
+def _ns_connectors():
+    for linea in (RAIZ / "k8s/reparto.env").read_text(encoding="utf-8").splitlines():
+        if linea.startswith("NS_CONNECTORS="):
+            return linea.split("=", 1)[1].strip()
+    raise AssertionError("k8s/reparto.env no declara NS_CONNECTORS")
+
+
+def test_el_borrado_entre_servicios_llega_a_la_api_de_connectors_en_la_web():
+    """auth-eliminaciones manda el DELETE firmado a URL_CONNECTORS, que con
+    CONNECTORS_API=web es web:8003. Sin esto, el borrado de una organización
+    queda pendiente y connectors conserva sus datos."""
+    assert permitido("auth-eliminaciones", "web", 8003)
+    assert permitido("gateway", "web", 8003)
+    for otro in ("subscriptions", "auth", "notifications", "web"):
+        assert not permitido(otro, "web", 8003), otro
+    assert not permitido("auth-eliminaciones", "web", 8003, namespace="otro-grupo")
+
+
+def test_el_satelite_de_connectors_llega_a_postgres_y_redis():
+    ns = _ns_connectors()
+    for origen, destinos in (
+        ("connectors-worker", (("postgres", 5432), ("redis", 6379))),
+        ("connectors", (("postgres", 5432), ("redis", 6379))),  # la purga y la API
+    ):
+        for destino, puerto in destinos:
+            assert permitido(origen, destino, puerto, namespace=ns), (origen, destino)
+            # Ni otro namespace con la misma etiqueta,
+            assert not permitido(origen, destino, puerto, namespace="otro-grupo"), (origen, destino)
+    # ni otra app del mismo namespace.
+    for destino, puerto in (("postgres", 5432), ("redis", 6379)):
+        assert not permitido("otra-app", destino, puerto, namespace=ns)
+
+
+def test_el_namespace_de_las_politicas_es_el_de_reparto():
+    """Si connectors cambia de namespace en reparto.env, las políticas tienen
+    que cambiar con él."""
+    texto = (RAIZ / "k8s/40-red.yaml").read_text(encoding="utf-8")
+    assert f"kubernetes.io/metadata.name: {_ns_connectors()} }}" in texto

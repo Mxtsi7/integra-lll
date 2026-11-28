@@ -20,6 +20,7 @@ export const CLAVES_SEGURAS = {
   REFRESH_TOKEN: 'refresh_token',
   DESFASE_RELOJ: 'desfase_reloj_ms',
   ASOCIACIONES_PAQUETES_USO: 'asociaciones_paquetes_uso',
+  COLA_USO: 'cola_uso_recolector',
   LIMPIEZA_PENDIENTE: 'limpieza_pendiente',
 } as const;
 
@@ -81,6 +82,21 @@ async function ejecutarDeleteConReintentos(key: string, maxReintentos = 2): Prom
   let ultimoError: unknown = null;
   for (let intento = 0; intento <= maxReintentos; intento++) {
     try {
+      if (key === CLAVES_SEGURAS.COLA_USO) {
+        // Ambos buffers, incluso fragmentos de una escritura interrumpida.
+        let reservas: number[] | undefined;
+        try {
+          const manifiesto = await backendActual.getItemAsync(key);
+          reservas = manifiesto ? JSON.parse(manifiesto).reservas : [0, 0];
+        } catch { /* Si no se puede leer el índice, purgar todo el espacio reservado. */ }
+        for (let slot = 0; slot < 2; slot++) {
+          const reservado = reservas?.[slot];
+          const cantidad = reservado !== undefined && Number.isInteger(reservado) && reservado >= 0 && reservado <= 512 ? reservado : 512;
+          for (let indice = 0; indice < cantidad; indice++) {
+            await backendActual.deleteItemAsync(`${key}_${slot}_${indice}`);
+          }
+        }
+      }
       await backendActual.deleteItemAsync(key);
       return;
     } catch (err) {
@@ -91,7 +107,8 @@ async function ejecutarDeleteConReintentos(key: string, maxReintentos = 2): Prom
   // Política durable: si el borrado nativo falla tras reintentos, destruir credenciales
   // sobrescribiendo con cadena vacía y marcando la sesión como pendiente de limpieza.
   try {
-    await backendActual.setItemAsync(key, '');
+    // El índice de fragmentos debe sobrevivir para poder repetir su purga completa.
+    if (key !== CLAVES_SEGURAS.COLA_USO) await backendActual.setItemAsync(key, '');
   } catch {}
 
   try {
@@ -195,6 +212,7 @@ export const adaptadorStorageSincrono = {
       // Si shared disparó logout() directamente (ej. interceptor 401 de pedir()),
       // invalidar de inmediato la generación para abortar escrituras pendientes en vuelo
       generacionActual++;
+      void encolarDelete(CLAVES_SEGURAS.COLA_USO, generacionActual).catch(() => {});
     }
     void encolarDelete(key, generacionActual).catch((err) => {
       console.warn(`[StorageSeguro] Error al eliminar clave '${key}':`, err);
@@ -249,6 +267,7 @@ export async function hidratarSesionSegura(): Promise<{
           backendActual.deleteItemAsync(CLAVES_SEGURAS.REFRESH_TOKEN),
           backendActual.deleteItemAsync(CLAVES_SEGURAS.DESFASE_RELOJ).catch(() => {}),
           backendActual.deleteItemAsync(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO),
+          ejecutarDeleteConReintentos(CLAVES_SEGURAS.COLA_USO),
         ]);
         credencialesEliminadas = true;
       } catch {
@@ -352,9 +371,10 @@ export async function guardarTokensSeguros(tokens: {
       const p2 = encolarDelete(CLAVES_SEGURAS.REFRESH_TOKEN, genRollback);
       const p3 = encolarDelete(CLAVES_SEGURAS.DESFASE_RELOJ, genRollback);
       const p4 = encolarDelete(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO, genRollback);
+      const p5 = encolarDelete(CLAVES_SEGURAS.COLA_USO, genRollback);
 
       try {
-        await Promise.all([p1, p2, p3, p4]);
+        await Promise.all([p1, p2, p3, p4, p5]);
       } catch (rollbackErr) {
         console.warn('[StorageSeguro] Error durante rollback en SecureStore:', rollbackErr);
       } finally {
@@ -392,6 +412,7 @@ export async function limpiarSesionSegura(): Promise<void> {
     cacheMemoria = {};
     logout();
     encolarDelete(CLAVES_SEGURAS.ASOCIACIONES_PAQUETES_USO, gen);
+    encolarDelete(CLAVES_SEGURAS.COLA_USO, gen);
 
     // 2. Esperar a que se completen los borrados de credenciales de esta
     // generación. La marca LIMPIEZA_PENDIENTE NO se encola aquí: si algún

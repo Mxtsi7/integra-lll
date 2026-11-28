@@ -10,8 +10,11 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace=web",
-    "build": "npm run build --workspace=web",
+    "build": "npm run build --workspace=web && npm run build --prefix extension",
     "test": "npm test --workspaces --if-present && npm test --prefix extension",
     "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck --prefix extension"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5"
   }
 }
