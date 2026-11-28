@@ -28,6 +28,8 @@ DE_S3_FE03 = ("connectors", "0010_avance_de_lectura")
 DE_S3_FE05 = ("connectors", "0011_avance_reiniciada_en_corrida")
 # S3-FE-18: el estado de la lectura programada, en el avance.
 DE_S3_FE18 = ("connectors", "0012_lectura_programada")
+# FASE 3: la fecha en que Suscripciones confirmó haber aplicado un candidato.
+DE_APLICADO = ("connectors", "0013_candidato_aplicado_en")
 
 
 @pytest.mark.django_db(transaction=True)
@@ -62,6 +64,7 @@ def test_migraciones_publicadas_conservan_datos(origen, claves):
         plan = [(migracion.app_label, migracion.name) for migracion, _ in executor.migration_plan(destino)]
         sin_publicar = [
             DE_ESTA_PR, DE_FE07, DE_S3_FE10, DE_S3_FE14, DE_S3_FE16, DE_S3_FE15, DE_S3_FE17, DE_S3_FE03, DE_S3_FE05, DE_S3_FE18,
+            DE_APLICADO,
         ]
         esperado = sin_publicar if origen == PUBLICADA[1] else [PUBLICADA] + sin_publicar
         assert sorted(plan) == sorted(esperado)
