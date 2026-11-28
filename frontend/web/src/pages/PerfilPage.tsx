@@ -1,4 +1,10 @@
-import { getUsuarioActual, type Usuario } from '@ojoalgasto/shared';
+import {
+  getUsuarioActual,
+  type Usuario,
+  describirDetallePlan,
+  describirPlan,
+  esPlanPremium,
+} from '@ojoalgasto/shared';
 import { Database, Home, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from '../components/layout/AppLayout';
@@ -99,8 +105,9 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
   const cerrarCambioContrasena = useCallback(() => setCambiandoContrasena(false), []);
   const [cambiandoCorreo, setCambiandoCorreo] = useState(false);
   const cerrarCambioCorreo = useCallback(() => setCambiandoCorreo(false), []);
-  const plan = usuario.plan ?? 'gratuito';
-  const esPremium = plan === 'premium';
+  const esPremium = esPlanPremium(usuario.plan);
+  const nombrePlan = describirPlan(usuario.plan);
+  const detallePlan = describirDetallePlan(usuario.plan);
   const etiquetaRol = usuario.rol === 'titular' ? 'Titular del hogar' : 'Integrante del hogar';
 
   return (
@@ -112,12 +119,8 @@ function ContenidoPerfil({ usuario, onNombreGuardado, onContrasenaCambiada }: Co
           <p className={styles.usuarioCorreo}>{usuario.correo}</p>
         </div>
         <div className={styles.plan}>
-          <p className={styles.planNombre}>{esPremium ? 'Plan Premium' : 'Plan Gratuito'}</p>
-          <p className={styles.planDetalle}>
-            {esPremium
-              ? 'Asistente financiero y recomendaciones avanzadas.'
-              : 'Alertas de cobro y de prueba gratis incluidas.'}
-          </p>
+          <p className={styles.planNombre}>{nombrePlan}</p>
+          <p className={styles.planDetalle}>{detallePlan}</p>
           {!esPremium && (
             <Boton variante="secundario" tamano="s" disabled title="Próximamente">
               Mejorar a Premium

@@ -9,6 +9,61 @@ export interface PermisosPlan {
   plan: CodigoPlan;
   features: FeaturesPlan;
 }
+
+/** Nombres legibles de cada función Premium (MX-09, SE-02). */
+export const NOMBRES_FEATURES: Record<keyof FeaturesPlan, string> = {
+  asistente_financiero: 'Asistente financiero',
+  recomendaciones_automaticas: 'Recomendaciones automáticas',
+};
+
+export const FEATURES_PREMIUM: (keyof FeaturesPlan)[] = [
+  'asistente_financiero',
+  'recomendaciones_automaticas',
+];
+
+/**
+ * Valida la respuesta de `/usuarios/me/permisos/`. Si no tiene la forma esperada devuelve null.
+ * Lo desconocido nunca se toma por permitido (seguro por defecto).
+ */
+export function leerPermisos(respuesta: unknown): PermisosPlan | null {
+  if (typeof respuesta !== 'object' || respuesta === null) return null;
+  const { plan, features } = respuesta as Partial<PermisosPlan>;
+  if (plan !== 'free' && plan !== 'premium') return null;
+  if (typeof features !== 'object' || features === null) return null;
+  return {
+    plan,
+    features: {
+      asistente_financiero: features.asistente_financiero === true,
+      recomendaciones_automaticas: features.recomendaciones_automaticas === true,
+    },
+  };
+}
+
+/** ¿Este conjunto de permisos incluye la función solicitada? Solo true explícito concede acceso. */
+export function incluyeFeature(
+  permisos: { features: FeaturesPlan } | null | undefined,
+  feature: keyof FeaturesPlan,
+): boolean {
+  if (!permisos || !permisos.features) return false;
+  return permisos.features[feature] === true;
+}
+
+/** Valida si el plan corresponde a Premium. */
+export function esPlanPremium(plan: string | null | undefined): boolean {
+  return plan === 'premium';
+}
+
+/** Nombre legible del plan para la interfaz (evita texto fijo hardcodeado). */
+export function describirPlan(plan: string | null | undefined): string {
+  return esPlanPremium(plan) ? 'Plan Premium' : 'Plan Gratuito';
+}
+
+/** Detalle de beneficios del plan para la interfaz. */
+export function describirDetallePlan(plan: string | null | undefined): string {
+  return esPlanPremium(plan)
+    ? 'Asistente financiero y recomendaciones avanzadas.'
+    : 'Alertas de cobro y de prueba gratis incluidas.';
+}
 export interface PlanDisponible {
   codigo: CodigoPlan;
   nombre: string;
