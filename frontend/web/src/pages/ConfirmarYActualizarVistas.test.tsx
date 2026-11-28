@@ -66,7 +66,7 @@ const SPOTIFY_CONFIRMADO: CandidatoDetectado = {
   estado: "confirmado",
   estado_legible: "Confirmado",
   decidido_en: "2026-11-24T10:00:00-03:00",
-  aplicacion: "pendiente",
+  aplicacion: "por_enviar",
 };
 // Lo que guarda el servidor después de confirmar: la suscripción y su primer cobro.
 const SUSCRIPCION_SPOTIFY: Suscripcion = {

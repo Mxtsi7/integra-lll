@@ -476,13 +476,13 @@ describe("Cobros encontrados y problemas de un archivo (S3-CH-06)", () => {
       expect(within(cobros()).getByRole("button", { name: "Rechazar" })).toBeDisabled();
     });
 
-    it("confirmar manda la decisión, dice que la orden quedó pendiente de aplicar y vuelve a leer la lista", async () => {
+    it("confirmar manda la decisión, dice que la orden se envía a Suscripciones y vuelve a leer la lista", async () => {
       const SPOTIFY_CONFIRMADO: CandidatoDetectado = {
         ...SPOTIFY,
         estado: "confirmado",
         estado_legible: "Confirmado",
         decidido_en: "2026-11-26T10:00:00-03:00",
-        aplicacion: "pendiente",
+        aplicacion: "por_enviar",
       };
       getMock.mockResolvedValue(MIXTA);
       candidatosMock
@@ -498,12 +498,12 @@ describe("Cobros encontrados y problemas de un archivo (S3-CH-06)", () => {
       expect(confirmarMock).toHaveBeenCalledWith("c-1");
       expect(rechazarMock).not.toHaveBeenCalled();
       expect(screen.getByLabelText("Resultado de la confirmación")).toHaveTextContent(
-        "Confirmaste 1 cobro. Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.",
+        "Confirmaste 1 cobro. Las órdenes se envían a Suscripciones; revisa ahí la suscripción y el cobro.",
       );
       // Lo que se ve después es lo que guardó el servidor, de esta misma importación.
       expect(candidatosMock).toHaveBeenCalledTimes(2);
       expect(candidatosMock).toHaveBeenLastCalledWith(expect.objectContaining({ importacion: "imp-1", pagina: 1 }));
-      expect(within(cobros()).getByText(/orden pendiente de aplicar/)).toBeInTheDocument();
+      expect(within(cobros()).getByText(/orden por enviar a Suscripciones/)).toBeInTheDocument();
       // Un cobro ya decidido no se vuelve a elegir.
       expect(within(cobros()).queryByRole("checkbox", { name: /^Seleccionar Spotify,/ })).not.toBeInTheDocument();
     });

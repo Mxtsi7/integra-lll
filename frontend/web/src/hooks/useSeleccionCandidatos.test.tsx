@@ -9,7 +9,7 @@ import { useSeleccionCandidatos } from './useSeleccionCandidatos';
 const SPOTIFY = candidatoDePrueba({ id: 'c-1', servicio: 'Spotify' });
 const NETFLIX = candidatoDePrueba({ id: 'c-2', servicio: 'Netflix' });
 const SIN_PROVEEDOR = candidatoDePrueba({ id: 'c-3', servicio: null, servicio_texto: 'PAGO 4471', servicio_resultado: 'desconocido' });
-const CONFIRMADO = candidatoDePrueba({ id: 'c-4', estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'pendiente' });
+const CONFIRMADO = candidatoDePrueba({ id: 'c-4', estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'por_enviar' });
 const RECHAZADO = candidatoDePrueba({ id: 'c-5', estado: 'rechazado', estado_legible: 'Rechazado' });
 
 const montar = (candidatos: readonly CandidatoDetectado[] | null) =>
