@@ -188,7 +188,12 @@ CELERY_TIMEZONE = TIME_ZONE
 # RabbitMQ es el transporte de eventos de dominio (MX-21 y
 # `candidato.confirmado`). Redis sigue siendo el broker de Celery: son dos
 # colas distintas con dos propósitos distintos.
-RABBITMQ_URL = env("RABBITMQ_URL")
+# El default es el MISMO que usa subscriptions: el runner local no pasa esta
+# variable y `manage.py check` tiene que seguir funcionando sin .env. En k8s
+# llega desde el Secret y Sobrescribe este valor.
+RABBITMQ_URL = env(
+    "RABBITMQ_URL", default="amqp://guest:guest@rabbitmq:5672/"
+)
 # subscriptions usa el mismo Redis con la cola y el canal de control por
 # omisión ("celery"). Con nombres propios, este worker no le quita las tareas
 # del Temporizador (las descartaría por no conocerlas) y a `inspect ping`

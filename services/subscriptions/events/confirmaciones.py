@@ -129,6 +129,10 @@ def fecha_proxima(fecha: date, tipo_mensaje: str) -> date | None:
     if tipo_mensaje == "aviso_de_cobro":
         return fecha
     if tipo_mensaje == "cobro_realizado":
+        # TODO(RN-DAT-005): confirmar con el Excel Integra III si el próximo
+        # cobro de un `cobro_realizado` es `fecha + 1 mes` recortado al último
+        # día del mes destino (31/01 → 28/02) o si la regla oficial es otra.
+        # Hoy es un SUPUESTO explícito, NO una regla de negocio ratificada.
         return fecha_mas_un_mes(fecha)
     return None
 
