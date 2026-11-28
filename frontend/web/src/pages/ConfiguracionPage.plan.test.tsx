@@ -24,8 +24,28 @@ vi.mock('../components/Configuracion/PreferenciasAvisos', () => ({ PreferenciasA
 vi.mock('../components/Configuracion/RecolectoresDeUso', () => ({ RecolectoresDeUso: () => null }));
 vi.mock('../components/Perfil/EliminarCuenta', () => ({ EliminarCuenta: () => null }));
 const capturarSesionMock = vi.fn(() => 1);
+const usuarioMock = { id: '1', nombre: 'Test', plan: 'free', rol: 'titular' };
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ cerrarSesionLocal: () => true, capturarSesion: capturarSesionMock }),
+  useAuth: () => ({
+    usuario: usuarioMock,
+    cerrarSesionLocal: () => true,
+    capturarSesion: capturarSesionMock,
+    actualizarUsuario: () => true,
+  }),
+}));
+vi.mock('../hooks/useContratacionPremium', () => ({
+  useContratacionPremium: () => ({
+    contrato: null,
+    idSinCargar: null,
+    operacion: null,
+    mensajeError: null,
+    precioDemo: null,
+    recuperando: false,
+    contratar: vi.fn(),
+    continuarPago: vi.fn(),
+    verificar: vi.fn(),
+    cancelar: vi.fn(),
+  }),
 }));
 vi.mock('../context/ToastContext', () => ({ useToast: () => ({ exito: vi.fn() }) }));
 
@@ -58,10 +78,7 @@ describe('Sección Plan en Ajustes (SE-02 / MX-08 / MX-09)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Comprobando plan…')).toBeInTheDocument();
-    expect(
-      screen.getByText('Consultando el estado de tu suscripción en el servidor.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Comprobando tu plan…')).toBeInTheDocument();
     expect(screen.queryByText('Plan Gratuito')).not.toBeInTheDocument();
     expect(screen.queryByText('Plan Premium')).not.toBeInTheDocument();
 
@@ -101,7 +118,7 @@ describe('Sección Plan en Ajustes (SE-02 / MX-08 / MX-09)', () => {
     expect(await screen.findByText('Plan Gratuito')).toBeInTheDocument();
   });
 
-  it('muestra Plan Gratuito, detalle y enlace para mejorar a Premium cuando el usuario es Free', async () => {
+  it('muestra Plan Gratuito, detalle y opción para mejorar a Premium cuando el usuario es Free', async () => {
     getPermisosPlanMock.mockResolvedValue({
       plan: 'free',
       features: { asistente_financiero: false, recomendaciones_automaticas: false },
@@ -117,9 +134,8 @@ describe('Sección Plan en Ajustes (SE-02 / MX-08 / MX-09)', () => {
     expect(
       screen.getByText('Alertas de cobro y de prueba gratis incluidas.'),
     ).toBeInTheDocument();
-    const mejorarLink = screen.getByRole('link', { name: 'Mejorar a Premium' });
-    expect(mejorarLink).toBeInTheDocument();
-    expect(mejorarLink).toHaveAttribute('href', '/perfil');
+    const mejorarBtn = screen.getByRole('button', { name: 'Mejorar a Premium' });
+    expect(mejorarBtn).toBeInTheDocument();
   });
 
   it('muestra Plan Premium y beneficios activos sin botón de upgrade cuando el usuario es Premium', async () => {
@@ -136,9 +152,8 @@ describe('Sección Plan en Ajustes (SE-02 / MX-08 / MX-09)', () => {
 
     expect(await screen.findByText('Plan Premium')).toBeInTheDocument();
     expect(
-      screen.getByText('Asistente financiero y recomendaciones avanzadas.'),
+      screen.getByText('Tienes las funciones Premium.'),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Mejorar a Premium' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mejorar a Premium' })).not.toBeInTheDocument();
   });
 });
