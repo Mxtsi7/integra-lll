@@ -50,7 +50,7 @@ class CandidatoConfirmadoV1Tests(unittest.TestCase):
 
     def test_rechaza_version_desconocida_y_campos_clave(self):
         base = mensaje()
-        for cambio in ({'version': 2}, {'evento': 'candidato.aplicado'},
+        for cambio in ({'version': 2}, {'evento': 'candidato.desconocido'},
                        {'organizacion_id': 'no-uuid'},
                        {'datos': dict(base['datos'], crear_cobro='true')},
                        {'datos': dict(base['datos'], tipo_mensaje='otro')}):

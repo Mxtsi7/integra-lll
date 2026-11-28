@@ -18,10 +18,14 @@ RAIZ = Path(__file__).resolve().parents[2]
 ESQUEMA = json.loads((RAIZ / 'shared/events/mx21-v2.schema.json').read_text('utf-8'))
 ESQUEMA_CANDIDATO = json.loads(
     (RAIZ / 'shared/events/candidato-confirmado-v1.schema.json').read_text('utf-8'))
+ESQUEMA_APLICADO = json.loads(
+    (RAIZ / 'shared/events/candidato-aplicado-v1.schema.json').read_text('utf-8'))
 Draft202012Validator.check_schema(ESQUEMA)
 Draft202012Validator.check_schema(ESQUEMA_CANDIDATO)
+Draft202012Validator.check_schema(ESQUEMA_APLICADO)
 VALIDADOR = Draft202012Validator(ESQUEMA, format_checker=FormatChecker())
 VALIDADOR_CANDIDATO = Draft202012Validator(ESQUEMA_CANDIDATO, format_checker=FormatChecker())
+VALIDADOR_APLICADO = Draft202012Validator(ESQUEMA_APLICADO, format_checker=FormatChecker())
 
 VALIDADORES = {
     ('suscripcion.creada', 2): VALIDADOR,
@@ -29,6 +33,7 @@ VALIDADORES = {
     ('suscripcion.estado_cambiado', 2): VALIDADOR,
     ('alerta.activada', 2): VALIDADOR,
     ('candidato.confirmado', 1): VALIDADOR_CANDIDATO,
+    ('candidato.aplicado', 1): VALIDADOR_APLICADO,
 }
 
 

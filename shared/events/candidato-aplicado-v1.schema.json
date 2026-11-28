@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "candidato.aplicado v1 — acuse durable de Suscripciones",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evento", "version", "id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+  "properties": {
+    "evento": {"const": "candidato.aplicado"},
+    "version": {"const": 1, "type": "integer"},
+    "id": {"$ref": "#/$defs/uuid"},
+    "organizacion_id": {"$ref": "#/$defs/uuid"},
+    "correlation_id": {"$ref": "#/$defs/uuid"},
+    "ocurrido_en": {"$ref": "#/$defs/instante"},
+    "datos": {"$ref": "#/$defs/datos"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "instante": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "datos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidato_id", "suscripcion_id", "cobro_id", "creada", "cobro_creado", "aplicada_en", "aplicacion"],
+      "properties": {
+        "candidato_id": {"$ref": "#/$defs/uuid"},
+        "suscripcion_id": {"$ref": "#/$defs/uuid"},
+        "cobro_id": {"type": ["string", "null"], "format": "uuid"},
+        "creada": {"type": "boolean"},
+        "cobro_creado": {"type": "boolean"},
+        "aplicada_en": {"$ref": "#/$defs/instante"},
+        "aplicacion": {"const": "aplicada"}
+      }
+    }
+  }
+}
