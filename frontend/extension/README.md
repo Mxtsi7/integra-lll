@@ -1,3 +1,20 @@
+# Sincronización de uso — actualización del 25 de noviembre de 2026
+
+La extensión ahora inicia sesión contra el gateway HTTPS, valida las suscripciones asociadas y solicita consentimiento servidor antes de capturar. Cola, UUID y cursores se guardan en `storage.local`; los tokens sólo en `storage.session`. El panel permite pausar, reanudar, retirar y ver pendientes/último acuse. Después de reiniciar Chrome hay que iniciar sesión y volver a autorizar: los eventos pendientes de esa cuenta se conservan.
+
+Antes de cargarla descomprimida, ejecutar desde la raíz:
+
+```sh
+npm ci --prefix frontend
+npm run build --prefix frontend/extension
+```
+
+Cargar la carpeta `frontend/extension` completa, incluyendo `dist/background.js`, desde Extensiones → Modo desarrollador. Cada servidor y dominio solicita su permiso HTTPS opcional. No publicar ni distribuir tokens. Más detalle: [política y validación de los recolectores](../../docs/recolectores-sincronizacion.md).
+
+Las secciones siguientes describen entregas históricas. Sus frases sobre ausencia de login, cola o envío corresponden a esas fechas y están reemplazadas por esta actualización.
+
+---
+
 # Extensión de seguimiento — S3-MX-09 y S3-MX-10
 
 Chrome/Edge de escritorio, Manifest V3, sin build ni dependencias. Carga esta carpeta

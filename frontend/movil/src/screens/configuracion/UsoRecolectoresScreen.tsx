@@ -1,197 +1,98 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { obtenerAccessToken, sesionDelToken } from '@ojoalgasto/shared';
-import { validarPaqueteAndroid } from '../../services/asociacionPaquetes';
+import type { EstadoColaUso } from '@ojoalgasto/shared';
 import { NavButton } from '../components/NavButton';
-import { calcularMinutosUsoAndroid } from '../../services/minutosUsoAndroid';
 import { usoAndroidNativo } from '../../services/usoAndroidNativo';
-import { crearControlPermisoUsoAndroid, crearControlUsoAndroid, type AlcanceUsoAndroid, type EstadoPermisoUsoAndroid } from '../../services/usoAndroid';
+import { crearControlPermisoUsoAndroid, type EstadoPermisoUsoAndroid } from '../../services/usoAndroid';
+import { aceptarUsoAndroid, cicloUsoAndroid, estadoUsoAndroid, pausarUsoAndroid, revocarUsoAndroid } from '../../services/usoAndroidSincronizacion';
 
 const CONTROL_PERMISO = crearControlPermisoUsoAndroid(usoAndroidNativo);
-
-const VENTANA_MAXIMA_MS = 86_400_000;
-
-function obtenerSesionUso(): string | null {
-  const token = obtenerAccessToken();
-  return token ? sesionDelToken(token) : null;
-}
-
-const ETIQUETAS_PERMISO: Record<EstadoPermisoUsoAndroid, string> = {
-  cargando: 'Comprobando permiso…',
-  no_disponible: 'Disponible solo en una compilación Android compatible.',
-  requerido: 'El permiso de acceso al uso está desactivado.',
-  concedido: 'El permiso de Android está concedido.',
+const ETIQUETAS: Record<EstadoPermisoUsoAndroid, string> = {
+  cargando: 'Comprobando permiso…', no_disponible: 'Disponible solo en una compilación Android compatible.',
+  requerido: 'El permiso de acceso al uso está desactivado.', concedido: 'El permiso de Android está concedido.',
   error: 'No se pudo comprobar el permiso. Inténtalo de nuevo.',
 };
 
 export default function UsoRecolectoresScreen() {
-  const [estadoPermiso, setEstadoPermiso] = useState<EstadoPermisoUsoAndroid>('cargando');
-
+  const [permiso, setPermiso] = useState<EstadoPermisoUsoAndroid>('cargando');
   const [paquete, setPaquete] = useState('');
-  const [paqueteAceptado, setPaqueteAceptado] = useState<string | null>(null);
-  const [resultado, setResultado] = useState<string | null>(null);
-  const [consultando, setConsultando] = useState(false);
-  const consentimiento = useRef<{ sesion: string; alcance: AlcanceUsoAndroid } | null>(null);
-  const generacion = useRef(0);
-
-  const retirar = useCallback(() => {
-    consentimiento.current = null;
-    setPaqueteAceptado(null);
-    setResultado(null);
-    setConsultando(false);
+  const [autorizado, setAutorizado] = useState<string | null>(null);
+  const [estado, setEstado] = useState<EstadoColaUso | null>(null);
+  const [mensaje, setMensaje] = useState<string | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  const refrescar = useCallback(async () => {
+    const datos = await estadoUsoAndroid();
+    setEstado(datos.estado); setAutorizado(datos.seleccion?.paquete ?? null);
   }, []);
-
-  const verificarPermiso = useCallback(async () => {
-    setEstadoPermiso('cargando');
-    const permiso = await CONTROL_PERMISO.verificar();
-    setEstadoPermiso(permiso);
-    if (permiso !== 'concedido' || consentimiento.current?.sesion !== obtenerSesionUso()) retirar();
-  }, [retirar]);
-
+  const verificar = useCallback(async () => {
+    setPermiso('cargando');
+    const actual = await CONTROL_PERMISO.verificar(); setPermiso(actual);
+    if (actual !== 'concedido') await pausarUsoAndroid().catch(() => {});
+    await refrescar();
+  }, [refrescar]);
   useEffect(() => {
-    void CONTROL_PERMISO.verificar().then(setEstadoPermiso);
-    const suscripcion = AppState.addEventListener('change', (estadoAplicacion) => {
-      if (estadoAplicacion === 'active') void verificarPermiso();
+    let vigente = true;
+    void CONTROL_PERMISO.verificar().then(valor => { if (vigente) setPermiso(valor); });
+    void estadoUsoAndroid().then(datos => {
+      if (vigente) { setEstado(datos.estado); setAutorizado(datos.seleccion?.paquete ?? null); }
+    }).catch(() => {});
+    const escucha = AppState.addEventListener('change', actual => {
+      if (actual === 'active') void verificar().catch(() => {});
     });
-    return () => {
-      consentimiento.current = null;
-      suscripcion.remove();
-    };
-  }, [verificarPermiso]);
-
-  const abrirAjustes = async () => {
-    const seAbrieron = await CONTROL_PERMISO.abrirAjustes();
-    if (!seAbrieron) setEstadoPermiso(usoAndroidNativo ? 'error' : 'no_disponible');
+    const intervalo = setInterval(() => { void refrescar().catch(() => {}); }, 5000);
+    return () => { vigente = false; escucha.remove(); clearInterval(intervalo); };
+  }, [refrescar, verificar]);
+  const ejecutar = async (accion: () => Promise<unknown>) => {
+    setOcupado(true); setMensaje(null);
+    try { await accion(); }
+    catch (error) { setMensaje(error instanceof Error ? error.message : 'No se pudo completar.'); }
+    finally { await refrescar().catch(() => {}); setOcupado(false); }
   };
-
-  const aceptar = () => {
-    const sesion = obtenerSesionUso();
-    if (!sesion || estadoPermiso !== 'concedido' || !usoAndroidNativo?.leerTramos) {
-      setResultado('Necesitas una sesión activa y acceso de uso en Android.');
-      return;
-    }
-    try {
-      const autorizado = validarPaqueteAndroid(paquete);
-      consentimiento.current = {
-        sesion,
-        alcance: { id: String(++generacion.current), desdeMs: Date.now(), paquetes: [autorizado] },
-      };
-      setPaqueteAceptado(autorizado);
-      setResultado(null);
-    } catch (error) {
-      setResultado(error instanceof RangeError ? error.message : 'No se pudo autorizar la lectura.');
-    }
-  };
-
-  const consultar = async () => {
-    const aceptacion = consentimiento.current;
-    if (!aceptacion) return;
-    if (aceptacion.sesion !== obtenerSesionUso()) {
-      retirar();
-      return;
-    }
-    const finMs = Date.now();
-    if (finMs <= aceptacion.alcance.desdeMs) return;
-    const alcanceVigente = () => consentimiento.current?.sesion === obtenerSesionUso()
-      ? consentimiento.current?.alcance ?? null : null;
-    const control = crearControlUsoAndroid(
-      usoAndroidNativo, obtenerSesionUso, () => alcanceVigente() !== null, alcanceVigente,
-    );
-    setConsultando(true);
-    setResultado(null);
-    try {
-      const lectura = await control.leerTramos(Math.max(aceptacion.alcance.desdeMs, finMs - VENTANA_MAXIMA_MS), finMs);
-      if (consentimiento.current !== aceptacion || !alcanceVigente()) return;
-      if (lectura.estado === 'revocado' || lectura.estado === 'sin_permiso') {
-        retirar();
-        setEstadoPermiso('requerido');
-        return;
-      }
-      if (lectura.estado !== 'disponible') {
-        setResultado('No se pudo realizar la consulta.');
-        return;
-      }
-      if (!lectura.tramos.length) {
-        setResultado('No se encontraron intervalos completos en la consulta.');
-        return;
-      }
-      const zonaHoraria = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const resumen = calcularMinutosUsoAndroid(lectura.tramos, zonaHoraria);
-      const duraciones = resumen.map(({ fechaLocal, minutos }) =>
-        `${fechaLocal}: ${minutos.toLocaleString('es-CL', { maximumSignificantDigits: 4 })} min`,
-      );
-      setResultado([`Intervalos encontrados: ${lectura.tramos.length}.`, ...duraciones].join('\n'));
-    } catch {
-      if (consentimiento.current === aceptacion && alcanceVigente()) {
-        setResultado('No se pudo realizar la consulta.');
-      }
-    } finally {
-      if (consentimiento.current === aceptacion) {
-        if (alcanceVigente()) setConsultando(false);
-        else retirar();
-      }
-    }
-  };
-
   return (
     <ScrollView testID="screen-uso-recolectores" contentContainerStyle={styles.contenedor}>
       <Text style={styles.titulo}>Acceso de uso</Text>
       <View style={styles.estado}>
         <Text style={styles.etiqueta}>Permiso del sistema</Text>
-        <Text testID="estado-permiso-uso">{ETIQUETAS_PERMISO[estadoPermiso]}</Text>
+        <Text testID="estado-permiso-uso">{ETIQUETAS[permiso]}</Text>
       </View>
-      <Text style={styles.texto}>
-        Android gestiona este permiso en Ajustes. Al volver a la app se comprobará de nuevo;
-        abrir Ajustes no se considera una concesión.
-      </Text>
-      <Text style={styles.texto}>
-        Puedes autorizar una consulta local del paquete que elijas. Se leen los inicios y fines
-        de uso desde tu aceptación y se muestran los minutos por día en la zona del dispositivo. La consulta no se envía al servidor ni se guarda como
-        historial. Puedes retirar la autorización aquí o salir de esta pantalla.
-      </Text>
-      <NavButton
-        testID="abrir-ajustes-uso"
-        title="Abrir ajustes de acceso al uso"
-        onPress={() => void abrirAjustes()}
-        disabled={!usoAndroidNativo || estadoPermiso === 'cargando'}
-      />
-      <NavButton
-        testID="verificar-permiso-uso"
-        title="Volver a comprobar permiso"
-        variant="secondary"
-        onPress={() => void verificarPermiso()}
-        disabled={!usoAndroidNativo || estadoPermiso === 'cargando'}
-      />
-      {usoAndroidNativo?.leerTramos ? (
-        <View style={styles.estado}>
-          <Text style={styles.etiqueta}>Consulta local de uso</Text>
-          {paqueteAceptado ? (
-            <>
-              <Text>Paquete autorizado: {paqueteAceptado}</Text>
-              <NavButton title="Consultar intervalos" loading={consultando}
-                disabled={estadoPermiso !== 'concedido'} onPress={() => void consultar()} />
-              <NavButton title="Retirar autorización" variant="secondary" onPress={retirar} />
-            </>
-          ) : (
-            <>
-              <TextInput accessibilityLabel="Paquete autorizado para consulta"
-                value={paquete} onChangeText={setPaquete} placeholder="com.ejemplo.app"
-                autoCapitalize="none" autoCorrect={false} maxLength={255} />
-              <NavButton title="Acepto autorizar la consulta local"
-                disabled={!paquete.trim() || estadoPermiso !== 'concedido'} onPress={aceptar} />
-            </>
-          )}
-          {resultado ? <Text accessibilityLiveRegion="polite">{resultado}</Text> : null}
-        </View>
-      ) : null}
+      <Text>Android gestiona este permiso en Ajustes. Al volver se comprobará de nuevo; abrir Ajustes no concede permiso.</Text>
+      <NavButton testID="abrir-ajustes-uso" title="Abrir ajustes de acceso al uso"
+        disabled={!usoAndroidNativo || permiso === 'cargando'} onPress={() => void ejecutar(async () => {
+          if (!await CONTROL_PERMISO.abrirAjustes()) setPermiso(usoAndroidNativo ? 'error' : 'no_disponible');
+        })} />
+      <NavButton testID="verificar-permiso-uso" title="Volver a comprobar permiso" variant="secondary"
+        disabled={!usoAndroidNativo || permiso === 'cargando'} onPress={() => void ejecutar(verificar)} />
+      {usoAndroidNativo?.leerTramos ? <View style={styles.estado}>
+        <Text style={styles.etiqueta}>Captura y sincronización</Text>
+        <Text>Autoriza un paquete que ya hayas asociado con una suscripción. Se enviarán únicamente intervalos y duración de uso, sin contenido de otras apps. La app consulta mientras está abierta y conserva pendientes para reintentar sin duplicarlos.</Text>
+        <Text>Los períodos sin medición se mantienen como desconocidos. Pausar detiene nuevas lecturas; retirar también descarta los pendientes de este recolector. El historial ya recibido se conserva.</Text>
+        {autorizado && estado?.fase !== 'revocado' ? <>
+          <Text>Paquete autorizado: {autorizado}</Text>
+          <Text>Captura: {estado?.fase ?? 'sin autorización'}</Text>
+          <Text>Pendientes: {estado?.pendientes.length ?? 0}</Text>
+          <Text>Última sincronización: {estado?.ultimoEnvio ? new Date(estado.ultimoEnvio).toLocaleString('es-CL') : 'Sin envíos confirmados'}</Text>
+          {estado?.accionPendiente ? <Text>Falta confirmar el cambio con el servidor. Se reintentará al sincronizar.</Text> : null}
+          {estado?.error ? <Text>{estado.error}</Text> : null}
+          <NavButton title="Sincronizar ahora" loading={ocupado} onPress={() => void ejecutar(cicloUsoAndroid)} />
+          {estado?.fase === 'activo' ? <NavButton title="Pausar captura" variant="secondary"
+            onPress={() => void ejecutar(pausarUsoAndroid)} /> : estado?.fase === 'pausado' || estado?.fase === 'pendiente' ?
+            <NavButton title="Reanudar captura" disabled={ocupado || permiso !== 'concedido'}
+              onPress={() => void ejecutar(() => aceptarUsoAndroid(autorizado))} /> : null}
+          <NavButton title="Retirar autorización" variant="secondary" onPress={() => void ejecutar(revocarUsoAndroid)} />
+        </> : <>
+          <TextInput accessibilityLabel="Paquete autorizado para consulta" value={paquete} onChangeText={setPaquete}
+            placeholder="com.ejemplo.app" autoCapitalize="none" autoCorrect={false} maxLength={255} />
+          <NavButton title="Acepto capturar y sincronizar el uso" loading={ocupado}
+            disabled={!paquete.trim() || permiso !== 'concedido'} onPress={() => void ejecutar(() => aceptarUsoAndroid(paquete.trim()))} />
+        </>}
+        {mensaje ? <Text accessibilityLiveRegion="polite">{mensaje}</Text> : null}
+      </View> : null}
     </ScrollView>
   );
 }
-
 const styles = StyleSheet.create({
   contenedor: { padding: 20, gap: 16, backgroundColor: '#f8fafc' },
   titulo: { fontSize: 24, fontWeight: '700', color: '#0f172a' },
-  estado: { padding: 14, borderRadius: 8, gap: 6, backgroundColor: '#e2e8f0' },
+  estado: { padding: 14, borderRadius: 8, gap: 8, backgroundColor: '#e2e8f0' },
   etiqueta: { fontWeight: '700', color: '#334155' },
-  texto: { color: '#475569', lineHeight: 22 },
 });

@@ -3,16 +3,34 @@
 <meta charset="utf-8">
 <title>Uso consentido — Ojo al Gasto</title>
 <body>
-  <h1>Seguimiento temporal</h1>
-  <p>Solo dominios elegidos. Sin rutas, títulos ni contenido. No se envía información.
-    La sesión se elimina al cerrar el navegador o recargar la extensión.</p>
+  <h1>Uso de tus suscripciones</h1>
+  <p>Solo dominios elegidos. Sin rutas, títulos ni contenido. Se envían intervalos y duración a tu cuenta.
+    Los pendientes se conservan al reiniciar; vuelve a iniciar sesión y autorizar para continuar.</p>
+  <form id="acceso">
+    <label>Servidor de Ojo al Gasto <input id="servidor" type="url" placeholder="https://tu-servidor/api" required></label>
+    <label>Correo <input id="correo" type="email" autocomplete="username" required></label>
+    <label>Contraseña <input id="password" type="password" autocomplete="current-password" required></label>
+    <button id="ingresar" disabled>Iniciar sesión</button>
+  </form>
+  <p id="cuenta" role="status"></p>
+  <button id="salir" hidden>Cerrar sesión</button>
   <form id="configuracion">
     <label>Dominios HTTPS exactos, uno por línea <textarea id="dominios" required></textarea></label>
-    <label>Asociaciones opcionales: dominio=UUID de tu suscripción <textarea id="asociaciones"></textarea></label>
-    <label><input id="consentimiento" type="checkbox" required> Acepto observar estos dominios durante esta sesión.</label>
+    <label>Dominio para asociar <select id="dominio-asociado"></select></label>
+    <label>Tu suscripción <select id="suscripcion"></select></label>
+    <button type="button" id="asociar">Asociar dominio</button>
+    <textarea id="asociaciones" hidden aria-label="Asociaciones de dominios"></textarea>
+    <p id="lista-asociaciones"></p>
+    <label><input id="consentimiento" type="checkbox" required> Acepto capturar y sincronizar el uso de estas suscripciones. Los períodos desconocidos no se consideran uso cero.</label>
     <button id="autorizar" disabled>Autorizar dominios</button>
   </form>
-  <button id="retirar">Retirar consentimiento y borrar sesión</button>
+  <button id="pausar">Pausar captura</button>
+  <button id="reanudar">Reanudar captura</button>
+  <button id="sincronizar">Sincronizar ahora</button>
+  <button id="retirar">Retirar consentimiento y descartar pendientes</button>
+  <p>Al pausar se conservan y envían los pendientes anteriores. Al retirar se detienen lectura y envíos;
+    los datos ya recibidos quedan en tu historial. Sin conexión, falta confirmar el retiro en el servidor.</p>
+  <p id="sincronizacion" role="status" aria-live="polite"></p>
   <p id="observacion" role="status" aria-label="Estado de captura" aria-live="polite"></p>
   <p id="estado" role="status" aria-live="polite"></p>
   <pre id="minutos" aria-label="Minutos de esta sesión"></pre>

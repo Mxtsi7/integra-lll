@@ -70,11 +70,11 @@ document.querySelector('#configuracion').addEventListener('submit', async evento
     const respuesta = await chrome.runtime.sendMessage({ tipo: 'guardar', intentoId, configuracion: { consentimiento: true } });
     if (actual !== generacion) return;
     if (respuesta?.cancelado) { estado.textContent = 'Autorización cancelada. Acepta de nuevo para activar.'; return; }
-    if (!respuesta?.ok) throw new Error('No se pudo guardar');
+    if (!respuesta?.ok) throw new Error(respuesta?.error ?? 'No se pudo guardar');
     estado.textContent = 'Dominios autorizados. El estado de captura se actualiza automáticamente.';
-  } catch {
+  } catch (error) {
     await chrome.runtime.sendMessage({ tipo: 'cancelar_autorizacion', intentoId }).catch(() => {});
-    if (actual === generacion) estado.textContent = 'No se pudo autorizar. Edita los dominios para volver a intentar.';
+    if (actual === generacion) estado.textContent = error.message;
   }
 });
 document.querySelector('#retirar').addEventListener('click', async () => {
@@ -84,17 +84,18 @@ document.querySelector('#retirar').addEventListener('click', async () => {
   try {
     const respuesta = await chrome.runtime.sendMessage({ tipo: 'retirar' });
     if (actual !== generacion) return;
-    if (!respuesta?.ok) throw new Error('No se pudo retirar');
+    if (!respuesta?.ok) throw new Error(respuesta?.error ?? 'No se pudo retirar');
     document.querySelector('#consentimiento').checked = false;
-    estado.textContent = 'Consentimiento retirado. Sesión borrada.';
+    estado.textContent = 'Consentimiento retirado y pendientes descartados.';
     await mostrarEstado(actual);
-  } catch {
-    if (actual === generacion) estado.textContent = 'No se pudo completar la retirada. Deshabilita la extensión y vuelve a intentarlo.';
+  } catch (error) {
+    if (actual === generacion) estado.textContent = error.message;
   }
 });
 // Suscribir antes de leer el snapshot para no perder cambios mientras se abre el panel.
 chrome.storage.onChanged.addListener((cambios, area) => {
   if (area !== 'session') return;
+  if (Object.hasOwn(cambios, 'sincronizacion')) mostrarSincronizacion(cambios.sincronizacion.newValue);
   if (Object.hasOwn(cambios, 'observacion')) {
     ++revisionObservacion;
     mostrarObservacion(cambios.observacion.newValue);
@@ -105,3 +106,83 @@ chrome.storage.onChanged.addListener((cambios, area) => {
   }
 });
 mostrarEstado().catch(() => { estado.textContent = 'No se pudo leer el estado de la sesión.'; });
+
+function mostrarSincronizacion(valores = []) {
+  document.querySelector('#sincronizacion').textContent = valores.map(e =>
+    'Captura: ' + e.fase + '. Pendientes: ' + e.pendientes + '. Última sincronización: ' +
+    (e.ultimoEnvio ? new Date(e.ultimoEnvio).toLocaleString('es-CL') : 'Sin envíos confirmados') +
+    (e.accionPendiente ? '. Falta confirmar ' + e.accionPendiente + ' con el servidor.' : '') +
+    (e.error ? '. ' + e.error : '')).join('\n');
+}
+let suscripciones = [];
+function mostrarAsociaciones() {
+  const valores = document.querySelector('#asociaciones').value.split(/\r?\n/).filter(Boolean);
+  document.querySelector('#lista-asociaciones').textContent = valores.map(valor => {
+    const [dominio, id] = valor.split('=');
+    return dominio + ': ' + (suscripciones.find(s => s.id === id)?.nombre ?? 'Suscripción asociada');
+  }).join('; ');
+}
+function opciones(selector, valores) {
+  const select = document.querySelector(selector);
+  select.replaceChildren(...valores.map(({ id, nombre }) => {
+    const opcion = document.createElement('option'); opcion.value = id; opcion.textContent = nombre; return opcion;
+  }));
+}
+document.querySelector('#dominios').addEventListener('change', () => {
+  const dominios = document.querySelector('#dominios').value.split(/\r?\n/).map(normalizarDominio).filter(Boolean);
+  opciones('#dominio-asociado', dominios.map(d => ({ id: d, nombre: d })));
+});
+document.querySelector('#asociar').addEventListener('click', () => {
+  const dominio = document.querySelector('#dominio-asociado').value;
+  const id = document.querySelector('#suscripcion').value;
+  if (!dominio || !id) { estado.textContent = 'Inicia sesión y elige un dominio y su suscripción.'; return; }
+  const restantes = document.querySelector('#asociaciones').value.split(/\r?\n/).filter(v => v && !v.startsWith(dominio + '='));
+  document.querySelector('#asociaciones').value = [...restantes, dominio + '=' + id].join('\n');
+  mostrarAsociaciones(); void prepararAutorizacion();
+});
+let revisionConexion = 0;
+document.querySelector('#servidor').addEventListener('input', async () => {
+  const revision = ++revisionConexion;
+  document.querySelector('#ingresar').disabled = true;
+  try {
+    const respuesta = await chrome.runtime.sendMessage({ tipo: 'preparar_conexion', urlBase: document.querySelector('#servidor').value });
+    if (revision === revisionConexion) document.querySelector('#ingresar').disabled = !respuesta?.ok;
+  } catch { /* Una URL incompleta se corrige mientras se escribe. */ }
+});
+async function cargarCuenta() {
+  const respuesta = await chrome.runtime.sendMessage({ tipo: 'estado_cuenta' });
+  if (!respuesta?.ok) throw new Error(respuesta?.error ?? 'No se pudo consultar la cuenta.');
+  document.querySelector('#acceso').hidden = respuesta.conectado;
+  document.querySelector('#salir').hidden = !respuesta.conectado;
+  document.querySelector('#cuenta').textContent = respuesta.conectado ? 'Sesión conectada' : 'Inicia sesión para sincronizar';
+  suscripciones = respuesta.suscripciones ?? [];
+  opciones('#suscripcion', suscripciones);
+  mostrarAsociaciones();
+  const datos = await chrome.storage.session.get('sincronizacion'); mostrarSincronizacion(datos.sincronizacion);
+}
+document.querySelector('#acceso').addEventListener('submit', async evento => {
+  evento.preventDefault();
+  const ingresar = document.querySelector('#ingresar'); ingresar.disabled = true;
+  try {
+    const url = new URL(document.querySelector('#servidor').value);
+    // El permiso se solicita en el gesto; el servidor se registró antes al escribir.
+    if (!await chrome.permissions.request({ origins: [url.origin + '/*'] })) throw new Error('Permiso de servidor denegado.');
+    const respuesta = await chrome.runtime.sendMessage({ tipo: 'login', urlBase: url.href,
+      correo: document.querySelector('#correo').value, password: document.querySelector('#password').value });
+    document.querySelector('#password').value = '';
+    if (!respuesta?.ok) throw new Error(respuesta?.error ?? 'No se pudo iniciar sesión.');
+    await cargarCuenta(); estado.textContent = 'Sesión iniciada. Elige dominios y suscripciones para autorizar.';
+  } catch (error) { estado.textContent = error.message; }
+  finally { ingresar.disabled = false; }
+});
+for (const tipo of ['pausar', 'reanudar', 'sincronizar', 'salir']) {
+  document.querySelector('#' + tipo).addEventListener('click', async () => {
+    try {
+      const respuesta = await chrome.runtime.sendMessage({ tipo });
+      if (!respuesta?.ok) throw new Error(respuesta?.error ?? 'No se pudo completar.');
+      estado.textContent = tipo === 'salir' ? 'Sesión cerrada. Captura detenida.' : 'Cambio aplicado.';
+      await cargarCuenta();
+    } catch (error) { estado.textContent = error.message; }
+  });
+}
+void cargarCuenta().catch(() => {});

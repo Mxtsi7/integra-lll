@@ -53,11 +53,12 @@ export async function cortarTransicion(api, { tipo, pestanaId, ventanaId, origin
 }
 
 export async function observar(api, { estado: pausa, observadoEn, esVigente = () => true } = {}) {
+  if (!esVigente()) return;
   const { configuracion } = await api.storage.session.get('configuracion');
   let dominio = null;
   let estado = 'sin_consentimiento';
   let identidad = {};
-  if (configuracion?.consentimiento) {
+  if (configuracion?.consentimiento && !configuracion.pausado) {
     if (pausa) estado = pausa;
     else {
       const lectura = await leerActividad(api, configuracion.dominios);
@@ -66,7 +67,7 @@ export async function observar(api, { estado: pausa, observadoEn, esVigente = ()
     }
   }
   const { configuracion: vigente } = await api.storage.session.get('configuracion');
-  if (vigente?.id !== configuracion?.id || !vigente?.consentimiento) {
+  if (vigente?.id !== configuracion?.id || !vigente?.consentimiento || vigente.pausado) {
     dominio = null;
     estado = 'sin_consentimiento';
   }

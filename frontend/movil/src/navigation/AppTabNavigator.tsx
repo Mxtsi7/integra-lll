@@ -6,10 +6,12 @@ import { HomeNavigator } from './HomeNavigator';
 import { PanelNavigator } from './PanelNavigator';
 import { CalendarioNavigator } from './CalendarioNavigator';
 import { ConfiguracionNavigator } from './ConfiguracionNavigator';
+import { useRecolectorAndroid } from '../services/useRecolectorAndroid';
 
 const Tab = createBottomTabNavigator<AppTabParamList>();
 
 export function AppTabNavigator() {
+  useRecolectorAndroid();
   return (
     <Tab.Navigator
       initialRouteName="HomeTab"
