@@ -22,6 +22,14 @@ navegador ─▶ web /cuentas ─▶ POST /api/conectores/autorizaciones/ ─▶
                                    │                           CobroCandidato (propuesto)
                                    └──────────────────────────────────────┘
                                                     confirmar / rechazar ─▶ orden en el outbox
+                                                                  │
+                                                   candidato.confirmado.v1
+                                                                  ▼
+                                      subscriptions: suscripción + cobro + acuse
+                                                                  │
+                                                  candidato.aplicado.v1
+                                                                  ▼
+                                      CobroCandidato.aplicado_en → `aplicada`
 ```
 
 ## 1. Antes de empezar: las cuentas de prueba
@@ -54,6 +62,8 @@ Copia `.env.example` a `.env` en la raíz del repo y completa:
 | `OAUTH_OUTLOOK_CLIENT_ID` / `_SECRET` | los de tu registro de Microsoft | |
 | `CLAVES_CIFRADO` | una clave Fernet (cómo generarla está en `.env.example`) | cifra los tokens guardados. Sin ella no se puede guardar una cuenta |
 | `CONECTORES_LECTURA_CORREO_SEGUNDOS` | `900` | cada cuánto el beat programa la lectura |
+| `CONECTORES_PUBLICACION_SEGUNDOS` | el del código | cada cuánto beat drena el outbox de `candidato.confirmado` |
+| `RABBITMQ_URL` | `amqp://guest:guest@rabbitmq:5672/` (default del código) | broker del publicador y del consumidor del acuse. En el clúster lo sobrescribe el Secret `ojoalgasto-rabbitmq`; en local basta el default para correr `manage.py check` sin `.env` |
 
 Las de importación tienen valores por omisión que sirven tal cual:
 `IMPORTACION_TAMANO_MAXIMO_BYTES` (5 MB), `IMPORTACION_CUOTA_DIARIA` (20
@@ -61,6 +71,12 @@ archivos), `IMPORTACION_DIAS_RETENCION` (7 días),
 `IMPORTACION_MONEDA_POR_DEFECTO` (`CLP`) e `IMPORTACION_ORDEN_FECHA`
 (vacía: se deduce del archivo). Todas se leen en
 `services/connectors/connectors_config/settings.py`.
+
+FASE 3 también lee una variable en **subscriptions**, no en connectors:
+`CONFIRMACIONES_FUENTES_HABILITADAS` (default `csv,correo`). Si una fuente se
+quita, las órdenes de esa fuente se ACK con un log
+`confirmacion.omitida ... motivo=fuente_no_habilitada`: no se aplican, pero
+tampoco quedan rebotando en la cola.
 
 > Hasta el sprint 3, `.env.example` traía un bloque «Conector Gmail» con
 > `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` y `GOOGLE_REDIRECT_URI`, que
@@ -78,7 +94,7 @@ docker compose up -d --build
 | `frontend` | la web en `http://localhost:5173` |
 | `gateway` | `http://localhost:8000`: valida el JWT y pone `X-Organizacion-Id` y `X-Usuario-Id` |
 | `connectors` | la API de conectores, importaciones y candidatos |
-| `connectors-worker` | el worker de Celery **con beat** (`--beat`): procesa los CSV y lee las cuentas cada 15 minutos |
+| `connectors-worker` | el worker de Celery **con beat** (`--beat`): procesa los CSV, lee las cuentas cada 15 minutos y (FASE 3) publica las confirmaciones. En k8s, además, el sidecar `aplicaciones` consume el acuse |
 | `notifications` | las alertas |
 
 Cuando `docker compose ps` muestre todo `healthy`, entra a la web con el
@@ -133,9 +149,13 @@ docker compose logs -f connectors-worker
 Confirmar deja una orden `candidato.confirmado` en el outbox. Confirmar dos
 veces no deja dos órdenes.
 
-> **Hoy nadie consume esas órdenes.** subscriptions no escucha
-> `candidato.confirmado`, así que confirmar no crea todavía la suscripción
-> ni el cobro (ver S3-FE-15, doc 21).
+> **Con FASE 3 las órdenes sí se consumen**, pero la rama
+> `aplicar-cobros-confirmados` no está fusionada: en lo que hoy corre en el
+> clúster, confirmar sigue sin crear la suscripción ni el cobro. Cuando se
+> despliegue, `subscriptions` aplica la orden y devuelve
+> `candidato.aplicado`; el sidecar `aplicaciones` del worker marca
+> `aplicado_en` y la API pasa a mostrar `aplicacion="aplicada"` (ver doc 21).
+> Los contratos siguen pendientes de ratificación con Maxi/Víctor/Felipe.
 
 ## 5. Repetir la importación de una cartola
 
@@ -243,6 +263,9 @@ Lo que **no** funciona todavía, a propósito:
 | La lectura no deja candidatos | mira los errores de la importación (`GET /api/importaciones/<id>/`): el motivo de cada correo descartado está ahí. Un boletín sin cobro no deja nada, y es correcto |
 | `estado_lectura` = `agotada` | el proveedor falló 6 veces seguidas. El error está en `ultimo_error` y `ultimo_error_detalle` del avance |
 | El CSV sale entero con `fecha_ambigua` | ninguna fila tiene un día mayor que 12: fija `IMPORTACION_ORDEN_FECHA` |
+| `aplicacion` sigue `pendiente` después de confirmar | la rama de FASE 3 no está desplegada, o la fuente no está en `CONFIRMACIONES_FUENTES_HABILITADAS` (se ACK y queda rastro en el log), o el sobre fue a `subscriptions.confirmaciones.fallidos`. `pendiente` no es un error: es «orden durable, sin acuse» |
+| `aplicacion="aplicada"` pero no hay cobro | es correcto si el tipo era `aviso_de_cobro` o `pago_fallido`: el acuse trae `cobro_id=null`. La suscripción sí quedó creada o emparejada |
+| Un cobro por correo y otro por CSV del mismo servicio aparecen dos veces | riesgo conocido fuera de alcance: la unicidad es por origen y un `Message-ID` nunca iguala la huella de una fila CSV (doc 34) |
 
 ## Dónde está el detalle
 

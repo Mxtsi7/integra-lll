@@ -27,6 +27,11 @@ hay una opinión, dice que es una opinión.
 | #215 | S3-FE-22 (avisos obsoletos) | 23-11 | abierta, revisión respondida | 1 |
 | #222 | S3-FE-23 (pruebas finales) | 24-11 | borrador | — |
 | esta | S3-FE-24 (guía y retrospectiva) | 24-11 | borrador | — |
+| rama `aplicar-cobros-confirmados` | FASE 3: publicar, aplicar y acusar las confirmaciones | — | sin PR, sin merge | — |
+
+FASE 3 se trabajó aparte de este sprint y se documenta acá para que el estado
+no se pierda: el código existe, pero no se da por entregada hasta la ratificación
+y el despliegue.
 
 De soporte, en el mismo periodo: #164 (notifications en el namespace de
 Maxi), #187 (una prueba de k8s inestable) y #204 (documentación de
@@ -101,8 +106,9 @@ Agrupadas por tipo, con un ejemplo de cada una:
 
 | Qué | Dónde |
 |---|---|
-| Confirmar no crea la suscripción ni el cobro: nadie consume `candidato.confirmado` | S3-FE-15, doc 21 |
-| El mismo cobro por correo y por CSV deja dos órdenes | hallazgo de S3-FE-23, doc 34 |
+| FASE 3 implementada en la rama `aplicar-cobros-confirmados` (publicador, consumidor y acuse), **sin merge ni ratificación**: lo confirma Felipe con Maxi | S3-FE-15, doc 21 |
+| `RN-DAT-005`: ¿el próximo cobro de un `cobro_realizado` es `fecha + 1 mes` recortado? Quedó como `TODO`, no como regla | `events/confirmaciones.py`, doc 21 |
+| El mismo cobro por correo y por CSV deja dos órdenes; con FASE 3 el riesgo ya es real, sigue fuera de alcance | hallazgo de S3-FE-23, doc 34 |
 | Lo que lee la lectura programada no se ve en la web (la pantalla de importaciones muestra solo las de la persona) | doc 35, sección 4.3 |
 | No salen correos de alertas: falta acordar de dónde sale la dirección y programar el despachador | S3-FE-21, doc 31 |
 | Ninguna lectura con una cuenta real de Gmail u Outlook ni un SMTP real. Connectors no está deployado en el clúster | S3-FE-23 y 24 |
@@ -111,8 +117,11 @@ Agrupadas por tipo, con un ejemplo de cada una:
 
 ## Para el próximo sprint
 
-1. Decidir con Maxi quién consume `candidato.confirmado`, y con eso cómo se
-   reconoce el mismo cobro por correo y por CSV. Son la misma conversación.
+1. Ratificar con Maxi/Víctor/Felipe los dos contratos (`candidato.confirmado`
+   y su acuse `candidato.aplicado`), confirmar `RN-DAT-005` con el Excel
+   Integra III y recién entonces fusionar y desplegar FASE 3. En la misma
+   conversación decide cómo se reconoce el mismo cobro por correo y por CSV:
+   ya no es un riesgo teórico porque las órdenes ahora se drenan.
 2. Recorrer la guía (doc 35) con una cuenta de prueba real, y corregirla
    donde no calce.
 3. Abrir contra `main` las tarjetas independientes, y apilar solo las que
