@@ -46,6 +46,15 @@ COLA_RESUMEN = "subscriptions.resumen"
 EXCHANGE_FALLIDOS = "suscripciones.fallidos"
 COLA_FALLIDOS = "subscriptions.resumen.fallidos"
 
+# El flujo de confirmaciones tiene su propia cola y su propia DLQ: mezclar sus
+# fallos con los del resumen v2 haría imposible saber qué trabajo quedó sin
+# hacer. No se toca la cola de resumen ni sus argumentos (PRECONDITION_FAILED).
+EVENTO_CONFIRMADO = "candidato.confirmado"
+VERSION_CONFIRMADO = 1
+COLA_CONFIRMACIONES = "subscriptions.confirmaciones"
+EXCHANGE_FALLIDOS_CONFIRMACIONES = "suscripciones.confirmaciones.fallidos"
+COLA_FALLIDOS_CONFIRMACIONES = "subscriptions.confirmaciones.fallidos"
+
 
 @dataclass(frozen=True)
 class _EventoParaClave:
@@ -78,7 +87,7 @@ PATRONES_RESUMEN = tuple(
 
 
 def declarar(canal) -> None:
-    """Deja el exchange, las dos colas y los enlaces listos. Idempotente."""
+    """Deja ambos flujos (resumen y confirmaciones) listos. Idempotente."""
     # durable=True en todo: sobreviven a un reinicio del broker, así que un
     # evento publicado mientras el consumidor estaba caído sigue ahí.
     canal.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
@@ -103,3 +112,28 @@ def declarar(canal) -> None:
     )
     for patron in PATRONES_RESUMEN:
         canal.queue_bind(exchange=EXCHANGE, queue=COLA_RESUMEN, routing_key=patron)
+
+    # ── confirmaciones de connectors ────────────────────────────────────
+    canal.exchange_declare(
+        exchange=EXCHANGE_FALLIDOS_CONFIRMACIONES,
+        exchange_type="fanout",
+        durable=True,
+    )
+    canal.queue_declare(queue=COLA_FALLIDOS_CONFIRMACIONES, durable=True)
+    canal.queue_bind(
+        exchange=EXCHANGE_FALLIDOS_CONFIRMACIONES,
+        queue=COLA_FALLIDOS_CONFIRMACIONES,
+    )
+    clave_confirmado = routing_key(
+        _EventoParaClave(evento=EVENTO_CONFIRMADO, version=VERSION_CONFIRMADO)
+    )
+    canal.queue_declare(
+        queue=COLA_CONFIRMACIONES,
+        durable=True,
+        arguments={"x-dead-letter-exchange": EXCHANGE_FALLIDOS_CONFIRMACIONES},
+    )
+    canal.queue_bind(
+        exchange=EXCHANGE,
+        queue=COLA_CONFIRMACIONES,
+        routing_key=clave_confirmado,
+    )

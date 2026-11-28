@@ -358,13 +358,15 @@ class TestTopologia:
             assert "*" not in patron
             assert "#" not in patron
 
-    def test_declara_las_dos_colas_y_sus_enlaces(self):
+    def test_declara_las_cuatro_colas_y_sus_enlaces(self):
         canal = CanalFalso()
         topologia.declarar(canal)
         tipos = [tipo for tipo, _ in canal.llamadas]
-        assert tipos.count("exchange") == 2  # el de eventos y el de fallos
-        assert tipos.count("cola") == 2      # resumen y fallidos
-        assert tipos.count("enlace") == 4  # fallidos + tres eventos v2
+        # Un exchange de eventos y dos de fallos (uno por flujo); dos colas
+        # principales y dos DLQ; tres eventos v2 y un `candidato.confirmado`.
+        assert tipos.count("exchange") == 3
+        assert tipos.count("cola") == 4
+        assert tipos.count("enlace") == 6
         enlaces_resumen = {
             kw["routing_key"]
             for tipo, kw in canal.llamadas
@@ -377,6 +379,12 @@ class TestTopologia:
             "suscripcion.actualizada.v2",
             "suscripcion.estado_cambiado.v2",
         }
+        enlaces_confirmaciones = {
+            kw["routing_key"]
+            for tipo, kw in canal.llamadas
+            if tipo == "enlace" and kw["queue"] == topologia.COLA_CONFIRMACIONES
+        }
+        assert enlaces_confirmaciones == {"candidato.confirmado.v1"}
 
     def test_la_cola_del_resumen_manda_sus_rechazos_a_la_cola_de_fallos(self):
         """La regresión del bug 2, en la declaración."""
@@ -387,6 +395,19 @@ class TestTopologia:
             if tipo == "cola" and kw["queue"] == topologia.COLA_RESUMEN
         )
         assert resumen["arguments"]["x-dead-letter-exchange"] == topologia.EXCHANGE_FALLIDOS
+
+    def test_la_cola_de_confirmaciones_tiene_su_propia_dlq(self):
+        """Sus fallos no deben mezclarse con los del resumen v2."""
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        cola = next(
+            kw for tipo, kw in canal.llamadas
+            if tipo == "cola" and kw["queue"] == topologia.COLA_CONFIRMACIONES
+        )
+        assert (
+            cola["arguments"]["x-dead-letter-exchange"]
+            == topologia.EXCHANGE_FALLIDOS_CONFIRMACIONES
+        )
 
     def test_todo_es_durable(self):
         """Sin durable, un reinicio del broker se lleva los eventos pendientes."""
