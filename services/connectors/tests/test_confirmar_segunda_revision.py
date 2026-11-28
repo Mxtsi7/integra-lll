@@ -293,20 +293,54 @@ def test_por_http_el_orden_inverso_tambien_da_conflicto(monkeypatch):
 # ══════════════════════════════════════════════
 
 
-def test_un_confirmado_dice_que_su_aplicacion_esta_pendiente():
-    """Lo que piden las dos revisiones para la interfaz: poder distinguir la
-    orden guardada de la suscripción creada. Hoy no hay publicador ni
-    consumidor, así que TODO confirmado está pendiente, y la respuesta lo
-    dice en vez de dejar que `estado="confirmado"` se lea como «ya está»."""
+def test_un_confirmado_dice_que_su_orden_esta_por_enviar():
+    """Lo que piden las revisiones de #159 y #242 para la interfaz: distinguir
+    la orden guardada de la que ya salió, sin afirmar nada de subscriptions.
+    Recién confirmado, la orden está en el outbox: `por_enviar`."""
     candidato = crear_candidato(uuid.uuid4())
 
     respuesta = confirmar_por_http(candidato)
 
     assert respuesta.status_code == 200
     assert respuesta.json()["estado"] == "confirmado"
-    assert respuesta.json()["aplicacion"] == "pendiente"
-    # Repetir la confirmación no lo convierte en aplicado.
-    assert confirmar_por_http(candidato).json()["aplicacion"] == "pendiente"
+    assert respuesta.json()["aplicacion"] == "por_enviar"
+    # Repetir la confirmación no la da por enviada.
+    assert confirmar_por_http(candidato).json()["aplicacion"] == "por_enviar"
+
+
+def test_cuando_el_broker_la_confirma_pasa_a_enviada(settings):
+    from connectors import publicacion
+
+    settings.RABBITMQ_URL = "amqp://guest:guest@broker-de-prueba:5672/"
+    candidato = crear_candidato(uuid.uuid4())
+    confirmar_por_http(candidato)
+
+    publicacion.despachar_pendientes(publicar_uno=lambda _e: None)
+
+    detalle = APIClient().get(f"/api/candidatos/{candidato.pk}/", headers=cabecera(candidato.organizacion_id))
+    assert detalle.json()["aplicacion"] == "enviada"
+    # Repetir la confirmación no la devuelve a `por_enviar` ni mueve la fecha.
+    candidato.refresh_from_db()
+    enviada_en = candidato.orden_enviada_en
+    assert confirmar_por_http(candidato).json()["aplicacion"] == "enviada"
+    candidato.refresh_from_db()
+    assert candidato.orden_enviada_en == enviada_en
+
+
+def test_si_el_broker_falla_sigue_por_enviar(settings):
+    import pika
+
+    from connectors import publicacion
+
+    settings.RABBITMQ_URL = "amqp://guest:guest@broker-de-prueba:5672/"
+    candidato = crear_candidato(uuid.uuid4())
+    confirmar_por_http(candidato)
+
+    def falla(_evento):
+        raise pika.exceptions.AMQPConnectionError()
+
+    publicacion.despachar_pendientes(publicar_uno=falla)
+    assert confirmar_por_http(candidato).json()["aplicacion"] == "por_enviar"
 
 
 def test_la_lista_tambien_lo_dice_y_solo_para_los_confirmados():
@@ -323,19 +357,21 @@ def test_la_lista_tambien_lo_dice_y_solo_para_los_confirmados():
     assert por_id == {
         str(propuesto.pk): None,
         str(rechazado.pk): None,
-        str(confirmado.pk): "pendiente",
+        str(confirmado.pk): "por_enviar",
     }
 
 
 def test_ningun_valor_afirma_que_la_suscripcion_existe():
-    """No hay quien pueda afirmarlo todavía. El día que exista el consumidor
-    y aparezca `aplicada`, esta prueba se cambia a propósito, en la misma PR
-    que lo implemente y con la evidencia de que la suscripción se creó."""
+    """connectors no puede ver el esquema de subscriptions (ADR-002), así que
+    ningún valor dice `aplicada`. Si algún día subscriptions le avisa de
+    vuelta, esta prueba se cambia a propósito en esa misma PR."""
+    from django.utils import timezone
     from connectors.serializers import CobroCandidatoSerializer
 
     valores = {
-        CobroCandidatoSerializer().get_aplicacion(CobroCandidato(estado=estado))
+        CobroCandidatoSerializer().get_aplicacion(CobroCandidato(estado=estado, orden_enviada_en=enviada))
         for estado in CobroCandidato.Estado.values
+        for enviada in (None, timezone.now())
     }
-    assert valores == {None, "pendiente"}
+    assert valores == {None, "por_enviar", "enviada"}
 

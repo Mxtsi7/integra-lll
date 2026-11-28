@@ -926,6 +926,17 @@ class CobroCandidato(ModeloTenant):
             "vive en el esquema de `auth` y acá no se interpreta (ADR-002)."
         ),
     )
+    orden_enviada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Orden enviada el",
+        help_text=(
+            "Cuándo el broker confirmó la orden de cobro de este candidato "
+            "(RF-14). La escribe `publicacion.py` en la misma transacción que "
+            "marca publicada la fila del outbox. Enviada NO es aplicada: eso "
+            "pasa en subscriptions, y desde acá no se ve."
+        ),
+    )
 
     evidencia = models.JSONField(
         default=dict,

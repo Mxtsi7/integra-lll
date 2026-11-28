@@ -111,9 +111,11 @@ y [`candidato-confirmado-v1.schema.json`](../contratos/candidato-confirmado-v1.s
 `crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo.
 La idempotencia usa `(organizacion_id, candidato_id)` y también
 `(organizacion_id, origen, identificador_origen)`. El mismo cargo que llega
-por las dos fuentes (mismo importe y moneda, menos de 5 días de diferencia)
-queda como UN cobro con los dos orígenes guardados (RN-DAT-004); el detalle
-está en `services/subscriptions/app/candidatos.py`.
+por las dos fuentes (mismo importe, moneda y fecha) queda como UN cobro con
+los dos orígenes guardados (RN-DAT-004); con fechas distintas quedan dos
+cobros y el aviso de doble cobro. `importe` no supera 99999999.99, el rango de
+las columnas de destino. El detalle está en
+`services/subscriptions/app/candidatos.py`.
 
 ### Publica `subscriptions`
 

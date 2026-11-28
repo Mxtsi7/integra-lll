@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from app.candidatos import aplicar, mismo_cobro
 from app.management.commands import consumir_eventos
@@ -191,25 +192,20 @@ class TestElCobro:
 
 
 class TestElMismoCargo:
-    def test_correo_y_cartola_del_mismo_cargo_dejan_un_cobro_con_los_dos_origenes(self, org, netflix):
+    def test_correo_y_cartola_del_mismo_dia_dejan_un_cobro_con_los_dos_origenes(self, org, netflix):
         aplicar(sobre(org, origen="correo", identificador="<abc@netflix.com>", fecha="2026-11-05"))
-        segunda = aplicar(sobre(org, origen="csv", identificador="csv:huella-1", fecha="2026-11-07"))
+        segunda = aplicar(sobre(org, origen="csv", identificador="csv:huella-1", fecha="2026-11-05"))
 
         (cobro,) = Cobro.objects.filter(organizacion_id=org)
         assert segunda.fila.resultado == CandidatoAplicado.Resultado.COBRO_EXISTENTE
         assert segunda.fila.cobro == cobro
-        # RN-DAT-004: los dos identificadores quedan, cada uno con su fecha.
-        origenes = {(f.origen, f.identificador_origen, f.fecha) for f in cobro.origenes.all()}
-        assert origenes == {
-            ("correo", "<abc@netflix.com>", date(2026, 11, 5)),
-            ("csv", "csv:huella-1", date(2026, 11, 7)),
-        }
-        # El cobro conserva la fecha del primero que llegó.
-        assert cobro.fecha == date(2026, 11, 5)
+        # RN-DAT-004: los dos identificadores quedan.
+        origenes = {(f.origen, f.identificador_origen) for f in cobro.origenes.all()}
+        assert origenes == {("correo", "<abc@netflix.com>"), ("csv", "csv:huella-1")}
 
     def test_en_el_otro_orden_tambien(self, org, netflix):
-        aplicar(sobre(org, origen="csv", fecha="2026-11-07"))
-        segunda = aplicar(sobre(org, origen="correo", fecha="2026-11-05"))
+        aplicar(sobre(org, origen="csv"))
+        segunda = aplicar(sobre(org, origen="correo"))
         assert Cobro.objects.filter(organizacion_id=org).count() == 1
         assert segunda.fila.resultado == CandidatoAplicado.Resultado.COBRO_EXISTENTE
 
@@ -220,8 +216,23 @@ class TestElMismoCargo:
             organizacion_id=org, tipo=HallazgoCobro.Tipo.DOBLE_COBRO
         ).exists()
 
-    def test_un_doble_cobro_de_verdad_no_se_tapa(self, org, netflix):
-        # Netflix cobró dos veces: la cartola trae dos líneas, el correo una.
+    @pytest.mark.parametrize("fecha_csv", ["2026-11-02", "2026-11-04", "2026-11-06"])
+    def test_con_fechas_distintas_quedan_dos_cobros_y_el_aviso_de_doble_cobro(self, org, netflix, fecha_csv):
+        """La revisión de #242: correo del 01-11 y cartola del 04-11 por 9.990
+        pueden ser dos pagos. No se decide por la persona: quedan los dos y
+        sale el hallazgo para que lo concilie (RF-07)."""
+        aplicar(sobre(org, origen="correo", fecha="2026-11-01" if fecha_csv < "2026-11-05" else "2026-11-05"))
+        segunda = aplicar(sobre(org, origen="csv", fecha=fecha_csv))
+
+        assert Cobro.objects.filter(organizacion_id=org).count() == 2
+        assert segunda.fila.resultado == CandidatoAplicado.Resultado.COBRO_CREADO
+        hallazgo = HallazgoCobro.objects.get(organizacion_id=org, tipo=HallazgoCobro.Tipo.DOBLE_COBRO)
+        # El hallazgo une los dos cobros, cada uno con su fuente.
+        fuentes = {o.origen for c in (hallazgo.cobro, hallazgo.cobro_relacionado) for o in c.origenes.all()}
+        assert fuentes == {"correo", "csv"}
+
+    def test_un_doble_cobro_de_verdad_no_se_tapa_aun_el_mismo_dia(self, org, netflix):
+        # Netflix cobró dos veces el 05-11: la cartola trae dos líneas, el correo una.
         aplicar(sobre(org, origen="correo"))
         aplicar(sobre(org, origen="csv", identificador="csv:linea-1"))
         tercera = aplicar(sobre(org, origen="csv", identificador="csv:linea-2"))
@@ -237,48 +248,169 @@ class TestElMismoCargo:
         aplicar(sobre(org, origen="csv", identificador="csv:2"))
         assert Cobro.objects.filter(organizacion_id=org).count() == 2
 
-    def test_se_junta_con_un_cobro_ingresado_a_mano(self, org, netflix):
+    def test_se_junta_con_un_cobro_ingresado_a_mano_el_mismo_dia(self, org, netflix):
         propia = suscripcion(org, netflix)
         a_mano = Cobro.objects.create(
-            organizacion_id=org, suscripcion=propia, monto=Decimal("9990"), fecha=date(2026, 11, 6)
+            organizacion_id=org, suscripcion=propia, monto=Decimal("9990"), fecha=date(2026, 11, 5)
         )
         aplicacion = aplicar(sobre(org, origen="csv"))
         assert aplicacion.fila.cobro == a_mano
         assert Cobro.objects.filter(organizacion_id=org).count() == 1
 
-    @pytest.mark.parametrize(
-        "cambio",
-        [
-            {"importe": "9991.00"},           # otro importe
-            {"fecha": "2026-11-10"},          # 5 días: ya no es «menos de 5»
-            {"fecha": "2026-10-31"},          # 5 días hacia atrás
-        ],
-    )
-    def test_no_se_junta_si_no_es_el_mismo_cargo(self, org, netflix, cambio):
-        aplicar(sobre(org, origen="correo", fecha="2026-11-05"))
-        aplicar(sobre(org, origen="csv", **cambio))
+    def test_no_se_junta_con_uno_a_mano_de_otro_dia(self, org, netflix):
+        propia = suscripcion(org, netflix)
+        Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("9990"), fecha=date(2026, 11, 6))
+        assert aplicar(sobre(org, origen="csv")).fila.resultado == CandidatoAplicado.Resultado.COBRO_CREADO
         assert Cobro.objects.filter(organizacion_id=org).count() == 2
 
-    def test_cuatro_dias_si_se_junta(self, org, netflix):
-        aplicar(sobre(org, origen="correo", fecha="2026-11-05"))
-        aplicar(sobre(org, origen="csv", fecha="2026-11-09"))
-        assert Cobro.objects.filter(organizacion_id=org).count() == 1
+    def test_otro_importe_no_se_junta(self, org, netflix):
+        aplicar(sobre(org, origen="correo"))
+        aplicar(sobre(org, origen="csv", importe="9991.00"))
+        assert Cobro.objects.filter(organizacion_id=org).count() == 2
 
-    def test_elige_el_mas_cercano(self, org, netflix):
+    def test_entre_dos_del_mismo_dia_elige_el_mas_antiguo(self, org, netflix):
         propia = suscripcion(org, netflix)
-        lejos = Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("9990"),
-                                     fecha=date(2026, 11, 2))
-        cerca = Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("9990"),
-                                     fecha=date(2026, 11, 6))
+        primero = Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("9990"),
+                                       fecha=date(2026, 11, 5))
+        Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("9990"),
+                             fecha=date(2026, 11, 5))
         assert mismo_cobro(propia, origen="csv", importe=Decimal("9990.00"), moneda="CLP",
-                           fecha=date(2026, 11, 5)) == cerca
-        assert lejos != cerca
+                           fecha=date(2026, 11, 5)) == primero
 
     def test_no_se_junta_con_un_cobro_de_otra_suscripcion(self, org, netflix):
         otra = suscripcion(org, None, nombre="Spotify")
         Cobro.objects.create(organizacion_id=org, suscripcion=otra, monto=Decimal("9990"), fecha=date(2026, 11, 5))
         aplicar(sobre(org, origen="csv"))
         assert Cobro.objects.filter(organizacion_id=org).count() == 2
+
+
+# ── una suscripción cancelada a la que la siguen cobrando (RF-03) ────────
+
+
+def cancelada_el(org, proveedor, dia: date):
+    from app.models import TransicionEstado
+
+    propia = suscripcion(org, proveedor)
+    propia.transicionar(Subscription.EventoEstado.CANCELACION_USUARIO, actor_rol="usuario")
+    TransicionEstado.objects.filter(suscripcion=propia).update(
+        ocurrido_en=timezone.make_aware(datetime.combine(dia, time(12)))
+    )
+    propia.refresh_from_db()
+    assert propia.estado == Subscription.Estado.CANCELADO
+    return propia
+
+
+class TestCanceladaQueSiguenCobrando:
+    def test_un_cobro_posterior_a_la_cancelacion_la_reactiva_con_la_transicion_del_dominio(self, org, netflix):
+        propia = cancelada_el(org, netflix, date(2026, 10, 20))
+        aplicar(sobre(org, fecha="2026-11-05"))
+
+        propia.refresh_from_db()
+        assert propia.estado == Subscription.Estado.ACTIVO
+        ultima = propia.transiciones_estado.order_by("-ocurrido_en", "-id").first()
+        assert (ultima.evento, ultima.estado_anterior, ultima.actor_rol) == (
+            "cobro_nuevo_detectado", "cancelado", "sistema",
+        )
+        # Y avisa, como cualquier transición (el resumen y notifications lo escuchan).
+        assert OutboxEvento.objects.filter(
+            organizacion_id=org, evento="suscripcion.estado_cambiado",
+            datos__evento_estado="cobro_nuevo_detectado",
+        ).exists()
+
+    @pytest.mark.parametrize("fecha", ["2026-10-15", "2026-10-20"])
+    def test_un_cobro_de_antes_o_del_mismo_dia_es_historia(self, org, netflix, fecha):
+        propia = cancelada_el(org, netflix, date(2026, 10, 20))
+        aplicar(sobre(org, fecha=fecha))
+        propia.refresh_from_db()
+        assert propia.estado == Subscription.Estado.CANCELADO
+        assert Cobro.objects.filter(suscripcion=propia).count() == 1
+
+    @pytest.mark.parametrize("tipo", ["aviso_de_cobro", "pago_fallido"])
+    def test_sin_plata_no_la_reactiva(self, org, netflix, tipo):
+        propia = cancelada_el(org, netflix, date(2026, 10, 20))
+        aplicar(sobre(org, tipo=tipo, fecha="2026-11-05"))
+        propia.refresh_from_db()
+        assert propia.estado == Subscription.Estado.CANCELADO
+
+    def test_una_reentrega_no_la_vuelve_a_tocar(self, org, netflix):
+        propia = cancelada_el(org, netflix, date(2026, 10, 20))
+        orden = sobre(org, fecha="2026-11-05")
+        aplicar(orden)
+        antes = propia.transiciones_estado.count()
+        aplicar(orden)
+        assert propia.transiciones_estado.count() == antes
+
+    def test_el_segundo_origen_del_mismo_cargo_no_transiciona_otra_vez(self, org, netflix):
+        propia = cancelada_el(org, netflix, date(2026, 10, 20))
+        aplicar(sobre(org, origen="correo", fecha="2026-11-05"))
+        antes = propia.transiciones_estado.count()
+        segunda = aplicar(sobre(org, origen="csv", fecha="2026-11-05"))
+        assert segunda.fila.resultado == CandidatoAplicado.Resultado.COBRO_EXISTENTE
+        assert propia.transiciones_estado.count() == antes
+
+    def test_una_activa_no_se_toca(self, org, netflix):
+        propia = suscripcion(org, netflix)
+        aplicar(sobre(org))
+        assert not propia.transiciones_estado.exists()
+
+
+# ── el importe ───────────────────────────────────────────────────────────
+
+
+class TestElImporte:
+    def test_el_rango_del_contrato_es_el_de_las_columnas(self):
+        """Si alguien cambia las columnas o el contrato, esto falla: una orden
+        que pasa el contrato tiene que caber donde se guarda."""
+        for campo in (Cobro._meta.get_field("monto"), Subscription._meta.get_field("monto")):
+            enteros = campo.max_digits - campo.decimal_places
+            assert Decimal("9" * enteros + "." + "9" * campo.decimal_places) == candidato_confirmado.IMPORTE_MAXIMO
+        patron = candidato_confirmado.esquema()["properties"]["datos"]["properties"]["importe"]["pattern"]
+        assert patron == "^[0-9]{1,8}\\.[0-9]{2}$"
+
+    def test_el_maximo_se_guarda_exacto(self, org, netflix):
+        aplicar(sobre(org, importe="99999999.99"))
+        cobro = Cobro.objects.get(organizacion_id=org)
+        cobro.refresh_from_db()
+        assert cobro.monto == Decimal("99999999.99")
+        assert Subscription.objects.get(organizacion_id=org).monto == Decimal("99999999.99")
+
+    def test_uno_mas_no_pasa_el_contrato(self, org):
+        assert not procesar_candidato(json.dumps(sobre(org, importe="100000000.00")).encode()).confirmar
+
+
+# ── la exportación muestra de dónde vino cada cobro ──────────────────────
+
+
+def exportar(org, **filtros):
+    from rest_framework.test import APIClient
+
+    consulta = "&".join(f"{k}={v}" for k, v in {"desde": "2026-11-01", "hasta": "2026-11-30", **filtros}.items())
+    respuesta = APIClient().get(f"/api/export/cobros/?{consulta}", HTTP_X_ORGANIZACION_ID=str(org))
+    assert respuesta.status_code == 200, respuesta.content
+    filas = respuesta.content.decode("utf-8").strip().splitlines()[1:]
+    return [fila.split(",")[5] for fila in filas]
+
+
+class TestLaExportacion:
+    def test_cada_cobro_dice_su_origen_y_el_mismo_cargo_sale_una_vez(self, org, netflix):
+        aplicar(sobre(org, origen="correo", fecha="2026-11-05"))
+        aplicar(sobre(org, origen="csv", fecha="2026-11-05"))
+        aplicar(sobre(org, origen="csv", fecha="2026-11-20", identificador="csv:otra"))
+        propia = Subscription.objects.get(organizacion_id=org)
+        Cobro.objects.create(organizacion_id=org, suscripcion=propia, monto=Decimal("10"), fecha=date(2026, 11, 25))
+
+        assert exportar(org) == ["correo+csv", "csv", "manual"]
+        assert exportar(org, origen="manual") == ["manual"]
+        assert exportar(org, origen="correo") == ["correo+csv"]
+        assert exportar(org, origen="csv") == ["correo+csv", "csv"]
+
+    def test_un_origen_desconocido_sigue_siendo_400(self, org):
+        from rest_framework.test import APIClient
+
+        respuesta = APIClient().get(
+            "/api/export/cobros/?desde=2026-11-01&hasta=2026-11-30&origen=pdf", HTTP_X_ORGANIZACION_ID=str(org)
+        )
+        assert respuesta.status_code == 400
 
 
 # ── idempotencia ─────────────────────────────────────────────────────────

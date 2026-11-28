@@ -33,7 +33,7 @@ const confirmado = (cobro: CandidatoDetectado): CandidatoDetectado => ({
   ...cobro,
   estado: 'confirmado',
   estado_legible: 'Confirmado',
-  aplicacion: 'pendiente',
+  aplicacion: 'por_enviar',
 });
 const rechazado = (cobro: CandidatoDetectado): CandidatoDetectado => ({
   ...cobro,
@@ -219,13 +219,13 @@ describe('los botones Confirmar y Rechazar, con una decisión inventada (S3-CH-0
     const hecho = (id: string, nombre: string) => ({ id, nombre, tipo: 'hecho' as const });
     const fallido = (id: string, nombre: string, mensaje: string) => ({ id, nombre, tipo: 'fallido' as const, mensaje });
 
-    it('si todos se confirmaron lo dice y aclara que la orden queda pendiente de aplicar', () => {
+    it('si todos se confirmaron lo dice y aclara dónde se ven la suscripción y el cobro', () => {
       montar({ decisiones: decisionesFalsas({ resultado: resultadoCon('confirmar', hecho('c-1', 'Spotify'), hecho('c-2', 'Netflix')) }) });
 
       const aviso = resultadoDeConfirmar();
       expect(aviso).toHaveAttribute('role', 'status');
       expect(aviso).toHaveTextContent('Confirmaste 2 cobros.');
-      expect(aviso).toHaveTextContent('Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.');
+      expect(aviso).toHaveTextContent('Las órdenes se envían a Suscripciones; revisa ahí la suscripción y el cobro.');
       expect(aviso).toHaveTextContent('Spotify: confirmado');
       expect(aviso).toHaveTextContent('Netflix: confirmado');
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -264,7 +264,7 @@ describe('los botones Confirmar y Rechazar, con una decisión inventada (S3-CH-0
       const alerta = screen.getByRole('alert');
       expect(alerta).toHaveTextContent(texto);
       expect(alerta).not.toHaveTextContent('Confirmaste');
-      expect(alerta).not.toHaveTextContent('pendientes de aplicar');
+      expect(alerta).not.toHaveTextContent('Las órdenes se envían');
     });
 
     it('si todos se rechazaron lo dice, sin hablar de pendientes: rechazar no crea nada que aplicar', () => {
@@ -370,7 +370,7 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     if (accion === 'confirmar') {
       if (estado === 'rechazado') return Promise.reject(new ErrorDeApi('Está rechazado.', 409, { codigo: ['candidato_rechazado'] }));
       estadoEnServidor[id] = 'confirmado';
-      return Promise.resolve({ id, estado: 'confirmado', aplicacion: 'pendiente' });
+      return Promise.resolve({ id, estado: 'confirmado', aplicacion: 'por_enviar' });
     }
     if (estado === 'confirmado') {
       return Promise.reject(new ErrorDeApi('Ya está confirmado.', 409, { codigo: ['candidato_ya_confirmado'] }));
@@ -438,7 +438,7 @@ describe('seleccionar y decidir de punta a punta, con la API simulada (S3-CH-07,
     // La lista se volvió a leer: los dos pasaron a confirmados, sin casilla, y la selección quedó vacía.
     expect(itemDe('Spotify')).toHaveTextContent('Confirmado');
     expect(within(itemDe('Spotify')).queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(itemDe('Spotify')).toHaveTextContent('orden pendiente de aplicar');
+    expect(itemDe('Spotify')).toHaveTextContent('orden por enviar a Suscripciones');
     expect(itemDe('HBO Max')).toHaveTextContent('Propuesto');
     expect(casillaDe(HBO)).not.toBeChecked();
     expect(botonConfirmar()).toBeDisabled();

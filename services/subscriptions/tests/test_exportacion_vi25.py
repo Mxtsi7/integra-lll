@@ -302,7 +302,7 @@ class TestFiltrosMonedaYOrigen:
         assert len(filas) == 1
         assert filas[0][5] == "manual"
 
-    @pytest.mark.parametrize("origen", ["csv", "correo", "pdf", "automatico"])
+    @pytest.mark.parametrize("origen", ["pdf", "automatico", "correo+csv", "banco"])
     @pytest.mark.parametrize("ruta", RUTAS)
     def test_origen_no_soportado_responde_400_en_ambas_rutas(
         self, client: APIClient, ruta: str, origen: str

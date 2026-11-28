@@ -17,27 +17,33 @@ confirma también. Son dos candidatos distintos en connectors (orígenes e
 identificadores distintos, así que su unicidad no los junta) y dos órdenes.
 Sin nada más, quedarían dos cobros y el gasto del mes saldría al doble.
 
-La regla para decir que son el mismo cargo:
+La regla para decir que son el mismo cargo, sin que nadie lo revise:
 
   · la misma suscripción, el mismo importe exacto y la misma moneda;
-  · fechas a menos de `DIAS_DOBLE_COBRO` (5) días: el correo llega el día
-    del cobro y la cartola suele asentarlo uno a tres días después. Es la
-    misma ventana con la que `anomalias.py` avisa un posible doble cobro,
-    así que lo que acá se junta es exactamente lo que allá se avisaría;
+  · la MISMA fecha;
   · y que ese cobro TODAVÍA NO tenga un origen de la misma fuente.
 
-El último punto es el que impide tapar un doble cobro de verdad. Si la
-cartola trae DOS líneas de 9.990 (Netflix cobró dos veces), la primera se
-junta con el correo y la segunda encuentra que ese cobro ya tiene un origen
-`csv`: no es el mismo, se registra aparte y `anomalias.py` levanta el
-hallazgo de doble cobro, que es lo que tiene que pasar. Un cobro ingresado a
-mano no tiene orígenes, así que también se junta con el primero que llegue.
+── Por qué la misma fecha y no una ventana ──────────────────────────────────
+La primera versión juntaba hasta 4 días de diferencia, pensando en que la
+cartola asienta el cargo después del correo. La revisión de #242 mostró el
+costo: un correo del 01-11 y una línea de cartola del 04-11 por 9.990 pueden
+ser DOS pagos distintos, y juntarlos los dejaba en un cobro sin ningún aviso.
+RF-07 pide lo contrario: que un posible doble cobro se vea.
 
-Lo que NO se junta, a propósito: importes distintos (un cobro en USD que la
-cartola muestra en CLP no se puede comparar sin un tipo de cambio que el
-sistema no tiene) y fechas a 5 días o más. Ante la duda quedan dos cobros y
-el aviso de doble cobro, que la persona puede revisar; juntar de más
-borraría un cobro real sin que nadie lo vea.
+Con fechas distintas no hay cómo saber cuál de las dos cosas es, así que no
+se decide por la persona: quedan los dos cobros, cada uno con su origen, y
+`anomalias.py` levanta el hallazgo de doble cobro (ventana de 5 días), que es
+la conciliación explícita que ya existe: la persona lo revisa y lo marca.
+Juntar de más esconde plata que salió; separar de más se ve y se corrige.
+
+El último punto impide tapar un doble cobro aun el mismo día. Si la cartola
+trae DOS líneas de 9.990 del 05-11, la primera se junta con el correo y la
+segunda ve que ese cobro ya tiene un origen `csv`: se registra aparte y sale
+el hallazgo. Un cobro ingresado a mano no tiene orígenes, así que se junta
+con el primero que llegue del mismo día.
+
+Tampoco se juntan importes distintos: un cobro en USD que la cartola muestra
+en CLP no se puede comparar sin un tipo de cambio que el sistema no tiene.
 
 ── Qué se conserva (RN-DAT-004) ─────────────────────────────────────────────
 Cada orden deja su fila, también la que se juntó: el cobro termina con un
@@ -59,10 +65,20 @@ persona tiene que ver. Si no hay ninguna, se crea:
     próximo     un mes después del cobro; en un aviso, la fecha avisada
     estado      activo; por_confirmar si lo único que se sabe es un pago fallido
 
-No se cambia el estado de una suscripción que ya existía ni su próximo cobro:
-registrar un cobro a mano tampoco lo hace, y las transiciones tienen sus
-propias reglas de tiempo. La orden registra lo que pasó; no reinterpreta el
-ciclo.
+No se cambia el próximo cobro de una suscripción que ya existía (registrar
+un cobro a mano tampoco lo hace) ni su estado, con UNA excepción: si estaba
+cancelada y llega un cobro NUEVO con fecha posterior a la cancelación, la
+siguen cobrando. RF-03 tiene la transición para eso, `cobro_nuevo_detectado`
+(→ activo), y se usa esa, con su auditoría y su evento. No reactiva un aviso
+ni un pago fallido (no hubo plata), ni un cobro anterior a la cancelación (es
+historia), ni una reentrega (ya estaba aplicada), ni el segundo origen de un
+cobro que ya existía (se decidió cuando llegó el primero).
+
+── El importe ───────────────────────────────────────────────────────────────
+`Cobro.monto` y `Subscription.monto` son NUMERIC(10,2). El contrato admite
+exactamente ese rango (`candidato_confirmado.IMPORTE_MAXIMO`) y connectors
+rechaza al confirmar un candidato que lo supere, así que una orden aceptada
+siempre cabe. `test_el_rango_del_contrato_es_el_de_las_columnas` lo amarra.
 """
 
 from __future__ import annotations
@@ -74,11 +90,12 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Case, IntegerField, Q, Value, When
+from django.utils import timezone
 
 from shared.bloqueo import bloquear
 from shared.borrado.bloqueo import bloquear_organizacion
 
-from app.anomalias import DIAS_DOBLE_COBRO, _restar_meses
+from app.anomalias import _restar_meses
 from app.models import CandidatoAplicado, Cobro, Proveedor, Subscription
 from events.outbox import registrar_creada
 from events.trabajo import HECHO_POR_CONSUMIDOR, OrganizacionEliminada, recalcular_resumen_por_evento
@@ -135,25 +152,37 @@ def _suscripcion(organizacion_id, datos, importe: Decimal, fecha: date) -> tuple
 
 def mismo_cobro(suscripcion: Subscription, *, origen: str, importe: Decimal, moneda: str, fecha: date) -> Cobro | None:
     """El cobro ya registrado que es este mismo cargo, o None. Ver el docstring."""
-    margen = DIAS_DOBLE_COBRO - 1
     # Sin FOR UPDATE: lo que serializa es el lock `ordenes_de_cobro` que
     # `aplicar` ya tomó. Una orden no compite con otra por el mismo cobro.
-    posibles = (
-        Cobro.objects.filter(
-            suscripcion=suscripcion,
-            monto=importe,
-            moneda=moneda,
-            fecha__range=(_sumar_dias(fecha, -margen), _sumar_dias(fecha, margen)),
-        )
+    return (
+        Cobro.objects.filter(suscripcion=suscripcion, monto=importe, moneda=moneda, fecha=fecha)
         .exclude(origenes__origen=origen)
-        .order_by("fecha", "id")
+        .order_by("creado_en", "id")
+        .first()
     )
-    # El más cercano en fecha; a igual distancia, el más antiguo.
-    return min(posibles, key=lambda c: (abs((c.fecha - fecha).days), c.fecha, str(c.id)), default=None)
 
 
-def _sumar_dias(fecha: date, dias: int) -> date:
-    return date.fromordinal(fecha.toordinal() + dias)
+def _reactivar_si_la_siguen_cobrando(suscripcion: Subscription, fecha_cobro: date, correlation_id) -> bool:
+    """`cobro_nuevo_detectado` si estaba cancelada y el cobro es posterior. Ver el docstring."""
+    if suscripcion.estado != Subscription.Estado.CANCELADO:
+        return False
+    cancelada_en = (
+        suscripcion.transiciones_estado.filter(estado_nuevo=Subscription.Estado.CANCELADO)
+        .order_by("-ocurrido_en")
+        .values_list("ocurrido_en", flat=True)
+        .first()
+    )
+    # Sin transición registrada (nació cancelada), lo único que se sabe es
+    # cuándo se creó: un cobro de ese día o anterior es historia.
+    desde = timezone.localtime(cancelada_en or suscripcion.creado_en).date()
+    if fecha_cobro <= desde:
+        return False
+    suscripcion.transicionar(
+        Subscription.EventoEstado.COBRO_NUEVO_DETECTADO,
+        actor_rol="sistema",
+        correlation_id=correlation_id,
+    )
+    return True
 
 
 def aplicar(sobre: dict) -> Aplicacion:
@@ -209,6 +238,8 @@ def aplicar(sobre: dict) -> Aplicacion:
                     fecha=fecha,
                 )
                 resultado = CandidatoAplicado.Resultado.COBRO_CREADO
+                if not creada:
+                    _reactivar_si_la_siguen_cobrando(suscripcion, fecha, sobre["correlation_id"])
 
         fila = CandidatoAplicado.objects.create(
             organizacion_id=organizacion_id,

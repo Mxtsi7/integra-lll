@@ -35,6 +35,7 @@ const MENSAJE_POR_CODIGO_DE_CONFIRMACION: Record<CodigoConfirmacionRechazada, st
   candidato_rechazado: 'Ya está rechazado y esa decisión no se puede deshacer desde aquí.',
   servicio_sin_resolver: 'No se reconoció el proveedor, así que no se puede crear la suscripción.',
   tipo_sin_regla: 'No hay una regla para este tipo de cobro.',
+  importe_fuera_de_rango: 'El monto es mayor que el máximo que se puede registrar. Revisa el archivo o el correo.',
 };
 export const MENSAJE_YA_CONFIRMADO = 'Ya está confirmado: desde aquí no se puede rechazar.';
 export const MENSAJE_COBRO_NO_ENCONTRADO = 'Ya no está disponible. Recarga la lista.';

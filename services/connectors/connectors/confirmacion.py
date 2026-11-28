@@ -72,6 +72,12 @@ CREA_COBRO = {
 CANDIDATO_RECHAZADO = "candidato_rechazado"
 SERVICIO_SIN_RESOLVER = "servicio_sin_resolver"
 TIPO_SIN_REGLA = "tipo_sin_regla"
+#: Los lectores admiten hasta 12 enteros (`CobroCandidato.importe` es
+#: NUMERIC(14,2)), pero subscriptions guarda NUMERIC(10,2). Se corta ACÁ, al
+#: confirmar, y no en el consumidor: una orden ya aceptada que después no
+#: cabe terminaría en la cola de fallos sin crear nada y la persona creería
+#: que quedó. Lo encontró la revisión de #242.
+IMPORTE_FUERA_DE_RANGO = "importe_fuera_de_rango"
 
 
 class ConfirmacionRechazada(ValueError):
@@ -156,6 +162,15 @@ def confirmar(candidato: CobroCandidato, *, por: str = "", cuando=None) -> bool:
         raise ConfirmacionRechazada(
             TIPO_SIN_REGLA,
             f"No hay regla para el tipo de mensaje {candidato.tipo_mensaje!r}.",
+        )
+
+    if candidato.importe > contrato.IMPORTE_MAXIMO:
+        # Recuperable: el candidato sigue `propuesto` y se puede rechazar.
+        raise ConfirmacionRechazada(
+            IMPORTE_FUERA_DE_RANGO,
+            f"El monto {candidato.importe} supera el máximo que se puede registrar "
+            f"como cobro ({contrato.IMPORTE_MAXIMO}). Revisa el archivo o el correo: "
+            "puede ser un número mal leído.",
         )
 
     crear_cobro = CREA_COBRO[candidato.tipo_mensaje]

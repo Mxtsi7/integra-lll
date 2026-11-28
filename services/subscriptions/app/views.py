@@ -1325,8 +1325,10 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
             "montos numéricos se mantienen numéricos.\n\n"
             "Ambos extremos son obligatorios y deben cumplir "
             "``desde <= hasta``. Filtros opcionales: ``moneda`` contra el "
-            "catálogo activo y ``origen=manual`` (único origen registrado "
-            "hoy; otros valores devuelven 400). También disponible como "
+            "catálogo activo y ``origen`` (``manual``, ``csv`` o ``correo``; "
+            "otros valores devuelven 400). La columna ``origen`` dice "
+            "``manual``, ``csv``, ``correo`` o ``correo+csv`` si el mismo "
+            "cargo llegó por las dos fuentes (una sola fila). También disponible como "
             "``GET /api/export/cobros/`` con los mismos parámetros."
         ),
         parameters=[
@@ -1358,7 +1360,7 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
                 type=str,
                 location=OpenApiParameter.QUERY,
                 required=False,
-                description="Origen del cobro. Solo 'manual' está soportado.",
+                description="Origen del cobro: 'manual', 'csv' o 'correo'.",
             ),
         ],
         responses={
@@ -1482,7 +1484,7 @@ class ExportarCobrosCSVView(APIView):
                 type=str,
                 location=OpenApiParameter.QUERY,
                 required=False,
-                description="Origen del cobro. Solo 'manual' está soportado.",
+                description="Origen del cobro: 'manual', 'csv' o 'correo'.",
             ),
         ],
         responses={

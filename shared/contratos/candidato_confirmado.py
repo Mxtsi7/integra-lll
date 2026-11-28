@@ -31,10 +31,20 @@ from __future__ import annotations
 
 import functools
 import json
+from decimal import Decimal
 from importlib.resources import files
 
 EVENTO = "candidato.confirmado"
 VERSION = 1
+
+#: El importe más grande que una orden puede llevar. Es el rango de
+#: `Cobro.monto` y `Subscription.monto` en subscriptions, NUMERIC(10,2): un
+#: importe mayor pasaría el contrato y reventaría al insertar, y la orden
+#: terminaría en la cola de fallos sin crear nada. connectors lo rechaza al
+#: confirmar (`confirmacion.IMPORTE_FUERA_DE_RANGO`) y el esquema JSON dice lo
+#: mismo con su `pattern` (8 enteros y 2 decimales). Cambiarlo es cambiar las
+#: columnas y el esquema a la vez; una prueba de cada lado lo amarra.
+IMPORTE_MAXIMO = Decimal("99999999.99")
 
 EXCHANGE = "connectors.eventos"
 ROUTING_KEY = f"{EVENTO}.v{VERSION}"

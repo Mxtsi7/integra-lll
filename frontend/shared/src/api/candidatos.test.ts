@@ -62,7 +62,7 @@ describe('confirmar un candidato (S3-CH-08, S3-FE-15)', () => {
   });
 
   it('devuelve el candidato tal cual lo mandó el servidor', async () => {
-    const confirmado = { id: 'c-1', estado: 'confirmado', aplicacion: 'pendiente' };
+    const confirmado = { id: 'c-1', estado: 'confirmado', aplicacion: 'por_enviar' };
     vi.mocked(pedir).mockResolvedValue(confirmado);
 
     await expect(confirmarCandidato('c-1')).resolves.toEqual(confirmado);

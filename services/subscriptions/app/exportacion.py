@@ -40,11 +40,13 @@ COLUMNAS = (
     "estado",
 )
 
-# Los cobros existentes se cargaron a mano; cuando exista ingesta CSV/PDF/
-# correo, el origen real podrá venir de un campo del cobro. Mientras tanto
-# "manual" es la respuesta verdadera, no un valor inventado.
+# La procedencia de un cobro sale de sus `CandidatoAplicado` (RF-14): uno
+# por fuente que lo trajo. Un cobro sin ninguno se ingresó a mano. Uno que
+# llegó por las dos fuentes (el mismo cargo en el correo y en la cartola) es
+# UNA fila con `correo+csv`, no dos: el cobro es uno solo.
 ORIGEN_POR_DEFECTO = "manual"
-ORIGENES_SOPORTADOS = frozenset({ORIGEN_POR_DEFECTO})
+ORIGENES_SOPORTADOS = frozenset({ORIGEN_POR_DEFECTO, "csv", "correo"})
+SEPARADOR_DE_ORIGENES = "+"
 
 
 def normalizar_moneda(valor: object) -> str | None:
@@ -65,12 +67,10 @@ def normalizar_moneda(valor: object) -> str | None:
 
 
 def normalizar_origen(valor: object) -> str | None:
-    """Valida ``origen`` contra los orígenes realmente soportados.
+    """Valida ``origen`` contra los orígenes que el sistema registra.
 
-    ``Cobro`` todavía no guarda procedencia: todos los cobros de este alcance
-    son manuales. Se acepta ``manual`` y se rechazan explícitamente los
-    orígenes que aún no existen (``csv``, ``correo``) en lugar de etiquetar
-    filas con una procedencia que no se puede demostrar.
+    ``manual`` (sin orden de cobro detrás), ``csv`` o ``correo`` (lo trajo
+    esa fuente, sola o junto con la otra). Cualquier otro valor es un 400.
     """
     if valor is None or str(valor).strip() == "":
         return None
@@ -79,8 +79,7 @@ def normalizar_origen(valor: object) -> str | None:
         raise ValidationError(
             {
                 "origen": (
-                    "Origen no soportado. Los cobros actuales son 'manual'; "
-                    "csv/correo todavía no tienen procedencia registrada."
+                    "Origen no soportado. Usa 'manual', 'csv' o 'correo'."
                 )
             }
         )
@@ -112,6 +111,12 @@ def _categoria_suscripcion(cobro: Cobro) -> str:
     return getattr(cobro.suscripcion, "categoria", "") or ""
 
 
+def origen_del_cobro(cobro: Cobro) -> str:
+    """`manual`, `csv`, `correo` o `correo+csv`. Usa los orígenes precargados."""
+    fuentes = sorted({fila.origen for fila in cobro.origenes.all()})
+    return SEPARADOR_DE_ORIGENES.join(fuentes) if fuentes else ORIGEN_POR_DEFECTO
+
+
 def construir_csv_cobros(
     organizacion_id: uuid.UUID,
     desde: date,
@@ -123,10 +128,10 @@ def construir_csv_cobros(
     """Construye el CSV completo (encabezados + filas) para el rango inclusivo.
 
     ``moneda`` y ``origen`` ya llegan normalizados por
-    :func:`normalizar_moneda` / :func:`normalizar_origen`. El origen ``manual``
-    no necesita filtro en la consulta porque es el único soportado hoy; se
-    mantiene explícito para que el contrato no cambie cuando exista un campo
-    de procedencia real.
+    :func:`normalizar_moneda` / :func:`normalizar_origen`. ``manual`` son los
+    cobros sin orden de cobro; ``csv`` y ``correo``, los que trajo esa fuente
+    (también si la otra trajo el mismo cargo). Un cobro con dos fuentes sale
+    una sola vez.
     """
     cobros = Cobro.objects.filter(
         organizacion_id=organizacion_id,
@@ -136,17 +141,24 @@ def construir_csv_cobros(
     )
     if moneda:
         cobros = cobros.filter(moneda=moneda)
-    if origen:
-        # ``origen`` ya está restringido a ``manual``; se deja el punto de
-        # extensión preparado para cuando el modelo registre procedencia.
-        assert origen == ORIGEN_POR_DEFECTO
-    cobros = cobros.select_related("suscripcion").order_by("fecha", "id")
+    if origen == ORIGEN_POR_DEFECTO:
+        cobros = cobros.filter(origenes__isnull=True)
+    elif origen:
+        # Filtrar por una relación de muchos repite el cobro por cada fila que
+        # calce: con `distinct` sale una vez aunque tenga dos órdenes.
+        cobros = cobros.filter(origenes__origen=origen).distinct()
+    cobros = (
+        cobros.select_related("suscripcion")
+        .prefetch_related("origenes")
+        .order_by("fecha", "id")
+    )
 
     salida = StringIO(newline="")
     escritor = csv.writer(salida)
     escritor.writerow(COLUMNAS)
 
-    for cobro in cobros.iterator():
+    # Por tandas, como antes, y con los orígenes de cada tanda precargados.
+    for cobro in cobros.iterator(chunk_size=500):
         escritor.writerow(
             (
                 escapar_formula_csv(cobro.suscripcion.nombre),
@@ -156,7 +168,7 @@ def construir_csv_cobros(
                 f"{cobro.monto:.2f}",
                 escapar_formula_csv(cobro.moneda),
                 cobro.fecha.isoformat(),
-                escapar_formula_csv(ORIGEN_POR_DEFECTO),
+                escapar_formula_csv(origen_del_cobro(cobro)),
                 escapar_formula_csv(_estado_suscripcion(cobro)),
             )
         )

@@ -247,3 +247,38 @@ def test_el_id_del_sobre_es_estable_entre_reintentos(con_broker):
         OutboxEvento.objects.get(pk=evento.pk)
     )["id"] == str(evento.id)
     uuid.UUID(str(evento.id))
+
+
+# ── el rango del importe (revisión de #242) ──────────────────────────────
+
+
+def test_el_maximo_que_cabe_en_subscriptions_se_confirma_y_cumple_el_contrato():
+    sobre = publicacion.crear_sobre(orden_confirmada(importe="99999999.99"))
+    assert sobre["datos"]["importe"] == "99999999.99"
+    assert contrato.errores(sobre) == []
+
+
+def test_un_importe_que_no_cabe_no_se_confirma_ni_deja_orden():
+    from rest_framework.test import APIClient
+
+    from tests.test_confirmar_candidatos import cabecera, confirmar
+
+    candidato = crear_candidato(importe="100000000.00")
+    with pytest.raises(confirmacion.ConfirmacionRechazada) as rechazo:
+        confirmacion.confirmar(candidato, por="42")
+    assert rechazo.value.codigo == confirmacion.IMPORTE_FUERA_DE_RANGO
+
+    respuesta = confirmar(APIClient(), candidato, headers=cabecera())
+    assert respuesta.status_code == 409
+    assert respuesta.json()["codigo"] == "importe_fuera_de_rango"
+    candidato.refresh_from_db()
+    # Recuperable: sigue propuesto y se puede rechazar.
+    assert candidato.estado == CobroCandidato.Estado.PROPUESTO
+    assert not OutboxEvento.objects.exists()
+
+
+def test_el_contrato_rechaza_lo_que_no_cabe():
+    sobre = publicacion.crear_sobre(orden_confirmada())
+    sobre["datos"]["importe"] = "100000000.00"
+    assert contrato.errores(sobre)
+    assert str(contrato.IMPORTE_MAXIMO) == "99999999.99"

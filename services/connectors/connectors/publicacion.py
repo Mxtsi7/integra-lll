@@ -44,7 +44,7 @@ from django.utils import timezone
 
 from shared.contratos import candidato_confirmado as contrato
 
-from .models import OutboxEvento
+from .models import CobroCandidato, OutboxEvento
 
 registro = logging.getLogger(__name__)
 
@@ -163,5 +163,13 @@ def despachar_pendientes(*, publicar_uno=None) -> dict[str, int]:
                 evento.publicado_en = timezone.now()
                 evento.ultimo_error = ""
                 evento.save(update_fields=("publicado_en", "ultimo_error"))
+                # Lo que la web lee para decir «enviada» y no «por enviar».
+                # Misma transacción: no hay candidato marcado enviado con su
+                # fila pendiente, ni al revés. Solo la primera vez.
+                CobroCandidato.objects.filter(
+                    organizacion_id=evento.organizacion_id,
+                    pk=evento.datos.get("candidato_id"),
+                    orden_enviada_en__isnull=True,
+                ).update(orden_enviada_en=evento.publicado_en)
                 publicados += 1
     return {"publicados": publicados, "reintentados": reintentados, "sin_broker": 0}

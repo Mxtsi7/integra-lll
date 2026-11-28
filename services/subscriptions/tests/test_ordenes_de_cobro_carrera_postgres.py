@@ -108,7 +108,7 @@ def test_el_segundo_origen_espera_al_primero_y_se_junta(solo_postgres, monkeypat
     _hasta_que(a_busco.is_set, descripcion="A buscó el mismo cargo",
                salvo_que=a.termino.is_set, porque=f"A terminó antes: {a.error!r}")
 
-    b = Hilo("B", lambda: candidatos.aplicar(sobre(org, origen="csv", fecha="2026-11-06")))
+    b = Hilo("B", lambda: candidatos.aplicar(sobre(org, origen="csv", fecha="2026-11-05")))
     b.start()
     try:
         _hasta_que(lambda: _esperando_el_lock() == 1, descripcion="B quedó esperando el lock de A",

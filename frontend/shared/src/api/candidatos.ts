@@ -16,11 +16,13 @@ export type EstadoCandidato = 'propuesto' | 'confirmado' | 'rechazado';
 export type ServicioResultado = 'reconocido' | 'ambiguo' | 'desconocido';
 
 /**
- * Qué pasó con la orden de un candidato confirmado (S3-FE-15). `null` mientras
- * no esté confirmado. `pendiente` quiere decir que la orden quedó en cola y que
- * todavía no hay suscripción ni cobro creados.
+ * Qué se sabe desde Conectores de la orden de un candidato confirmado (S3-FE-15,
+ * RF-14). `null` mientras no esté confirmado. `por_enviar`: la orden sigue en
+ * cola. `enviada`: salió hacia Suscripciones, que es donde se registran la
+ * suscripción y el cobro; Conectores no puede ver si ya quedaron, así que
+ * `enviada` no lo afirma.
  */
-export type AplicacionCandidato = 'pendiente' | null;
+export type AplicacionCandidato = 'por_enviar' | 'enviada' | null;
 
 /**
  * CobroCandidatoSerializer: un cobro detectado en un archivo o un correo.
@@ -88,8 +90,14 @@ export async function getCandidatos({
  * - `candidato_rechazado`: ya se descartó; desde aquí no se puede confirmar.
  * - `servicio_sin_resolver`: no se reconoció el proveedor.
  * - `tipo_sin_regla`: no hay regla para el tipo de mensaje.
+ * - `importe_fuera_de_rango`: el monto no cabe como cobro (RF-14); sigue propuesto.
  */
-const CODIGOS_DE_CONFIRMACION_RECHAZADA = ['candidato_rechazado', 'servicio_sin_resolver', 'tipo_sin_regla'] as const;
+const CODIGOS_DE_CONFIRMACION_RECHAZADA = [
+  'candidato_rechazado',
+  'servicio_sin_resolver',
+  'tipo_sin_regla',
+  'importe_fuera_de_rango',
+] as const;
 export type CodigoConfirmacionRechazada = (typeof CODIGOS_DE_CONFIRMACION_RECHAZADA)[number];
 
 /**
@@ -102,8 +110,9 @@ export type CodigoRechazoNoPermitido = (typeof CODIGOS_DE_RECHAZO_NO_PERMITIDO)[
 /**
  * POST /api/candidatos/<id>/confirmar/ (S3-FE-15). Responde 200 con el candidato
  * `confirmado`. Es idempotente: repetirlo devuelve el mismo candidato y no
- * agrega otra orden. Confirmar NO crea todavía la suscripción ni el cobro: deja
- * la orden en cola, y el candidato lo dice con `aplicacion: 'pendiente'`.
+ * agrega otra orden. Confirmar no crea la suscripción ni el cobro en el momento:
+ * deja la orden en cola (`aplicacion: 'por_enviar'`) y Suscripciones los registra
+ * cuando la recibe.
  */
 export async function confirmarCandidato(id: string): Promise<CandidatoDetectado> {
   return await pedir(`/candidatos/${encodeURIComponent(id)}/confirmar/`, { method: 'POST' });

@@ -119,12 +119,23 @@ describe('contenido de cada cobro (S3-CH-04)', () => {
     expect(itemDe('Cobro sin descripción')).toHaveTextContent('Proveedor sin reconocer.');
   });
 
-  it('un candidato confirmado con la orden en cola lo dice: todavía no hay suscripción ni cobro', () => {
+  it('un candidato confirmado con la orden en cola dice que está por enviar', () => {
     montar({
-      carga: listoCon(paginaDeCandidatosDePrueba({ results: [candidatoDePrueba({ estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'pendiente' })] })),
+      carga: listoCon(paginaDeCandidatosDePrueba({ results: [candidatoDePrueba({ estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'por_enviar' })] })),
     });
 
-    expect(itemDe('Spotify')).toHaveTextContent('orden pendiente de aplicar: todavía no hay suscripción ni cobro creados');
+    expect(itemDe('Spotify')).toHaveTextContent('orden por enviar a Suscripciones');
+    // Nunca afirma que la suscripción o el cobro no existan (revisión de #242).
+    expect(itemDe('Spotify')).not.toHaveTextContent('todavía no hay');
+  });
+
+  it('con la orden enviada dice dónde revisar, sin afirmar que ya quedó', () => {
+    montar({
+      carga: listoCon(paginaDeCandidatosDePrueba({ results: [candidatoDePrueba({ estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'enviada' })] })),
+    });
+
+    expect(itemDe('Spotify')).toHaveTextContent('orden enviada: revisa la suscripción y el cobro en Suscripciones');
+    expect(itemDe('Spotify')).not.toHaveTextContent('por enviar');
   });
 
   it('sin orden pendiente no dice nada de aplicar', () => {
@@ -251,7 +262,7 @@ function ListaConSeleccion({ carga }: { carga: CargaCandidatos }) {
 const SPOTIFY = candidatoDePrueba({ id: 'c-1', servicio: 'Spotify' });
 const NETFLIX = candidatoDePrueba({ id: 'c-2', servicio: 'Netflix', importe: '8990.00' });
 const SIN_PROVEEDOR = candidatoDePrueba({ id: 'c-3', servicio: null, servicio_texto: 'PAGO 4471', servicio_resultado: 'desconocido' });
-const CONFIRMADO = candidatoDePrueba({ id: 'c-4', servicio: 'Disney+', estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'pendiente' });
+const CONFIRMADO = candidatoDePrueba({ id: 'c-4', servicio: 'Disney+', estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'por_enviar' });
 const RECHAZADO = candidatoDePrueba({ id: 'c-5', servicio: 'HBO Max', estado: 'rechazado', estado_legible: 'Rechazado' });
 
 const conLosCobros = (...cobros: CandidatoDetectado[]): CargaCandidatos =>

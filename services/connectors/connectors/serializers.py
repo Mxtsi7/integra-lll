@@ -279,33 +279,35 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
     )
     aplicacion = serializers.SerializerMethodField(
         help_text=(
-            "Si lo confirmado ya existe en Suscripciones. `null` mientras el "
-            "candidato no está confirmado; `pendiente` cuando lo está: la "
-            "orden de crear quedó guardada, pero todavía NO hay suscripción "
-            "ni cobro creados."
+            "Qué se sabe desde acá de la orden de un candidato confirmado. "
+            "`null` mientras no está confirmado; `por_enviar` si la orden "
+            "sigue en el outbox; `enviada` cuando el broker la confirmó. "
+            "`enviada` NO dice que la suscripción y el cobro existan: los "
+            "registra subscriptions, y este servicio no puede verlo."
         )
     )
 
-    # ── «Confirmado» no es «aplicado» ───────────────────────────────────
+    # ── «Confirmado» no es «aplicado», y «enviada» tampoco ──────────────
     # Confirmar deja el candidato confirmado y una orden durable en el
-    # outbox, los dos o ninguno. Lo que NO hace es crear la suscripción ni el
-    # cobro: eso pasa en `subscriptions`, cuando alguien publique y consuma
-    # esa orden, y hoy no hay ni publicador ni consumidor.
+    # outbox, los dos o ninguno. El worker la publica (`publicacion.py`) y
+    # subscriptions la aplica. Lo único que connectors sabe por sí mismo es
+    # si la orden ya salió: lo escribe el publicador en `orden_enviada_en`.
     #
-    # Sin este campo la interfaz solo ve `estado="confirmado"` y no tiene
-    # cómo saber que del otro lado todavía no existe nada: mostraría como
-    # hecho algo que está en cola. Lo pidieron las dos revisiones de #159.
-    #
-    # Hoy vale `pendiente` para todo confirmado, y es la verdad: ninguna
-    # orden se ha aplicado nunca. El valor `aplicada` llega con el
-    # consumidor, que es quien puede afirmarlo; inventarlo acá sería dar por
-    # creada una suscripción que nadie creó.
-    APLICACION_PENDIENTE = "pendiente"
+    # Antes valía `pendiente` para todo confirmado, con el texto «todavía no
+    # hay suscripción ni cobro creados». Con el consumidor andando eso pasó a
+    # ser falso a los segundos de confirmar: la revisión de #242 lo marcó. Y
+    # decir `aplicada` sería afirmar algo que este servicio no puede ver
+    # (ADR-002: no consulta el esquema de subscriptions). Por eso son dos
+    # valores, y los dos son verdad.
+    APLICACION_POR_ENVIAR = "por_enviar"
+    APLICACION_ENVIADA = "enviada"
 
     def get_aplicacion(self, candidato) -> str | None:
-        if candidato.estado == CobroCandidato.Estado.CONFIRMADO:
-            return self.APLICACION_PENDIENTE
-        return None
+        if candidato.estado != CobroCandidato.Estado.CONFIRMADO:
+            return None
+        if candidato.orden_enviada_en is None:
+            return self.APLICACION_POR_ENVIAR
+        return self.APLICACION_ENVIADA
 
     class Meta:
         model = CobroCandidato

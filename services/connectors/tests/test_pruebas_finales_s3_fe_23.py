@@ -282,8 +282,9 @@ def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_que_subscriptions_
     identificador, que RN-DAT-004 pide conservar— y `subscriptions` las
     reconoce como el mismo cargo (`app/candidatos.py`). Esta prueba fija lo
     que este lado tiene que mandar para que allá se puedan juntar: el mismo
-    proveedor, importe y moneda, fechas a menos de 5 días y orígenes
-    distintos. Lo que hace subscriptions con las dos está en
+    proveedor, importe, moneda y FECHA, y orígenes distintos (con fechas
+    distintas subscriptions no las junta: deja dos cobros y el aviso de doble
+    cobro, por la revisión de #242). Lo que hace subscriptions con las dos está en
     `services/subscriptions/tests/test_ordenes_de_cobro_rf14.py::TestElMismoCargo`.
     """
     from connectors.publicacion import crear_sobre
@@ -304,5 +305,4 @@ def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_que_subscriptions_
     assert correo_["identificador_origen"] != csv["identificador_origen"]
     for campo in ("servicio", "importe", "moneda", "crear_cobro"):
         assert correo_[campo] == csv[campo], campo
-    dias = abs((date.fromisoformat(correo_["fecha"]) - date.fromisoformat(csv["fecha"])).days)
-    assert dias < 5
+    assert correo_["fecha"] == csv["fecha"]
