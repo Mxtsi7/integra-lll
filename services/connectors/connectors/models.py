@@ -1090,10 +1090,10 @@ class OutboxEvento(ModeloTenant):
     propósito: el consumidor que lo drene ya sabe leer ese sobre, y copiarlo
     distinto obligaría a escribir un segundo lector para decir lo mismo.
 
-    ── Lo que este servicio NO hace todavía ────────────────────────────────
-    Publicar. No hay publicador en connectors, así que las filas se acumulan
-    acá, durables, hasta que exista el que las drene. Nada se pierde y nada se
-    inventa: no se finge que la suscripción ya está creada.
+    ── Quién la drena ──────────────────────────────────────────────────────
+    `publicacion.py`, desde la tarea periódica `despachar_eventos` del
+    worker. Una fila queda `publicado_en` solo cuando el broker confirmó el
+    mensaje; mientras tanto sigue acá, durable, con su espera de reintento.
     """
 
     evento = models.CharField(max_length=40)

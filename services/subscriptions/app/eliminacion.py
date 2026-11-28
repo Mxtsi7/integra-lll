@@ -3,7 +3,7 @@ from rest_framework.response import Response
 
 from shared.eliminacion import LimpiezaOrganizacionView
 from .models import (
-    Cobro, ConsentimientoRecolector, EventoUsoRecibido, HallazgoCobro, OutboxEvento, Presupuesto,
+    CandidatoAplicado, Cobro, ConsentimientoRecolector, EventoUsoRecibido, HallazgoCobro, OutboxEvento, Presupuesto,
     ProyeccionUsoRecolector, RegistroUso, ResumenOrganizacion, Subscription,
     TrabajoDerivado, TransicionEstado,
 )
@@ -12,7 +12,8 @@ from .models import (
 class LimpiezaSubscriptionsView(LimpiezaOrganizacionView):
     servicio = "subscriptions"
     modelos = (
-        OutboxEvento, Presupuesto, HallazgoCobro, Cobro, ConsentimientoRecolector, EventoUsoRecibido,
+        # CandidatoAplicado (RF-14) antes que Cobro y Subscription: las apunta.
+        OutboxEvento, Presupuesto, HallazgoCobro, CandidatoAplicado, Cobro, ConsentimientoRecolector, EventoUsoRecibido,
         ProyeccionUsoRecolector, RegistroUso, TransicionEstado,
         TrabajoDerivado, ResumenOrganizacion, Subscription,
     )
@@ -23,6 +24,10 @@ class LimpiezaSubscriptionsView(LimpiezaOrganizacionView):
             Q(suscripcion__organizacion_id=organizacion_id)
             | Q(cobro__organizacion_id=organizacion_id)
             | Q(cobro_relacionado__organizacion_id=organizacion_id),
+        ).exclude(organizacion_id=organizacion_id).exists():
+            return Response({"code": "datos_tenant_inconsistentes"}, status=409)
+        if CandidatoAplicado.objects.filter(
+            Q(suscripcion__organizacion_id=organizacion_id) | Q(cobro__organizacion_id=organizacion_id),
         ).exclude(organizacion_id=organizacion_id).exists():
             return Response({"code": "datos_tenant_inconsistentes"}, status=409)
         for modelo in (Cobro, ConsentimientoRecolector, EventoUsoRecibido, ProyeccionUsoRecolector, RegistroUso, TransicionEstado):

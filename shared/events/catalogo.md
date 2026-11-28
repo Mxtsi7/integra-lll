@@ -93,6 +93,28 @@ La idempotencia usa `(organizacion_id, recolector_id, event_id)`; la
 suscripción es destino inmutable y no forma parte de la clave. Los detalles
 semánticos y los acuses HTTP están en el contrato.
 
+### Contrato de órdenes de cobro (v1, exchange dedicado)
+
+Cuando una persona confirma un cobro candidato (de un CSV o de un correo),
+connectors deja la orden en su outbox en la misma transacción y su worker la
+publica en `connectors.eventos` con routing key `candidato.confirmado.v1`. La
+consume `subscriptions` desde `subscriptions.candidatos` (los rechazos van a
+`subscriptions.candidatos.fallidos`). El exchange, las colas y el esquema
+viven en UN archivo que leen los dos lados:
+[`shared/contratos/candidato_confirmado.py`](../contratos/candidato_confirmado.py)
+y [`candidato-confirmado-v1.schema.json`](../contratos/candidato-confirmado-v1.schema.json).
+
+| Evento | Cuándo | Datos | Escucha |
+|---|---|---|---|
+| `candidato.confirmado` v1 | Se confirma un cobro candidato (RF-14) | `candidato_id`, `importacion_id`, `origen`, `identificador_origen`, `servicio`, `servicio_texto`, `importe` (texto con dos decimales), `moneda`, `fecha`, `tipo_mensaje`, `crear_cobro`, `decidido_por`, `evidencia` | subscriptions |
+
+`crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo.
+La idempotencia usa `(organizacion_id, candidato_id)` y también
+`(organizacion_id, origen, identificador_origen)`. El mismo cargo que llega
+por las dos fuentes (mismo importe y moneda, menos de 5 días de diferencia)
+queda como UN cobro con los dos orígenes guardados (RN-DAT-004); el detalle
+está en `services/subscriptions/app/candidatos.py`.
+
 ### Publica `subscriptions`
 
 | Evento | Cuándo | Datos | Escucha |
@@ -110,7 +132,7 @@ semánticos y los acuses HTTP están en el contrato.
 | `conector.vinculado` | El usuario autoriza una cuenta externa | `conector_id`, `tipo`, `usuario_id` | analytics |
 | `conector.fallido` | La sincronización falla tras los reintentos | `conector_id`, `tipo`, `error` | notifications |
 | `uso.registrado` (v1 legado) | Llegan datos de uso desde una API externa | `suscripcion_id`, `minutos`, `fecha`, `fuente` | analytics (legado) |
-| `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions |
+| `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions (no se publica: lo reemplazó `candidato.confirmado` v1, arriba) |
 
 ### Publica `analytics`
 

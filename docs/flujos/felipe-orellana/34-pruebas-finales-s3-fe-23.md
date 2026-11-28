@@ -107,6 +107,11 @@ nadie se conecta a esas URL.
 
 ## Hallazgo: el mismo cobro por correo y por CSV deja dos órdenes
 
+> **Resuelto en RF-14** ([37-ordenes-de-cobro-rf-14.md](37-ordenes-de-cobro-rf-14.md)):
+> se eligió juntar al drenar. Las dos órdenes siguen saliendo, cada una con su
+> identificador, y subscriptions las aplica como un solo cobro con los dos
+> orígenes. La prueba de abajo dejó de ser `xfail` y ahora fija eso.
+
 Si el recibo de Netflix del 01-10-2026 llega por correo, y la cartola del
 banco trae la misma fila, quedan **dos candidatos**, y confirmar los dos
 emite **dos órdenes** de crear el cobro. La unicidad de S3-FE-17 es por

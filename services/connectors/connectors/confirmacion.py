@@ -34,11 +34,11 @@ El criterio de la tarjeta es exactamente ese: «aviso futuro no genera un pago
 realizado». Un aviso que se contara como cobro lo contaría dos veces cuando
 después llegue el recibo de verdad, y haría cuadrar mal el presupuesto.
 
-── Lo que falta, dicho sin adornos ─────────────────────────────────────────
-No hay publicador en connectors. Las filas del outbox se acumulan durables
-hasta que exista quien las drene y un consumidor en `subscriptions` que las
-aplique. Esta tarjeta deja la orden escrita y el contrato fijo; no finge que
-la suscripción ya existe.
+── Quién la entrega ─────────────────────────────────────────────────────────
+`publicacion.py` drena este outbox a RabbitMQ (tarea periódica del worker) y
+`subscriptions` la aplica con su consumidor (`app/candidatos.py`). Allá se
+resuelve también el mismo cargo que llega por CSV y por correo: no se crea
+un segundo cobro, se le agrega el otro origen al que ya estaba.
 """
 
 from __future__ import annotations
@@ -48,13 +48,15 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
+from shared.contratos import candidato_confirmado as contrato
+
 from .models import CobroCandidato, OutboxEvento
 
-#: El nombre y la versión del evento. Son contrato: quien lo consuma compara
-#: contra estos dos valores, así que cambiarlos es cambiar el contrato y
-#: necesita una versión nueva, no una edición.
-EVENTO = "candidato.confirmado"
-VERSION = 1
+#: El nombre y la versión del evento. Son contrato y viven en
+#: `shared/contratos/candidato_confirmado.py`, el mismo archivo que lee el
+#: consumidor: cambiarlos es cambiar el contrato y necesita una versión nueva.
+EVENTO = contrato.EVENTO
+VERSION = contrato.VERSION
 
 #: Qué tipo de mensaje significa que la plata ya salió. Es la regla del
 #: criterio «aviso futuro no genera un pago realizado», escrita UNA vez.

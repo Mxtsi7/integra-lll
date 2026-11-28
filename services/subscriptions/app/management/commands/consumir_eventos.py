@@ -79,6 +79,7 @@ from events.topologia import (
 from events.trabajo import (
     HECHO_POR_CONSUMIDOR, OrganizacionEliminada, recalcular_resumen_por_evento,
 )
+from shared.contratos import candidato_confirmado
 
 
 registro = logging.getLogger(__name__)
@@ -230,6 +231,74 @@ def procesar(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
     )
 
 
+def procesar_candidato(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
+    """Aplica una orden de cobro de connectors (RF-14). Mismos desenlaces.
+
+    La cola es otra (`subscriptions.candidatos`, del exchange de connectors)
+    y el contrato también (`candidato.confirmado` v1), pero las reglas son las
+    de `procesar`: ack solo con el trabajo confirmado en la base o con la
+    organización eliminada; la base caída se reintenta; lo demás va a la cola
+    de fallos de connectors. Que la orden ya estuviera aplicada es un éxito:
+    lo dice la fila de `CandidatoAplicado`, no una bandera.
+    """
+    # Import local: `app.candidatos` importa modelos, y este módulo se carga
+    # también en pruebas que no tocan la base.
+    from app.candidatos import aplicar
+
+    avisar = avisar or (lambda _texto: None)
+    try:
+        sobre = json.loads(cuerpo)
+    except ValueError as error:
+        return Desenlace(confirmar=False, motivo=f"no es JSON: {error}")
+    fallos = candidato_confirmado.errores(sobre)
+    if fallos:
+        return Desenlace(
+            confirmar=False,
+            motivo="no cumple candidato.confirmado v1 — " + "; ".join(fallos[:5]),
+        )
+
+    ultimo = None
+    espera = ESPERA_INICIAL
+    for intento in range(1, INTENTOS + 1):
+        try:
+            aplicacion = aplicar(sobre)
+        except OrganizacionEliminada:
+            registro.info(
+                "orden.omitida organizacion_eliminada org=%s evento=%s",
+                sobre["organizacion_id"], sobre["id"],
+            )
+            return Desenlace(confirmar=True, motivo="organizacion_eliminada")
+        except ERRORES_PASAJEROS as error:
+            ultimo = error
+            if intento < INTENTOS:
+                avisar(
+                    f"base no disponible (intento {intento}/{INTENTOS}), "
+                    f"reintento en {espera}s: {error}"
+                )
+                dormir(espera)
+                espera *= 2
+                close_old_connections()
+                continue
+        except Exception as error:  # noqa: BLE001
+            return Desenlace(confirmar=False, motivo=f"error al aplicar la orden: {error}")
+        else:
+            fila = aplicacion.fila
+            registro.info(
+                "orden.%s resultado=%s org=%s candidato=%s origen=%s",
+                "aplicada" if aplicacion.nueva else "repetida",
+                fila.resultado, sobre["organizacion_id"], fila.candidato_id, fila.origen,
+            )
+            return Desenlace(
+                confirmar=True,
+                motivo=fila.resultado if aplicacion.nueva else "ya_aplicada",
+            )
+
+    return Desenlace(
+        confirmar=False,
+        motivo=f"base no disponible tras {INTENTOS} intentos: {ultimo}",
+    )
+
+
 class Command(BaseCommand):
     help = "Escucha los eventos de dominio en RabbitMQ y recalcula el resumen."
 
@@ -245,6 +314,9 @@ class Command(BaseCommand):
         canal = conexion.channel()
         # La misma topología que declara el publicador (events/topologia.py).
         declarar(canal)
+        # Y la de las órdenes de cobro de connectors (RF-14), que es la que
+        # declara el publicador de allá: el mismo archivo de shared/.
+        candidato_confirmado.declarar(canal)
         canal.basic_qos(prefetch_count=1)
 
         def apagar(*_):
@@ -262,16 +334,32 @@ class Command(BaseCommand):
                 # un mensaje inválido se quedaría colgada para siempre.
                 canal_.stop_consuming()
 
+        def al_recibir_orden(canal_, metodo, _propiedades, cuerpo):
+            self.atender(
+                canal_, metodo, cuerpo,
+                procesador=procesar_candidato, cola_fallidos=candidato_confirmado.COLA_FALLIDOS,
+            )
+            if opciones["uno"]:
+                canal_.stop_consuming()
+
         canal.basic_consume(queue=COLA_RESUMEN, on_message_callback=al_recibir)
+        # Mismo canal y mismo prefetch: los mensajes de las dos colas se
+        # atienden de a uno, en el mismo hilo. No hace falta otro proceso ni
+        # otro contenedor, que en el clúster del ramo no sobran.
+        canal.basic_consume(queue=candidato_confirmado.COLA, on_message_callback=al_recibir_orden)
         self.stdout.write(
             f"escuchando {COLA_RESUMEN} en {EXCHANGE} "
             f"({', '.join(routing_key(_Clave(n, v)) for n, v in EVENTOS_DEL_RESUMEN)}); "
             f"los fallos van a {COLA_FALLIDOS}"
         )
+        self.stdout.write(
+            f"escuchando {candidato_confirmado.COLA} en {candidato_confirmado.EXCHANGE} "
+            f"({candidato_confirmado.ROUTING_KEY}); los fallos van a {candidato_confirmado.COLA_FALLIDOS}"
+        )
         canal.start_consuming()
         conexion.close()
 
-    def atender(self, canal_, metodo, cuerpo) -> Desenlace:
+    def atender(self, canal_, metodo, cuerpo, *, procesador=None, cola_fallidos=COLA_FALLIDOS) -> Desenlace:
         """Procesa UN mensaje y lo confirma o lo aparta. Devuelve el desenlace.
 
         El ack va después de `procesar`, nunca antes: `procesar` solo devuelve
@@ -285,13 +373,15 @@ class Command(BaseCommand):
         # conexiones muertas después de un corte.
         close_old_connections()
 
-        desenlace = procesar(cuerpo, avisar=self.stderr.write)
+        # `procesar` se busca al llamar y no como valor por omisión: las
+        # pruebas lo reemplazan en el módulo.
+        desenlace = (procesador or procesar)(cuerpo, avisar=self.stderr.write)
         if desenlace.confirmar:
             canal_.basic_ack(delivery_tag=metodo.delivery_tag)
         else:
             # Rechaza sin reencolar: la cola tiene DLX, así que el mensaje se
-            # va a `COLA_FALLIDOS` en vez de borrarse.
-            self.stderr.write(f"a {COLA_FALLIDOS}: {desenlace.motivo} | {cuerpo[:200]!r}")
+            # va a su cola de fallos en vez de borrarse.
+            self.stderr.write(f"a {cola_fallidos}: {desenlace.motivo} | {cuerpo[:200]!r}")
             registro.warning("evento apartado (%s): %r", desenlace.motivo, cuerpo[:500])
             canal_.basic_reject(delivery_tag=metodo.delivery_tag, requeue=False)
         return desenlace

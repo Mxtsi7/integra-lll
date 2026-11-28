@@ -272,3 +272,38 @@ def test_el_namespace_de_las_politicas_es_el_de_reparto():
     que cambiar con él."""
     texto = (RAIZ / "k8s/40-red.yaml").read_text(encoding="utf-8")
     assert f"kubernetes.io/metadata.name: {_ns_connectors()} }}" in texto
+
+
+# ── RF-14: el worker de connectors publica las órdenes de cobro ────────────
+
+
+def test_el_worker_de_connectors_repartido_llega_a_rabbitmq_y_nadie_mas_de_su_namespace():
+    ns = _ns_connectors()
+    assert permitido("connectors-worker", "rabbitmq", 5672, namespace=ns)
+    # La API y la purga no publican.
+    assert not permitido("connectors", "rabbitmq", 5672, namespace=ns)
+    assert not permitido("otra-app", "rabbitmq", 5672, namespace=ns)
+    assert not permitido("connectors-worker", "rabbitmq", 5672, namespace="otro-grupo")
+    # Ni la consola de administración del broker.
+    assert not permitido("connectors-worker", "rabbitmq", 15672, namespace=ns)
+
+
+def _variables(contenedor):
+    return {v["name"]: v for v in contenedor.get("env", [])}
+
+
+def test_solo_el_worker_de_connectors_recibe_la_credencial_del_broker():
+    (worker,) = [d for d in documentos("k8s/tandas/worker-connectors.yaml") if d["kind"] == "Deployment"]
+    (contenedor,) = worker["spec"]["template"]["spec"]["containers"]
+    ref = _variables(contenedor)["RABBITMQ_URL"]["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "ojoalgasto-rabbitmq", "key": "RABBITMQ_URL"}
+
+    import yaml
+
+    parche = yaml.safe_load((RAIZ / "k8s/parches/connectors-api-en-web.yaml").read_text(encoding="utf-8"))
+    (api_en_web,) = parche["spec"]["template"]["spec"]["containers"]
+    assert "RABBITMQ_URL" not in _variables(api_en_web)
+    for doc in documentos("k8s/tandas/connectors.yaml"):
+        if doc["kind"] == "Deployment":
+            for contenedor in doc["spec"]["template"]["spec"]["containers"]:
+                assert "RABBITMQ_URL" not in _variables(contenedor), doc["metadata"]["name"]

@@ -258,5 +258,11 @@ spec:
         - podSelector:
             matchExpressions:
               - { key: app, operator: In, values: [auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+        # El worker de connectors repartido publica las órdenes de cobro
+        # (RF-14). Solo el worker: la API y la purga no hablan con el broker.
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-casolis }
+          podSelector:
+            matchLabels: { app: connectors-worker }
       ports:
         - { protocol: TCP, port: 5672 }

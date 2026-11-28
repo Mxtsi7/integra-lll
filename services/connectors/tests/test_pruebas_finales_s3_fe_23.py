@@ -274,10 +274,21 @@ class TestCaso5Desconexion:
 # ══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Hallazgo de S3-FE-23 (doc 34): la unicidad es por origen, así que el mismo cobro leído en el "
-    "recibo y en la cartola son dos candidatos y dos órdenes. Falta decidir cómo se reconoce."))
-def test_el_mismo_cobro_por_correo_y_por_csv_deja_una_sola_orden(google):
+def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_que_subscriptions_junta(google):
+    """El hallazgo de S3-FE-23 (doc 34), resuelto en RF-14 (doc 37).
+
+    La decisión fue juntar al APLICAR y no al confirmar: connectors sigue
+    emitiendo una orden por candidato —cada una con su origen y su
+    identificador, que RN-DAT-004 pide conservar— y `subscriptions` las
+    reconoce como el mismo cargo (`app/candidatos.py`). Esta prueba fija lo
+    que este lado tiene que mandar para que allá se puedan juntar: el mismo
+    proveedor, importe y moneda, fechas a menos de 5 días y orígenes
+    distintos. Lo que hace subscriptions con las dos está en
+    `services/subscriptions/tests/test_ordenes_de_cobro_rf14.py::TestElMismoCargo`.
+    """
+    from connectors.publicacion import crear_sobre
+    from shared.contratos import candidato_confirmado as contrato
+
     c = gmail()
     google.con_mensajes(correo("m1", RECIBO))
     leer_cuenta(c.pk, ahora=AHORA)
@@ -285,4 +296,13 @@ def test_el_mismo_cobro_por_correo_y_por_csv_deja_una_sola_orden(google):
 
     confirmar_todos()
 
-    assert OutboxEvento.objects.count() == 1
+    sobres = [crear_sobre(e) for e in OutboxEvento.objects.order_by("creado_en", "id")]
+    assert len(sobres) == 2
+    assert all(contrato.errores(s) == [] for s in sobres)
+    correo_, csv = sorted((s["datos"] for s in sobres), key=lambda d: d["origen"])
+    assert (correo_["origen"], csv["origen"]) == ("correo", "csv")
+    assert correo_["identificador_origen"] != csv["identificador_origen"]
+    for campo in ("servicio", "importe", "moneda", "crear_cobro"):
+        assert correo_[campo] == csv[campo], campo
+    dias = abs((date.fromisoformat(correo_["fecha"]) - date.fromisoformat(csv["fecha"])).days)
+    assert dias < 5
