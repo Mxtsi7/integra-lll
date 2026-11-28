@@ -38,9 +38,24 @@ def test_configuracion_publica_no_contiene_credenciales():
                 assert datos.get("SEED_DEMO", "0") != "1"
 
 
+def _cumple(expresion, etiquetas):
+    # Los cuatro operadores de un LabelSelector. Antes todo se leía como In,
+    # y un NotIn (la regla al revés) pasaba por permitido.
+    clave, operador = expresion["key"], expresion["operator"]
+    if operador == "In":
+        return clave in etiquetas and etiquetas[clave] in expresion["values"]
+    if operador == "NotIn":
+        return clave not in etiquetas or etiquetas[clave] not in expresion["values"]
+    if operador == "Exists":
+        return clave in etiquetas
+    if operador == "DoesNotExist":
+        return clave not in etiquetas
+    raise AssertionError(f"operador desconocido en un selector: {operador!r}")
+
+
 def selecciona(selector, etiquetas):
     return all(etiquetas.get(k) == v for k, v in selector.get("matchLabels", {}).items()) and all(
-        etiquetas.get(e["key"]) in e["values"] for e in selector.get("matchExpressions", [])
+        _cumple(e, etiquetas) for e in selector.get("matchExpressions", [])
     )
 
 
@@ -179,11 +194,27 @@ def test_comparador_externo_tiene_acceso_solo_al_gateway_autorizado():
 # ── S3-FE-21: el directorio de destinatarios ────────────────────────────────
 
 
-def _ns_notifications():
+def _reparto():
+    """Las líneas NOMBRE=valor de k8s/reparto.env.
+
+    Una clave repetida es un error: desplegar-satelite.sh se queda con la
+    ÚLTIMA (`tail -n 1`) y una prueba que leyera la primera validaría otro
+    namespace que el que se despliega.
+    """
+    valores = {}
     for linea in (RAIZ / "k8s/reparto.env").read_text(encoding="utf-8").splitlines():
-        if linea.startswith("NS_NOTIFICATIONS="):
-            return linea.split("=", 1)[1].strip()
-    raise AssertionError("k8s/reparto.env no declara NS_NOTIFICATIONS")
+        if not linea.strip() or linea.lstrip().startswith("#"):
+            continue
+        clave, _, valor = linea.partition("=")
+        assert clave not in valores, f"k8s/reparto.env repite {clave}"
+        valores[clave] = valor.strip()
+    return valores
+
+
+def _ns_notifications():
+    ns = _reparto().get("NS_NOTIFICATIONS")
+    assert ns, "k8s/reparto.env no declara NS_NOTIFICATIONS"
+    return ns
 
 
 def test_solo_los_jobs_de_alertas_llegan_a_auth_ademas_del_gateway():
@@ -219,6 +250,123 @@ def test_la_cuenta_de_correo_solo_llega_al_contenedor_que_despacha():
     for doc in documentos("k8s/tandas/notifications.yaml"):
         assert "EMAIL_HOST_PASSWORD" not in str(doc), "la API y el consumidor no mandan correos"
         assert "ojoalgasto-alertas" not in str(doc)
+
+
+# ── notifications repartido: el satélite llega a PostgreSQL y RabbitMQ ─────
+# Corre en el namespace de NS_NOTIFICATIONS (k8s/reparto.env) y usa la base y
+# el broker del núcleo. Un peer con solo podSelector no cruza de namespace,
+# así que sin su propio peer el satélite no arranca el día que el clúster
+# haga cumplir las políticas.
+
+_BASE_Y_BROKER = (("postgres", 5432), ("rabbitmq", 5672))
+
+
+def _pods_notifications():
+    """Las etiquetas de los pods que despliega el satélite, leídas de sus
+    manifiestos: la API con el consumidor (mismo pod, componente: api) y los
+    Jobs de alertas (componente: alertas). Las del objeto no sirven: la
+    política mira las de la plantilla del pod."""
+    pods = []
+    for ruta in ("k8s/tandas/notifications.yaml", "k8s/tandas/alertas-notifications.yaml"):
+        for doc in documentos(ruta):
+            if doc["kind"] == "Deployment":
+                pods.append(doc["spec"]["template"]["metadata"]["labels"])
+            elif doc["kind"] == "CronJob":
+                pods.append(doc["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["labels"])
+    assert {p.get("componente") for p in pods} == {"api", "alertas"}, pods
+    return pods
+
+
+def test_notifications_repartido_llega_a_postgres_y_rabbitmq():
+    for destino, puerto in _BASE_Y_BROKER:
+        for etiquetas in _pods_notifications():
+            assert permitido("notifications", destino, puerto, namespace=_ns_notifications(),
+                             etiquetas_origen=etiquetas), (destino, etiquetas)
+        # Desde el núcleo, como antes.
+        assert permitido("notifications", destino, puerto)
+
+
+def test_notifications_de_otro_grupo_no_llega_a_postgres_ni_rabbitmq():
+    for destino, puerto in _BASE_Y_BROKER:
+        for etiquetas in _pods_notifications():
+            assert not permitido("notifications", destino, puerto, namespace="otro-grupo",
+                                 etiquetas_origen=etiquetas), (destino, etiquetas)
+
+
+def test_otra_app_del_namespace_de_notifications_no_llega_a_postgres_ni_rabbitmq():
+    # El namespace es de otro integrante: lo que corra ahí que no sea
+    # notifications no entra, aunque en el núcleo sí tenga permiso.
+    otras = ("web", "gateway", "auth", "auth-eliminaciones", "subscriptions", "subscriptions-worker",
+             "connectors", "connectors-worker", "analytics", "analytics-worker", "notificaciones", "otro")
+    for destino, puerto in _BASE_Y_BROKER:
+        for app in otras:
+            assert not permitido(app, destino, puerto, namespace=_ns_notifications()), (destino, app)
+        assert not permitido("otro", destino, puerto, namespace=_ns_notifications(),
+                             etiquetas_origen={"componente": "alertas"}), destino
+
+
+def test_notifications_repartido_no_llega_a_nada_mas_del_nucleo():
+    # No usa Redis (sin cliente en requirements.txt, sin URL en sus Secrets)
+    # ni llama a las APIs de dominio; el directorio de auth es solo de los
+    # Jobs de alertas y está cubierto en su propia prueba.
+    api = {"app": "notifications", "componente": "api"}
+    for etiquetas in _pods_notifications():
+        for destino, puerto in (("redis", 6379), ("rabbitmq", 15672), ("gateway", 8000),
+                                ("subscriptions", 8002), ("connectors", 8003), ("analytics", 8004)):
+            assert not permitido("notifications", destino, puerto, namespace=_ns_notifications(),
+                                 etiquetas_origen=etiquetas), (destino, etiquetas)
+    assert not permitido("notifications", "auth", 8001, namespace=_ns_notifications(), etiquetas_origen=api)
+
+
+def test_el_namespace_de_notifications_en_la_red_es_el_de_reparto():
+    # El nombre está escrito en 40-red.yaml; si reparto.env cambia y la
+    # política no, el satélite nuevo queda sin base ni broker.
+    vistos = {}
+    for politica in documentos("k8s/40-red.yaml"):
+        destino = politica["spec"]["podSelector"].get("matchLabels", {}).get("app")
+        for regla in politica["spec"].get("ingress", []):
+            for peer in regla["from"]:
+                ns = peer.get("namespaceSelector")
+                if ns is None or not any(selecciona(peer.get("podSelector", {}), e)
+                                            for e in _pods_notifications()):
+                    continue
+                for puerto in (p["port"] for p in regla["ports"]):
+                    vistos.setdefault((destino, puerto), set()).add(
+                        ns.get("matchLabels", {}).get("kubernetes.io/metadata.name"))
+    for destino, puerto in _BASE_Y_BROKER:
+        assert vistos.get((destino, puerto)) == {_ns_notifications()}, (destino, puerto, vistos)
+    for clave, namespaces in vistos.items():
+        assert namespaces == {_ns_notifications()}, (clave, namespaces)
+
+
+def test_la_infraestructura_del_nucleo_solo_cruza_a_namespaces_del_reparto():
+    # Las pruebas de arriba miran caminos sueltos; esta mira la forma. A
+    # PostgreSQL, RabbitMQ y Redis del núcleo solo se entra desde otro
+    # namespace si está en reparto.env, con su nombre exacto y sin rangos ni
+    # IPs. Y desde el de notifications, solo app: notifications, sin otra app.
+    repartidos = {v for k, v in _reparto().items() if k.startswith("NS_") and k != "NS_NUCLEO" and v}
+    assert _ns_notifications() in repartidos
+    for politica in documentos("k8s/40-red.yaml"):
+        destino = politica["spec"]["podSelector"].get("matchLabels", {}).get("app")
+        if destino not in {"postgres", "rabbitmq", "redis"}:
+            continue
+        for regla in politica["spec"].get("ingress", []):
+            assert regla.get("from"), f"{destino}: una regla sin from deja entrar a cualquiera"
+            assert regla.get("ports"), f"{destino}: una regla sin ports abre todos los puertos"
+            for puerto in regla["ports"]:
+                assert puerto.get("protocol") == "TCP" and "endPort" not in puerto, (destino, puerto)
+            for peer in regla["from"]:
+                assert "ipBlock" not in peer, (destino, peer)
+                ns = peer.get("namespaceSelector")
+                if ns is None:
+                    continue
+                assert set(ns) == {"matchLabels"}, (destino, ns)
+                assert set(ns["matchLabels"]) == {"kubernetes.io/metadata.name"}, (destino, ns)
+                nombre = ns["matchLabels"]["kubernetes.io/metadata.name"]
+                assert nombre in repartidos, f"{destino}: {nombre} no está en k8s/reparto.env"
+                assert "podSelector" in peer, f"{destino}: abre el namespace {nombre} entero"
+                if nombre == _ns_notifications():
+                    assert peer["podSelector"] == {"matchLabels": {"app": "notifications"}}, (destino, peer)
 
 
 def test_la_api_de_connectors_en_la_web_no_abre_la_base_a_cualquier_web():
