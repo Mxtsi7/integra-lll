@@ -27,6 +27,20 @@ spec:
               - { key: app, operator: In, values: [gateway] }
       ports:
         - { protocol: TCP, port: 8001 }
+    # S3-FE-21: los Jobs de alertas de notifications consultan el directorio
+    # de destinatarios (ruta interna, firma HMAC). Solo ellos (componente
+    # alertas), no la API de notifications, y solo desde el núcleo o desde el
+    # satélite de notifications de k8s/reparto.env: auth confía en las
+    # cabeceras de identidad del gateway, así que no se abre a cualquiera.
+    - from:
+        - podSelector:
+            matchLabels: { app: notifications, componente: alertas }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-maximiliano-saez-cd928ab3cf06 }
+          podSelector:
+            matchLabels: { app: notifications, componente: alertas }
+      ports:
+        - { protocol: TCP, port: 8001 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -146,6 +160,16 @@ spec:
               - { key: app.kubernetes.io/name, operator: In, values: [ingress-nginx, rke2-ingress-nginx] }
       ports:
         - { protocol: TCP, port: 8080 }
+    # La API de connectors dentro del pod web. La llaman el gateway y
+    # auth-eliminaciones, que le pide borrar los datos de una organización o
+    # de una persona (MX-07; ELIMINACION_DESTINOS incluye connectors). Nadie
+    # más: auth-eliminaciones firma, y aun así no se abre a otros pods.
+    - from:
+        - podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [gateway, auth-eliminaciones] }
+      ports:
+        - { protocol: TCP, port: 8003 }
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -180,6 +204,32 @@ spec:
         - podSelector:
             matchExpressions:
               - { key: app, operator: In, values: [auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+        # La API de connectors dentro del pod web (CONNECTORS_API=web). No
+        # cualquier web: solo la que lleva ese contenedor.
+        - podSelector:
+            matchLabels: { app: web, componente: con-connectors }
+        # connectors repartido (k8s/reparto.env, NS_CONNECTORS): su worker, su
+        # purga y, cuando haya cupo de Services, su API. Solo ese namespace y
+        # solo esas apps; un podSelector sin namespaceSelector no los alcanza.
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-casolis }
+          podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [connectors, connectors-worker] }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    # notifications repartido (k8s/reparto.env, NS_NOTIFICATIONS): la API, el
+    # consumidor (mismo pod) y los Jobs de alertas (componente: alertas) usan
+    # el PostgreSQL del núcleo. Solo ese namespace y solo app: notifications; un
+    # podSelector sin namespaceSelector no los alcanza.
+    # No va a Redis: notifications no trae cliente de Redis ni de Celery, y el
+    # CELERY_BROKER_URL que le llega con el ConfigMap compartido no lo lee
+    # nadie. Por eso sesiones-y-tareas-a-redis no se le abre.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-maximiliano-saez-cd928ab3cf06 }
+          podSelector:
+            matchLabels: { app: notifications }
       ports:
         - { protocol: TCP, port: 5432 }
 ---
@@ -196,6 +246,16 @@ spec:
         - podSelector:
             matchExpressions:
               - { key: app, operator: In, values: [gateway, auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+        - podSelector:
+            matchLabels: { app: web, componente: con-connectors }
+        # connectors repartido (k8s/reparto.env, NS_CONNECTORS): su worker, su
+        # purga y, cuando haya cupo de Services, su API. Solo ese namespace y
+        # solo esas apps; un podSelector sin namespaceSelector no los alcanza.
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-casolis }
+          podSelector:
+            matchExpressions:
+              - { key: app, operator: In, values: [connectors, connectors-worker] }
       ports:
         - { protocol: TCP, port: 6379 }
 ---
@@ -212,5 +272,16 @@ spec:
         - podSelector:
             matchExpressions:
               - { key: app, operator: In, values: [auth, auth-eliminaciones, subscriptions, connectors, analytics, notifications, subscriptions-worker, subscriptions-beat, connectors-worker, analytics-worker] }
+      ports:
+        - { protocol: TCP, port: 5672 }
+    # notifications repartido (k8s/reparto.env, NS_NOTIFICATIONS): la API, el
+    # consumidor (mismo pod) y los Jobs de alertas (componente: alertas) usan
+    # el RabbitMQ del núcleo. Solo ese namespace y solo app: notifications; un
+    # podSelector sin namespaceSelector no los alcanza.
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: student-maximiliano-saez-cd928ab3cf06 }
+          podSelector:
+            matchLabels: { app: notifications }
       ports:
         - { protocol: TCP, port: 5672 }

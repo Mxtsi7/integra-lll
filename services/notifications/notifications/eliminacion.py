@@ -7,7 +7,6 @@ from shared.borrado.bloqueo import bloquear_organizacion
 from shared.eliminacion import LimpiezaOrganizacionView, validar_solicitud_eliminacion
 from .models import (
     Alerta,
-    DireccionCorreo,
     EntregaAlerta,
     EventoRecibido,
     PreferenciaNotificacion,
@@ -31,7 +30,7 @@ class LimpiezaNotificationsView(LimpiezaOrganizacionView):
     #   el orden contrario, una limpieza y un reclamo de la misma persona
     #   podían esperarse el uno al otro.
     modelos = (
-        PreferenciaNotificacion, EntregaAlerta, DireccionCorreo, Alerta,
+        PreferenciaNotificacion, EntregaAlerta, Alerta,
         SuscripcionVigilada, UsuarioEliminado, EventoRecibido,
     )
 
@@ -54,10 +53,9 @@ class LimpiezaUsuarioNotificationsView(APIView):
                 organizacion_id=organizacion_id, usuario_id=str(usuario_id),
             )
             # Mismo orden que el despachador: preferencias y después entregas.
-            # Las entregas guardan la dirección usada (`destino`), y
-            # `DireccionCorreo` es el correo mismo: datos de la persona.
+            # Las entregas guardan la dirección usada (`destino`): datos de
+            # la persona. El correo mismo vive en auth (S3-FE-21).
             de_la_persona = dict(organizacion_id=organizacion_id, usuario_id=str(usuario_id))
             PreferenciaNotificacion.objects.filter(**de_la_persona).delete()
             EntregaAlerta.objects.filter(**de_la_persona).delete()
-            DireccionCorreo.objects.filter(**de_la_persona).delete()
         return Response(status=204)

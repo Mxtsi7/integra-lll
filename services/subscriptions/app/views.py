@@ -1052,6 +1052,11 @@ class SubscriptionViewSet(PaginacionExplicitaMixin, TenantViewSet):
         except (TypeError, ValueError, AttributeError) as exc:
             raise ValidationError({"actor_id": "El identificador de usuario no es válido."}) from exc
 
+    @action(detail=True, methods=['get', 'post'], url_path='uso/consentimiento')
+    def consentimiento_uso_recolector(self, request, pk=None):
+        from app.uso_recolectores.consentimiento import gestionar
+        return gestionar(request, self.get_object(), self._actor_id(request, required=True))
+
     @action(detail=True, methods=['post'], url_path='uso/recolector')
     def recibir_uso_recolector(self, request, pk=None):
         from app.uso_recolectores.recepcion import recibir

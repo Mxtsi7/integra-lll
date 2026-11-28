@@ -310,6 +310,33 @@ services:
       rabbitmq: { condition: service_healthy }
     volumes: ["./services/analytics:/app", "./shared:/app/shared:ro"]
 
+  # ─── Alertas por lote (S3-FE-21) ──────────────────────────────
+  # generar_alertas y despachar_alertas cada 15 minutos. Es el ÚNICO proceso
+  # de notifications que le pregunta a auth quiénes son las personas y su
+  # correo (consulta interna firmada con DIRECTORIO_INTERNO_SECRET). Por eso
+  # cruza a la red de auth, como auth-eliminaciones, y la API de notifications
+  # sigue aislada (D-11). Sin DIRECTORIO_INTERNO_SECRET en .env, auth rechaza
+  # la consulta y los correos quedan diferidos; sin cuenta SMTP, en reintento.
+  # No se simula ningún envío. Las alertas de la campana se generan igual.
+  notifications-alertas:
+    networks: [notifications, auth]
+    build: ./services/notifications
+    env_file: .env
+    environment:
+      <<: *eventos
+      ESQUEMA_BD: notifications
+      URL_AUTH: http://auth:8001
+      # Las migraciones las aplica el servicio notifications.
+      APLICAR_MIGRACIONES: "0"
+    command: ["sh", "-c", "while :; do python manage.py generar_alertas; python manage.py despachar_alertas; sleep 900; done"]
+    depends_on:
+      notifications: { condition: service_healthy }
+      auth: { condition: service_healthy }
+    # Un bucle que duerme entre corridas, sin canal de consulta (como
+    # connectors-purga). La imagen trae el healthcheck HTTP de la API.
+    healthcheck: { disable: true }
+    volumes: ["./services/notifications:/app", "./shared:/app/shared:ro"]
+
   notifications:
     networks: [notifications]
     build: ./services/notifications

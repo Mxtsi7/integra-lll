@@ -50,6 +50,15 @@ export async function getMisImportaciones(pagina = 1): Promise<Paginado<Importac
 }
 
 /**
+ * GET /api/importaciones/?origen=correo: las lecturas de correo de la organización, de a 10 por página.
+ * No llevan `mias=true`: las programadas no las pide una persona y ese filtro las deja fuera.
+ */
+export async function getLecturasDeCorreo(pagina = 1): Promise<Paginado<Importacion>> {
+  const consulta = new URLSearchParams({ origen: 'correo', page: String(pagina) });
+  return await pedir(`/importaciones/?${consulta.toString()}`);
+}
+
+/**
  * POST /api/importaciones/archivos/ (S3-SE-02, FE-07).
  * Sube un archivo CSV o cartola mediante multipart/form-data (campo `archivo`).
  * Devuelve la importación creada en estado 'pendiente' con su `id` para consultar su progreso.

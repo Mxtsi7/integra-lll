@@ -33,6 +33,8 @@ def _conflicto(mensaje):
 @transaction.atomic
 def persistir(*, suscripcion, usuario_id, evento, correlacion):
     """Guarda el hecho y su trabajo pendiente antes de emitir el acuse."""
+    # La barrera HTTP ya responde 410 en el middleware; este chequeo cubre
+    # también las escrituras internas que no pasan por él.
     estado_org = bloquear_organizacion(suscripcion.organizacion_id, compartido=True)
     if estado_org.eliminada:
         raise PermissionDenied('La organización fue eliminada.')
@@ -67,16 +69,21 @@ def persistir(*, suscripcion, usuario_id, evento, correlacion):
                 correlation_id=correlacion,
                 proyeccion_pendiente=True,
             )
-            proyectar(destino, usuario_id, evento.fecha, correlacion)
-            recibido.proyeccion_pendiente = False
-            recibido.save(update_fields=('proyeccion_pendiente', 'actualizado_en'))
+            # Dentro del savepoint de primera aceptación: un reenvío 200, un
+            # conflicto 409 o un fallo de proyección no dejan otra fila de
+            # outbox. `registrar_uso` no publica; sólo prepara el despacho
+            # posterior al commit. El entero de Auth se conserva hasta acá:
+            # `events.uso` lo convierte con su namespace canónico.
             registrar_uso(
                 organizacion_id=destino.organizacion_id,
                 suscripcion_id=destino.pk,
-                usuario_id=usuario_id,
                 evento=evento.cuerpo,
+                usuario_id=usuario_id,
                 correlation_id=correlacion,
             )
+            proyectar(destino, usuario_id, evento.fecha, correlacion)
+            recibido.proyeccion_pendiente = False
+            recibido.save(update_fields=('proyeccion_pendiente', 'actualizado_en'))
     except IntegrityError as error:
         diagnostico = getattr(getattr(error.__cause__, 'diag', None), 'constraint_name', None)
         if diagnostico != NOMBRE_RESTRICCION_CLAVE:

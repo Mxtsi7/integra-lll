@@ -178,6 +178,20 @@
 
 /* ---- Listado ---- */
 
+/* Cartolas y lecturas de correo van en dos partes, cada una con su paginación. */
+.seccion {
+  display: flex;
+  flex-direction: column;
+  margin-top: 24px;
+}
+
+.tituloSeccion {
+  margin: 0 0 10px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--tinta);
+}
+
 .lista {
   display: flex;
   flex-direction: column;

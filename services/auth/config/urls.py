@@ -5,6 +5,7 @@ from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from app.google_login import GoogleLoginView, GoogleNonceView
 from app.historial_accesos import HistorialAccesosView
+from app.directorio import DestinatariosOrganizacionView
 
 from app.views import (
     ConfirmacionRecuperacionView,
@@ -46,6 +47,8 @@ urlpatterns = [
     path("api/planes/", PlanesView.as_view(), name="planes"),
     path("api/usuarios/me/permisos/", PermisosPlanView.as_view(), name="permisos-plan"),
     path("health/", salud),
+    # Interna (S3-FE-21): fuera de /api/, el gateway no la enruta. Firmada.
+    path("internal/organizaciones/<uuid:organizacion_id>/destinatarios/", DestinatariosOrganizacionView.as_view()),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema")),
     path("api/auth/register/", RegisterView.as_view(), name="register"),

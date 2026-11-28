@@ -59,22 +59,56 @@ proveedor sería declarar entregado algo que no salió.
 
 ## De dónde sale la dirección
 
-**No hay contrato acordado: hay un conflicto abierto.** El correo de una
-persona vive en el esquema de auth, y ningún servicio consulta el de otro
-(ADR-002). Las dos opciones:
+**De auth, en el momento, con una consulta interna firmada** (decidido el
+24-11-2026; la revisión de #203 pidió una «fuente autoritativa con auth»):
 
-| Opción | A favor | En contra |
-|---|---|---|
-| `usuario.creado` con `email`, como lo describe el catálogo (`shared/events/catalogo.md`, «Publica auth»). `DireccionCorreo` es la forma de lo que guardaría ese consumidor | ya está en el catálogo | MX-21 dice «No transportar tokens, contraseñas, correos ni cuerpos de mensajes». Guarda una copia de los correos en notifications |
-| Una consulta interna firmada a auth al momento de reclamar, como la de la limpieza (MX-07) | no guarda correos acá ni choca con MX-21; la dirección es siempre la vigente | auth no la expone; un auth caído deja el correo en reintento |
+```
+GET {URL_AUTH}/internal/organizaciones/<organizacion_id>/destinatarios/
+X-Directorio-Instante, X-Directorio-Firma = HMAC-SHA256(DIRECTORIO_INTERNO_SECRET,
+                                              "directorio:<organizacion_id>:<instante>")
+→ 200 {"destinatarios": [{"usuario_id": "12", "email": "ana@ejemplo.cl"}, …]}
+```
 
-Lo deciden Maxi y quien lleve auth. Mi propuesta es la consulta firmada. Si
-se elige, cambian solo `CanalCorreo.destino` (a dónde) y
-`PreferenciaNotificacion.de_la_organizacion` (quiénes son las personas), y
-`DireccionCorreo` se retira.
+| Pieza | Dónde |
+|---|---|
+| La firma y el formato (los dos lados) | `shared/directorio.py` |
+| La vista: solo las cuentas ACTIVAS de esa organización, solo `usuario_id` y `email` | `services/auth/app/directorio.py` |
+| El cliente | `services/notifications/notifications/directorio.py` |
 
-Mientras tanto **nadie llena `DireccionCorreo`** fuera de las pruebas, y una
-entrega por correo sin dirección termina `fallida` con `sin_direccion`.
+- **Quiénes son las personas** (`PreferenciaNotificacion.de_la_organizacion`):
+  las que auth entrega. Una fila de preferencias de alguien que ya no es de
+  la organización no cuenta.
+- **A dónde se escribe** (`CanalCorreo.destino`): la dirección vigente al
+  momento de mandar. Si la persona cambió su correo después de que se
+  planificó, sale al nuevo. Si ya no está en la organización, `sin_direccion`.
+- **Por qué no el evento `usuario.creado`**: MX-21 prohíbe transportar correos
+  en los eventos, y una copia guardada acá se desactualiza.
+- **Por qué un secreto propio**: el de la limpieza (MX-07) autoriza borrar
+  organizaciones; este solo deja leer direcciones.
+- **Por qué fuera de `/api/`**: el gateway solo enruta `/api/…`, así que no se
+  alcanza desde afuera. Igual exige firma, que vence a los 60 segundos.
+
+La tabla `DireccionCorreo`, que nadie llenaba, se retiró (migración
+`0010_retirar_direccion_correo`).
+
+### Si auth no responde
+
+| Dónde | Qué pasa |
+|---|---|
+| Al generar | `generar_alertas` falla a la vista y no crea nada a medias: sin saber quiénes son, no se puede planificar. La corrida siguiente lo intenta otra vez (el id de cada alerta es determinístico) |
+| Al mandar | la entrega queda `diferida` 5 minutos, **sin gastar un intento**: una caída de auth no es un fallo del proveedor de correo |
+
+### Quién puede preguntar
+
+Solo los procesos por lote (`generar_alertas` y `despachar_alertas`), no la
+API ni el consumidor de notifications. Las APIs de dominio no comparten red
+(D-11), así que:
+- en compose, el servicio `notifications-alertas` cruza a la red de auth, como
+  `auth-eliminaciones`;
+- en k8s, el pod del CronJob lleva `componente: alertas`, y `40-red.yaml`
+  deja llegar a auth solo a ese pod, desde el núcleo o desde el satélite de
+  `k8s/reparto.env`. auth confía en las cabeceras de identidad del gateway:
+  abrirle el puerto a cualquiera permitiría suplantar personas.
 
 ## El recorrido
 
@@ -288,18 +322,18 @@ las mutaciones.
 provisorio que usa auth en producción. **No se mandó ningún correo real** en
 esta tarea.
 
-Una corrida real acotada demuestra el **proveedor**, no la fuente de
-direcciones, y hay que presentarla así. En una base de desarrollo, nunca la
-de producción, y con una dirección propia cargada a mano:
+Una corrida real demuestra el proveedor y la fuente de direcciones juntos.
+En local, con una cuenta de la web registrada con un correo propio y una
+suscripción que se cobre en los próximos 3 días:
 
 ```bash
-export EMAIL_HOST=smtp.gmail.com EMAIL_PORT=587 EMAIL_USE_TLS=True \
-       EMAIL_HOST_USER='<gmail provisorio>' EMAIL_HOST_PASSWORD='<clave de aplicación>' \
-       DEFAULT_FROM_EMAIL='<gmail provisorio>'
-python manage.py shell -c "from notifications.models import DireccionCorreo; \
-  DireccionCorreo.objects.create(organizacion_id='<org>', usuario_id='<usuario>', email='<correo propio>')"
-python manage.py generar_alertas
-python manage.py despachar_alertas
+# en .env: EMAIL_HOST=smtp.gmail.com, EMAIL_HOST_USER y EMAIL_HOST_PASSWORD
+# (clave de aplicación) del Gmail provisorio, DEFAULT_FROM_EMAIL igual a esa
+# cuenta, y un DIRECTORIO_INTERNO_SECRET cualquiera (el mismo lo leen auth y
+# notifications-alertas, porque los dos usan .env)
+docker compose up -d
+docker compose run --rm notifications-alertas python manage.py generar_alertas
+docker compose run --rm notifications-alertas python manage.py despachar_alertas
 ```
 
 La evidencia es la fila `aceptada` con su `message_id` y, en el buzón de
@@ -338,36 +372,42 @@ Las agotadas también van a stderr. Con un backend que no entrega, falla con
 `--ahora` se lee igual que en `generar_alertas` (`notifications/reloj.py`),
 pero aquí se rechaza fuera del buzón de pruebas.
 
-**Hoy no lo programa nadie, a propósito.** Sin fuente de direcciones, cada
-correo que tome quedaría `fallida` con `sin_direccion` para siempre:
-programarlo antes destruye entregas que podrían salir después. Cuando haya
-fuente, el plan es:
+**Programado en el CronJob de alertas** (`k8s/tandas/alertas-notifications.yaml`):
+un pod por corrida, como antes, así que la cuota no cambia.
+1. `generar_alertas` corre como initContainer: si falla, no se despacha.
+2. `despachar_alertas` es el contenedor principal y el ÚNICO que recibe la
+   cuenta SMTP (regla 10).
 
-- correrlo en el **mismo** CronJob de `k8s/tandas/alertas-notifications.yaml`,
-  después de `generar_alertas`, y no en uno aparte: la tanda está en 12 de 12
-  pods con el generador corriendo, y `k8s/pruebas/presupuesto.py` cobra un pod
-  por CronJob;
-- pasarle `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS` y `DEFAULT_FROM_EMAIL`, y
-  los secretos `EMAIL_HOST_USER` y `EMAIL_HOST_PASSWORD` como en
-  `k8s/10-auth.yaml`, **solo a ese contenedor**: la API y el consumidor de
-  notifications no mandan correos (regla 10);
-- antes de habilitarlo por primera vez, mirar las entregas `pendiente`
-  antiguas: saldrían avisos de cobros que ya pasaron, y anularlas es de
-  S3-FE-22.
+La cuenta y el secreto del directorio van en un Secret aparte,
+`ojoalgasto-alertas`, que solo ven esos Jobs. Se crea a mano en el núcleo
+(pasos en `k8s/tandas/README.md`), y `desplegar-satelite.sh` lo traslada si
+existe. El CronJob sigue llegando **suspendido**: activarlo es una decisión
+de la tanda.
+
+En local, el servicio `notifications-alertas` de compose corre los dos
+comandos cada 15 minutos. Sin `DIRECTORIO_INTERNO_SECRET` en `.env`, no sale
+ningún correo: auth rechaza la consulta y las entregas quedan diferidas.
+
+**Las entregas viejas no salen.** Lo que antes había que revisar a mano antes
+de activarlo por primera vez ahora lo hace `reclamar`: un aviso de un cobro
+que ya pasó, o de una prueba que ya terminó, se descarta con `aviso_vencido`.
+«Se cobra hoy» todavía sale.
 
 ## Dónde está
 
 | Pieza | Archivo |
 |---|---|
-| Modelos y migración | `services/notifications/notifications/models.py` → `EntregaAlerta`, `DireccionCorreo`, `PreferenciaNotificacion.de_la_organizacion`; `migrations/0008_entregas_de_alertas.py` |
+| Modelos y migración | `services/notifications/notifications/models.py` → `EntregaAlerta`, `PreferenciaNotificacion.de_la_organizacion`; `migrations/0008_entregas_de_alertas.py` y `0010_retirar_direccion_correo.py` |
 | Planificar, reclamar, anotar y despachar | `notifications/entregas.py` |
 | El canal de correo, la clasificación SMTP y la barrera de proveedor | `notifications/canales.py` |
 | Descanso y cuota, sin base ni reloj | `notifications/politica_envio.py` |
 | Las entregas nacen con la alerta; las mismas personas para las ventanas | `notifications/generador.py` → `_crear_una_vez`, `_preferencias` |
 | Las limpiezas | `notifications/eliminacion.py` |
 | El comando | `notifications/management/commands/despachar_alertas.py` |
+| Las personas y su correo, desde auth | `notifications/directorio.py`, `shared/directorio.py`, `services/auth/app/directorio.py` |
+| La programación | `k8s/tandas/alertas-notifications.yaml`; en local, `notifications-alertas` en `docker-compose.yml` |
 | Las variables de correo y `EMAIL_BACKENDS_CON_PROVEEDOR` | `notifications_config/settings.py` |
-| Las pruebas | `tests/test_entregas_s3_fe_21.py` (120) y `tests/test_carrera_entregas_postgres.py` (6, con dos conexiones a PostgreSQL); `conftest.py` agrega `locmem` como proveedor solo en pruebas |
+| Las pruebas | `tests/test_entregas_s3_fe_21.py` (120) y `tests/test_carrera_entregas_postgres.py` (6, con dos conexiones a PostgreSQL), `tests/test_directorio_s3_fe_21.py` (23) y, en auth, `tests/test_directorio_s3_fe_21.py` (16). `conftest.py` agrega `locmem` como proveedor y el doble del directorio (`tests/directorio_falso.py`), solo en pruebas |
 
 ## Cómo se comprobaron las pruebas
 
@@ -420,10 +460,8 @@ prueba explícita de que la corrida se niega aunque no haya nada que mandar.
 
 - **El canal es el correo**, por RF-09, FE-21, `.env.example` y ADR-006. No
   hay un acuerdo escrito de S3-FE-21 aparte de eso: lo valida Maxi.
-- **De dónde sale la dirección**: conflicto abierto entre el catálogo y MX-21.
-  Propongo la consulta firmada a auth; lo deciden Maxi y quien lleve auth.
-- **El despachador no se programa** hasta tener fuente de direcciones; el plan
-  está en «El comando».
+- **De dónde sale la dirección**: de auth, con la consulta firmada (arriba).
+- **El despachador** corre en el CronJob de alertas, después del generador.
 - **Anticipación por persona: «dentro de su anticipación y un aviso por
   cobro»**, no «solo si su anticipación es la de la alerta». Con la igualdad,
   B (7 días) no recibía nada si su ventana no alcanzó a generarse (suscripción
@@ -457,15 +495,12 @@ prueba explícita de que la corrida se niega aunque no haya nada que mandar.
 
 ## Lo que falta para cerrar
 
-- **La fuente de direcciones**, acordada con Maxi y auth. Sin eso, en
-  cualquier entorno, cada correo termina `fallida` con `sin_direccion`.
-- **Una corrida real** con el Gmail provisorio, con la captura del correo y su
+- **Crear el Secret `ojoalgasto-alertas`** en el núcleo, con la cuenta de
+  Gmail provisoria y un `DIRECTORIO_INTERNO_SECRET` nuevo. Es a mano y sin
+  mostrar valores (`k8s/tandas/README.md`).
+- **Una corrida real** con esa cuenta, con la captura del correo y su
   Message-ID enlazados en la PR.
-- **Programar el despachador** con las variables y secretos de correo solo en
-  su contenedor (plan en «El comando»).
 - **Respuesta de Maxi** sobre el respaldo por correo de HU-03.
-- **FE-22**: cuota, franja y zona horaria por persona, el orden de prioridad
-  de RN-08 y la cuota con entregas en vuelo.
+- **Cuota, franja y zona horaria por persona**, el orden de prioridad de
+  RN-08 y la cuota con entregas en vuelo.
 - **El push**: proveedor (Expo) y registro de dispositivos.
-- **S3-FE-22**: anular las entregas pendientes de una alerta que quedó
-  obsoleta (suscripción cancelada, con otra fecha o un cobro que ya pasó).

@@ -11,28 +11,36 @@ export function crearControlador(api) {
     }
   }
   async function limpiarPermisosSobrantes() {
-    const { configuracion, autorizacion } = await api.storage.session.get(['configuracion', 'autorizacion']);
+    const { configuracion, autorizacion, conexion } = await api.storage.session.get(['configuracion', 'autorizacion', 'conexion']);
     // Una concesión tardía no puede quitar permisos de una aceptación nueva o en curso.
     const dominios = [...(configuracion?.consentimiento ? configuracion.dominios : []), ...(autorizacion?.dominios ?? [])];
     const vigentes = new Set(dominios.map(dominio => `https://${dominio}/*`));
+    if (conexion?.urlBase) vigentes.add(`${new URL(conexion.urlBase).origin}/*`);
     const permisos = await api.permissions.getAll();
     const sobrantes = (permisos.origins ?? []).filter(origen => !vigentes.has(origen));
     if (sobrantes.length) await api.permissions.remove({ origins: sobrantes });
   }
+  /**
+   * @template T
+   * @param {() => Promise<T>} operacion
+   * @returns {Promise<T>}
+   */
   function encolar(operacion) {
     const pendiente = cola.then(operacion);
     cola = pendiente.catch(() => {}); // El llamador recibe el rechazo; la cola sigue utilizable.
     return pendiente;
   }
   return {
-    actualizar: (senal = {}) => {
+    coordinarMedicion: encolar,
+    actualizar: (senal = {}, antesDeObservar = () => {}, autorizado = () => true) => {
       const actual = ++revision;
       // Las pausas son hechos recibidos; una reconsulta solo vale si sigue vigente.
       const pausa = senal.estado ? { estado: senal.estado, observadoEn: Date.now() } : null;
       const transicion = senal.transicion ? { ...senal.transicion, observadoEn: Date.now() } : null;
-      const esVigente = () => pausa !== null || actual === revision;
+      const esVigente = () => autorizado() && (pausa !== null || actual === revision);
       return encolar(async () => {
         try {
+          await antesDeObservar();
           // El corte es un hecho; solo la lectura del destino puede quedar superada.
           if (transicion) await cortarTransicion(api, transicion);
           if (esVigente()) await observar(api, { ...pausa, esVigente });
@@ -80,9 +88,13 @@ export function crearControlador(api) {
       await limpiarPermisosSobrantes();
     }),
     retirar: () => encolar(async () => {
+      const { conexion, credenciales } = await api.storage.session.get(['conexion', 'credenciales']);
       await api.storage.session.clear();
+      if (conexion) await api.storage.session.set({ conexion, ...(credenciales ? { credenciales } : {}) });
       const permisos = await api.permissions.getAll();
-      if (permisos.origins?.length) await api.permissions.remove({ origins: permisos.origins });
+      const conservar = conexion?.urlBase ? `${new URL(conexion.urlBase).origin}/*` : null;
+      const retirar = permisos.origins?.filter(origen => origen !== conservar);
+      if (retirar?.length) await api.permissions.remove({ origins: retirar });
     }),
   };
 }

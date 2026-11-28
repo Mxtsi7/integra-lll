@@ -4,10 +4,13 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  confirmarCandidato,
   ErrorDeApi,
   getCandidatos,
   getImportacion,
   getMisImportaciones,
+  rechazarCandidato,
+  type CandidatoDetectado,
   type Importacion,
   type Paginado,
 } from "@ojoalgasto/shared";
@@ -21,11 +24,22 @@ import { ImportacionesPage } from "./ImportacionesPage";
 // Solo se simula la red; las páginas y el polling son reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getCandidatos: vi.fn(), getImportacion: vi.fn(), getMisImportaciones: vi.fn() };
+  return {
+    ...real,
+    getCandidatos: vi.fn(),
+    getImportacion: vi.fn(),
+    getMisImportaciones: vi.fn(),
+    // El listado también pide las lecturas de correo; sus casos están en ImportacionesPage.lecturas.test.
+    getLecturasDeCorreo: vi.fn(async () => ({ count: 0, next: null, previous: null, results: [] })),
+    confirmarCandidato: vi.fn(),
+    rechazarCandidato: vi.fn(),
+  };
 });
 const getMock = vi.mocked(getImportacion);
 const listarMock = vi.mocked(getMisImportaciones);
 const candidatosMock = vi.mocked(getCandidatos);
+const confirmarMock = vi.mocked(confirmarCandidato);
+const rechazarMock = vi.mocked(rechazarCandidato);
 
 const BASE: Importacion = {
   id: "imp-1",
@@ -80,6 +94,8 @@ beforeEach(() => {
   getMock.mockReset();
   listarMock.mockReset();
   candidatosMock.mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
+  confirmarMock.mockReset();
+  rechazarMock.mockReset();
 });
 
 afterEach(() => {
@@ -133,8 +149,9 @@ describe("Progreso de una importación (CH-27)", () => {
     expect(screen.getByText(/Todavía no se creó ni cambió ninguna suscripción/)).toBeInTheDocument();
     expect(screen.queryByText(/import(ó|aron|ada con éxito)|exitos/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    // La previsualización (FE-10) todavía no existe: el paso se ve, pero no lleva a ninguna parte.
-    expect(screen.getByRole("button", { name: "Revisar cobros encontrados" })).toBeDisabled();
+    // La revisión está en la misma página, en «Cobros encontrados»: ya no hay un botón que no lleva a ninguna parte.
+    expect(screen.getByText(/revísalos en «Cobros encontrados»/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revisar cobros encontrados" })).not.toBeInTheDocument();
   });
 
   it("completada y confirmada lo dice; sin candidatos, también", async () => {
@@ -445,14 +462,85 @@ describe("Cobros encontrados y problemas de un archivo (S3-CH-06)", () => {
     expect(candidatosMock).not.toHaveBeenCalled();
   });
 
-  it("la lista es de solo lectura: sin casillas ni botones para confirmar o rechazar, y «Revisar cobros encontrados» sigue deshabilitado", async () => {
-    getMock.mockResolvedValue(MIXTA);
-    conLosCobros();
-    await montarYEsperarLosCobros();
+  describe("revisar y decidir los cobros en la página (S3-CH-07 a S3-CH-10)", () => {
+    const seleccionar = (nombre: string) => fireEvent.click(within(cobros()).getByRole("checkbox", { name: new RegExp(`^Seleccionar ${nombre},`) }));
 
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^(Confirmar|Rechazar)/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Revisar cobros encontrados" })).toBeDisabled();
+    it("cada cobro propuesto se puede elegir, y hay botones para confirmar y rechazar", async () => {
+      getMock.mockResolvedValue(MIXTA);
+      conLosCobros();
+      await montarYEsperarLosCobros();
+
+      expect(within(cobros()).getByRole("checkbox", { name: /^Seleccionar Spotify,/ })).toBeInTheDocument();
+      expect(within(cobros()).getByRole("checkbox", { name: /^Seleccionar Netflix,/ })).toBeInTheDocument();
+      expect(within(cobros()).getByRole("button", { name: "Confirmar" })).toBeDisabled();
+      expect(within(cobros()).getByRole("button", { name: "Rechazar" })).toBeDisabled();
+    });
+
+    it("confirmar manda la decisión, dice que la orden quedó pendiente de aplicar y vuelve a leer la lista", async () => {
+      const SPOTIFY_CONFIRMADO: CandidatoDetectado = {
+        ...SPOTIFY,
+        estado: "confirmado",
+        estado_legible: "Confirmado",
+        decidido_en: "2026-11-26T10:00:00-03:00",
+        aplicacion: "pendiente",
+      };
+      getMock.mockResolvedValue(MIXTA);
+      candidatosMock
+        .mockResolvedValueOnce(paginaDeCandidatosDePrueba({ count: 2, results: [SPOTIFY, NETFLIX] }))
+        .mockResolvedValueOnce(paginaDeCandidatosDePrueba({ count: 2, results: [SPOTIFY_CONFIRMADO, NETFLIX] }));
+      confirmarMock.mockResolvedValue(SPOTIFY_CONFIRMADO);
+      await montarYEsperarLosCobros();
+
+      seleccionar("Spotify");
+      await act(async () => fireEvent.click(within(cobros()).getByRole("button", { name: "Confirmar 1 cobro" })));
+
+      expect(confirmarMock).toHaveBeenCalledTimes(1);
+      expect(confirmarMock).toHaveBeenCalledWith("c-1");
+      expect(rechazarMock).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Resultado de la confirmación")).toHaveTextContent(
+        "Confirmaste 1 cobro. Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.",
+      );
+      // Lo que se ve después es lo que guardó el servidor, de esta misma importación.
+      expect(candidatosMock).toHaveBeenCalledTimes(2);
+      expect(candidatosMock).toHaveBeenLastCalledWith(expect.objectContaining({ importacion: "imp-1", pagina: 1 }));
+      expect(within(cobros()).getByText(/orden pendiente de aplicar/)).toBeInTheDocument();
+      // Un cobro ya decidido no se vuelve a elegir.
+      expect(within(cobros()).queryByRole("checkbox", { name: /^Seleccionar Spotify,/ })).not.toBeInTheDocument();
+    });
+
+    it("rechazar pregunta primero y solo manda la decisión al aceptar", async () => {
+      getMock.mockResolvedValue(MIXTA);
+      conLosCobros();
+      rechazarMock.mockResolvedValue({ ...NETFLIX, estado: "rechazado", estado_legible: "Rechazado" });
+      await montarYEsperarLosCobros();
+
+      seleccionar("Netflix");
+      fireEvent.click(within(cobros()).getByRole("button", { name: "Rechazar 1 cobro" }));
+      expect(rechazarMock).not.toHaveBeenCalled();
+
+      const pregunta = screen.getByRole("alertdialog");
+      await act(async () => fireEvent.click(within(pregunta).getByRole("button", { name: "Rechazar" })));
+
+      expect(rechazarMock).toHaveBeenCalledTimes(1);
+      expect(rechazarMock).toHaveBeenCalledWith("c-2");
+      expect(confirmarMock).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Resultado del rechazo")).toHaveTextContent("Rechazaste 1 cobro.");
+    });
+
+    it("si el servidor no confirma un cobro, lo dice y no lo da por confirmado", async () => {
+      getMock.mockResolvedValue(MIXTA);
+      conLosCobros();
+      confirmarMock.mockRejectedValue(new TypeError("Failed to fetch"));
+      await montarYEsperarLosCobros();
+
+      seleccionar("Spotify");
+      await act(async () => fireEvent.click(within(cobros()).getByRole("button", { name: "Confirmar 1 cobro" })));
+
+      const resultado = screen.getByLabelText("Resultado de la confirmación");
+      expect(resultado).toHaveTextContent("No se pudo confirmar el cobro.");
+      expect(resultado).toHaveTextContent(MENSAJE_SIN_RED);
+      expect(resultado).not.toHaveTextContent("Confirmaste");
+    });
   });
 
   it("de un archivo explica cómo corregir y volver a subir", async () => {

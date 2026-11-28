@@ -387,3 +387,48 @@ IANA existente, cobertura sin huecos y unión temporal entre fuentes. También
 comprueba el rechazo de identidad en el cuerpo y de los casos negativos de
 destino ajeno, duración inconsistente, tramo fuera de ventana, zona inválida y
 cruce de día.
+
+## 13. Cierre de integración v1.0 (S3-VI-23 / S3-VI-24)
+
+**Fecha:** 2026-11-25 · **Estado:** contrato integrado desde la base del review
+`main dba7019` y verificado en el SHA `e1ef09b`; los dos P2 están corregidos.
+Esta sección no cambia las reglas
+anteriores: registra qué eslabones quedaron conectados, qué se sustituye por un
+doble y con qué evidencia. El detalle está en
+[docs/entregas/sprint-3-victor.md](../entregas/sprint-3-victor.md).
+
+| Punto del contrato | Cierre verificado |
+|---|---|
+| Bearer y tenant | Se valida el token con el código real del gateway; un middleware de prueba inyecta las cabeceras resultantes. La identidad nunca se toma del cuerpo. El salto HTTP gateway→servicio **no** se ejercita. |
+| Recepción y outbox | `registrar_uso` se ejecuta dentro del savepoint de **primera aceptación**. El `201` crea un evento durable; el `200` y el `409` no crean otra fila ni otra publicación. |
+| Forma del sobre | El `usuario_id` entero de Auth se conserva hasta `events.uso.registrar_uso`, que lo convierte con `uuid_usuario_auth` y `NAMESPACE_USUARIO_AUTH` (canónico de `main`). Auth `42` produce `9180eff3-4e75-5137-95fa-1879656f1c43`; no existe el namespace alternativo. |
+| Identidad cruzada | `tests/test_uso_contrato_cruzado.py` pasa el sobre real por el validador TypeScript y comprueba la huella estable del reintento, sin crear otra identidad ni conflicto para el mismo hecho. |
+| RabbitMQ y consumidor | Despacho real del outbox al exchange dedicado; el worker TypeScript corre como proceso separado y confirma, deduplica y aísla por organización. La reentrega espera con timeout el log posterior al ACK y exige un resultado `duplicado` nuevo para el mismo `event_id`, sin repetir efectos. |
+| Persistencia analítica | Tablas `analytics.uso_evento`, `uso_tramo`, `uso_diario` y `uso_mensual_recolector` sobre PostgreSQL real; milisegundos exactos y proyección entera sin perder residuo. |
+| Barrera de borrado | Se aplica en la recepción HTTP (`public`) y en el consumidor (`analytics`): `410` en HTTP y ACK sin reinserción en mensajes en vuelo, confirmado por el log posterior al ACK con timeout explícito antes de verificar tablas y cola de fallos. `persistir` conserva la barrera de `main` para escrituras internas. |
+| Precisión y gastos | 30 s positivos se acreditan con `minutos_enteros_proyectados = 0` sin clasificarse como uso cero; la cobertura/datos insuficientes no habilita penalización; los gastos se agrupan por moneda sin mezclar divisas. |
+| Evidencia | `pytest -v` del job `backend/subscriptions`: **585 passed**, incluidos los **3 E2E**, **0 skipped** (`EXIT=0`). Sin `RABBITMQ_PRUEBA_URL`: **3 errores explícitos**, `EXIT=1`. Los checks del SHA integrado se registran en la entrega. |
+
+## 14. Alcance real, dobles y pendientes
+
+La E2E usa PostgreSQL y RabbitMQ reales, pero no sustituye todos los eslabones:
+
+- el gateway HTTP se reemplaza por `BearerGatewayMiddleware`, que reutiliza
+  `leer_token`/`validar` e inyecta las cabeceras ya validadas;
+- las sesiones emplean `LocMemCache`, no Redis;
+- `USO_VERIFICAR_CONSENTIMIENTO` es un doble que devuelve `True`
+  incondicionalmente: no valida la autoridad de consentimiento;
+- los eventos son las fixtures del contrato v1, no capturas desde dispositivo;
+- el verificador invoca código local de contexto/resumen, sin proveedor de IA
+  externo;
+- la suite depende solo de `RABBITMQ_PRUEBA_URL`; no hay default local ni
+  fallback y falla explícitamente si falta infraestructura.
+
+Quedan fuera de esta evidencia, por tanto, la autoridad real de consentimiento,
+el salto HTTP gateway→servicio, la captura desde dispositivo y cualquier
+proveedor de IA externo. Son pendientes declarados, no afirmaciones de cierre.
+
+No se usó SQLite como sustituto en ninguna prueba de integración: la suite E2E
+falla explícitamente si `DATABASES["default"]` no apunta a PostgreSQL. Los
+valores de conexión y los secretos se inyectan por entorno y no se transcriben
+en este documento ni en la evidencia.

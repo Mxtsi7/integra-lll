@@ -25,7 +25,8 @@ from django.db import connection
 
 from notifications import entregas, generador
 from notifications.generador import generar
-from notifications.models import Alerta, DireccionCorreo, EntregaAlerta, PreferenciaNotificacion
+from notifications.models import Alerta, EntregaAlerta, PreferenciaNotificacion
+from tests.directorio_falso import DIRECTORIO
 from notifications.proyeccion import aplicar
 from tests.test_carrera_entregas_postgres import ESPERA, Freno, Hilo, hasta_que_espere, terminar
 from tests.test_invalidacion_s3_fe_22 import HOY, ORG, sobre
@@ -45,7 +46,7 @@ def solo_postgres():
 def suscripcion(settings):
     settings.DEFAULT_FROM_EMAIL = "no-responder@ejemplo.cl"
     PreferenciaNotificacion.objects.create(organizacion_id=ORG, usuario_id="42")
-    DireccionCorreo.objects.create(organizacion_id=ORG, usuario_id="42", email="ana@ejemplo.cl")
+    DIRECTORIO.agregar(ORG, "42", "ana@ejemplo.cl")
     aplicar(sobre("suscripcion.creada", ocurrido="2026-11-01T12:00:00Z"))
 
 

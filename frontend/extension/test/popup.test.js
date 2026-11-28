@@ -266,13 +266,13 @@ test('retirar sustituye mensajes de preparación y autorización confirmadas', a
   await document.querySelector('#dominios').input();
   assert.match(document.querySelector('#estado').textContent, /Revisa/);
   await retirar();
-  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado y pendientes descartados.');
   document.querySelector('#dominios').value = 'example.com';
   document.querySelector('#consentimiento').checked = true;
   await aceptar();
   assert.match(document.querySelector('#estado').textContent, /Dominios autorizados/);
   await retirar();
-  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado. Sesión borrada.');
+  assert.equal(document.querySelector('#estado').textContent, 'Consentimiento retirado y pendientes descartados.');
 });
 
 test('conserva la pausa y su instante aunque la cola espere siete segundos', async () => {

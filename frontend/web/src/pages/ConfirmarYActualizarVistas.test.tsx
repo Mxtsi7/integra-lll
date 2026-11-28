@@ -9,25 +9,28 @@ import {
   getCandidatos,
   getCatalogosSuscripciones,
   getCobrosDelMes,
+  getImportacion,
   getSuscripciones,
   type CandidatoDetectado,
   type CatalogosSuscripciones,
   type CobroCalendario,
+  type Importacion,
   type Suscripcion,
 } from "@ojoalgasto/shared";
-import { RevisionDeCandidatos } from "../components/candidatos/RevisionDeCandidatos";
 import { AuthProvider } from "../context/AuthContext";
 import { CatalogosProvider } from "../context/CatalogosContext";
 import { ToastProvider } from "../context/ToastContext";
 import { candidatoDePrueba, paginaDeCandidatosDePrueba } from "../test/candidatosDePrueba";
 import { CalendarioPage } from "./CalendarioPage";
 import Homepage from "./Homepage";
+import { ImportacionPage } from "./ImportacionPage";
 
-// Solo se simula la red. Las vistas, la revisión de cobros y las decisiones son las reales.
+// Solo se simula la red. Las vistas, la página de la importación, la revisión de cobros y las decisiones son las reales.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
   return {
     ...real,
+    getImportacion: vi.fn(),
     getCandidatos: vi.fn(),
     confirmarCandidato: vi.fn(),
     getSuscripciones: vi.fn(),
@@ -35,6 +38,27 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     getCobrosDelMes: vi.fn(),
   };
 });
+
+/** La importación ya terminó y encontró un cobro: la página muestra la revisión. */
+const IMPORTACION_COMPLETADA: Importacion = {
+  id: "imp-1",
+  origen: "csv",
+  origen_legible: "Archivo CSV o cartola",
+  nombre_archivo: "cartola-noviembre.csv",
+  estado: "completada",
+  estado_legible: "Análisis completado",
+  terminada: true,
+  progreso: 100,
+  filas_totales: 1,
+  filas_procesadas: 1,
+  candidatos_detectados: 1,
+  candidatos_confirmados: false,
+  errores: [],
+  errores_totales: 0,
+  terminada_en: "2026-11-24T09:00:00-03:00",
+  confirmada_en: null,
+  creado_en: "2026-11-24T08:59:00-03:00",
+};
 
 const SPOTIFY_PENDIENTE = candidatoDePrueba({ id: "c-1", servicio: "Spotify" });
 const SPOTIFY_CONFIRMADO: CandidatoDetectado = {
@@ -87,15 +111,6 @@ function Raiz() {
   );
 }
 
-/**
- * La revisión de cobros de una importación. La página de importación todavía no la monta
- * (S3-CH-06 la dejó solo lectura hasta que las operaciones reales se acepten), así que la
- * prueba la monta directamente en su ruta.
- */
-function RevisionDePrueba() {
-  return <RevisionDeCandidatos importacion="imp-1" />;
-}
-
 function montar(ruta: string) {
   const router = createMemoryRouter(
     [
@@ -105,7 +120,7 @@ function montar(ruta: string) {
         children: [
           { path: "home", element: <Homepage /> },
           { path: "calendario", element: <CalendarioPage /> },
-          { path: "importaciones/:id", element: <RevisionDePrueba /> },
+          { path: "importaciones/:id", element: <ImportacionPage /> },
         ],
       },
     ],
@@ -130,6 +145,7 @@ async function confirmarSpotify() {
 const enlace = (nombre: string) => screen.getByRole("link", { name: nombre });
 
 beforeEach(() => {
+  vi.mocked(getImportacion).mockReset().mockResolvedValue(IMPORTACION_COMPLETADA);
   vi.mocked(getCatalogosSuscripciones).mockReset().mockResolvedValue(structuredClone(CATALOGO));
   vi.mocked(getSuscripciones).mockReset().mockResolvedValue([]);
   vi.mocked(getCobrosDelMes).mockReset().mockResolvedValue([]);

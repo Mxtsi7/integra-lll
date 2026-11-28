@@ -101,6 +101,11 @@ spec:
             - name: ELIMINACION_INTERNA_SECRET
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: ELIMINACION_INTERNA_SECRET }
+            # S3-FE-21: verifica la consulta de destinatarios de notifications.
+            # Opcional: sin él, auth rechaza la consulta y nada más se rompe.
+            - name: DIRECTORIO_INTERNO_SECRET
+              valueFrom:
+                secretKeyRef: { name: ojoalgasto-alertas, key: DIRECTORIO_INTERNO_SECRET, optional: true }
             - name: CLAVES_CIFRADO
               valueFrom:
                 secretKeyRef: { name: ojoalgasto, key: CLAVES_CIFRADO, optional: true }

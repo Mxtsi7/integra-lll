@@ -1,26 +1,17 @@
 import { Database, Link2, Moon, Palette, Sun, Wallet } from 'lucide-react';
 import { PreferenciasAvisos } from '../components/Configuracion/PreferenciasAvisos';
 import { RecolectoresDeUso } from '../components/Configuracion/RecolectoresDeUso';
+import { PlanPremium } from '../components/Planes/PlanPremium';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Boton, BotonEnlace } from '../components/ui/Boton';
 import { Fila, Seccion } from '../components/ui/Seccion';
 import { useTema } from '../hooks/useTema';
 import styles from './ConfiguracionPage.module.css';
 import { EliminarCuenta } from '../components/Perfil/EliminarCuenta';
-import { usePermisosPlan } from '../hooks/usePermisosPlan';
-import { ErrorConReintento } from '../components/ui/ErrorConReintento';
 
 export function ConfiguracionPage() {
   // Apariencia (persistente y aplicada a toda la app)
   const [tema, setTema] = useTema();
-  const {
-    cargando: cargandoPlan,
-    error: errorPlan,
-    esPremium,
-    nombrePlan,
-    detallePlan,
-    reintentar: reintentarPlan,
-  } = usePermisosPlan();
 
   return (
     <AppLayout headerTitulo="Ajustes" headerSubtitulo="Avisos, apariencia y tus datos.">
@@ -92,24 +83,7 @@ export function ConfiguracionPage() {
           </Seccion>
 
           <Seccion titulo="Plan" icono={<Wallet size={19} aria-hidden="true" />} tinte="verde">
-            {cargandoPlan ? (
-              <Fila etiqueta="Comprobando plan…" detalle="Consultando el estado de tu suscripción en el servidor." />
-            ) : errorPlan ? (
-              <div className={styles.pieSeccion}>
-                <ErrorConReintento mensaje={errorPlan} onReintentar={reintentarPlan} />
-              </div>
-            ) : (
-              <>
-                <Fila etiqueta={nombrePlan} detalle={detallePlan} />
-                {!esPremium && (
-                  <div className={styles.pieSeccion}>
-                    <BotonEnlace to="/perfil" variante="secundario">
-                      Mejorar a Premium
-                    </BotonEnlace>
-                  </div>
-                )}
-              </>
-            )}
+            <PlanPremium />
           </Seccion>
         </div>
       </div>
