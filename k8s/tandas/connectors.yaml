@@ -20,8 +20,9 @@
 #
 # ── Lo que NO recibe ─────────────────────────────────────────────────────────
 # La clave administradora de PostgreSQL, el secreto de los JWT ni la cuenta de
-# correo. RabbitMQ sí lo recibe el WORKER (`worker-connectors.yaml`), que es
-# quien publica las confirmaciones; la API sigue sin publicar. Las credenciales
+# correo. RabbitMQ sí lo recibe el WORKER (`worker-connectors.yaml`): publica
+# las confirmaciones y su sidecar `aplicaciones` consume el acuse de vuelta; la
+# API no publica ni consume. Las credenciales
 # OAuth de Google y Microsoft van en un Secret aparte, `ojoalgasto-conectores`,
 # opcional: sin él la API y la importación de CSV funcionan, pero conectar
 # Gmail u Outlook falla en la pantalla del proveedor.
