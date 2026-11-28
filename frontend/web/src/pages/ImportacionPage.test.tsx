@@ -29,6 +29,8 @@ vi.mock("@ojoalgasto/shared", async (importOriginal) => {
     getCandidatos: vi.fn(),
     getImportacion: vi.fn(),
     getMisImportaciones: vi.fn(),
+    // El listado también pide las lecturas de correo; sus casos están en ImportacionesPage.lecturas.test.
+    getLecturasDeCorreo: vi.fn(async () => ({ count: 0, next: null, previous: null, results: [] })),
     confirmarCandidato: vi.fn(),
     rechazarCandidato: vi.fn(),
   };
