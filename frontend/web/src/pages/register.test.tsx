@@ -47,6 +47,18 @@ afterEach(() => {
   cleanup();
 });
 
+describe("Registro: enlace a los términos (S3-AN-08)", () => {
+  it("abre /terminos en una pestaña nueva para no perder lo escrito en el formulario", () => {
+    montar();
+    escribir("Nombre", "Ana");
+    const enlace = screen.getByRole("link", { name: "términos y condiciones" });
+    expect(enlace).toHaveAttribute("href", "/terminos");
+    expect(enlace).toHaveAttribute("target", "_blank");
+    expect(enlace).toHaveAttribute("rel", expect.stringContaining("noopener"));
+    expect(campo("Nombre").value).toBe("Ana");
+  });
+});
+
 describe("Registro: validación antes de enviar (CH-04)", () => {
   it("con el formulario vacío no envía y marca cada campo", () => {
     montar();
