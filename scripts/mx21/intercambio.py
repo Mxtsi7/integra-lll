@@ -16,8 +16,30 @@ import pika
 
 RAIZ = Path(__file__).resolve().parents[2]
 ESQUEMA = json.loads((RAIZ / 'shared/events/mx21-v2.schema.json').read_text('utf-8'))
+ESQUEMA_CANDIDATO = json.loads(
+    (RAIZ / 'shared/events/candidato-confirmado-v1.schema.json').read_text('utf-8'))
 Draft202012Validator.check_schema(ESQUEMA)
+Draft202012Validator.check_schema(ESQUEMA_CANDIDATO)
 VALIDADOR = Draft202012Validator(ESQUEMA, format_checker=FormatChecker())
+VALIDADOR_CANDIDATO = Draft202012Validator(ESQUEMA_CANDIDATO, format_checker=FormatChecker())
+
+VALIDADORES = {
+    ('suscripcion.creada', 2): VALIDADOR,
+    ('suscripcion.actualizada', 2): VALIDADOR,
+    ('suscripcion.estado_cambiado', 2): VALIDADOR,
+    ('alerta.activada', 2): VALIDADOR,
+    ('candidato.confirmado', 1): VALIDADOR_CANDIDATO,
+}
+
+
+def validar(evento):
+    """Elige el esquema por evento/versión; v2 queda intacto."""
+    if not isinstance(evento, dict):
+        raise ValidationError('el sobre no es un objeto JSON')
+    clave = (evento.get('evento'), evento.get('version'))
+    if clave not in VALIDADORES:
+        raise ValidationError(f'evento o versión sin esquema: {clave!r}')
+    VALIDADORES[clave].validate(evento)
 
 
 def ejemplos():
@@ -39,7 +61,7 @@ def ejemplos():
 
 
 def aplicar(db, evento, clave, propiedades):
-    VALIDADOR.validate(evento)
+    validar(evento)
     if (clave != f"{evento['evento']}.v{evento['version']}" or propiedades.message_id != evento['id']
             or propiedades.correlation_id != evento['correlation_id']
             or propiedades.content_type != 'application/json'):

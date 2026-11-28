@@ -57,14 +57,40 @@ pertenencia ni transiciones. Esas reglas siguen en productores y servicios.
 | `CobroCandidato.desde_candidato()` | Copia los datos; toma organización de `Importacion` y recorta `servicio_texto` a 300 caracteres |
 | `GET /api/candidatos/` | `CobroCandidatoSerializer` conserva origen e identificador, excluye `organizacion_id`; el tenant lo determina la sesión/gateway |
 | Respuesta HTTP | Añade `id`, `importacion`, etiquetas legibles, decisión, `creado_en` y `aplicacion`; importe texto, normalmente dos decimales por la columna |
-| `aplicacion` | `null` sin confirmar y `pendiente` confirmado; confirmar no acredita una suscripción creada |
+| `aplicacion` | `null` sin confirmar y `pendiente` confirmado; confirmar no acredita una suscripción creada hasta que el consumidor lo aplica |
 | `candidato.confirmado` v1 | `confirmacion.py` genera datos con `candidato_id`, `importacion_id`, origen/identificador, servicio/texto, importe/moneda/fecha/tipo, `crear_cobro`, `decidido_por`, evidencia |
-| Organización del evento | Vive en `OutboxEvento.organizacion_id`, no repetida en sus datos |
+| Organización del evento | Viaja en la envoltura común (`organizacion_id`), tomada de `OutboxEvento.organizacion_id` al publicar; no se repite en `datos` |
+| `id` del evento | Es `OutboxEvento.id`; el sobre interno `candidato_id` identifica el hecho de negocio |
 
 La API no permite editar el candidato; confirmar/rechazar tienen acciones
-propias. Aviso y fallo no se convierten en pago realizado. El consumidor de
-Víctor debe aplicar su propia idempotencia por candidato; publicar y consumir
-la orden no se implementan aquí. Estos tres formatos no son intercambiables.
+propias. Aviso y fallo no se convierten en pago realizado. Estos tres formatos
+no son intercambiables.
+
+### Envoltura del evento publicado
+
+`candidato.confirmado` v1 usa la envoltura de `shared/events/catalogo.md` y se
+valida contra `shared/events/candidato-confirmado-v1.schema.json`:
+
+```json
+{
+  "evento": "candidato.confirmado",
+  "version": 1,
+  "id": "<OutboxEvento.id>",
+  "ocurrido_en": "...Z",
+  "correlation_id": "<OutboxEvento.correlation_id>",
+  "organizacion_id": "<OutboxEvento.organizacion_id>",
+  "datos": { "...": "el sobre de confirmacion._sobre()" }
+}
+```
+
+La routing key es `candidato.confirmado.v1` en el exchange `suscripciones`.
+El publicador de connectors y el consumidor de Suscripciones son los dos lados
+de este contrato. `crear_cobro` viaja resuelto y el consumidor no re-deduce el
+tipo del mensaje.
+
+**Publicación y consumo implementados, contrato pendiente de ratificación.**
+La aceptación formal con Maxi/Víctor/Felipe se registra abajo cuando ocurra;
+este documento no la da por obtenida.
 
 ## Ejemplos y verificación
 
