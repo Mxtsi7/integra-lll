@@ -31,4 +31,26 @@ function politicaCSP(apiUrl) {
   return `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ${new URL(apiUrl).origin}; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'`;
 }
 
-module.exports = { configurarApi, esInterna, resolverArchivo, politicaCSP };
+const DIMENSIONES_VENTANA = Object.freeze({
+  width: 1280,
+  height: 800,
+  minWidth: 900,
+  minHeight: 650,
+});
+
+function obtenerRutaInicial(argv = process.argv, env = process.env) {
+  const argRuta = argv.find(arg => arg.startsWith('--ruta='));
+  const ruta = argRuta ? argRuta.slice('--ruta='.length) : (env.DESKTOP_RUTA || '/login');
+  let urlCompleta;
+  try {
+    urlCompleta = new URL(ruta, 'app://ojoalgasto');
+  } catch {
+    throw new Error('Ruta inicial de desktop no autorizada');
+  }
+  if (!esInterna(urlCompleta.href)) {
+    throw new Error('Ruta inicial de desktop no autorizada');
+  }
+  return urlCompleta.pathname + urlCompleta.search + urlCompleta.hash;
+}
+
+module.exports = { configurarApi, esInterna, resolverArchivo, politicaCSP, DIMENSIONES_VENTANA, obtenerRutaInicial };

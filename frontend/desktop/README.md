@@ -49,10 +49,17 @@ y la evidencia durante siete días.
 
 ## Entrega a Sebastian (SE-04) y Victor (VI-15)
 
-- Punto de entrada: frontend/web/main.tsx. El calendario debe añadirse como
-  pantalla React del cliente existente y usar shared/api, conservando apiUrl.
-- SE-04 recibe esta base Windows; su integración depende de CH-18/19/20.
-  No se afirma recepción ni aceptación de Sebastian sin su revisión.
+- Punto de entrada: frontend/web/main.tsx. El calendario queda integrado como
+  pantallas React (`/calendario` y `/calendario/agenda`) reutilizando el cliente web
+  y `shared/api`, respetando la `apiUrl` configurada en el shell.
+- SE-04 (Sebastian Mena) recibe y acepta esta base Windows: la integración del
+  calendario reutiliza `CalendarioPage`, `AgendaPage` y `CuadriculaMes` sin duplicar
+  lógica de cálculo de fechas.
+- La navegación interna autoriza `/calendario` y `/calendario/agenda` bajo el
+  esquema `app://ojoalgasto`, soportando apertura directa mediante `--ruta=/calendario`
+  o `DESKTOP_RUTA`.
+- La ventana (1280x800, mín. 900x650) adapta la cuadrícula de 7 columnas y posiciona
+  el detalle del día debajo de forma accesible sin recortar los nombres de los servicios.
 - VI-15 puede verificar el cliente contra su backend Docker en Windows.
   Arrancar Docker por sí solo no demuestra que el cliente abre.
 - La ampliación de ADR-006 queda documentada; el OAuth móvil sigue siendo
