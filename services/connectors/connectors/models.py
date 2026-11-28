@@ -926,6 +926,45 @@ class CobroCandidato(ModeloTenant):
             "vive en el esquema de `auth` y acá no se interpreta (ADR-002)."
         ),
     )
+    class ResultadoAplicacion(models.TextChoices):
+        APLICADO = "aplicado", "Aplicada en subscriptions"
+        FALLIDO = "fallido", "subscriptions no la pudo aplicar"
+
+    orden_enviada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Orden enviada el",
+        help_text=(
+            "Cuándo el broker confirmó la orden de cobro de este candidato "
+            "(RF-14). La escribe `publicacion.py` en la misma transacción que "
+            "marca publicada la fila del outbox. Enviada NO es aplicada: eso "
+            "lo contesta subscriptions (`resultado_aplicacion`)."
+        ),
+    )
+    resultado_aplicacion = models.CharField(
+        max_length=10,
+        choices=ResultadoAplicacion.choices,
+        blank=True,
+        default="",
+        verbose_name="Qué hizo subscriptions con la orden",
+        help_text=(
+            "La respuesta `candidato.aplicado` v1 (RF-14). Vacío mientras no "
+            "llega. La escribe `resultados.py`."
+        ),
+    )
+    motivo_aplicacion = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name="Motivo de la respuesta",
+        help_text="`cobro_creado` o `sin_cobro` si se aplicó; `contrato_invalido` o `no_aplicable` si no.",
+    )
+    orden_aplicada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Respondida el",
+        help_text="Cuándo contestó subscriptions (el `ocurrido_en` de su respuesta).",
+    )
 
     evidencia = models.JSONField(
         default=dict,
@@ -1090,10 +1129,10 @@ class OutboxEvento(ModeloTenant):
     propósito: el consumidor que lo drene ya sabe leer ese sobre, y copiarlo
     distinto obligaría a escribir un segundo lector para decir lo mismo.
 
-    ── Lo que este servicio NO hace todavía ────────────────────────────────
-    Publicar. No hay publicador en connectors, así que las filas se acumulan
-    acá, durables, hasta que exista el que las drene. Nada se pierde y nada se
-    inventa: no se finge que la suscripción ya está creada.
+    ── Quién la drena ──────────────────────────────────────────────────────
+    `publicacion.py`, desde la tarea periódica `despachar_eventos` del
+    worker. Una fila queda `publicado_en` solo cuando el broker confirmó el
+    mensaje; mientras tanto sigue acá, durable, con su espera de reintento.
     """
 
     evento = models.CharField(max_length=40)

@@ -274,10 +274,22 @@ class TestCaso5Desconexion:
 # ══════════════════════════════════════════════════════════════════════
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Hallazgo de S3-FE-23 (doc 34): la unicidad es por origen, así que el mismo cobro leído en el "
-    "recibo y en la cartola son dos candidatos y dos órdenes. Falta decidir cómo se reconoce."))
-def test_el_mismo_cobro_por_correo_y_por_csv_deja_una_sola_orden(google):
+def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_con_lo_necesario_para_conciliarlas(google):
+    """El hallazgo de S3-FE-23 (doc 34), resuelto en RF-14 (doc 37).
+
+    connectors sigue emitiendo una orden por candidato, cada una con su origen
+    y su identificador (RN-DAT-004). Las dos revisiones de #242 dejaron claro
+    que no se puede decidir solo que son el mismo cargo: subscriptions registra
+    los dos cobros, levanta el posible doble cobro y la persona lo concilia
+    (`POST /api/hallazgos/<id>/conciliar/`) o lo marca revisado. Esta prueba
+    fija lo que este lado tiene que mandar para que allá el par se vea y se
+    pueda conciliar: el mismo proveedor, importe y moneda, y orígenes
+    distintos. Lo de allá está en
+    `services/subscriptions/tests/test_ordenes_de_cobro_rf14.py::TestLaPersonaResuelve`.
+    """
+    from connectors.publicacion import crear_sobre
+    from shared.contratos import candidato_confirmado as contrato
+
     c = gmail()
     google.con_mensajes(correo("m1", RECIBO))
     leer_cuenta(c.pk, ahora=AHORA)
@@ -285,4 +297,12 @@ def test_el_mismo_cobro_por_correo_y_por_csv_deja_una_sola_orden(google):
 
     confirmar_todos()
 
-    assert OutboxEvento.objects.count() == 1
+    sobres = [crear_sobre(e) for e in OutboxEvento.objects.order_by("creado_en", "id")]
+    assert len(sobres) == 2
+    assert all(contrato.errores(s) == [] for s in sobres)
+    correo_, csv = sorted((s["datos"] for s in sobres), key=lambda d: d["origen"])
+    assert (correo_["origen"], csv["origen"]) == ("correo", "csv")
+    assert correo_["identificador_origen"] != csv["identificador_origen"]
+    for campo in ("servicio", "importe", "moneda", "crear_cobro"):
+        assert correo_[campo] == csv[campo], campo
+    assert correo_["fecha"] == csv["fecha"]

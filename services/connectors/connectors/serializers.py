@@ -279,33 +279,40 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
     )
     aplicacion = serializers.SerializerMethodField(
         help_text=(
-            "Si lo confirmado ya existe en Suscripciones. `null` mientras el "
-            "candidato no está confirmado; `pendiente` cuando lo está: la "
-            "orden de crear quedó guardada, pero todavía NO hay suscripción "
-            "ni cobro creados."
+            "Qué pasó con la orden de un candidato confirmado. `null` "
+            "mientras no está confirmado; `por_enviar` si la orden sigue en "
+            "el outbox; `enviada` cuando el broker la confirmó y subscriptions "
+            "todavía no contesta; `aplicada` si subscriptions la aplicó "
+            "(suscripción y, si hubo pago, cobro); `fallida` si la apartó a "
+            "su cola de fallos sin aplicarla."
         )
     )
 
-    # ── «Confirmado» no es «aplicado» ───────────────────────────────────
+    # ── «Confirmado» no es «aplicado», y «enviada» tampoco ──────────────
     # Confirmar deja el candidato confirmado y una orden durable en el
-    # outbox, los dos o ninguno. Lo que NO hace es crear la suscripción ni el
-    # cobro: eso pasa en `subscriptions`, cuando alguien publique y consuma
-    # esa orden, y hoy no hay ni publicador ni consumidor.
+    # outbox, los dos o ninguno. El worker la publica (`publicacion.py`,
+    # escribe `orden_enviada_en`), subscriptions la aplica y contesta
+    # `candidato.aplicado`, y el worker recoge la respuesta (`resultados.py`,
+    # escribe `resultado_aplicacion`). Cada valor dice lo que se sabe, nada
+    # más: connectors no consulta el esquema de subscriptions (ADR-002).
     #
-    # Sin este campo la interfaz solo ve `estado="confirmado"` y no tiene
-    # cómo saber que del otro lado todavía no existe nada: mostraría como
-    # hecho algo que está en cola. Lo pidieron las dos revisiones de #159.
-    #
-    # Hoy vale `pendiente` para todo confirmado, y es la verdad: ninguna
-    # orden se ha aplicado nunca. El valor `aplicada` llega con el
-    # consumidor, que es quien puede afirmarlo; inventarlo acá sería dar por
-    # creada una suscripción que nadie creó.
-    APLICACION_PENDIENTE = "pendiente"
+    # La respuesta manda sobre el envío: puede llegar antes de que el
+    # publicador termine su transacción, y lo que pasó allá es más que «salió».
+    APLICACION_POR_ENVIAR = "por_enviar"
+    APLICACION_ENVIADA = "enviada"
+    APLICACION_APLICADA = "aplicada"
+    APLICACION_FALLIDA = "fallida"
 
     def get_aplicacion(self, candidato) -> str | None:
-        if candidato.estado == CobroCandidato.Estado.CONFIRMADO:
-            return self.APLICACION_PENDIENTE
-        return None
+        if candidato.estado != CobroCandidato.Estado.CONFIRMADO:
+            return None
+        if candidato.resultado_aplicacion == CobroCandidato.ResultadoAplicacion.APLICADO:
+            return self.APLICACION_APLICADA
+        if candidato.resultado_aplicacion == CobroCandidato.ResultadoAplicacion.FALLIDO:
+            return self.APLICACION_FALLIDA
+        if candidato.orden_enviada_en is None:
+            return self.APLICACION_POR_ENVIAR
+        return self.APLICACION_ENVIADA
 
     class Meta:
         model = CobroCandidato

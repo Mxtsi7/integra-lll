@@ -93,6 +93,47 @@ La idempotencia usa `(organizacion_id, recolector_id, event_id)`; la
 suscripción es destino inmutable y no forma parte de la clave. Los detalles
 semánticos y los acuses HTTP están en el contrato.
 
+### Contrato de órdenes de cobro (v1, exchange dedicado)
+
+Cuando una persona confirma un cobro candidato (de un CSV o de un correo),
+connectors deja la orden en su outbox en la misma transacción y su worker la
+publica en `connectors.eventos` con routing key `candidato.confirmado.v1`. La
+consume `subscriptions` desde `subscriptions.candidatos` (los rechazos van a
+`subscriptions.candidatos.fallidos`). El exchange, las colas y el esquema
+viven en UN archivo que leen los dos lados:
+[`shared/contratos/candidato_confirmado.py`](../contratos/candidato_confirmado.py)
+y [`candidato-confirmado-v1.schema.json`](../contratos/candidato-confirmado-v1.schema.json).
+
+| Evento | Cuándo | Datos | Escucha |
+|---|---|---|---|
+| `candidato.confirmado` v1 | Se confirma un cobro candidato (RF-14) | `candidato_id`, `importacion_id`, `origen`, `identificador_origen`, `servicio`, `servicio_texto`, `importe` (texto con dos decimales), `moneda`, `fecha`, `tipo_mensaje`, `crear_cobro`, `decidido_por`, `evidencia` | subscriptions |
+
+`crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo. El contrato solo lo admite en `true` con `tipo_mensaje = cobro_realizado`: un aviso o un pago fallido no son plata que salió, y en subscriptions un cobro nuevo puede reactivar una suscripción.
+La idempotencia usa `(organizacion_id, candidato_id)` y también
+`(organizacion_id, origen, identificador_origen)`. El mismo cargo que llega
+por las dos fuentes NO se junta solo: quedan dos cobros, cada uno con su
+origen (RN-DAT-004), y el aviso de posible doble cobro; la persona lo concilia
+(`POST /api/hallazgos/<id>/conciliar/`, queda uno con los dos orígenes) o lo
+marca revisado. `importe` no supera 99999999.99, el rango de las columnas de
+destino. El detalle está en `services/subscriptions/app/candidatos.py`.
+
+subscriptions contesta cada orden por otro exchange dedicado,
+`suscripciones.ordenes`, con routing key `candidato.aplicado.v1`, a la cola
+`connectors.candidatos.resultados` (los rechazos van a
+`connectors.candidatos.resultados.fallidos`). Contrato:
+[`shared/contratos/candidato_aplicado.py`](../contratos/candidato_aplicado.py)
+y [`candidato-aplicado-v1.schema.json`](../contratos/candidato-aplicado-v1.schema.json).
+
+| Evento | Cuándo | Datos | Escucha |
+|---|---|---|---|
+| `candidato.aplicado` v1 | subscriptions aplicó una orden, o la apartó a su cola de fallos | `candidato_id`, `orden_id` (el `id` del sobre de la orden), `resultado` (`aplicado`/`fallido`), `motivo` (`cobro_creado`, `sin_cobro`, `contrato_invalido`, `no_aplicable`), `suscripcion_id`, `cobro_id` | connectors |
+
+Lleva el `correlation_id` de la orden. Se escribe en la misma transacción que
+la aplica, así que una reentrega no contesta otra vez; connectors la guarda una
+vez (un `aplicado` corrige un `fallido`, nunca al revés). Si la base de
+subscriptions sigue caída tras los reintentos no hay respuesta: la orden queda
+`enviada`.
+
 ### Publica `subscriptions`
 
 | Evento | Cuándo | Datos | Escucha |
@@ -110,7 +151,7 @@ semánticos y los acuses HTTP están en el contrato.
 | `conector.vinculado` | El usuario autoriza una cuenta externa | `conector_id`, `tipo`, `usuario_id` | analytics |
 | `conector.fallido` | La sincronización falla tras los reintentos | `conector_id`, `tipo`, `error` | notifications |
 | `uso.registrado` (v1 legado) | Llegan datos de uso desde una API externa | `suscripcion_id`, `minutos`, `fecha`, `fuente` | analytics (legado) |
-| `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions |
+| `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions (no se publica: lo reemplazó `candidato.confirmado` v1, arriba) |
 
 ### Publica `analytics`
 

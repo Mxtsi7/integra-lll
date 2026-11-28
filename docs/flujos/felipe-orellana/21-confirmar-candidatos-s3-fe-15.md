@@ -24,6 +24,13 @@ Los dos criterios de la tarjeta:
 | La migración | `connectors/migrations/0008_outbox_de_connectors.py` |
 | Las pruebas | `services/connectors/tests/test_confirmar_candidatos.py`, 26 |
 
+> **Actualización (RF-14, doc [37](37-ordenes-de-cobro-rf-14.md)).** Lo que
+> esta tarjeta dejó pendiente ya está: el worker de connectors publica la
+> orden y `subscriptions` crea (o reutiliza) la suscripción y registra el
+> cobro, unos segundos después de confirmar. Lo de abajo sigue siendo cierto
+> para el momento en que el endpoint responde: ahí la suscripción todavía no
+> existe; aparece cuando el consumidor aplica la orden.
+
 ## Lo primero, porque cambia cómo se lee todo lo demás
 
 **La suscripción NO queda creada cuando este endpoint responde 200.**

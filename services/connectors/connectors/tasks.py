@@ -9,6 +9,8 @@ y `autodiscover_tasks` las encuentra por vivir en este módulo.
     rescatar_importaciones_estancadas  la red bajo el trapecio (ver abajo)
     programar_lecturas_de_correo      S3-FE-18/20: una lectura por cuenta conectada
     leer_cuenta_de_correo             S3-FE-18/20: la lectura de una cuenta, con reintentos
+    despachar_eventos                 RF-14: publica las órdenes de cobro del outbox
+    recoger_resultados                RF-14: lo que subscriptions contestó de cada orden
 
 La lógica de las dos últimas vive en `lectura_programada.py`; aquí solo está
 lo que es de Celery.
@@ -113,6 +115,31 @@ def latido():
     ahora = timezone.localtime()
     log.info("latido de %s a las %s", settings.SERVICE_NAME, ahora.strftime("%H:%M:%S"))
     return {"servicio": settings.SERVICE_NAME, "latido": ahora.isoformat()}
+
+
+@shared_task
+def despachar_eventos() -> dict:
+    """Publica en RabbitMQ lo que el outbox tiene pendiente (RF-14).
+
+    Beat la programa cada `CONECTORES_DESPACHO_SEGUNDOS`. Que se pisen dos
+    pasadas no duplica nada: cada fila se toma con SKIP LOCKED. La lógica
+    vive en `publicacion.py`.
+    """
+    from .publicacion import despachar_pendientes
+
+    return despachar_pendientes()
+
+
+@shared_task
+def recoger_resultados() -> dict:
+    """Recoge las respuestas `candidato.aplicado` de subscriptions (RF-14).
+
+    Beat la programa junto con el despacho. Saca lo que haya en la cola con
+    `basic_get` y termina; la lógica vive en `resultados.py`.
+    """
+    from .resultados import recoger_pendientes
+
+    return recoger_pendientes()
 
 
 # ═══════════════════════════════════════════════════════════════════

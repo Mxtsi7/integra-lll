@@ -34,11 +34,12 @@ El criterio de la tarjeta es exactamente ese: «aviso futuro no genera un pago
 realizado». Un aviso que se contara como cobro lo contaría dos veces cuando
 después llegue el recibo de verdad, y haría cuadrar mal el presupuesto.
 
-── Lo que falta, dicho sin adornos ─────────────────────────────────────────
-No hay publicador en connectors. Las filas del outbox se acumulan durables
-hasta que exista quien las drene y un consumidor en `subscriptions` que las
-aplique. Esta tarjeta deja la orden escrita y el contrato fijo; no finge que
-la suscripción ya existe.
+── Quién la entrega ─────────────────────────────────────────────────────────
+`publicacion.py` drena este outbox a RabbitMQ (tarea periódica del worker),
+`subscriptions` la aplica con su consumidor (`app/candidatos.py`) y contesta
+`candidato.aplicado`, que `resultados.py` recoge. El mismo cargo que llega por
+CSV y por correo no se junta solo: allá quedan dos cobros con el aviso de
+posible doble cobro, y la persona lo concilia.
 """
 
 from __future__ import annotations
@@ -48,13 +49,15 @@ import uuid
 from django.db import transaction
 from django.utils import timezone
 
+from shared.contratos import candidato_confirmado as contrato
+
 from .models import CobroCandidato, OutboxEvento
 
-#: El nombre y la versión del evento. Son contrato: quien lo consuma compara
-#: contra estos dos valores, así que cambiarlos es cambiar el contrato y
-#: necesita una versión nueva, no una edición.
-EVENTO = "candidato.confirmado"
-VERSION = 1
+#: El nombre y la versión del evento. Son contrato y viven en
+#: `shared/contratos/candidato_confirmado.py`, el mismo archivo que lee el
+#: consumidor: cambiarlos es cambiar el contrato y necesita una versión nueva.
+EVENTO = contrato.EVENTO
+VERSION = contrato.VERSION
 
 #: Qué tipo de mensaje significa que la plata ya salió. Es la regla del
 #: criterio «aviso futuro no genera un pago realizado», escrita UNA vez.
@@ -70,6 +73,12 @@ CREA_COBRO = {
 CANDIDATO_RECHAZADO = "candidato_rechazado"
 SERVICIO_SIN_RESOLVER = "servicio_sin_resolver"
 TIPO_SIN_REGLA = "tipo_sin_regla"
+#: Los lectores admiten hasta 12 enteros (`CobroCandidato.importe` es
+#: NUMERIC(14,2)), pero subscriptions guarda NUMERIC(10,2). Se corta ACÁ, al
+#: confirmar, y no en el consumidor: una orden ya aceptada que después no
+#: cabe terminaría en la cola de fallos sin crear nada y la persona creería
+#: que quedó. Lo encontró la revisión de #242.
+IMPORTE_FUERA_DE_RANGO = "importe_fuera_de_rango"
 
 
 class ConfirmacionRechazada(ValueError):
@@ -154,6 +163,15 @@ def confirmar(candidato: CobroCandidato, *, por: str = "", cuando=None) -> bool:
         raise ConfirmacionRechazada(
             TIPO_SIN_REGLA,
             f"No hay regla para el tipo de mensaje {candidato.tipo_mensaje!r}.",
+        )
+
+    if candidato.importe > contrato.IMPORTE_MAXIMO:
+        # Recuperable: el candidato sigue `propuesto` y se puede rechazar.
+        raise ConfirmacionRechazada(
+            IMPORTE_FUERA_DE_RANGO,
+            f"El monto {candidato.importe} supera el máximo que se puede registrar "
+            f"como cobro ({contrato.IMPORTE_MAXIMO}). Revisa el archivo o el correo: "
+            "puede ser un número mal leído.",
         )
 
     crear_cobro = CREA_COBRO[candidato.tipo_mensaje]

@@ -104,12 +104,23 @@ const AVISO_DE_PROVEEDOR = new Map<string, string>([
   ['desconocido', 'Proveedor sin reconocer.'],
 ]);
 const AVISO_DE_PROVEEDOR_GENERAL = 'Proveedor sin reconocer.';
+/**
+ * Lo que pasó con la orden. `aplicada` y `fallida` las contesta Suscripciones;
+ * mientras no contesta, `enviada` solo dice que salió.
+ */
+const TEXTO_DE_LA_ORDEN: Record<NonNullable<CandidatoDetectado['aplicacion']> | 'ninguna', string> = {
+  ninguna: '',
+  por_enviar: ' · orden por enviar a Suscripciones',
+  enviada: ' · orden enviada, esperando respuesta de Suscripciones',
+  aplicada: ' · aplicada en Suscripciones',
+  fallida: ' · Suscripciones no pudo aplicar la orden',
+};
 
 function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado; seleccion?: SeleccionDeCandidatos }) {
   // Sin proveedor se muestra lo que decía el archivo o el correo: inventar un nombre sería peor.
   const sinProveedor = candidato.servicio === null;
   const nombre = candidato.servicio ?? (candidato.servicio_texto || 'Cobro sin descripción');
-  const pendienteDeAplicar = candidato.aplicacion === 'pendiente';
+  const estadoDeLaOrden = TEXTO_DE_LA_ORDEN[candidato.aplicacion ?? 'ninguna'];
   const importe = importeDelCandidato(candidato);
   return (
     <li className={styles.item}>
@@ -150,7 +161,7 @@ function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado
         </p>
         <p className={styles.estado}>
           {candidato.estado_legible}
-          {pendienteDeAplicar && ' · orden pendiente de aplicar: todavía no hay suscripción ni cobro creados'}
+          {estadoDeLaOrden}
         </p>
       </div>
     </li>
@@ -287,7 +298,7 @@ const TEXTOS_DEL_RESULTADO: Record<AccionDeCandidato, TextosDelResultado> = {
     hecho: 'confirmado',
     verbo: 'confirmar',
     dichoEnPasado: 'Confirmaste',
-    pendiente: 'Quedaron pendientes de aplicar: todavía no hay suscripción ni cobro creados.',
+    pendiente: 'Las órdenes se envían a Suscripciones; revisa ahí la suscripción y el cobro.',
   },
   rechazar: {
     etiqueta: 'Resultado del rechazo',

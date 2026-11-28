@@ -1036,3 +1036,86 @@ class TrabajoDerivado(ModeloTenant):
 
     def __str__(self) -> str:
         return f"{self.trabajo} de {self.evento_id} por {self.hecho_por}"
+
+
+class CandidatoAplicado(ModeloTenant):
+    """Una orden de cobro de connectors ya aplicada (RF-14 / RN-DAT-004).
+
+    Cada `candidato.confirmado` que llega deja UNA fila acá, en la misma
+    transacción que la suscripción o el cobro que produjo. Sirve para tres
+    cosas:
+
+    1. **Idempotencia.** RabbitMQ entrega al menos una vez y el outbox de
+       connectors puede publicar dos veces la misma fila. El candidato es
+       único por organización: la reentrega lo encuentra y no hace nada.
+
+    2. **Conservar el identificador de origen (RN-DAT-004).** El `Cobro` no
+       sabe de dónde vino. Esta fila guarda el origen (`csv` o `correo`) y
+       su identificador (la huella de la fila de la cartola o el Message-ID),
+       con la fecha y el importe que dijo ESE origen.
+
+    3. **Saber de dónde vino cada cobro.** Si la persona concilia dos cobros
+       que eran el mismo cargo (`anomalias.conciliar_doble_cobro`), la fila
+       del que sobraba se mueve al que queda: el cobro termina con una fila
+       por origen y las dos identificaciones quedan. Ver `app/candidatos.py`.
+    """
+
+    class Resultado(models.TextChoices):
+        COBRO_CREADO = "cobro_creado", "Se registró el cobro"
+        SIN_COBRO = "sin_cobro", "Aviso o pago fallido: no hubo cobro"
+
+    class Origen(models.TextChoices):
+        CSV = "csv", "Archivo CSV o cartola"
+        CORREO = "correo", "Correo"
+
+    evento_id = models.UUIDField(verbose_name="Sobre que lo trajo")
+    candidato_id = models.UUIDField(verbose_name="Candidato en connectors")
+    origen = models.CharField(max_length=10, choices=Origen.choices, verbose_name="Origen")
+    identificador_origen = models.CharField(max_length=200, verbose_name="Identificador en su origen")
+    tipo_mensaje = models.CharField(max_length=20, verbose_name="Tipo de mensaje")
+    fecha = models.DateField(verbose_name="Fecha según el origen")
+    importe = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Importe según el origen")
+    moneda = models.CharField(max_length=3, verbose_name="Moneda")
+
+    suscripcion = models.ForeignKey(
+        Subscription,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="candidatos_aplicados",
+        verbose_name="Suscripción",
+    )
+    cobro = models.ForeignKey(
+        Cobro,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="origenes",
+        verbose_name="Cobro",
+        help_text="Vacío si fue un aviso o un pago fallido.",
+    )
+    suscripcion_creada = models.BooleanField(
+        default=False,
+        verbose_name="La suscripción nació con esta orden",
+    )
+    resultado = models.CharField(max_length=20, choices=Resultado.choices, verbose_name="Resultado")
+
+    class Meta(ModeloTenant.Meta):
+        db_table = "candidato_aplicado"
+        ordering = ["-creado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organizacion_id", "candidato_id"],
+                name="candidato_aplicado_unico",
+            ),
+            # El mismo hecho leído dos veces —dos importaciones de la misma
+            # cartola, el mismo correo— tiene el mismo identificador.
+            models.UniqueConstraint(
+                fields=["organizacion_id", "origen", "identificador_origen"],
+                name="candidato_aplicado_unico_por_origen",
+            ),
+        ]
+        verbose_name = "Orden de cobro aplicada"
+        verbose_name_plural = "Órdenes de cobro aplicadas"
+
+    def __str__(self) -> str:
+        return f"{self.origen}:{self.identificador_origen} → {self.resultado}"

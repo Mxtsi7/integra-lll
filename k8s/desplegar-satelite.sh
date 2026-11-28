@@ -40,7 +40,9 @@ case "$SERVICIO" in
     # CLAVES_CIFRADO cifra los tokens de las cuentas conectadas: solo viaja
     # al satélite que las guarda.
     CLAVES_GLOBALES=SECRET_KEY,ELIMINACION_INTERNA_SECRET,CLAVES_CIFRADO
-    USA_RABBITMQ=0; ESPERA_CONSUMIDOR=0
+    # RabbitMQ sí: el worker publica las órdenes de cobro (RF-14). No hay
+    # consumidor al que esperar; el que las aplica es el de subscriptions.
+    USA_RABBITMQ=1; ESPERA_CONSUMIDOR=0
     DEPLOYMENTS="connectors connectors-worker" ;;
   *) echo "Uso: desplegar-satelite.sh notifications|connectors" >&2
      echo "(analytics todavía no tiene manifiestos: ver k8s/tandas/perfiles.yaml)" >&2

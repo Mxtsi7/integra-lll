@@ -18,6 +18,11 @@ alertas.
 
 Este módulo no cambia el estado de la suscripción: una alerta es evidencia
 para el usuario, no una transición de la máquina de estados.
+
+Un posible doble cobro se resuelve de dos maneras, las dos explícitas:
+``marcar_hallazgo_revisado`` («lo vi, son dos cargos») deja los dos cobros, y
+``conciliar_doble_cobro`` («es el mismo cargo») deja uno solo con los orígenes
+de los dos (RF-14: el mismo cargo que llegó por correo y por la cartola).
 """
 
 from __future__ import annotations
@@ -30,7 +35,9 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
-from app.models import Cobro, HallazgoCobro
+from shared.bloqueo import bloquear
+
+from app.models import CandidatoAplicado, Cobro, HallazgoCobro
 
 
 # ── parámetros de negocio ────────────────────────────────────────────
@@ -316,3 +323,130 @@ def marcar_hallazgo_revisado(
         update_fields=("estado", "revisado_en", "revisado_por", "actualizado_en")
     )
     return hallazgo
+
+
+# ── conciliar un posible doble cobro (RF-14) ─────────────────────────
+
+#: Lo que queda en ``detalle["resolucion"]`` de un doble cobro conciliado.
+MISMO_CARGO = "mismo_cargo"
+
+# Por qué no se concilia. Códigos estables: la API responde con ellos.
+NO_ES_DOBLE_COBRO = "no_es_doble_cobro"
+SIN_COBRO_RELACIONADO = "sin_cobro_relacionado"
+IMPORTES_DISTINTOS = "importes_distintos"
+
+
+class ConciliacionRechazada(ValueError):
+    """No se puede conciliar este hallazgo. ``codigo`` es estable."""
+
+    def __init__(self, codigo: str, mensaje: str):
+        super().__init__(mensaje)
+        self.codigo = codigo
+        self.mensaje = mensaje
+
+
+def conciliar_doble_cobro(
+    hallazgo: HallazgoCobro,
+    *,
+    usuario_id: int | None = None,
+    cuando=None,
+) -> HallazgoCobro:
+    """«Es el mismo cargo»: deja UN cobro con los orígenes de los dos.
+
+    Es la otra salida de un posible doble cobro (la primera es marcarlo
+    revisado: «son dos»). El sistema no lo decide solo porque fecha, importe y
+    moneda iguales no prueban identidad; lo decide la persona, y esto hace que
+    su decisión quede en los datos y no solo en el estado de la alerta:
+
+      · queda el cobro de fecha MÁS TEMPRANA (la cartola suele asentar
+        después del correo: la fecha del cargo es la primera); a igual
+        fecha, el que se registró primero;
+      · las filas de ``CandidatoAplicado`` del otro se mueven al que queda,
+        así que su origen y su identificador se conservan (RN-DAT-004) y la
+        exportación lo informa como ``correo+csv``;
+      · el otro cobro se borra: deja de contar en el gasto, el calendario y
+        la exportación. Lo que se borró queda escrito en el ``detalle`` del
+        hallazgo, que pasa a revisado con ``resolucion = mismo_cargo``;
+      · se vuelve a analizar el cobro que queda: si el que se borró era
+        también el par de un TERCER cobro cercano, ese posible doble cobro
+        no desaparece con él.
+
+    Solo con el mismo importe y la misma moneda: con montos distintos no es
+    el mismo cargo, y juntarlos haría desaparecer la diferencia.
+
+    Idempotente: conciliar un hallazgo ya conciliado lo devuelve igual. Uno
+    marcado revisado («son dos») sí se puede conciliar después: la persona
+    puede cambiar de opinión, y la decisión explícita más reciente manda.
+    """
+    with transaction.atomic():
+        # El mismo lock que toman las órdenes de connectors: una orden que
+        # llega mientras se concilia no ve un cobro a medio borrar.
+        bloquear("ordenes_de_cobro", hallazgo.organizacion_id)
+        hallazgo = HallazgoCobro.objects.select_for_update().get(pk=hallazgo.pk)
+
+        if hallazgo.tipo != HallazgoCobro.Tipo.DOBLE_COBRO:
+            raise ConciliacionRechazada(
+                NO_ES_DOBLE_COBRO,
+                "Solo un posible doble cobro se puede conciliar.",
+            )
+        if hallazgo.detalle.get("resolucion") == MISMO_CARGO:
+            return hallazgo
+        if hallazgo.cobro_relacionado_id is None:
+            raise ConciliacionRechazada(
+                SIN_COBRO_RELACIONADO,
+                "El hallazgo no tiene el segundo cobro del par.",
+            )
+
+        par = list(
+            Cobro.objects.select_for_update()
+            .filter(pk__in=(hallazgo.cobro_id, hallazgo.cobro_relacionado_id))
+        )
+        primero, segundo = par
+        if (primero.monto, primero.moneda) != (segundo.monto, segundo.moneda):
+            raise ConciliacionRechazada(
+                IMPORTES_DISTINTOS,
+                "Los dos cobros tienen importes o monedas distintos: no son el "
+                "mismo cargo. Si de verdad uno sobra, hay que corregirlo a mano.",
+            )
+
+        queda, sobra = sorted(par, key=lambda c: (c.fecha, c.creado_en, str(c.pk)))
+        origenes = list(
+            CandidatoAplicado.objects.filter(cobro=sobra)
+            .order_by("creado_en", "id")
+            .values("origen", "identificador_origen", "candidato_id")
+        )
+        CandidatoAplicado.objects.filter(cobro=sobra).update(cobro=queda)
+
+        hallazgo.cobro = queda
+        hallazgo.cobro_relacionado = None
+        hallazgo.fecha_cobro = queda.fecha
+        hallazgo.fecha_referencia = sobra.fecha
+        hallazgo.estado = HallazgoCobro.Estado.REVISADA
+        hallazgo.revisado_en = cuando or timezone.now()
+        hallazgo.revisado_por = usuario_id
+        hallazgo.detalle = {
+            **hallazgo.detalle,
+            "resolucion": MISMO_CARGO,
+            "cobro_conciliado": {
+                "id": str(sobra.pk),
+                "fecha": sobra.fecha.isoformat(),
+                "monto": str(sobra.monto),
+                "moneda": sobra.moneda,
+                "origenes": [
+                    {
+                        "origen": fila["origen"],
+                        "identificador_origen": fila["identificador_origen"],
+                        "candidato_id": str(fila["candidato_id"]),
+                    }
+                    for fila in origenes
+                ],
+            },
+        }
+        # Antes de borrar: el hallazgo apunta al cobro que sobra, y su FK es
+        # CASCADE. Si se borrara primero, se llevaría la decisión con él.
+        hallazgo.save()
+        sobra.delete()
+        detectar_anomalias_cobro(queda)
+
+    return hallazgo
+

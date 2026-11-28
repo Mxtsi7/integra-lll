@@ -57,14 +57,15 @@ pertenencia ni transiciones. Esas reglas siguen en productores y servicios.
 | `CobroCandidato.desde_candidato()` | Copia los datos; toma organización de `Importacion` y recorta `servicio_texto` a 300 caracteres |
 | `GET /api/candidatos/` | `CobroCandidatoSerializer` conserva origen e identificador, excluye `organizacion_id`; el tenant lo determina la sesión/gateway |
 | Respuesta HTTP | Añade `id`, `importacion`, etiquetas legibles, decisión, `creado_en` y `aplicacion`; importe texto, normalmente dos decimales por la columna |
-| `aplicacion` | `null` sin confirmar y `pendiente` confirmado; confirmar no acredita una suscripción creada |
+| `aplicacion` | `null` sin confirmar; confirmado: `por_enviar` (en el outbox), `enviada` (salió, sin respuesta), `aplicada` o `fallida` (lo contestó subscriptions con `candidato.aplicado` v1). Ver doc 37 de RF-14 |
 | `candidato.confirmado` v1 | `confirmacion.py` genera datos con `candidato_id`, `importacion_id`, origen/identificador, servicio/texto, importe/moneda/fecha/tipo, `crear_cobro`, `decidido_por`, evidencia |
 | Organización del evento | Vive en `OutboxEvento.organizacion_id`, no repetida en sus datos |
 
 La API no permite editar el candidato; confirmar/rechazar tienen acciones
 propias. Aviso y fallo no se convierten en pago realizado. El consumidor de
-Víctor debe aplicar su propia idempotencia por candidato; publicar y consumir
-la orden no se implementan aquí. Estos tres formatos no son intercambiables.
+subscriptions aplica la orden con su propia idempotencia por candidato y
+contesta `candidato.aplicado` v1 (RF-14, `docs/flujos/felipe-orellana/37-ordenes-de-cobro-rf-14.md`).
+Estos tres formatos no son intercambiables.
 
 ## Ejemplos y verificación
 

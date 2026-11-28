@@ -212,4 +212,22 @@ CELERY_BEAT_SCHEDULE = {
         "task": "connectors.tasks.programar_lecturas_de_correo",
         "schedule": env.float("CONECTORES_LECTURA_CORREO_SEGUNDOS", default=900.0),
     },
+    # RF-14: publica las órdenes de cobro que deja la confirmación. Cada 10 s:
+    # es lo que tarda en aparecer el cobro en subscriptions después de
+    # confirmar, y una pasada sin pendientes es una sola consulta.
+    "despacho-de-eventos": {
+        "task": "connectors.tasks.despachar_eventos",
+        "schedule": env.float("CONECTORES_DESPACHO_SEGUNDOS", default=10.0),
+    },
+    # Y la vuelta: lo que subscriptions hizo con cada orden. Mismo ritmo.
+    "recoger-resultados-de-ordenes": {
+        "task": "connectors.tasks.recoger_resultados",
+        "schedule": env.float("CONECTORES_DESPACHO_SEGUNDOS", default=10.0),
+    },
 }
+
+# ── RabbitMQ: a dónde se publican las órdenes de cobro (RF-14) ───────
+# Con valor por omisión vacío, a diferencia del broker de Celery: la API no
+# publica (lo hace el worker) y no tiene por qué recibir la credencial. Sin
+# ella, `publicacion.despachar_pendientes` deja las filas pendientes y avisa.
+RABBITMQ_URL = env("RABBITMQ_URL", default="")

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ojoalgasto.cl/contratos/candidato-confirmado-v1.schema.json",
+  "title": "candidato.confirmado v1: la orden de cobro que connectors publica y subscriptions aplica",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evento", "version", "id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+  "properties": {
+    "evento": {"const": "candidato.confirmado"},
+    "version": {"const": 1, "type": "integer"},
+    "id": {"$ref": "#/$defs/uuid"},
+    "organizacion_id": {"$ref": "#/$defs/uuid"},
+    "correlation_id": {"$ref": "#/$defs/uuid"},
+    "ocurrido_en": {"type": "string", "format": "date-time"},
+    "datos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidato_id", "importacion_id", "origen", "identificador_origen",
+        "servicio", "servicio_texto", "importe", "moneda", "fecha",
+        "tipo_mensaje", "crear_cobro", "decidido_por", "evidencia"
+      ],
+      "properties": {
+        "candidato_id": {"$ref": "#/$defs/uuid"},
+        "importacion_id": {"$ref": "#/$defs/uuid"},
+        "origen": {"enum": ["csv", "correo"]},
+        "identificador_origen": {"type": "string", "minLength": 1, "maxLength": 200},
+        "servicio": {"type": "string", "minLength": 1, "maxLength": 120},
+        "servicio_texto": {"type": "string", "maxLength": 300},
+        "importe": {"type": "string", "pattern": "^[0-9]{1,8}\\.[0-9]{2}$", "description": "Hasta 99999999.99: el rango de NUMERIC(10,2), las columnas de destino en subscriptions."},
+        "moneda": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "fecha": {"type": "string", "format": "date"},
+        "tipo_mensaje": {"enum": ["cobro_realizado", "aviso_de_cobro", "pago_fallido"]},
+        "crear_cobro": {"type": "boolean"},
+        "decidido_por": {"type": "string", "maxLength": 64},
+        "evidencia": {"type": "object"}
+      },
+      "if": {"properties": {"crear_cobro": {"const": true}}},
+      "then": {
+        "properties": {"tipo_mensaje": {"const": "cobro_realizado"}},
+        "description": "Solo un cobro realizado es plata que salió: un aviso o un pago fallido no crean cobro."
+      }
+    }
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"}
+  }
+}
