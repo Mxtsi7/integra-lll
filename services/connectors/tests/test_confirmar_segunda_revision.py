@@ -361,17 +361,26 @@ def test_la_lista_tambien_lo_dice_y_solo_para_los_confirmados():
     }
 
 
-def test_ningun_valor_afirma_que_la_suscripcion_existe():
-    """connectors no puede ver el esquema de subscriptions (ADR-002), así que
-    ningún valor dice `aplicada`. Si algún día subscriptions le avisa de
-    vuelta, esta prueba se cambia a propósito en esa misma PR."""
+def test_aplicada_solo_la_dice_la_respuesta_de_subscriptions():
+    """connectors no puede ver el esquema de subscriptions (ADR-002): `aplicada`
+    y `fallida` salen SOLO de la respuesta `candidato.aplicado` que recoge
+    `resultados.py`, nunca de que la orden haya salido."""
     from django.utils import timezone
     from connectors.serializers import CobroCandidatoSerializer
 
-    valores = {
-        CobroCandidatoSerializer().get_aplicacion(CobroCandidato(estado=estado, orden_enviada_en=enviada))
-        for estado in CobroCandidato.Estado.values
-        for enviada in (None, timezone.now())
-    }
-    assert valores == {None, "por_enviar", "enviada"}
+    def valor(estado, enviada, resultado):
+        return CobroCandidatoSerializer().get_aplicacion(
+            CobroCandidato(estado=estado, orden_enviada_en=enviada, resultado_aplicacion=resultado)
+        )
 
+    confirmado = CobroCandidato.Estado.CONFIRMADO
+    assert {valor(confirmado, enviada, "") for enviada in (None, timezone.now())} == {"por_enviar", "enviada"}
+    assert {valor(confirmado, enviada, "aplicado") for enviada in (None, timezone.now())} == {"aplicada"}
+    assert {valor(confirmado, enviada, "fallido") for enviada in (None, timezone.now())} == {"fallida"}
+    sin_confirmar = {
+        valor(estado, enviada, resultado)
+        for estado in CobroCandidato.Estado.values if estado != confirmado
+        for enviada in (None, timezone.now())
+        for resultado in ("", "aplicado", "fallido")
+    }
+    assert sin_confirmar == {None}

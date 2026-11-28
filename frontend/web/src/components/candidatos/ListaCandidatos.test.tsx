@@ -129,13 +129,26 @@ describe('contenido de cada cobro (S3-CH-04)', () => {
     expect(itemDe('Spotify')).not.toHaveTextContent('todavía no hay');
   });
 
-  it('con la orden enviada dice dónde revisar, sin afirmar que ya quedó', () => {
+  it('con la orden enviada dice que espera respuesta, sin afirmar que ya quedó', () => {
     montar({
       carga: listoCon(paginaDeCandidatosDePrueba({ results: [candidatoDePrueba({ estado: 'confirmado', estado_legible: 'Confirmado', aplicacion: 'enviada' })] })),
     });
 
-    expect(itemDe('Spotify')).toHaveTextContent('orden enviada: revisa la suscripción y el cobro en Suscripciones');
+    expect(itemDe('Spotify')).toHaveTextContent('orden enviada, esperando respuesta de Suscripciones');
     expect(itemDe('Spotify')).not.toHaveTextContent('por enviar');
+    expect(itemDe('Spotify')).not.toHaveTextContent('aplicada');
+  });
+
+  it.each([
+    ['aplicada', 'aplicada en Suscripciones'],
+    ['fallida', 'Suscripciones no pudo aplicar la orden'],
+  ] as const)('con la respuesta de Suscripciones (%s) dice lo que pasó', (aplicacion, texto) => {
+    montar({
+      carga: listoCon(paginaDeCandidatosDePrueba({ results: [candidatoDePrueba({ estado: 'confirmado', estado_legible: 'Confirmado', aplicacion })] })),
+    });
+
+    expect(itemDe('Spotify')).toHaveTextContent(texto);
+    expect(itemDe('Spotify')).not.toHaveTextContent('esperando respuesta');
   });
 
   it('sin orden pendiente no dice nada de aplicar', () => {

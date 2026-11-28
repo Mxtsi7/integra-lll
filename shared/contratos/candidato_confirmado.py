@@ -29,10 +29,9 @@ Declarar es idempotente.
 
 from __future__ import annotations
 
-import functools
-import json
 from decimal import Decimal
-from importlib.resources import files
+
+from . import _validacion
 
 EVENTO = "candidato.confirmado"
 VERSION = 1
@@ -79,27 +78,13 @@ def declarar(canal) -> None:
     canal.queue_bind(exchange=EXCHANGE, queue=COLA, routing_key=ROUTING_KEY)
 
 
-@functools.lru_cache(maxsize=1)
+_ESQUEMA = "candidato-confirmado-v1.schema.json"
+
+
 def esquema() -> dict:
-    return json.loads(
-        files("shared.contratos").joinpath("candidato-confirmado-v1.schema.json").read_text("utf-8")
-    )
-
-
-@functools.lru_cache(maxsize=1)
-def _validador():
-    # Import perezoso: `jsonschema` está en los dos servicios, pero importarlo
-    # al cargar el módulo haría que un problema de despliegue apareciera como
-    # un ImportError lejos de donde corresponde.
-    from jsonschema import Draft202012Validator, FormatChecker
-
-    # Sin FormatChecker, `format: uuid` y `format: date` no se comprueban.
-    return Draft202012Validator(esquema(), format_checker=FormatChecker())
+    return _validacion.esquema(_ESQUEMA)
 
 
 def errores(sobre) -> list[str]:
     """Los incumplimientos del contrato, todos y en texto. Vacío si cumple."""
-    if not isinstance(sobre, dict):
-        return [f"el sobre no es un objeto JSON, es {type(sobre).__name__}"]
-    fallos = sorted(_validador().iter_errors(sobre), key=lambda e: [str(p) for p in e.path])
-    return [f"{'.'.join(str(p) for p in e.path) or '(raíz)'}: {e.message}" for e in fallos]
+    return _validacion.errores(_ESQUEMA, sobre)

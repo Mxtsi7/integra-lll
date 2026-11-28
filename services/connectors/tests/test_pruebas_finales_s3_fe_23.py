@@ -274,18 +274,18 @@ class TestCaso5Desconexion:
 # ══════════════════════════════════════════════════════════════════════
 
 
-def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_que_subscriptions_junta(google):
+def test_el_mismo_cobro_por_correo_y_por_csv_deja_dos_ordenes_con_lo_necesario_para_conciliarlas(google):
     """El hallazgo de S3-FE-23 (doc 34), resuelto en RF-14 (doc 37).
 
-    La decisión fue juntar al APLICAR y no al confirmar: connectors sigue
-    emitiendo una orden por candidato —cada una con su origen y su
-    identificador, que RN-DAT-004 pide conservar— y `subscriptions` las
-    reconoce como el mismo cargo (`app/candidatos.py`). Esta prueba fija lo
-    que este lado tiene que mandar para que allá se puedan juntar: el mismo
-    proveedor, importe, moneda y FECHA, y orígenes distintos (con fechas
-    distintas subscriptions no las junta: deja dos cobros y el aviso de doble
-    cobro, por la revisión de #242). Lo que hace subscriptions con las dos está en
-    `services/subscriptions/tests/test_ordenes_de_cobro_rf14.py::TestElMismoCargo`.
+    connectors sigue emitiendo una orden por candidato, cada una con su origen
+    y su identificador (RN-DAT-004). Las dos revisiones de #242 dejaron claro
+    que no se puede decidir solo que son el mismo cargo: subscriptions registra
+    los dos cobros, levanta el posible doble cobro y la persona lo concilia
+    (`POST /api/hallazgos/<id>/conciliar/`) o lo marca revisado. Esta prueba
+    fija lo que este lado tiene que mandar para que allá el par se vea y se
+    pueda conciliar: el mismo proveedor, importe y moneda, y orígenes
+    distintos. Lo de allá está en
+    `services/subscriptions/tests/test_ordenes_de_cobro_rf14.py::TestLaPersonaResuelve`.
     """
     from connectors.publicacion import crear_sobre
     from shared.contratos import candidato_confirmado as contrato

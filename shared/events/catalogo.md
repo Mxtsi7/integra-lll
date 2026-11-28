@@ -111,11 +111,28 @@ y [`candidato-confirmado-v1.schema.json`](../contratos/candidato-confirmado-v1.s
 `crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo.
 La idempotencia usa `(organizacion_id, candidato_id)` y también
 `(organizacion_id, origen, identificador_origen)`. El mismo cargo que llega
-por las dos fuentes (mismo importe, moneda y fecha) queda como UN cobro con
-los dos orígenes guardados (RN-DAT-004); con fechas distintas quedan dos
-cobros y el aviso de doble cobro. `importe` no supera 99999999.99, el rango de
-las columnas de destino. El detalle está en
-`services/subscriptions/app/candidatos.py`.
+por las dos fuentes NO se junta solo: quedan dos cobros, cada uno con su
+origen (RN-DAT-004), y el aviso de posible doble cobro; la persona lo concilia
+(`POST /api/hallazgos/<id>/conciliar/`, queda uno con los dos orígenes) o lo
+marca revisado. `importe` no supera 99999999.99, el rango de las columnas de
+destino. El detalle está en `services/subscriptions/app/candidatos.py`.
+
+subscriptions contesta cada orden por otro exchange dedicado,
+`suscripciones.ordenes`, con routing key `candidato.aplicado.v1`, a la cola
+`connectors.candidatos.resultados` (los rechazos van a
+`connectors.candidatos.resultados.fallidos`). Contrato:
+[`shared/contratos/candidato_aplicado.py`](../contratos/candidato_aplicado.py)
+y [`candidato-aplicado-v1.schema.json`](../contratos/candidato-aplicado-v1.schema.json).
+
+| Evento | Cuándo | Datos | Escucha |
+|---|---|---|---|
+| `candidato.aplicado` v1 | subscriptions aplicó una orden, o la apartó a su cola de fallos | `candidato_id`, `orden_id` (el `id` del sobre de la orden), `resultado` (`aplicado`/`fallido`), `motivo` (`cobro_creado`, `sin_cobro`, `contrato_invalido`, `no_aplicable`), `suscripcion_id`, `cobro_id` | connectors |
+
+Lleva el `correlation_id` de la orden. Se escribe en la misma transacción que
+la aplica, así que una reentrega no contesta otra vez; connectors la guarda una
+vez (un `aplicado` corrige un `fallido`, nunca al revés). Si la base de
+subscriptions sigue caída tras los reintentos no hay respuesta: la orden queda
+`enviada`.
 
 ### Publica `subscriptions`
 

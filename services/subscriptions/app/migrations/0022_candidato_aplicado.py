@@ -28,7 +28,7 @@ class Migration(migrations.Migration):
                 ('importe', models.DecimalField(decimal_places=2, max_digits=14, verbose_name='Importe según el origen')),
                 ('moneda', models.CharField(max_length=3, verbose_name='Moneda')),
                 ('suscripcion_creada', models.BooleanField(default=False, verbose_name='La suscripción nació con esta orden')),
-                ('resultado', models.CharField(choices=[('cobro_creado', 'Se registró el cobro'), ('cobro_existente', 'Era el mismo cobro que llegó por otra fuente'), ('sin_cobro', 'Aviso o pago fallido: no hubo cobro')], max_length=20, verbose_name='Resultado')),
+                ('resultado', models.CharField(choices=[('cobro_creado', 'Se registró el cobro'), ('sin_cobro', 'Aviso o pago fallido: no hubo cobro')], max_length=20, verbose_name='Resultado')),
                 ('cobro', models.ForeignKey(blank=True, help_text='Vacío si fue un aviso o un pago fallido.', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='origenes', to='app.cobro', verbose_name='Cobro')),
                 ('suscripcion', models.ForeignKey(null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='candidatos_aplicados', to='app.subscription', verbose_name='Suscripción')),
             ],

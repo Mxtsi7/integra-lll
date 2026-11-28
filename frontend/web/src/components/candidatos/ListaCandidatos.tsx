@@ -105,13 +105,15 @@ const AVISO_DE_PROVEEDOR = new Map<string, string>([
 ]);
 const AVISO_DE_PROVEEDOR_GENERAL = 'Proveedor sin reconocer.';
 /**
- * Lo que se sabe de la orden desde aquí. `enviada` no dice que la suscripción y el
- * cobro ya existan: eso se ve en Suscripciones, no en Conectores.
+ * Lo que pasó con la orden. `aplicada` y `fallida` las contesta Suscripciones;
+ * mientras no contesta, `enviada` solo dice que salió.
  */
 const TEXTO_DE_LA_ORDEN: Record<NonNullable<CandidatoDetectado['aplicacion']> | 'ninguna', string> = {
   ninguna: '',
   por_enviar: ' · orden por enviar a Suscripciones',
-  enviada: ' · orden enviada: revisa la suscripción y el cobro en Suscripciones',
+  enviada: ' · orden enviada, esperando respuesta de Suscripciones',
+  aplicada: ' · aplicada en Suscripciones',
+  fallida: ' · Suscripciones no pudo aplicar la orden',
 };
 
 function ItemCandidato({ candidato, seleccion }: { candidato: CandidatoDetectado; seleccion?: SeleccionDeCandidatos }) {

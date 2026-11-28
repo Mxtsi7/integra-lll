@@ -16,13 +16,14 @@ export type EstadoCandidato = 'propuesto' | 'confirmado' | 'rechazado';
 export type ServicioResultado = 'reconocido' | 'ambiguo' | 'desconocido';
 
 /**
- * Qué se sabe desde Conectores de la orden de un candidato confirmado (S3-FE-15,
- * RF-14). `null` mientras no esté confirmado. `por_enviar`: la orden sigue en
- * cola. `enviada`: salió hacia Suscripciones, que es donde se registran la
- * suscripción y el cobro; Conectores no puede ver si ya quedaron, así que
- * `enviada` no lo afirma.
+ * Qué pasó con la orden de un candidato confirmado (S3-FE-15, RF-14). `null`
+ * mientras no esté confirmado. `por_enviar`: la orden sigue en cola. `enviada`:
+ * salió hacia Suscripciones y todavía no contesta. `aplicada`: Suscripciones la
+ * aplicó (la suscripción y, si hubo pago, el cobro). `fallida`: Suscripciones no
+ * la pudo aplicar. Las dos últimas las dice la respuesta de Suscripciones
+ * (`candidato.aplicado` v1), no Conectores.
  */
-export type AplicacionCandidato = 'por_enviar' | 'enviada' | null;
+export type AplicacionCandidato = 'por_enviar' | 'enviada' | 'aplicada' | 'fallida' | null;
 
 /**
  * CobroCandidatoSerializer: un cobro detectado en un archivo o un correo.

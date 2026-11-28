@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ojoalgasto.cl/contratos/candidato-aplicado-v1.schema.json",
+  "title": "candidato.aplicado v1: lo que subscriptions hizo con una orden de cobro, de vuelta a connectors",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evento", "version", "id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+  "properties": {
+    "evento": {"const": "candidato.aplicado"},
+    "version": {"const": 1, "type": "integer"},
+    "id": {"$ref": "#/$defs/uuid"},
+    "organizacion_id": {"$ref": "#/$defs/uuid"},
+    "correlation_id": {"$ref": "#/$defs/uuid", "description": "El mismo de la orden (`candidato.confirmado`) que contesta."},
+    "ocurrido_en": {"type": "string", "format": "date-time"},
+    "datos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidato_id", "orden_id", "resultado", "motivo", "suscripcion_id", "cobro_id"],
+      "properties": {
+        "candidato_id": {"$ref": "#/$defs/uuid"},
+        "orden_id": {"$ref": "#/$defs/uuid", "description": "El `id` del sobre `candidato.confirmado` que se aplicó."},
+        "resultado": {"enum": ["aplicado", "fallido"]},
+        "motivo": {"enum": ["cobro_creado", "sin_cobro", "contrato_invalido", "no_aplicable"]},
+        "suscripcion_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+        "cobro_id": {"anyOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"resultado": {"const": "aplicado"}}},
+          "then": {
+            "properties": {
+              "motivo": {"enum": ["cobro_creado", "sin_cobro"]},
+              "suscripcion_id": {"$ref": "#/$defs/uuid"}
+            }
+          },
+          "else": {
+            "properties": {
+              "motivo": {"enum": ["contrato_invalido", "no_aplicable"]},
+              "suscripcion_id": {"type": "null"},
+              "cobro_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"motivo": {"const": "cobro_creado"}}},
+          "then": {"properties": {"cobro_id": {"$ref": "#/$defs/uuid"}}},
+          "else": {"properties": {"cobro_id": {"type": "null"}}}
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"}
+  }
+}

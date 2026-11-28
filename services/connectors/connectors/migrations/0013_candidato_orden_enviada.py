@@ -13,6 +13,21 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='cobrocandidato',
             name='orden_enviada_en',
-            field=models.DateTimeField(blank=True, help_text='Cuándo el broker confirmó la orden de cobro de este candidato (RF-14). La escribe `publicacion.py` en la misma transacción que marca publicada la fila del outbox. Enviada NO es aplicada: eso pasa en subscriptions, y desde acá no se ve.', null=True, verbose_name='Orden enviada el'),
+            field=models.DateTimeField(blank=True, help_text='Cuándo el broker confirmó la orden de cobro de este candidato (RF-14). La escribe `publicacion.py` en la misma transacción que marca publicada la fila del outbox. Enviada NO es aplicada: eso lo contesta subscriptions (`resultado_aplicacion`).', null=True, verbose_name='Orden enviada el'),
+        ),
+        migrations.AddField(
+            model_name='cobrocandidato',
+            name='resultado_aplicacion',
+            field=models.CharField(blank=True, choices=[('aplicado', 'Aplicada en subscriptions'), ('fallido', 'subscriptions no la pudo aplicar')], default='', help_text='La respuesta `candidato.aplicado` v1 (RF-14). Vacío mientras no llega. La escribe `resultados.py`.', max_length=10, verbose_name='Qué hizo subscriptions con la orden'),
+        ),
+        migrations.AddField(
+            model_name='cobrocandidato',
+            name='motivo_aplicacion',
+            field=models.CharField(blank=True, default='', help_text='`cobro_creado` o `sin_cobro` si se aplicó; `contrato_invalido` o `no_aplicable` si no.', max_length=20, verbose_name='Motivo de la respuesta'),
+        ),
+        migrations.AddField(
+            model_name='cobrocandidato',
+            name='orden_aplicada_en',
+            field=models.DateTimeField(blank=True, help_text='Cuándo contestó subscriptions (el `ocurrido_en` de su respuesta).', null=True, verbose_name='Respondida el'),
         ),
     ]

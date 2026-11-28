@@ -35,10 +35,11 @@ realizado». Un aviso que se contara como cobro lo contaría dos veces cuando
 después llegue el recibo de verdad, y haría cuadrar mal el presupuesto.
 
 ── Quién la entrega ─────────────────────────────────────────────────────────
-`publicacion.py` drena este outbox a RabbitMQ (tarea periódica del worker) y
-`subscriptions` la aplica con su consumidor (`app/candidatos.py`). Allá se
-resuelve también el mismo cargo que llega por CSV y por correo: no se crea
-un segundo cobro, se le agrega el otro origen al que ya estaba.
+`publicacion.py` drena este outbox a RabbitMQ (tarea periódica del worker),
+`subscriptions` la aplica con su consumidor (`app/candidatos.py`) y contesta
+`candidato.aplicado`, que `resultados.py` recoge. El mismo cargo que llega por
+CSV y por correo no se junta solo: allá quedan dos cobros con el aviso de
+posible doble cobro, y la persona lo concilia.
 """
 
 from __future__ import annotations

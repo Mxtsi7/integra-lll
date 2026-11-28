@@ -30,7 +30,7 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from app.anomalias import marcar_hallazgo_revisado
+from app.anomalias import ConciliacionRechazada, conciliar_doble_cobro, marcar_hallazgo_revisado
 from app.exportacion import (
     construir_csv_cobros,
     normalizar_moneda,
@@ -1682,6 +1682,44 @@ class HallazgoCobroViewSet(PaginacionExplicitaMixin, SoloLecturaTenantViewSet):
             hallazgo,
             usuario_id=_actor_id_opcional(request),
         )
+        return Response(
+            HallazgoCobroSerializer(hallazgo).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @extend_schema(
+        summary="Conciliar un posible doble cobro: es el mismo cargo",
+        description=(
+            "La otra salida de un ``doble_cobro`` (la primera es ``revisar``: "
+            "son dos cargos). Deja **un** cobro: el de fecha más temprana, con "
+            "los orígenes de los dos (RF-14: el mismo cargo que llegó por "
+            "correo y por la cartola). El otro se borra y queda descrito en "
+            "``detalle.cobro_conciliado``; el hallazgo pasa a ``revisada`` con "
+            "``detalle.resolucion = mismo_cargo``. Idempotente.\n\n"
+            "**409** con ``codigo``: ``no_es_doble_cobro`` (es un alza), "
+            "``sin_cobro_relacionado`` o ``importes_distintos`` (importe o "
+            "moneda distintos: no es el mismo cargo)."
+        ),
+        request=None,
+        responses={
+            200: HallazgoCobroSerializer,
+            409: OpenApiResponse(description="No se puede conciliar; ver `codigo`."),
+        },
+    )
+    @action(detail=True, methods=["post"], url_path="conciliar")
+    def conciliar(self, request, pk=None):
+        """POST /api/hallazgos/<id>/conciliar/."""
+        hallazgo = self.get_object()
+        try:
+            hallazgo = conciliar_doble_cobro(
+                hallazgo,
+                usuario_id=_actor_id_opcional(request),
+            )
+        except ConciliacionRechazada as rechazo:
+            return Response(
+                {"codigo": rechazo.codigo, "detail": rechazo.mensaje},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(
             HallazgoCobroSerializer(hallazgo).data,
             status=status.HTTP_200_OK,

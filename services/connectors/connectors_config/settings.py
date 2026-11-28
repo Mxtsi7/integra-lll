@@ -219,6 +219,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "connectors.tasks.despachar_eventos",
         "schedule": env.float("CONECTORES_DESPACHO_SEGUNDOS", default=10.0),
     },
+    # Y la vuelta: lo que subscriptions hizo con cada orden. Mismo ritmo.
+    "recoger-resultados-de-ordenes": {
+        "task": "connectors.tasks.recoger_resultados",
+        "schedule": env.float("CONECTORES_DESPACHO_SEGUNDOS", default=10.0),
+    },
 }
 
 # ── RabbitMQ: a dónde se publican las órdenes de cobro (RF-14) ───────

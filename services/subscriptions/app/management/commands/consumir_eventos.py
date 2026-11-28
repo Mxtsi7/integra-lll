@@ -79,7 +79,7 @@ from events.topologia import (
 from events.trabajo import (
     HECHO_POR_CONSUMIDOR, OrganizacionEliminada, recalcular_resumen_por_evento,
 )
-from shared.contratos import candidato_confirmado
+from shared.contratos import candidato_aplicado, candidato_confirmado
 
 
 registro = logging.getLogger(__name__)
@@ -231,6 +231,18 @@ def procesar(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
     )
 
 
+def _contestar_fallo(registrar_fallo, sobre, motivo: str) -> None:
+    """Le dice a connectors que su orden se fue a la cola de fallos.
+
+    Si contestar también falla, la orden se aparta igual: no contestar deja la
+    orden «enviada» (verdad a medias); no apartarla la dejaría dando vueltas.
+    """
+    try:
+        registrar_fallo(sobre, motivo=motivo)
+    except Exception as error:  # noqa: BLE001
+        registro.error("orden.sin_respuesta motivo=%s error=%s", motivo, type(error).__name__)
+
+
 def procesar_candidato(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Desenlace:
     """Aplica una orden de cobro de connectors (RF-14). Mismos desenlaces.
 
@@ -243,7 +255,7 @@ def procesar_candidato(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Dese
     """
     # Import local: `app.candidatos` importa modelos, y este módulo se carga
     # también en pruebas que no tocan la base.
-    from app.candidatos import aplicar
+    from app.candidatos import aplicar, registrar_fallo
 
     avisar = avisar or (lambda _texto: None)
     try:
@@ -252,6 +264,7 @@ def procesar_candidato(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Dese
         return Desenlace(confirmar=False, motivo=f"no es JSON: {error}")
     fallos = candidato_confirmado.errores(sobre)
     if fallos:
+        _contestar_fallo(registrar_fallo, sobre, candidato_aplicado.CONTRATO_INVALIDO)
         return Desenlace(
             confirmar=False,
             motivo="no cumple candidato.confirmado v1 — " + "; ".join(fallos[:5]),
@@ -280,6 +293,7 @@ def procesar_candidato(cuerpo: bytes, *, dormir=time.sleep, avisar=None) -> Dese
                 close_old_connections()
                 continue
         except Exception as error:  # noqa: BLE001
+            _contestar_fallo(registrar_fallo, sobre, candidato_aplicado.NO_APLICABLE)
             return Desenlace(confirmar=False, motivo=f"error al aplicar la orden: {error}")
         else:
             fila = aplicacion.fila

@@ -8,6 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from app.models import OutboxEvento
+from events.ordenes import EVENTO_RESULTADO, publicar_resultado
 from events.publicador import publicar
 from events.uso import EVENTO_USO, publicar_uso
 
@@ -46,6 +47,9 @@ def despachar_pendientes() -> dict[str, int]:
             try:
                 if evento.evento == EVENTO_USO:
                     publicar_uso(evento)
+                elif evento.evento == EVENTO_RESULTADO:
+                    # La respuesta a una orden de connectors: su propio exchange.
+                    publicar_resultado(evento)
                 else:
                     publicar(evento)
             except (pika.exceptions.AMQPError, OSError) as exc:

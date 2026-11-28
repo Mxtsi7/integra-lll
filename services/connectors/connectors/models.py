@@ -926,6 +926,10 @@ class CobroCandidato(ModeloTenant):
             "vive en el esquema de `auth` y acá no se interpreta (ADR-002)."
         ),
     )
+    class ResultadoAplicacion(models.TextChoices):
+        APLICADO = "aplicado", "Aplicada en subscriptions"
+        FALLIDO = "fallido", "subscriptions no la pudo aplicar"
+
     orden_enviada_en = models.DateTimeField(
         null=True,
         blank=True,
@@ -934,8 +938,32 @@ class CobroCandidato(ModeloTenant):
             "Cuándo el broker confirmó la orden de cobro de este candidato "
             "(RF-14). La escribe `publicacion.py` en la misma transacción que "
             "marca publicada la fila del outbox. Enviada NO es aplicada: eso "
-            "pasa en subscriptions, y desde acá no se ve."
+            "lo contesta subscriptions (`resultado_aplicacion`)."
         ),
+    )
+    resultado_aplicacion = models.CharField(
+        max_length=10,
+        choices=ResultadoAplicacion.choices,
+        blank=True,
+        default="",
+        verbose_name="Qué hizo subscriptions con la orden",
+        help_text=(
+            "La respuesta `candidato.aplicado` v1 (RF-14). Vacío mientras no "
+            "llega. La escribe `resultados.py`."
+        ),
+    )
+    motivo_aplicacion = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name="Motivo de la respuesta",
+        help_text="`cobro_creado` o `sin_cobro` si se aplicó; `contrato_invalido` o `no_aplicable` si no.",
+    )
+    orden_aplicada_en = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Respondida el",
+        help_text="Cuándo contestó subscriptions (el `ocurrido_en` de su respuesta).",
     )
 
     evidencia = models.JSONField(

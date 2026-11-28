@@ -279,32 +279,37 @@ class CobroCandidatoSerializer(serializers.ModelSerializer):
     )
     aplicacion = serializers.SerializerMethodField(
         help_text=(
-            "Qué se sabe desde acá de la orden de un candidato confirmado. "
-            "`null` mientras no está confirmado; `por_enviar` si la orden "
-            "sigue en el outbox; `enviada` cuando el broker la confirmó. "
-            "`enviada` NO dice que la suscripción y el cobro existan: los "
-            "registra subscriptions, y este servicio no puede verlo."
+            "Qué pasó con la orden de un candidato confirmado. `null` "
+            "mientras no está confirmado; `por_enviar` si la orden sigue en "
+            "el outbox; `enviada` cuando el broker la confirmó y subscriptions "
+            "todavía no contesta; `aplicada` si subscriptions la aplicó "
+            "(suscripción y, si hubo pago, cobro); `fallida` si la apartó a "
+            "su cola de fallos sin aplicarla."
         )
     )
 
     # ── «Confirmado» no es «aplicado», y «enviada» tampoco ──────────────
     # Confirmar deja el candidato confirmado y una orden durable en el
-    # outbox, los dos o ninguno. El worker la publica (`publicacion.py`) y
-    # subscriptions la aplica. Lo único que connectors sabe por sí mismo es
-    # si la orden ya salió: lo escribe el publicador en `orden_enviada_en`.
+    # outbox, los dos o ninguno. El worker la publica (`publicacion.py`,
+    # escribe `orden_enviada_en`), subscriptions la aplica y contesta
+    # `candidato.aplicado`, y el worker recoge la respuesta (`resultados.py`,
+    # escribe `resultado_aplicacion`). Cada valor dice lo que se sabe, nada
+    # más: connectors no consulta el esquema de subscriptions (ADR-002).
     #
-    # Antes valía `pendiente` para todo confirmado, con el texto «todavía no
-    # hay suscripción ni cobro creados». Con el consumidor andando eso pasó a
-    # ser falso a los segundos de confirmar: la revisión de #242 lo marcó. Y
-    # decir `aplicada` sería afirmar algo que este servicio no puede ver
-    # (ADR-002: no consulta el esquema de subscriptions). Por eso son dos
-    # valores, y los dos son verdad.
+    # La respuesta manda sobre el envío: puede llegar antes de que el
+    # publicador termine su transacción, y lo que pasó allá es más que «salió».
     APLICACION_POR_ENVIAR = "por_enviar"
     APLICACION_ENVIADA = "enviada"
+    APLICACION_APLICADA = "aplicada"
+    APLICACION_FALLIDA = "fallida"
 
     def get_aplicacion(self, candidato) -> str | None:
         if candidato.estado != CobroCandidato.Estado.CONFIRMADO:
             return None
+        if candidato.resultado_aplicacion == CobroCandidato.ResultadoAplicacion.APLICADO:
+            return self.APLICACION_APLICADA
+        if candidato.resultado_aplicacion == CobroCandidato.ResultadoAplicacion.FALLIDO:
+            return self.APLICACION_FALLIDA
         if candidato.orden_enviada_en is None:
             return self.APLICACION_POR_ENVIAR
         return self.APLICACION_ENVIADA

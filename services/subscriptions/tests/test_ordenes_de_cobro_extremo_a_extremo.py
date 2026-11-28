@@ -26,6 +26,7 @@ from app.management.commands import consumir_eventos  # noqa: E402
 from app.management.commands.consumir_eventos import Command, procesar_candidato  # noqa: E402
 from app.models import CandidatoAplicado, Cobro, Proveedor  # noqa: E402
 from shared.contratos import candidato_confirmado as contrato  # noqa: E402
+from shared.contratos import candidato_aplicado  # noqa: E402
 from tests.test_ordenes_de_cobro_rf14 import sobre  # noqa: E402
 
 URL_PRUEBA = os.environ.get("RABBITMQ_PRUEBA_URL", "")
@@ -101,3 +102,29 @@ def test_un_sobre_fuera_de_contrato_termina_en_la_cola_de_fallos(canal):
     assert apartado is not None, "el rechazo no llegó a la cola de fallos"
     assert json.loads(cuerpo_apartado)["datos"]["importe"] == 9990
     assert not CandidatoAplicado.objects.filter(organizacion_id=org).exists()
+
+
+def test_la_respuesta_sale_por_el_broker_a_la_cola_de_connectors(canal, settings):
+    """La vuelta: `aplicar` deja `candidato.aplicado` en el outbox y el despacho
+    de este servicio la publica donde connectors la va a buscar."""
+    from events.despacho import despachar_pendientes
+
+    candidato_aplicado.declarar(canal)
+    for cola in (candidato_aplicado.COLA, candidato_aplicado.COLA_FALLIDOS):
+        canal.queue_purge(queue=cola)
+    settings.RABBITMQ_URL = URL_PRUEBA
+    org = uuid.uuid4()
+    Proveedor.objects.get_or_create(nombre="Netflix", defaults={"categoria": "streaming"})
+    orden = sobre(org)
+    publicar(canal, json.dumps(orden).encode())
+    metodo, cuerpo = tomar(canal, contrato.COLA)
+    Command().atender(canal, metodo, cuerpo, procesador=procesar_candidato, cola_fallidos=contrato.COLA_FALLIDOS)
+
+    despachar_pendientes()
+
+    metodo, cuerpo = tomar(canal, candidato_aplicado.COLA, auto_ack=True)
+    assert metodo is not None, "la respuesta no llegó a connectors.candidatos.resultados"
+    respuesta = json.loads(cuerpo)
+    assert candidato_aplicado.errores(respuesta) == []
+    assert respuesta["correlation_id"] == orden["correlation_id"]
+    assert (respuesta["datos"]["orden_id"], respuesta["datos"]["resultado"]) == (orden["id"], "aplicado")

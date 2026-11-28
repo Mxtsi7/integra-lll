@@ -1054,15 +1054,14 @@ class CandidatoAplicado(ModeloTenant):
        su identificador (la huella de la fila de la cartola o el Message-ID),
        con la fecha y el importe que dijo ESE origen.
 
-    3. **Que el mismo cargo no quede dos veces.** Si el cobro ya existe por
-       la otra fuente, la orden no crea otro: se cuelga del que estaba y queda
-       `resultado = cobro_existente`. El cobro termina con dos filas acá, una
-       por origen, y las dos identificaciones quedan. Ver `app/candidatos.py`.
+    3. **Saber de dónde vino cada cobro.** Si la persona concilia dos cobros
+       que eran el mismo cargo (`anomalias.conciliar_doble_cobro`), la fila
+       del que sobraba se mueve al que queda: el cobro termina con una fila
+       por origen y las dos identificaciones quedan. Ver `app/candidatos.py`.
     """
 
     class Resultado(models.TextChoices):
         COBRO_CREADO = "cobro_creado", "Se registró el cobro"
-        COBRO_EXISTENTE = "cobro_existente", "Era el mismo cobro que llegó por otra fuente"
         SIN_COBRO = "sin_cobro", "Aviso o pago fallido: no hubo cobro"
 
     class Origen(models.TextChoices):
