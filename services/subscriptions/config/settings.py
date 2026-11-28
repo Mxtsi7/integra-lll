@@ -113,6 +113,18 @@ RABBITMQ_URL = env(
 # Ojo: en los dos modos el evento se registra igual en el outbox, porque
 # otros consumidores dependen de él. La bandera NO apaga el outbox.
 EVENTOS_ASINCRONOS = env.bool("EVENTOS_ASINCRONOS", default=False)
+
+# Orígenes de candidatos que esta instancia aplica. Si una confirmación llega
+# con una fuente apagada, el consumidor la descarta con ACK y deja rastro; ver
+# `events/confirmaciones.py`.
+CONFIRMACIONES_FUENTES_HABILITADAS = tuple(
+    fuente.strip().lower()
+    for fuente in env(
+        "CONFIRMACIONES_FUENTES_HABILITADAS", default="csv,correo"
+    ).split(",")
+    if fuente.strip()
+)
+
 CELERY_BEAT_SCHEDULE = {
     "despachar-eventos-pendientes": {
         "task": "app.tasks.despachar_eventos_pendientes",

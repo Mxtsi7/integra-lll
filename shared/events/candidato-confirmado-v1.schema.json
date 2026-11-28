@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "candidato.confirmado v1 — orden durable de connectors",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evento", "version", "id", "ocurrido_en", "correlation_id", "organizacion_id", "datos"],
+  "properties": {
+    "evento": {"const": "candidato.confirmado"},
+    "version": {"const": 1, "type": "integer"},
+    "id": {"$ref": "#/$defs/uuid"},
+    "organizacion_id": {"$ref": "#/$defs/uuid"},
+    "correlation_id": {"$ref": "#/$defs/uuid"},
+    "ocurrido_en": {"$ref": "#/$defs/instante"},
+    "datos": {"$ref": "#/$defs/datos"}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "format": "uuid"},
+    "instante": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "datos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidato_id", "importacion_id", "origen", "identificador_origen", "servicio", "servicio_texto", "importe", "moneda", "fecha", "tipo_mensaje", "crear_cobro", "decidido_por", "evidencia"],
+      "properties": {
+        "candidato_id": {"$ref": "#/$defs/uuid"},
+        "importacion_id": {"$ref": "#/$defs/uuid"},
+        "origen": {"enum": ["csv", "correo"]},
+        "identificador_origen": {"type": "string", "minLength": 1},
+        "servicio": {"type": ["string", "null"]},
+        "servicio_texto": {"type": "string"},
+        "importe": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+)?$"},
+        "moneda": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "fecha": {"type": "string", "format": "date"},
+        "tipo_mensaje": {"enum": ["cobro_realizado", "aviso_de_cobro", "pago_fallido"]},
+        "crear_cobro": {"type": "boolean"},
+        "decidido_por": {"type": "string"},
+        "evidencia": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    }
+  }
+}

@@ -185,6 +185,15 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 CELERY_BROKER_URL = env("CELERY_BROKER_URL")
 CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
+# RabbitMQ es el transporte de eventos de dominio (MX-21 y
+# `candidato.confirmado`). Redis sigue siendo el broker de Celery: son dos
+# colas distintas con dos propósitos distintos.
+# El default es el MISMO que usa subscriptions: el runner local no pasa esta
+# variable y `manage.py check` tiene que seguir funcionando sin .env. En k8s
+# llega desde el Secret y Sobrescribe este valor.
+RABBITMQ_URL = env(
+    "RABBITMQ_URL", default="amqp://guest:guest@rabbitmq:5672/"
+)
 # subscriptions usa el mismo Redis con la cola y el canal de control por
 # omisión ("celery"). Con nombres propios, este worker no le quita las tareas
 # del Temporizador (las descartaría por no conocerlas) y a `inspect ping`
@@ -211,5 +220,11 @@ CELERY_BEAT_SCHEDULE = {
     "lectura-de-correo": {
         "task": "connectors.tasks.programar_lecturas_de_correo",
         "schedule": env.float("CONECTORES_LECTURA_CORREO_SEGUNDOS", default=900.0),
+    },
+    # Drena las órdenes confirmadas hacia `subscriptions.confirmaciones`.
+    # Una fila publicada no se reenvía: el outbox es la fuente de verdad.
+    "publicacion-de-confirmaciones": {
+        "task": "connectors.tasks.publicar_eventos_confirmados",
+        "schedule": env.float("CONECTORES_PUBLICACION_SEGUNDOS", default=30.0),
     },
 }

@@ -441,3 +441,14 @@ def leer_cuenta_de_correo(self, cuenta_id: str, cadena: str | None = None) -> di
         raise self.retry(args=[cuenta_id], kwargs={"cadena": resultado["cadena"]}, countdown=espera)
     return resultado
 
+
+@shared_task
+def publicar_eventos_confirmados() -> dict:
+    """Drena el outbox de confirmaciones. Beat lo llama cada
+    `CONECTORES_PUBLICACION_SEGUNDOS`."""
+    # Import diferido: el módulo de despacho abre pika al publicar, y no queremos
+    # que importar `tasks` (lo hace Celery al descubrir tareas) exija RabbitMQ.
+    from events.despacho import despachar_pendientes
+
+    return despachar_pendientes()
+

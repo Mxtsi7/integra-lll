@@ -1,6 +1,13 @@
-"""Persistencia del outbox y snapshots de suscripción según MX-21 v2."""
+"""Persistencia del outbox y snapshots de suscripción según MX-21 v2.
+
+Además de los cuatro snapshots v2, acá nace `candidato.aplicado` v1: el
+acuse que Suscripciones debe a connectors. Los dos salen del MISMO outbox y
+de la MISMA transacción que el efecto que describen; por eso el despacho no
+necesita saber de dónde vino cada uno.
+"""
 
 import uuid
+from datetime import timezone as datetime_timezone
 
 from django.utils import timezone
 
@@ -35,11 +42,13 @@ def _registrar(
     evento: str,
     datos: dict,
     correlation_id=None,
+    *,
+    version: int = 2,
 ) -> OutboxEvento:
     return OutboxEvento.objects.create(
         organizacion_id=suscripcion.organizacion_id,
         evento=evento,
-        version=2,
+        version=version,
         ocurrido_en=timezone.now(),
         correlation_id=_correlation_id(correlation_id),
         datos=datos,
@@ -69,6 +78,41 @@ def registrar_actualizada(
         "suscripcion.actualizada",
         datos,
         correlation_id,
+    )
+
+
+def registrar_candidato_aplicado(
+    suscripcion: Subscription,
+    *,
+    candidato_id,
+    cobro_id,
+    creada: bool,
+    cobro_creado: bool,
+    aplicada_en,
+    correlation_id=None,
+) -> OutboxEvento:
+    """Escribe el acuse v1 de una orden ya aplicada.
+
+    No reutiliza `_snapshot`: este sobre no describe la suscripción, describe
+    el efecto sobre el candidato que connectors necesita marcar. Los ids van
+    como texto para que el JSON sea el mismo en SQLite y en PostgreSQL.
+    """
+    return _registrar(
+        suscripcion,
+        "candidato.aplicado",
+        {
+            "candidato_id": str(candidato_id),
+            "suscripcion_id": str(suscripcion.id),
+            "cobro_id": str(cobro_id) if cobro_id is not None else None,
+            "creada": bool(creada),
+            "cobro_creado": bool(cobro_creado),
+            "aplicada_en": aplicada_en.astimezone(datetime_timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "aplicacion": "aplicada",
+        },
+        correlation_id,
+        version=1,
     )
 
 

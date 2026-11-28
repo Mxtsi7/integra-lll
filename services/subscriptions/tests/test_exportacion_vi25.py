@@ -47,6 +47,7 @@ def crear_cobro(
     monto: str = "9990.00",
     *,
     moneda: str = "CLP",
+    origen: str = Cobro.Origen.MANUAL,
 ) -> Cobro:
     return Cobro.objects.create(
         organizacion_id=suscripcion.organizacion_id,
@@ -54,6 +55,7 @@ def crear_cobro(
         monto=Decimal(monto),
         moneda=moneda,
         fecha=fecha,
+        origen=origen,
     )
 
 
@@ -302,7 +304,24 @@ class TestFiltrosMonedaYOrigen:
         assert len(filas) == 1
         assert filas[0][5] == "manual"
 
-    @pytest.mark.parametrize("origen", ["csv", "correo", "pdf", "automatico"])
+    @pytest.mark.parametrize("origen", [Cobro.Origen.CSV, Cobro.Origen.CORREO])
+    @pytest.mark.parametrize("ruta", RUTAS)
+    def test_origen_de_candidato_confirmado_filtra_y_se_exporta(
+        self, client: APIClient, ruta: str, origen: str
+    ) -> None:
+        org = uuid.uuid4()
+        suscripcion = crear_suscripcion(org)
+        crear_cobro(suscripcion, date(2026, 3, 10), origen=origen)
+        crear_cobro(suscripcion, date(2026, 3, 11))
+
+        respuesta = exportar(client, org, url=ruta, origen=origen)
+
+        assert respuesta.status_code == status.HTTP_200_OK
+        filas = filas_csv(respuesta)[1:]
+        assert len(filas) == 1
+        assert filas[0][5] == origen
+
+    @pytest.mark.parametrize("origen", ["pdf", "automatico"])
     @pytest.mark.parametrize("ruta", RUTAS)
     def test_origen_no_soportado_responde_400_en_ambas_rutas(
         self, client: APIClient, ruta: str, origen: str

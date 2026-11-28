@@ -72,6 +72,47 @@ Una cancelación en VI-26 publica solo `suscripcion.estado_cambiado.v2` por defe
 Si hay receptores v1 activos, acordar el adaptador descrito en MX-21 antes de migrarlos.
 El nombre histórico del exchange `suscripciones` también abarca alertas y los demás dominios de este catálogo.
 
+### Contrato `candidato.confirmado` (v1, para aplicación en Suscripciones)
+
+Connectors publica el hecho de que una persona confirmó un candidato; la fila
+durable de la que sale está en `connectors_event_outbox`. El evento usa la
+misma envoltura común y se valida contra
+[`candidato-confirmado-v1.schema.json`](candidato-confirmado-v1.schema.json).
+Los cuatro contratos v2 de MX-21 no cambian.
+
+| Evento / routing key | Publica | Cola | Datos |
+|---|---|---|---|
+| `candidato.confirmado` / `candidato.confirmado.v1` | connectors | `subscriptions.confirmaciones` (DLQ `subscriptions.confirmaciones.fallidos`) | `candidato_id`, `importacion_id`, origen/identificador, servicio/texto, importe como texto, moneda, fecha, `tipo_mensaje`, `crear_cobro`, `decidido_por`, evidencia; el tenant y el `id` del sobre van en la envoltura |
+
+`crear_cobro` viaja resuelto (`cobro_realizado → true`; `aviso_de_cobro` y
+`pago_fallido → false`). El consumidor no vuelve a deducirlo del tipo. El
+`id` del sobre es el de la fila del outbox y sirve para descartar reentregas.
+El contrato sigue **pendiente de ratificación** con Maxi/Víctor/Felipe; ver
+`docs/contratos/candidatos-v1.md`.
+
+### Contrato `candidato.aplicado` (v1, acuse hacia connectors)
+
+Suscripciones publica el hecho de que la orden se aplicó de verdad: creó o
+emparejó la suscripción, y creó el cobro cuando correspondía. Sale de su
+outbox en la MISMA transacción que la suscripción y el cobro, así que un
+`candidato.aplicado` nunca afirma algo que no quedó guardado. Se valida contra
+[`candidato-aplicado-v1.schema.json`](candidato-aplicado-v1.schema.json).
+
+| Evento / routing key | Publica | Cola | Datos |
+|---|---|---|---|
+| `candidato.aplicado` / `candidato.aplicado.v1` | subscriptions | `connectors.aplicaciones` (DLQ `connectors.aplicaciones.fallidos`) | `candidato_id`, `suscripcion_id`, `cobro_id` (nullable), `creada`, `cobro_creado`, `aplicada_en`, `aplicacion="aplicada"`; el tenant y el `id` del sobre van en la envoltura |
+
+Connectors marca `CobroCandidato.aplicado_en` con `aplicada_en` y expone
+`aplicacion="aplicada"` en su API. Una reentrega no mueve esa fecha: la
+idempotencia la da el `UPDATE` condicional sobre el candidato confirmado y el
+`id` del sobre. `cobro_id` es `null` cuando `crear_cobro` era `false`; el
+consumidor no lo necesita para marcar, pero deja rastro de qué pasó.
+
+Los nombres de cola, DLQ y exchange de fallos son **SUPUESTOS** de esta
+integración, como lo fueron los de `subscriptions.confirmaciones`: el
+exchange `suscripciones` es el contrato existente. Ratificación pendiente con
+Maxi/Víctor/Felipe, igual que el contrato de ida.
+
 ### Contrato de uso de recolectores (v1, exchange dedicado)
 
 El [contrato canónico `uso-recolectores-v1`](../../docs/contratos/uso-recolectores-v1.md)
@@ -99,6 +140,7 @@ semánticos y los acuses HTTP están en el contrato.
 |---|---|---|---|
 | `suscripcion.creada` | Se registra una suscripción | `suscripcion_id`, `proveedor_id`, `monto`, `ciclo`, `proximo_cobro` | analytics, notifications |
 | `suscripcion.actualizada` | Cambia monto, ciclo o estado | `suscripcion_id`, `campos_modificados` | analytics |
+| `candidato.aplicado` v1 | Se aplicó un `candidato.confirmado` (ver contrato arriba) | Envoltura común + ids del candidato, suscripción y cobro; `creada`, `cobro_creado`, `aplicada_en` | connectors |
 | `suscripcion.cancelada` | El usuario la marca como cancelada | `suscripcion_id`, `motivo`, `ahorro_mensual` | analytics, notifications |
 | `cobro.registrado` | Se detecta o registra un cobro | `suscripcion_id`, `monto`, `fecha` | analytics |
 | `precio.aumentado` | Un cobro supera al anterior del mismo servicio | `suscripcion_id`, `monto_anterior`, `monto_nuevo` | notifications |
@@ -111,6 +153,7 @@ semánticos y los acuses HTTP están en el contrato.
 | `conector.fallido` | La sincronización falla tras los reintentos | `conector_id`, `tipo`, `error` | notifications |
 | `uso.registrado` (v1 legado) | Llegan datos de uso desde una API externa | `suscripcion_id`, `minutos`, `fecha`, `fuente` | analytics (legado) |
 | `cobro.detectado` | Se identifica un cobro en el correo | `proveedor`, `monto`, `fecha`, `correo_id` | subscriptions |
+| `candidato.confirmado` v1 | Se confirma un candidato (ver contrato arriba) | Envoltura común + sobre de `confirmacion.py` | subscriptions |
 
 ### Publica `analytics`
 

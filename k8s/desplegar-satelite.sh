@@ -40,7 +40,11 @@ case "$SERVICIO" in
     # CLAVES_CIFRADO cifra los tokens de las cuentas conectadas: solo viaja
     # al satélite que las guarda.
     CLAVES_GLOBALES=SECRET_KEY,ELIMINACION_INTERNA_SECRET,CLAVES_CIFRADO
-    USA_RABBITMQ=0; ESPERA_CONSUMIDOR=0
+    # FASE 3: el worker publica confirmaciones y el sidecar `aplicaciones`
+    # consume el acuse, así que el satélite necesita el Secret del broker.
+    # ESPERA_CONSUMIDOR sigue en 0: ese chequeo busca el contenedor
+    # `consumidor` de notifications, no el sidecar de connectors.
+    USA_RABBITMQ=1; ESPERA_CONSUMIDOR=0
     DEPLOYMENTS="connectors connectors-worker" ;;
   *) echo "Uso: desplegar-satelite.sh notifications|connectors" >&2
      echo "(analytics todavía no tiene manifiestos: ver k8s/tandas/perfiles.yaml)" >&2

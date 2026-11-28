@@ -113,8 +113,9 @@ emite **dos órdenes** de crear el cobro. La unicidad de S3-FE-17 es por
 origen: (organización, origen, identificador), y un Message-ID y la huella de
 una fila de CSV nunca coinciden.
 
-Hoy no se nota, porque nadie drena esas órdenes todavía (subscriptions no
-consume `candidato.confirmado`). Se va a notar en cuanto alguien las drene.
+Con FASE 3 alguien ya drena esas órdenes: el riesgo dejó de ser teórico. Sigue
+**sin arreglar y fuera de alcance** de esta tarjeta; quedó registrado acá y en
+la descripción de la PR para decidirlo con el negocio.
 
 Reconocerlo no es obvio: la fecha del recibo y la de la cartola pueden
 diferir en uno o dos días, y la glosa del banco no es el nombre del servicio.
@@ -124,6 +125,36 @@ ventana de fechas. Queda reproducido en
 `test_el_mismo_cobro_por_correo_y_por_csv_deja_una_sola_orden`, marcada
 `xfail(strict=True)`. Cuando se arregle, la prueba empieza a pasar, el
 `strict` la hace fallar y obliga a quitar la marca.
+
+## Verificación de FASE 3 (rama `aplicar-cobros-confirmados`, sin fusionar)
+
+| Corrida | Resultado |
+|---|---|
+| Contratos compartidos (`scripts/mx21`) | 17 pasan: el acuse usa la envoltura común y los cuatro eventos MX-21 v2 siguen validando |
+| Foco de `subscriptions` (aplicación, consumidor, topología y regresiones v2) | 123 pasan, 3 se saltan |
+| Foco de `connectors` (modelo, serializer, migración del acuse) | 41 pasan |
+| Consumidor del acuse en `connectors` | 12 pasan: marca con la fecha del sobre, reentrega sin moverla, sobre inválido, base caída con reintentos, `--uno`, ack después de escribir |
+| Suite completa de `connectors` | 1353 pasan, 23 se saltan, 1 `xfail`, **1 falla**: la del fixtures CSV con CRLF en Windows (preexistente, pasa en checkout limpio de `VI-revision`) |
+| Suite completa de `subscriptions` | 578 pasan, 38 se saltan, **7 fallas y 3 errores**, todos preexistentes en `VI-revision`: tercera moneda, persistencia/proyección de uso (sin PostgreSQL) y E2E sin `RABBITMQ_PRUEBA_URL` |
+| `makemigrations --check --dry-run` en los dos servicios | `No changes detected` (EXIT=0); `manage.py check` de connectors, sin problemas |
+
+Lo que **no** se pudo correr acá: las pruebas de carrera con dos conexiones
+(no hay Docker/PostgreSQL en este PC) y el E2E con broker efímero (falta
+`RABBITMQ_PRUEBA_URL`). Se saltan o fallan igual en `VI-revision`, así que no
+son regresiones de esta rama.
+
+Tampoco hay linter ejecutado: no están instalados `ruff` ni `flake8` en el
+entorno.
+
+### Lo que queda declarado, no resuelto
+
+- `TODO(RN-DAT-005)`: la regla `fecha + 1 mes` para `cobro_realizado` es un
+  SUPUESTO. Falta confirmarla con el Excel Integra III; no se inventó.
+- Duplicado correo vs. CSV: fuera de alcance, con el `xfail(strict=True)` de
+  arriba como recordatorio.
+- SUPUESTOS de defaults (`mensual`, `otro`), del evento `proximo_cobro` y de
+  los nombres de cola/DLQ, escritos en el catálogo y en el doc 21.
+- Contratos sin ratificar (Maxi/Víctor/Felipe) y rama sin `merge`.
 
 ## Lo que NO se probó con un proveedor real
 

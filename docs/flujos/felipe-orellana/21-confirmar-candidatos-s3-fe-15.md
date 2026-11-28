@@ -38,10 +38,12 @@ confirmado y la orden de crear**. Eso es lo que hay, y eso es lo que el
 criterio llama atómico: después de un commit no existe un candidato
 confirmado sin su orden, ni una orden sin su candidato.
 
-Lo que falta es una pieza y está identificada: **no hay publicador en
-connectors**, así que las filas se acumulan durables hasta que exista quien
-las drene y un consumidor en `subscriptions` que las aplique. Nada se pierde y
-nada se finge.
+Las piezas que faltaban ya están escritas en la rama
+`aplicar-cobros-confirmados` (FASE 3): el publicador drena el outbox de
+connectors, `subscriptions` aplica la orden y devuelve un acuse
+`candidato.aplicado`, y connectors marca el candidato como `aplicada`. **La rama
+no está fusionada y los contratos siguen pendientes de ratificación** («lo
+confirma él con Maxi»): lo implementado no cambia ese estado.
 
 ### Por qué no se resolvió con una llamada HTTP
 
@@ -85,7 +87,10 @@ confirmacion.confirmar(candidato, por=<usuario>)
 200 con el candidato (el mismo contrato de S3-FE-14)
    │
    ▼
-(pendiente) publicador → subscriptions crea la suscripción y el cobro
+publicador (beat) ─▶ subscriptions aplica la orden en una transacción
+                         │   suscripción + cobro + eventos MX-21 v2 + acuse
+                         ▼
+                    candidato.aplicado v1 ─▶ connectors marca `aplicado_en`
 ```
 
 ## Cómo se llaman los datos
@@ -186,13 +191,15 @@ La respuesta de confirmar y la lista de candidatos traen `aplicacion`:
 | Valor | Qué significa |
 |---|---|
 | `null` | el candidato no está confirmado |
-| `pendiente` | está confirmado y la orden quedó guardada, pero **todavía no hay suscripción ni cobro creados** |
+| `pendiente` | está confirmado y la orden quedó guardada, pero **todavía no hay acuse de que la suscripción y el cobro existan** |
+| `aplicada` | llegó `candidato.aplicado` y `CobroCandidato.aplicado_en` está escrito con la fecha del evento |
 
-Hoy todo confirmado dice `pendiente`, y es la verdad: no hay publicador ni
-consumidor, así que ninguna orden se ha aplicado nunca. La interfaz tiene que
-mostrarlo así y no como «listo». El valor `aplicada` no existe todavía a
-propósito: lo agrega quien implemente el consumidor, que es el único que
-puede afirmarlo.
+`aplicada` **no se deduce del estado**: lo escribe el consumidor del acuse, con
+la fecha que `subscriptions` puso en la misma transacción en que creó el cobro.
+Una reentrega no mueve esa fecha (el `UPDATE` exige `aplicado_en IS NULL`). La
+migración `0013_candidato_aplicado_en` deja los candidatos ya confirmados en
+`pendiente`: no finge un acuse que nunca ocurrió. Hasta que la rama se despliegue,
+todo confirmado sigue diciendo `pendiente`, que es la verdad.
 
 ### Dos cosas que corrigió la revisión de #159
 
@@ -213,16 +220,62 @@ con el importe, la glosa y quién confirmó. Ahora está en la lista de
 `organizacion_id` tenga quién la borre. Regla que deja: **una tabla tenant
 nueva se registra en la limpieza en la misma PR que la crea.**
 
+## FASE 3: cómo se aplica la orden (rama sin fusionar)
+
+| Pieza | Archivo |
+|---|---|
+| Aplicación de la orden | `services/subscriptions/events/confirmaciones.py` |
+| Outbox, con los eventos v2 y el acuse | `services/subscriptions/events/outbox.py` |
+| Cola, DLQ y validación en subscriptions | `services/subscriptions/events/topologia.py`, `validacion.py` |
+| Consumidor de subscriptions | `services/subscriptions/app/management/commands/consumir_eventos.py` |
+| Consumidor del acuse en connectors | `services/connectors/events/consumidor.py` y `management/commands/consumir_eventos.py` |
+| Despliegue | `k8s/tandas/worker-connectors.yaml` (sidecar `aplicaciones`) |
+
+`subscriptions` empareja la suscripción por `(organización, servicio
+normalizado)` con un advisory lock: dos confirmaciones de Netflix y Spotify del
+mismo tenant no se estorban. La fila de organización se toma con `FOR SHARE`
+para detectar un borrado sin bloquear las escrituras HTTP. El bloqueo del
+núcleo sigue siendo `escritura_organizacion` para esas escrituras; **no se
+cambió** para no provocar `FOR SHARE` contra él.
+
+La fecha del próximo cobro:
+
+| `tipo_mensaje` | Efecto en una suscripción existente |
+|---|---|
+| `cobro_realizado` | `fecha` + un periodo mensual recortado al último día del mes destino (31/01 → 28/02). **Nunca** la fecha de pago |
+| `aviso_de_cobro` | `fecha` tal cual, sin sumarle nada |
+| `pago_fallido` | no se toca |
+
+La moneda de una suscripción existente nunca se sobrescribe; el monto solo se
+actualiza si la moneda del sobre coincide. Crear un `Cobro` publica siempre
+`suscripcion.actualizada`, aunque la fecha no haya cambiado. Todo —suscripción,
+cobro, eventos v2, acuse y evidencia `TrabajoDerivado(candidato_aplicado)`— se
+escribe en **una sola transacción**. La reentrega se descarta por esa evidencia
+y por `Cobro.candidato_id` (único por organización cuando no es nulo).
+
+**SUPUESTOS** (no los inventó el negocio, los dejó escritos): `frecuencia="mensual"`
+y `categoria="otro"` al crear; `campos_modificados=["proximo_cobro"]` cuando se
+crea un cobro (el esquema v2 exige un campo no vacío y no admite `cobro`);
+`fecha + 1 mes` para `cobro_realizado`; la suscripción nueva con `pago_fallido`
+usa `fecha` como semilla. Los nombres de cola y DLQ son SUPUESTOS del catálogo
+(`suscripciones` es el exchange existente). `CONFIRMACIONES_FUENTES_HABILITADAS`
+viene por entorno (default `csv,correo`): una fuente apagada se **ACK** con log
+estructurado `confirmacion.omitida ... motivo=fuente_no_habilitada`, nunca en
+silencio.
+
+**Pendiente de confirmar con Maxi:** `TODO(RN-DAT-005)` en
+`confirmaciones.py::fecha_proxima` pregunta si el próximo cobro de un
+`cobro_realizado` es realmente `fecha + 1 mes` recortado, o si la regla del
+Excel Integra III es otra. No se inventó la regla: está marcada en el código y
+en la descripción de la PR.
+
 ## Lo que falta
 
-- **El publicador** y el consumidor en `subscriptions`. Es la pieza que hace
-  que la suscripción exista de verdad, y es de otra tarjeta: necesita que
-  Víctor valide el contrato de arriba y declare el enlace de la cola.
-  **Mientras no exista, S3-FE-15 no está cerrada**: lo entregado es la mitad
-  local —candidato confirmado y orden durable, los dos o ninguno—, no la
-  suscripción creada. Cuando se haga, el publicador tiene que escribir bajo
-  `escritura_organizacion` (el mismo bloqueo que toma la limpieza) y pasar
-  `aplicacion` a `aplicada` solo con el ACK del consumidor.
+- **Ratificación y despliegue.** El contrato de ida y el acuse están
+  implementados, pero no ratificados por Maxi/Víctor/Felipe ni fusionados: lo
+  confirma el dueño de la tarjeta con Maxi. Sin eso, S3-FE-15 no se da por
+  cerrada.
+- **RN-DAT-005**, a confirmar con el Excel Integra III (ver el `TODO` arriba).
 - **Asignar el proveedor a mano**, para los candidatos que hoy dan
   `servicio_sin_resolver`.
 - **Confirmar varios de una vez.** Hoy es una petición por candidato, igual

@@ -57,14 +57,72 @@ pertenencia ni transiciones. Esas reglas siguen en productores y servicios.
 | `CobroCandidato.desde_candidato()` | Copia los datos; toma organización de `Importacion` y recorta `servicio_texto` a 300 caracteres |
 | `GET /api/candidatos/` | `CobroCandidatoSerializer` conserva origen e identificador, excluye `organizacion_id`; el tenant lo determina la sesión/gateway |
 | Respuesta HTTP | Añade `id`, `importacion`, etiquetas legibles, decisión, `creado_en` y `aplicacion`; importe texto, normalmente dos decimales por la columna |
-| `aplicacion` | `null` sin confirmar y `pendiente` confirmado; confirmar no acredita una suscripción creada |
+| `aplicacion` | `null` sin confirmar, `pendiente` confirmado sin acuse, `aplicada` cuando llegó `candidato.aplicado` y se escribió `aplicado_en`; el estado confirmado por sí solo no acredita una suscripción creada |
 | `candidato.confirmado` v1 | `confirmacion.py` genera datos con `candidato_id`, `importacion_id`, origen/identificador, servicio/texto, importe/moneda/fecha/tipo, `crear_cobro`, `decidido_por`, evidencia |
-| Organización del evento | Vive en `OutboxEvento.organizacion_id`, no repetida en sus datos |
+| Organización del evento | Viaja en la envoltura común (`organizacion_id`), tomada de `OutboxEvento.organizacion_id` al publicar; no se repite en `datos` |
+| `id` del evento | Es `OutboxEvento.id`; el sobre interno `candidato_id` identifica el hecho de negocio |
 
 La API no permite editar el candidato; confirmar/rechazar tienen acciones
-propias. Aviso y fallo no se convierten en pago realizado. El consumidor de
-Víctor debe aplicar su propia idempotencia por candidato; publicar y consumir
-la orden no se implementan aquí. Estos tres formatos no son intercambiables.
+propias. Aviso y fallo no se convierten en pago realizado. Estos tres formatos
+no son intercambiables.
+
+### Envoltura del evento publicado
+
+`candidato.confirmado` v1 usa la envoltura de `shared/events/catalogo.md` y se
+valida contra `shared/events/candidato-confirmado-v1.schema.json`:
+
+```json
+{
+  "evento": "candidato.confirmado",
+  "version": 1,
+  "id": "<OutboxEvento.id>",
+  "ocurrido_en": "...Z",
+  "correlation_id": "<OutboxEvento.correlation_id>",
+  "organizacion_id": "<OutboxEvento.organizacion_id>",
+  "datos": { "...": "el sobre de confirmacion._sobre()" }
+}
+```
+
+La routing key es `candidato.confirmado.v1` en el exchange `suscripciones`.
+El publicador de connectors y el consumidor de Suscripciones son los dos lados
+de este contrato. `crear_cobro` viaja resuelto y el consumidor no re-deduce el
+tipo del mensaje.
+
+**Publicación y consumo implementados, contrato pendiente de ratificación.**
+La aceptación formal con Maxi/Víctor/Felipe se registra abajo cuando ocurra;
+este documento no la da por obtenida. FASE 3 está en la rama
+`aplicar-cobros-confirmados`, sin merge.
+
+### Acuse `candidato.aplicado` v1
+
+`subscriptions` publica el acuse desde **la misma transacción** en que crea o
+empareja la suscripción y crea el cobro cuando corresponde. Usa la envoltura
+común y se valida contra `shared/events/candidato-aplicado-v1.schema.json`:
+
+```json
+{
+  "evento": "candidato.aplicado",
+  "version": 1,
+  "id": "<OutboxEvento.id>",
+  "ocurrido_en": "...Z",
+  "correlation_id": "<OutboxEvento.correlation_id>",
+  "organizacion_id": "<OutboxEvento.organizacion_id>",
+  "datos": {
+    "candidato_id": "...", "suscripcion_id": "...", "cobro_id": null,
+    "creada": true, "cobro_creado": false,
+    "aplicada_en": "...Z", "aplicacion": "aplicada"
+  }
+}
+```
+
+La routing key es `candidato.aplicado.v1` en el exchange `suscripciones`; la
+cola `connectors.aplicaciones` y su DLQ `connectors.aplicaciones.fallidos` son
+**SUPUESTOS** documentados en `shared/events/catalogo.md`, como lo fueron los
+de la cola de ida. `cobro_id` es `null` cuando `crear_cobro` era `false`.
+Connectors marca `CobroCandidato.aplicado_en` con `aplicada_en` mediante un
+`UPDATE` condicional (`aplicado_en IS NULL`): una reentrega confirma sin mover
+la fecha. Ni este contrato ni el de ida están ratificados; ambos se revisan
+juntos con Maxi/Víctor/Felipe.
 
 ## Ejemplos y verificación
 

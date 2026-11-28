@@ -40,6 +40,7 @@ class CobroSerializer(serializers.ModelSerializer):
             "monto",
             "moneda",
             "fecha",
+            "origen",
             "creado_en",
         )
         read_only_fields = fields
