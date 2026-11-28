@@ -7,6 +7,7 @@ import {
   ErrorDeApi,
   getCandidatos,
   getImportacion,
+  getLecturasDeCorreo,
   getMisImportaciones,
   getUsuarioActual,
   guardarTokens,
@@ -25,9 +26,17 @@ import { ImportacionesPage } from "./ImportacionesPage";
 // simula la red.
 vi.mock("@ojoalgasto/shared", async (importOriginal) => {
   const real = await importOriginal<typeof import("@ojoalgasto/shared")>();
-  return { ...real, getCandidatos: vi.fn(), getImportacion: vi.fn(), getMisImportaciones: vi.fn(), getUsuarioActual: vi.fn() };
+  return {
+    ...real,
+    getCandidatos: vi.fn(),
+    getImportacion: vi.fn(),
+    getLecturasDeCorreo: vi.fn(),
+    getMisImportaciones: vi.fn(),
+    getUsuarioActual: vi.fn(),
+  };
 });
 const getMock = vi.mocked(getImportacion);
+const lecturasMock = vi.mocked(getLecturasDeCorreo);
 const listarMock = vi.mocked(getMisImportaciones);
 const getUsuarioActualMock = vi.mocked(getUsuarioActual);
 const candidatosMock = vi.mocked(getCandidatos);
@@ -150,6 +159,7 @@ beforeEach(() => {
   // /usuarios/me/ e importaciones responden según el token, como el backend:
   // para B, la importación de A es de otra organización (404).
   candidatosMock.mockReset().mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
+  lecturasMock.mockReset().mockResolvedValue(pagina([]));
   getUsuarioActualMock.mockReset().mockImplementation(async () => (deB() ? PERSONA_B : PERSONA_A));
   getMock.mockReset().mockImplementation(async () => {
     consultasDetalle.push(obtenerAccessToken() === TOKEN_B ? "B" : "A");
@@ -320,5 +330,69 @@ describe("Listado de importaciones al cambiar de sesión (revisión de #130)", (
     expect(conB).toEqual([1]);
     nadaDeA();
     expect(screen.getByText("Cartola de B.csv")).toBeInTheDocument();
+  });
+
+  describe("lecturas de correo", () => {
+    const lecturaDe = (id: string, cobros: number): Importacion => ({
+      ...DE_B,
+      id,
+      origen: "correo",
+      origen_legible: "Lectura de correo",
+      nombre_archivo: "",
+      candidatos_detectados: cobros,
+    });
+    const destinos = () =>
+      screen
+        .queryAllByRole("link")
+        .map((enlace) => enlace.getAttribute("href"))
+        .filter((destino) => destino?.startsWith("/importaciones/lec-"));
+
+    beforeEach(() => {
+      lecturasMock.mockImplementation(async (n = 1) => {
+        if (deB()) return pagina([lecturaDe("lec-b", 2)]);
+        return n === 1 ? pagina([lecturaDe("lec-a", 7)], "?page=2") : pagina([lecturaDe("lec-a-vieja", 5)]);
+      });
+    });
+
+    it("al entrar B solo quedan sus lecturas", async () => {
+      await montar("/importaciones");
+      expect(destinos()).toEqual(["/importaciones/lec-a"]);
+
+      await otraPestanaGuarda(TOKEN_B);
+
+      expect(destinos()).toEqual(["/importaciones/lec-b"]);
+      expect(screen.queryByText(/7 cobros encontrados/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ver más lecturas" })).not.toBeInTheDocument();
+    });
+
+    it("la segunda página de A que llega después del cambio no se agrega a las de B", async () => {
+      const pagina2 = diferida<Paginado<Importacion>>();
+      await montar("/importaciones");
+      lecturasMock.mockImplementationOnce(() => pagina2.promesa);
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Ver más lecturas" })));
+
+      await otraPestanaGuarda(TOKEN_B);
+      await act(async () => pagina2.resolver(pagina([lecturaDe("lec-a-vieja", 5)])));
+
+      expect(destinos()).toEqual(["/importaciones/lec-b"]);
+    });
+
+    it("un clic en Ver más lecturas en el mismo instante del cambio no pide la página siguiente con el token de B", async () => {
+      await montar("/importaciones");
+      const verMas = screen.getByRole("button", { name: "Ver más lecturas" });
+      const conB: number[] = [];
+      lecturasMock.mockImplementation(async (n = 1) => {
+        if (deB()) conB.push(n);
+        return pagina([lecturaDe("lec-b", 2)]);
+      });
+
+      await act(async () => {
+        avisoDeOtraPestana(TOKEN_B);
+        fireEvent.click(verMas);
+      });
+
+      expect(conB).toEqual([1]);
+      expect(destinos()).toEqual(["/importaciones/lec-b"]);
+    });
   });
 });
