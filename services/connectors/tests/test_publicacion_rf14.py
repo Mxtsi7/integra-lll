@@ -67,6 +67,14 @@ def test_un_correo_tambien_cumple_el_contrato():
     assert sobre["datos"]["origen"] == "correo"
 
 
+@pytest.mark.parametrize("tipo", ["aviso_de_cobro", "pago_fallido"])
+def test_el_contrato_no_admite_crear_cobro_de_algo_que_no_se_pago(tipo):
+    sobre = publicacion.crear_sobre(orden_confirmada(tipo=tipo, identificador=f"sha:{tipo}"))
+    assert sobre["datos"]["crear_cobro"] is False and contrato.errores(sobre) == []
+    sobre["datos"]["crear_cobro"] = True
+    assert contrato.errores(sobre)
+
+
 def test_el_nombre_del_evento_sale_del_contrato_compartido():
     assert (confirmacion.EVENTO, confirmacion.VERSION) == (contrato.EVENTO, contrato.VERSION)
 

@@ -108,7 +108,7 @@ y [`candidato-confirmado-v1.schema.json`](../contratos/candidato-confirmado-v1.s
 |---|---|---|---|
 | `candidato.confirmado` v1 | Se confirma un cobro candidato (RF-14) | `candidato_id`, `importacion_id`, `origen`, `identificador_origen`, `servicio`, `servicio_texto`, `importe` (texto con dos decimales), `moneda`, `fecha`, `tipo_mensaje`, `crear_cobro`, `decidido_por`, `evidencia` | subscriptions |
 
-`crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo.
+`crear_cobro` viaja decidido: el consumidor no lo vuelve a deducir del tipo. El contrato solo lo admite en `true` con `tipo_mensaje = cobro_realizado`: un aviso o un pago fallido no son plata que salió, y en subscriptions un cobro nuevo puede reactivar una suscripción.
 La idempotencia usa `(organizacion_id, candidato_id)` y también
 `(organizacion_id, origen, identificador_origen)`. El mismo cargo que llega
 por las dos fuentes NO se junta solo: quedan dos cobros, cada uno con su

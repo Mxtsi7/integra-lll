@@ -34,6 +34,11 @@
         "crear_cobro": {"type": "boolean"},
         "decidido_por": {"type": "string", "maxLength": 64},
         "evidencia": {"type": "object"}
+      },
+      "if": {"properties": {"crear_cobro": {"const": true}}},
+      "then": {
+        "properties": {"tipo_mensaje": {"const": "cobro_realizado"}},
+        "description": "Solo un cobro realizado es plata que salió: un aviso o un pago fallido no crean cobro."
       }
     }
   },

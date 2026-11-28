@@ -19,8 +19,15 @@ haya con `basic_get` (AMQP lo admite tal cual) y termina.
   · ack SOLO después de que el cambio quedó escrito en la base;
   · la base caída: el mensaje vuelve a la cola (`requeue=True`) y la pasada
     termina; la siguiente lo intenta de nuevo;
-  · un sobre que no cumple el contrato: a la cola de fallos (`requeue=False`
-    + `x-dead-letter-exchange`), donde queda para mirarlo.
+  · un sobre que no cumple el contrato, o que falla al guardarse por algo
+    que no es pasajero: a la cola de fallos (`requeue=False` +
+    `x-dead-letter-exchange`), donde queda para mirarlo. Devolverlo a la cola
+    no serviría: RabbitMQ lo deja PRIMERO, `basic_get` lo sacaría en cada
+    pasada y las respuestas de atrás no llegarían nunca;
+  · el broker caído (al conectar o a la mitad): la pasada termina sin
+    reventar la tarea. Lo que no alcanzó a confirmarse vuelve solo a la cola
+    al cerrarse el canal, y como guardar es idempotente, repetirlo no cambia
+    nada.
 
 ── Idempotente ──────────────────────────────────────────────────────────────
 Se escribe con un UPDATE con condición, no leyendo y guardando:
@@ -110,6 +117,9 @@ def procesar(cuerpo: bytes) -> Desenlace:
         cambiadas = aplicar_respuesta(sobre)
     except ERRORES_PASAJEROS as error:
         return Desenlace(confirmar=False, motivo=f"base no disponible: {error}", reintentar=True)
+    except Exception as error:  # noqa: BLE001
+        # No mejora reintentando, y reencolado bloquearía la cola: ver el docstring.
+        return Desenlace(confirmar=False, motivo=f"no se pudo guardar: {type(error).__name__}: {error}")
     return Desenlace(confirmar=True, motivo="guardada" if cambiadas else "sin_cambios")
 
 
@@ -119,7 +129,12 @@ def recoger_pendientes(*, conectar=None) -> dict[str, int]:
         return {"guardadas": 0, "sin_cambios": 0, "apartadas": 0, "sin_broker": 1}
     conectar = conectar or (lambda: pika.BlockingConnection(pika.URLParameters(settings.RABBITMQ_URL)))
     cuenta = {"guardadas": 0, "sin_cambios": 0, "apartadas": 0, "sin_broker": 0}
-    conexion = conectar()
+    try:
+        conexion = conectar()
+    except (pika.exceptions.AMQPError, OSError) as error:
+        registro.warning("respuestas sin recoger: broker no disponible (%s)", type(error).__name__)
+        cuenta["sin_broker"] = 1
+        return cuenta
     try:
         canal = conexion.channel()
         contrato.declarar(canal)
@@ -140,6 +155,9 @@ def recoger_pendientes(*, conectar=None) -> dict[str, int]:
                 break
             cuenta["apartadas"] += 1
             registro.error("respuesta.apartada %s", desenlace.motivo)
+    except (pika.exceptions.AMQPError, OSError) as error:
+        registro.warning("respuestas: el broker se cortó a la mitad de la pasada (%s)", type(error).__name__)
+        cuenta["sin_broker"] = 1
     finally:
         if conexion.is_open:
             conexion.close()

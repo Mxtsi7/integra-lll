@@ -290,6 +290,62 @@ def test_con_la_base_caida_devuelve_el_mensaje_y_corta_la_pasada(settings, monke
     assert len(canal.cuerpos) == 1, "siguió sacando mensajes con la base caída"
 
 
+def test_un_error_que_no_es_pasajero_va_a_fallos_y_no_tapa_la_cola(settings, monkeypatch):
+    """Reencolado quedaría primero: `basic_get` lo sacaría en cada pasada y las
+    respuestas de atrás no llegarían nunca."""
+    monkeypatch.setattr(resultados, "close_old_connections", lambda: None)
+    settings.RABBITMQ_URL = "amqp://prueba@broker-de-prueba:5672/"
+    malo, bueno = confirmado(), confirmado()
+    original = resultados.aplicar_respuesta
+
+    def revienta_con_el_malo(sobre):
+        if sobre["datos"]["candidato_id"] == str(malo.id):
+            raise ValueError("algo que no se arregla reintentando")
+        return original(sobre)
+
+    monkeypatch.setattr(resultados, "aplicar_respuesta", revienta_con_el_malo)
+    canal = CanalDeMentira([json.dumps(respuesta(malo)).encode(), json.dumps(respuesta(bueno)).encode()])
+
+    cuenta = resultados.recoger_pendientes(conectar=lambda: ConexionDeMentira(canal))
+
+    assert canal.nacks == [(2, False)] and canal.acks == [1]
+    assert (cuenta["apartadas"], cuenta["guardadas"]) == (1, 1)
+    assert (aplicacion(malo), aplicacion(bueno)) == ("por_enviar", "aplicada")
+
+
+def test_sin_broker_al_conectar_la_pasada_termina_sin_reventar(settings):
+    import pika
+
+    settings.RABBITMQ_URL = "amqp://prueba@broker-de-prueba:5672/"
+
+    def no_conecta():
+        raise pika.exceptions.AMQPConnectionError("no hay broker")
+
+    assert resultados.recoger_pendientes(conectar=no_conecta)["sin_broker"] == 1
+
+
+def test_el_broker_cortado_a_la_mitad_no_revienta_y_cierra(settings, monkeypatch):
+    import pika
+
+    monkeypatch.setattr(resultados, "close_old_connections", lambda: None)
+    settings.RABBITMQ_URL = "amqp://prueba@broker-de-prueba:5672/"
+    bueno = confirmado()
+
+    class CanalQueSeCorta(CanalDeMentira):
+        def basic_ack(self, *, delivery_tag):
+            raise pika.exceptions.StreamLostError("se cortó")
+
+    canal = CanalQueSeCorta([json.dumps(respuesta(bueno)).encode(), json.dumps(respuesta(confirmado())).encode()])
+    conexion = ConexionDeMentira(canal)
+
+    cuenta = resultados.recoger_pendientes(conectar=lambda: conexion)
+
+    # Quedó guardada; el mensaje sin ack vuelve solo a la cola, y repetirlo no cambia nada.
+    assert cuenta["sin_broker"] == 1 and not conexion.is_open
+    assert len(canal.cuerpos) == 1, "siguió sacando mensajes sin broker"
+    assert aplicacion(bueno) == "aplicada"
+
+
 def test_beat_la_programa_con_el_despacho(settings):
     entrada = settings.CELERY_BEAT_SCHEDULE["recoger-resultados-de-ordenes"]
     assert entrada["task"] == tasks.recoger_resultados.name == "connectors.tasks.recoger_resultados"

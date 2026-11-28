@@ -492,6 +492,21 @@ class TestPorConfirmarQueSePaga:
         propia.refresh_from_db()
         assert propia.estado == Subscription.Estado.POR_CONFIRMAR
 
+    @pytest.mark.parametrize("tipo", ["aviso_de_cobro", "pago_fallido"])
+    def test_un_fallo_que_dice_crear_cobro_no_pasa_el_contrato(self, org, netflix, tipo):
+        """`crear_cobro` viaja decidido, pero el contrato no admite decidir que
+        un aviso o un pago fallido son plata que salió: crearía un cobro que no
+        existió y regularizaría la suscripción con él."""
+        propia = por_confirmar_el(org, netflix, date(2026, 11, 1))
+        orden = sobre(org, tipo=tipo, fecha="2026-11-05")
+        orden["datos"]["crear_cobro"] = True
+
+        assert candidato_confirmado.errores(orden)
+        assert not procesar_candidato(json.dumps(orden).encode()).confirmar
+        propia.refresh_from_db()
+        assert propia.estado == Subscription.Estado.POR_CONFIRMAR
+        assert not Cobro.objects.filter(organizacion_id=org).exists()
+
     def test_una_reentrega_no_transiciona_dos_veces(self, org, netflix):
         propia = por_confirmar_el(org, netflix, date(2026, 11, 1))
         orden = sobre(org, fecha="2026-11-05")

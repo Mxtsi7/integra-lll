@@ -71,7 +71,8 @@ para eso, así queda su auditoría y su evento:
 «Pago nuevo» quiere decir las tres cosas a la vez:
 
   · es un `cobro_realizado`: un aviso o un pago fallido no son plata que
-    salió (y un fallido es justo lo que la tiene por confirmar);
+    salió (y un fallido es justo lo que la tiene por confirmar). Lo asegura el
+    contrato, que solo admite `crear_cobro` con ese tipo;
   · su fecha es POSTERIOR al día en que la suscripción entró a ese estado
     (la última transición hacia él, o su creación si nació así). Un cobro de
     antes, o del mismo día, es historia: puede ser justamente el que falló;
