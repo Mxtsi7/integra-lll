@@ -19,8 +19,9 @@
 # pod `web` del núcleo (k8s/parches/connectors-api-en-web.yaml).
 #
 # ── Lo que NO recibe ─────────────────────────────────────────────────────────
-# La clave administradora de PostgreSQL, el secreto de los JWT, la cuenta de
-# correo ni RabbitMQ: connectors no publica eventos todavía. Las credenciales
+# La clave administradora de PostgreSQL, el secreto de los JWT ni la cuenta de
+# correo. RabbitMQ sí lo recibe el WORKER (`worker-connectors.yaml`), que es
+# quien publica las confirmaciones; la API sigue sin publicar. Las credenciales
 # OAuth de Google y Microsoft van en un Secret aparte, `ojoalgasto-conectores`,
 # opcional: sin él la API y la importación de CSV funcionan, pero conectar
 # Gmail u Outlook falla en la pantalla del proveedor.
