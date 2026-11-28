@@ -94,7 +94,7 @@ spec:
             - { name: ESQUEMA_BD, value: connectors }
             - { name: APLICAR_MIGRACIONES, value: "0" }
           resources:
-            requests: { cpu: 20m, memory: 64Mi }
+            requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 100m, memory: 128Mi }
 ---
 apiVersion: batch/v1
