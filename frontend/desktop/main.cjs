@@ -2,9 +2,10 @@ const { app, BrowserWindow, net, protocol, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { configurarApi, esInterna, resolverArchivo, politicaCSP } = require('./seguridad.cjs');
+const { configurarApi, esInterna, resolverArchivo, politicaCSP, DIMENSIONES_VENTANA, obtenerRutaInicial } = require('./seguridad.cjs');
 const humo = process.argv.includes('--smoke-test');
 const apiUrl = configurarApi(process.env.DESKTOP_API_URL);
+const rutaInicial = obtenerRutaInicial(process.argv, process.env);
 const renderer = path.join(__dirname, 'renderer');
 app.setName('Ojo al Gasto');
 if (humo) {
@@ -33,7 +34,7 @@ async function abrir() {
   });
   session.defaultSession.setPermissionRequestHandler((_wc, _permiso, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
-  const ventana = new BrowserWindow({ width: 1280, height: 800, minWidth: 900, minHeight: 650,
+  const ventana = new BrowserWindow({ ...DIMENSIONES_VENTANA,
     title: 'Ojo al Gasto', show: !humo, autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true,
       sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: !humo,
@@ -42,14 +43,16 @@ async function abrir() {
   for (const evento of ['will-navigate', 'will-redirect']) {
     ventana.webContents.on(evento, (e, url) => { if (!esInterna(url)) e.preventDefault(); });
   }
-  await ventana.loadURL('app://ojoalgasto/login');
+  await ventana.loadURL('app://ojoalgasto' + rutaInicial);
   if (humo) {
     const resultado = await ventana.webContents.executeJavaScript(`(async () => {
       for (let i=0; i<100 && !document.querySelector('#raiz')?.children.length; i++) await new Promise(r=>setTimeout(r,50));
       const respuesta = await fetch(new URL('/health/', window.ojoDesktop.apiUrl));
       return { plataforma: navigator.platform, renderer: !!document.querySelector('#raiz')?.children.length,
         nodeAislado: typeof window.require === 'undefined' && typeof window.process === 'undefined',
-        apiUrl: window.ojoDesktop.apiUrl, estadoApi: respuesta.status, api: await respuesta.json() };
+        apiUrl: window.ojoDesktop.apiUrl, estadoApi: respuesta.status, api: await respuesta.json(),
+        rutaActual: window.location.pathname,
+        dimensiones: { ancho: window.innerWidth, alto: window.innerHeight } };
     })()`);
     const archivo = process.env.DESKTOP_SMOKE_OUTPUT || path.join(process.cwd(), 'smoke-desktop.json');
     fs.writeFileSync(archivo, JSON.stringify(resultado, null, 2));
