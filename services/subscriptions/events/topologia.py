@@ -55,6 +55,15 @@ COLA_CONFIRMACIONES = "subscriptions.confirmaciones"
 EXCHANGE_FALLIDOS_CONFIRMACIONES = "suscripciones.confirmaciones.fallidos"
 COLA_FALLIDOS_CONFIRMACIONES = "subscriptions.confirmaciones.fallidos"
 
+# El acuse de vuelta viaja por el MISMO exchange, pero tiene cola y DLQ
+# propias en connectors. Nadie más debe recibirlo: si se mezclara con el
+# resumen v2, el conector marcaria applying sobre un sobre que no es suyo.
+EVENTO_APLICADO = "candidato.aplicado"
+VERSION_APLICADO = 1
+COLA_APLICACIONES = "connectors.aplicaciones"
+EXCHANGE_FALLIDOS_APLICACIONES = "suscripciones.aplicaciones.fallidos"
+COLA_FALLIDOS_APLICACIONES = "connectors.aplicaciones.fallidos"
+
 
 @dataclass(frozen=True)
 class _EventoParaClave:
@@ -87,7 +96,7 @@ PATRONES_RESUMEN = tuple(
 
 
 def declarar(canal) -> None:
-    """Deja ambos flujos (resumen y confirmaciones) listos. Idempotente."""
+    """Deja los tres flujos (resumen, confirmaciones y acuse) listos. Idempotente."""
     # durable=True en todo: sobreviven a un reinicio del broker, así que un
     # evento publicado mientras el consumidor estaba caído sigue ahí.
     canal.exchange_declare(exchange=EXCHANGE, exchange_type="topic", durable=True)
@@ -136,4 +145,29 @@ def declarar(canal) -> None:
         exchange=EXCHANGE,
         queue=COLA_CONFIRMACIONES,
         routing_key=clave_confirmado,
+    )
+
+    # ── acuse de vuelta para connectors ────────────────────────────────
+    canal.exchange_declare(
+        exchange=EXCHANGE_FALLIDOS_APLICACIONES,
+        exchange_type="fanout",
+        durable=True,
+    )
+    canal.queue_declare(queue=COLA_FALLIDOS_APLICACIONES, durable=True)
+    canal.queue_bind(
+        exchange=EXCHANGE_FALLIDOS_APLICACIONES,
+        queue=COLA_FALLIDOS_APLICACIONES,
+    )
+    clave_aplicado = routing_key(
+        _EventoParaClave(evento=EVENTO_APLICADO, version=VERSION_APLICADO)
+    )
+    canal.queue_declare(
+        queue=COLA_APLICACIONES,
+        durable=True,
+        arguments={"x-dead-letter-exchange": EXCHANGE_FALLIDOS_APLICACIONES},
+    )
+    canal.queue_bind(
+        exchange=EXCHANGE,
+        queue=COLA_APLICACIONES,
+        routing_key=clave_aplicado,
     )

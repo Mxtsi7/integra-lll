@@ -1,6 +1,6 @@
 """FASE 3 — aplicar confirmaciones en Suscripciones, sin tocar RabbitMQ."""
 
-from datetime import date
+from datetime import date, timezone as datetime_timezone
 from decimal import Decimal
 import copy
 import json
@@ -12,6 +12,7 @@ import pytest
 from app.models import Cobro, OutboxEvento, Subscription, TrabajoDerivado
 from events import confirmaciones
 from events.confirmaciones import procesar_confirmacion
+from events.validacion import errores as errores_de_contrato
 
 
 def sobre(
@@ -59,8 +60,19 @@ def bytes_de(evento):
 
 
 def eventos_de(organizacion_id):
+    """Los eventos MX-21 v2 del núcleo; el acuse de vuelta se mira aparte."""
     return list(
-        OutboxEvento.objects.filter(organizacion_id=organizacion_id).order_by("creado_en", "id")
+        OutboxEvento.objects.filter(organizacion_id=organizacion_id)
+        .exclude(evento="candidato.aplicado")
+        .order_by("creado_en", "id")
+    )
+
+
+def acuses_de(organizacion_id):
+    return list(
+        OutboxEvento.objects.filter(
+            organizacion_id=organizacion_id, evento="candidato.aplicado"
+        ).order_by("creado_en", "id")
     )
 
 
@@ -111,6 +123,69 @@ class TestAplicarConfirmaciones:
             evento_id=uuid.UUID(evento["id"]),
             trabajo=TrabajoDerivado.Trabajo.CANDIDATO_APLICADO,
         ).exists()
+
+    def test_publica_el_acuse_de_vuelta_en_la_misma_transaccion(self):
+        evento = sobre()
+        resultado = procesar_confirmacion(bytes_de(evento))
+
+        assert resultado.aplicada
+        acuses = acuses_de(evento["organizacion_id"])
+        assert len(acuses) == 1
+        acuse = acuses[0]
+        assert (acuse.evento, acuse.version) == ("candidato.aplicado", 1)
+        assert acuse.correlation_id == uuid.UUID(evento["correlation_id"])
+        assert acuse.datos == {
+            "candidato_id": evento["datos"]["candidato_id"],
+            "suscripcion_id": str(Subscription.objects.get().id),
+            "cobro_id": str(Cobro.objects.get().id),
+            "creada": True,
+            "cobro_creado": True,
+            "aplicada_en": acuse.datos["aplicada_en"],
+            "aplicacion": "aplicada",
+        }
+        assert acuse.datos["aplicada_en"].endswith("Z")
+        assert errores_de_contrato((json.loads(json.dumps({
+            "evento": acuse.evento,
+            "version": acuse.version,
+            "id": str(acuse.id),
+            "organizacion_id": str(acuse.organizacion_id),
+            "correlation_id": str(acuse.correlation_id),
+            "ocurrido_en": acuse.ocurrido_en.astimezone(
+                datetime_timezone.utc
+            ).isoformat().replace("+00:00", "Z"),
+            "datos": acuse.datos,
+        })))) == []
+
+    def test_el_acuse_no_se_duplica_en_una_reentrega(self):
+        evento = sobre()
+        procesar_confirmacion(bytes_de(evento))
+        procesar_confirmacion(bytes_de(copy.deepcopy(evento)))
+
+        assert len(acuses_de(evento["organizacion_id"])) == 1
+
+    def test_sin_cobro_el_acuse_lleva_cobro_id_null(self):
+        evento = sobre(tipo="aviso_de_cobro", crear_cobro=False)
+        procesar_confirmacion(bytes_de(evento))
+
+        acuse = acuses_de(evento["organizacion_id"])[0]
+        assert acuse.datos["cobro_id"] is None
+        assert acuse.datos["cobro_creado"] is False
+
+    def test_si_falla_el_acreditado_no_queda_acuse(self):
+        """El outbox y la base se confirman juntos, o no se confirma nada."""
+        evento = sobre()
+
+        def explotar(*_a, **_k):
+            raise RuntimeError("no se pudo acreditar")
+
+        from unittest.mock import patch
+
+        with patch.object(TrabajoDerivado.objects, "get_or_create", explotar):
+            resultado = procesar_confirmacion(bytes_de(evento))
+
+        assert not resultado.confirmar
+        assert acuses_de(evento["organizacion_id"]) == []
+        assert Cobro.objects.count() == 0
 
     def test_aviso_de_cobro_usa_la_fecha_tal_cual_y_no_crea_cobro(self):
         evento = sobre(tipo="aviso_de_cobro", crear_cobro=False, fecha="2026-03-15")

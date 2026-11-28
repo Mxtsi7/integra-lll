@@ -11,6 +11,10 @@ convierte, en una sola transacción, en:
   · la evidencia `TrabajoDerivado(candidato_aplicado)` que hace idempotente la
     reentrega.
 
+Todo eso, incluidos los eventos del outbox, nace dentro de la MISMA
+`transaction.atomic()`. El acuse no se publica después: si algo falla, no
+existe ni el cobro ni la afirmación de que se creó.
+
 `crear_cobro` viaja resuelto desde connectors. Este módulo NUNCA lo deduce del
 `tipo_mensaje`: si las dos reglas se separan, gana la que mandó el productor.
 El tipo solo gobierna la fecha del próximo cobro.
@@ -54,12 +58,17 @@ import uuid
 from django.conf import settings
 from django.db import IntegrityError, close_old_connections, transaction
 from django.db.utils import InterfaceError, OperationalError
+from django.utils import timezone
 
 from shared.bloqueo import bloquear
 from shared.borrado.bloqueo import bloquear_organizacion
 
 from app.models import Cobro, Subscription, TrabajoDerivado
-from events.outbox import registrar_actualizada, registrar_creada
+from events.outbox import (
+    registrar_actualizada,
+    registrar_candidato_aplicado,
+    registrar_creada,
+)
 from events.trabajo import HECHO_POR_CONSUMIDOR
 from events.validacion import errores as errores_de_contrato
 
@@ -268,9 +277,9 @@ def _aplicar(sobre: dict, datos: dict) -> Resultado:
         if campos_modelo:
             suscripcion.save(update_fields=sorted(campos_modelo))
 
-        cobro_creado = False
+        cobro = None
         if datos["crear_cobro"]:
-            Cobro.objects.create(
+            cobro = Cobro.objects.create(
                 organizacion_id=organizacion_id,
                 suscripcion=suscripcion,
                 monto=datos["importe"],
@@ -279,7 +288,6 @@ def _aplicar(sobre: dict, datos: dict) -> Resultado:
                 origen=datos["origen"],
                 candidato_id=candidato_id,
             )
-            cobro_creado = True
             # Aunque la fecha ya fuera la misma, el alta del cobro es un hecho
             # que otros consumidores deben ver (SUPUESTO del sobre v2).
             campos_evento.add("proximo_cobro")
@@ -291,12 +299,22 @@ def _aplicar(sobre: dict, datos: dict) -> Resultado:
             )
             actualizada = True
 
+        aplicada_en = timezone.now()
+        registrar_candidato_aplicado(
+            suscripcion,
+            candidato_id=candidato_id,
+            cobro_id=cobro.id if cobro is not None else None,
+            creada=creada,
+            cobro_creado=cobro is not None,
+            aplicada_en=aplicada_en,
+            correlation_id=correlation_id,
+        )
         _acreditar(evento_id, organizacion_id)
         return Resultado(
             confirmar=True,
             aplicada=True,
             creada=creada,
-            cobro_creado=cobro_creado,
+            cobro_creado=cobro is not None,
             actualizada=actualizada,
         )
 

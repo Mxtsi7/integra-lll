@@ -2,8 +2,9 @@
 
 Los eventos MX-21 v2 se validan contra `mx21-v2.schema.json`, el MISMO archivo
 que usa el check `intercambio` de la CI. `candidato.confirmado` v1 usa su propio
-esquema con la misma envoltura. Los dos se eligen por `(evento, version)`: un
-v3 no se valida en silencio con el esquema de v2.
+esquema con la misma envoltura, y `candidato.aplicado` v1 el del acuse de vuelta.
+Los tres se eligen por `(evento, version)`: un v3 no se valida en silencio con
+el esquema de v2.
 
 ── Por qué no alcanzaba con mirar evento, versión y tenant ──────────────────
 La primera versión de `validar()` comprobaba que el sobre fuera un objeto, que
@@ -34,6 +35,9 @@ from jsonschema import Draft202012Validator, FormatChecker
 NOMBRE_ESQUEMA = Path("shared") / "events" / "mx21-v2.schema.json"
 NOMBRE_ESQUEMA_CONFIRMADO = (
     Path("shared") / "events" / "candidato-confirmado-v1.schema.json"
+)
+NOMBRE_ESQUEMA_APLICADO = (
+    Path("shared") / "events" / "candidato-aplicado-v1.schema.json"
 )
 
 
@@ -76,12 +80,19 @@ def validador_confirmado() -> Draft202012Validator:
     return _cargar(NOMBRE_ESQUEMA_CONFIRMADO)
 
 
+@functools.lru_cache(maxsize=1)
+def validador_aplicado() -> Draft202012Validator:
+    """El validador de `candidato.aplicado` v1."""
+    return _cargar(NOMBRE_ESQUEMA_APLICADO)
+
+
 VALIDADORES = {
     ("suscripcion.creada", 2): validador,
     ("suscripcion.actualizada", 2): validador,
     ("suscripcion.estado_cambiado", 2): validador,
     ("alerta.activada", 2): validador,
     ("candidato.confirmado", 1): validador_confirmado,
+    ("candidato.aplicado", 1): validador_aplicado,
 }
 
 

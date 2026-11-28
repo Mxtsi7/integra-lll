@@ -358,15 +358,16 @@ class TestTopologia:
             assert "*" not in patron
             assert "#" not in patron
 
-    def test_declara_las_cuatro_colas_y_sus_enlaces(self):
+    def test_declara_las_seis_colas_y_sus_enlaces(self):
         canal = CanalFalso()
         topologia.declarar(canal)
         tipos = [tipo for tipo, _ in canal.llamadas]
-        # Un exchange de eventos y dos de fallos (uno por flujo); dos colas
-        # principales y dos DLQ; tres eventos v2 y un `candidato.confirmado`.
-        assert tipos.count("exchange") == 3
-        assert tipos.count("cola") == 4
-        assert tipos.count("enlace") == 6
+        # Un exchange de eventos y tres de fallos (uno por flujo); tres colas
+        # principales y tres DLQ; tres eventos v2, el `candidato.confirmado`
+        # de ida y el `candidato.aplicado` de vuelta.
+        assert tipos.count("exchange") == 4
+        assert tipos.count("cola") == 6
+        assert tipos.count("enlace") == 8
         enlaces_resumen = {
             kw["routing_key"]
             for tipo, kw in canal.llamadas
@@ -385,6 +386,12 @@ class TestTopologia:
             if tipo == "enlace" and kw["queue"] == topologia.COLA_CONFIRMACIONES
         }
         assert enlaces_confirmaciones == {"candidato.confirmado.v1"}
+        enlaces_aplicaciones = {
+            kw["routing_key"]
+            for tipo, kw in canal.llamadas
+            if tipo == "enlace" and kw["queue"] == topologia.COLA_APLICACIONES
+        }
+        assert enlaces_aplicaciones == {"candidato.aplicado.v1"}
 
     def test_la_cola_del_resumen_manda_sus_rechazos_a_la_cola_de_fallos(self):
         """La regresión del bug 2, en la declaración."""
@@ -407,6 +414,19 @@ class TestTopologia:
         assert (
             cola["arguments"]["x-dead-letter-exchange"]
             == topologia.EXCHANGE_FALLIDOS_CONFIRMACIONES
+        )
+
+    def test_la_cola_de_aplicaciones_tiene_su_propia_dlq(self):
+        """El acuse no comparte fallos con el resumen ni con la ida."""
+        canal = CanalFalso()
+        topologia.declarar(canal)
+        cola = next(
+            kw for tipo, kw in canal.llamadas
+            if tipo == "cola" and kw["queue"] == topologia.COLA_APLICACIONES
+        )
+        assert (
+            cola["arguments"]["x-dead-letter-exchange"]
+            == topologia.EXCHANGE_FALLIDOS_APLICACIONES
         )
 
     def test_todo_es_durable(self):
